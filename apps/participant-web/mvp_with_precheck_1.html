@@ -94,6 +94,21 @@
         .form-group select, .form-group input {
             width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px;
             font-size: 15px; background-color: var(--input-bg); box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        .form-group select.error, .form-group input.error {
+            border-color: var(--error);
+            background-color: #FEF2F2;
+        }
+        .form-group select[aria-invalid="true"], .form-group input[aria-invalid="true"] {
+            border-color: var(--error);
+            background-color: #FEF2F2;
+        }
+        .error-message, .field-error {
+            color: var(--error);
+            font-size: 12px;
+            margin-top: 5px;
+            display: block;
         }
         .form-row { display: flex; gap: 20px; }
         .form-row .form-group { flex: 1; }
@@ -637,14 +652,14 @@
             
             <div class="form-group">
                 <label data-i18n="email_label">Email</label>
-                <input type="email" id="userEmail" placeholder="name@example.com">
+                <input type="email" id="userEmail" placeholder="name@example.com" onblur="validateEmailField()">
             </div>
             
             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 10px;">
                 <span id="generatedIdPreview"></span>
             </div>
 
-            <button class="btn" onclick="collectTechDataAndProceed()" data-i18n="btn_next">Далее</button>
+            <button class="btn" onclick="collectTechDataAndProceed()" data-i18n="btn_next" id="step3NextBtn">Далее</button>
         </div>
 
         <!-- ШАГ 4: Анкета -->
@@ -655,7 +670,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label data-i18n="label_age">Возраст</label>
-                        <input type="number" id="age" min="18" max="99">
+                        <input type="number" id="age" min="18" max="99" onblur="checkForm()" oninput="checkForm()">
                     </div>
                     <div class="form-group">
                         <label data-i18n="label_gender">Пол</label>
@@ -732,7 +747,7 @@
                     </div>
                 </div>
             </form>
-            <button class="btn" id="formBtn" disabled onclick="nextStep(5)" data-i18n="btn_next">Далее</button>
+            <button class="btn" id="formBtn" disabled onclick="if (!document.getElementById('formBtn').disabled) nextStep(5);" data-i18n="btn_next">Далее</button>
         </div>
 
         <!-- ШАГ 5: настройка камеры (pre-check) -->
@@ -1301,9 +1316,91 @@
             navigator.clipboard.writeText(text).then(() => alert('ID copied!'));
         }
 
+        // --- ВАЛИДАЦИЯ EMAIL (при blur) ---
+        function validateEmailField() {
+            const emailInput = document.getElementById('userEmail');
+            const email = emailInput.value.trim();
+            const validation = validateEmail(email);
+            
+            if (!validation.valid) {
+                emailInput.setAttribute('aria-invalid', 'true');
+                emailInput.classList.add('error');
+                showFieldError(emailInput, validation.error);
+            } else {
+                emailInput.removeAttribute('aria-invalid');
+                emailInput.classList.remove('error');
+                hideFieldError(emailInput);
+            }
+        }
+        
+        // --- ВАЛИДАЦИЯ EMAIL ---
+        function validateEmail(email) {
+            if (!email || email.trim() === '') {
+                return { valid: false, error: 'Email обязателен для заполнения' };
+            }
+            
+            // Проверка на emoji и специальные символы (до базовой проверки)
+            const emojiRegex = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u;
+            if (emojiRegex.test(email)) {
+                return { valid: false, error: 'Email не может содержать emoji' };
+            }
+            
+            // Базовые проверки формата
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return { valid: false, error: 'Неверный формат email' };
+            }
+            
+            // Дополнительные проверки
+            if (email.includes('..')) {
+                return { valid: false, error: 'Email не может содержать двойные точки' };
+            }
+            
+            if (email.includes(' ')) {
+                return { valid: false, error: 'Email не может содержать пробелы' };
+            }
+            
+            // Проверка на кириллицу (опционально, можно убрать если нужно)
+            if (/[а-яё]/i.test(email)) {
+                return { valid: false, error: 'Email не может содержать кириллицу' };
+            }
+            
+            return { valid: true };
+        }
+
         // --- СБОР ТЕХНИЧЕСКИХ ДАННЫХ ---
         function collectTechDataAndProceed() {
-            const email = document.getElementById('userEmail').value;
+            const emailInput = document.getElementById('userEmail');
+            const email = emailInput.value.trim();
+            
+            // Валидация email
+            const emailValidation = validateEmail(email);
+            if (!emailValidation.valid) {
+                // Показываем ошибку
+                emailInput.setAttribute('aria-invalid', 'true');
+                emailInput.classList.add('error');
+                
+                // Показываем сообщение об ошибке
+                let errorMsg = document.getElementById('emailError');
+                if (!errorMsg) {
+                    errorMsg = document.createElement('div');
+                    errorMsg.id = 'emailError';
+                    errorMsg.className = 'error-message';
+                    errorMsg.style.cssText = 'color: var(--error); font-size: 12px; margin-top: 5px;';
+                    emailInput.parentElement.appendChild(errorMsg);
+                }
+                errorMsg.textContent = emailValidation.error;
+                
+                // Блокируем переход
+                return;
+            }
+            
+            // Убираем ошибку если валидно
+            emailInput.removeAttribute('aria-invalid');
+            emailInput.classList.remove('error');
+            const errorMsg = document.getElementById('emailError');
+            if (errorMsg) errorMsg.remove();
+            
             if (email) sessionData.user.email = email; 
 
             sessionData.tech.screen = {
@@ -1350,12 +1447,78 @@
         function checkForm() {
             const required = ['age', 'gender', 'inputDevice', 'keyboardType', 'vision'];
             let isValid = true;
+            const errors = [];
+            
+            // Проверка обязательных полей
             required.forEach(id => {
                 const el = document.getElementById(id);
-                if (!el || !el.value) isValid = false;
+                if (!el || !el.value) {
+                    isValid = false;
+                    if (el) {
+                        el.setAttribute('aria-invalid', 'true');
+                        el.classList.add('error');
+                    }
+                } else {
+                    if (el) {
+                        el.removeAttribute('aria-invalid');
+                        el.classList.remove('error');
+                    }
+                }
             });
-            document.getElementById('formBtn').disabled = !isValid;
+            
+            // Валидация возраста (диапазон 18-99)
+            const ageInput = document.getElementById('age');
+            if (ageInput && ageInput.value) {
+                const age = parseInt(ageInput.value, 10);
+                const ageValue = ageInput.value.trim();
+                
+                // Проверка на число
+                if (isNaN(age) || ageValue !== age.toString()) {
+                    isValid = false;
+                    ageInput.setAttribute('aria-invalid', 'true');
+                    ageInput.classList.add('error');
+                    showFieldError(ageInput, 'Возраст должен быть целым числом');
+                }
+                // Проверка диапазона
+                else if (age < 18 || age > 99) {
+                    isValid = false;
+                    ageInput.setAttribute('aria-invalid', 'true');
+                    ageInput.classList.add('error');
+                    if (age < 18) {
+                        showFieldError(ageInput, 'Возраст должен быть не менее 18 лет');
+                    } else {
+                        showFieldError(ageInput, 'Возраст должен быть не более 99 лет');
+                    }
+                }
+                // Проверка на отрицательные числа
+                else if (age < 0) {
+                    isValid = false;
+                    ageInput.setAttribute('aria-invalid', 'true');
+                    ageInput.classList.add('error');
+                    showFieldError(ageInput, 'Возраст не может быть отрицательным');
+                }
+                // Проверка на ноль
+                else if (age === 0) {
+                    isValid = false;
+                    ageInput.setAttribute('aria-invalid', 'true');
+                    ageInput.classList.add('error');
+                    showFieldError(ageInput, 'Возраст должен быть не менее 18 лет');
+                }
+                // Валидно
+                else {
+                    ageInput.removeAttribute('aria-invalid');
+                    ageInput.classList.remove('error');
+                    hideFieldError(ageInput);
+                }
+            }
+            
+            // Блокируем кнопку если форма невалидна
+            const formBtn = document.getElementById('formBtn');
+            if (formBtn) {
+                formBtn.disabled = !isValid;
+            }
 
+            // Сохраняем данные только если форма валидна
             if (isValid) {
                 sessionData.user = {
                     ...sessionData.user,
@@ -1369,6 +1532,26 @@
                     inputDevice: document.getElementById('inputDevice').value,
                     keyboardType: document.getElementById('keyboardType').value
                 };
+            }
+        }
+        
+        // Показать ошибку поля
+        function showFieldError(field, message) {
+            let errorMsg = field.parentElement.querySelector('.field-error');
+            if (!errorMsg) {
+                errorMsg = document.createElement('div');
+                errorMsg.className = 'field-error';
+                errorMsg.style.cssText = 'color: var(--error); font-size: 12px; margin-top: 5px;';
+                field.parentElement.appendChild(errorMsg);
+            }
+            errorMsg.textContent = message;
+        }
+        
+        // Скрыть ошибку поля
+        function hideFieldError(field) {
+            const errorMsg = field.parentElement.querySelector('.field-error');
+            if (errorMsg) {
+                errorMsg.remove();
             }
         }
 
