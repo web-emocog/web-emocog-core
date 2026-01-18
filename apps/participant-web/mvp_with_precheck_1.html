@@ -5,8 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EmoCog Research (Multilingual)</title>
     
+    <!-- MediaPipe Vision (Face Landmarker) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
+    <script>
+        // Загрузка MediaPipe как глобальных объектов для non-module скриптов
+        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs')
+            .then(vision => {
+                window.FilesetResolver = vision.FilesetResolver;
+                window.FaceLandmarker = vision.FaceLandmarker;
+                console.log('[MediaPipe] Vision modules loaded');
+            })
+            .catch(err => console.error('[MediaPipe] Load error:', err));
+    </script>
+    
     <!-- CDN WebGazer -->
     <script src="https://cdn.jsdelivr.net/npm/webgazer@3.3.0/dist/webgazer.min.js"></script>
+    
+    <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
+    <script src="js/precheck-analyzer.js?v=2.0.1"></script>
+    <!-- QC Metrics Module -->
+    <script src="js/qc-metrics.js?v=1.0.1"></script>
     
     <style>
         /* CSS - Стили */
@@ -752,14 +770,13 @@
 
         <!-- ШАГ 5: настройка камеры (pre-check) -->
         <div id="step5" class="step">
-            <h2 data-i18n="calib_title">Проверка камеры</h2>
-            <p style="text-align: center;" data-i18n="calib_desc">Сначала проверим камеру для участия в исследовании, затем начнём калибровку.</p>
+            <h2 data-i18n="calib_title">Настройка камеры</h2>
+            <p data-i18n="calib_desc">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
             
-            <!-- pre-check контейнер -->
-            <div class="precheck-container" id="precheckContainer">
-                <!-- видео превью -->
-                <div class="camera-preview" id="cameraPreview">
-                    <video id="precheckVideo" autoplay muted playsinline></video>
+            <div id="precheckContainer" class="precheck-container">
+                <!-- Превью камеры -->
+                <div id="cameraPreview" class="camera-preview">
+                    <video id="precheckVideo" autoplay playsinline muted></video>
                     <canvas id="overlayCanvas"></canvas>
                     <div class="face-guide"></div>
                     <div class="guide-text" data-i18n="guide_text">Расположите лицо внутри рамки</div>
@@ -892,7 +909,7 @@
                 opt_edu_student: "Студент",
                 opt_edu_higher: "Высшее",
                 opt_edu_degree: "Ученая степень",
-                form_section_tech: "👁️ Зрение и Оборудование",
+                form_section_tech: "👁️ Зрение & Оборудование",
                 label_vision: "Зрение",
                 opt_vis_norm: "Норма",
                 opt_vis_glass: "Очки",
@@ -905,7 +922,7 @@
                 label_hand: "Ведущая рука",
                 opt_hand_r: "Правая",
                 opt_hand_l: "Левая",
-                label_device: "Устройство ввода",
+                label_device: "Input Device",
                 opt_dev_mouse: "Мышь",
                 opt_dev_touch: "Тачпад",
                 label_keyboard: "Клавиатура",
@@ -943,20 +960,38 @@
                 status_not_found: "Не найдено",
                 status_too_small: "Далеко от камеры",
                 status_too_large: "Близко к камере",
+                status_out_of_zone: "Вне зоны",
+                status_tilted: "Голова наклонена",
                 status_stable: "Стабильно",
                 status_unstable: "Нестабильно",
                 status_no_face: "Нет лица",
                 status_all_good: "🎉  Проверка пройдена! Можно начинать калибровку",
                 status_needs_fix: "🔴 Требуется исправить",
                 status_checking: "⏳ Проверяем условия",
+                status_partial_face: "Часть лица скрыта",
+                status_off_center: "Не по центру",
                 //подсказки
                 tip_light_dark: "Слишком темно, необходимо включить лампу или подойти к окну",
                 tip_light_bright: "Слишком ярко, не направляйте свет прямо в камеру или отойдите от окна",
                 tip_face_not_found: "Лицо не обнаружено, убедитесь, что вы в центре кадра",
-                tip_face_too_small: "Вы слишком далеко, подвиньтесь ближе к камере",
+                tip_face_too_small: "Подвиньтесь ближе к камере, лицо должно быть полностью видно",
                 tip_face_too_large: "Вы слишком близко, отодвиньтесь от камеры",
+                tip_face_out_of_zone: "Расположите лицо по центру кадра",
+                tip_face_tilted: "Держите голову прямо, не наклоняйте её",
                 tip_pose_no_face: "Лицо не обнаружено, расположитесь по центру кадра",
                 tip_pose_unstable: "Постарайтесь смотреть прямо в камеру и не двигаться",
+                tip_pose_partial_face: "Часть лица не видна. Расположитесь так, чтобы всё лицо было в кадре",
+                tip_pose_eyes_off_center: "Глаза не по центру экрана. Сместитесь так, чтобы смотреть прямо в камеру",
+                tip_pose_move_left: "Сместитесь немного влево",
+                tip_pose_move_right: "Сместитесь немного вправо", 
+                tip_pose_move_up: "Поднимите камеру или опуститесь ниже",
+                tip_pose_move_down: "Опустите камеру или поднимитесь выше",
+                tip_pose_turn_left: "Поверните голову немного влево",
+                tip_pose_turn_right: "Поверните голову немного вправо",
+                tip_pose_tilt_up: "Поднимите подбородок",
+                tip_pose_tilt_down: "Опустите подбородок",
+                tip_pose_straighten: "Выровняйте голову, не наклоняйте её вбок",
+                tip_eyes_closed: "Откройте глаза и смотрите в камеру",
                 // Dynamic JS strings
                 id_participant: "Ваш ID участника:",
                 id_not_generated: "ID не сгенерирован",
@@ -1061,20 +1096,38 @@
                 status_not_found: "Not Found",
                 status_too_small: "Far from the camera",
                 status_too_large: "Close to the camera",
+                status_out_of_zone: "Out of frame",
+                status_tilted: "Head tilted",
                 status_stable: "Stable",
                 status_unstable: "Unstable",
                 status_no_face: "No Face",
                 status_all_good: "🎉 All good! You can start calibration",
                 status_needs_fix: "🔴 Needs fixing",
                 status_checking: "⏳ Checking conditions",
+                status_partial_face: "Face partially hidden",
+                status_off_center: "Off center",
                 //подсказки
                 tip_light_dark: "Too dark, turn on a lamp or move closer to a window",
                 tip_light_bright: "Too bright, don't point light directly at the camera or move away from the window",
                 tip_face_not_found: "Face not detected, make sure you're in the center of the frame",
-                tip_face_too_small: "You're too far away, move closer to the camera",
+                tip_face_too_small: "Move closer to the camera, your face must be fully visible",
                 tip_face_too_large: "You're too close, move away from the camera",
+                tip_face_out_of_zone: "Position your face in the center of the frame",
+                tip_face_tilted: "Keep your head straight, don't tilt it",
                 tip_pose_no_face: "Face not detected, position yourself in the center of the frame",
                 tip_pose_unstable: "Try to look straight at the camera and don't move",
+                tip_pose_partial_face: "Part of your face is not visible. Position yourself so your entire face is in frame",
+                tip_pose_eyes_off_center: "Eyes are not centered on screen. Move so you're looking straight at the camera",
+                tip_pose_move_left: "Move slightly to the left",
+                tip_pose_move_right: "Move slightly to the right",
+                tip_pose_move_up: "Raise the camera or lower yourself",
+                tip_pose_move_down: "Lower the camera or raise yourself",
+                tip_pose_turn_left: "Turn your head slightly to the left",
+                tip_pose_turn_right: "Turn your head slightly to the right",
+                tip_pose_tilt_up: "Raise your chin",
+                tip_pose_tilt_down: "Lower your chin",
+                tip_pose_straighten: "Straighten your head, don't tilt it sideways",
+                tip_eyes_closed: "Open your eyes and look at the camera",
                 // Dynamic JS strings
                 id_participant: "Your Participant ID:",
                 id_not_generated: "ID not generated",
@@ -1143,11 +1196,16 @@
         let analysisFrameId = null;
         let successFrames = 0;
         const requiredSuccessFrames = 15;
+        
+        // Локальный анализатор (вместо бэкенда)
+        let localAnalyzer = null;
+        let precheckFramesHistory = []; // История кадров для QC
 
         let precheckData = {
             illumination: null,
             face: null,
             pose: null,
+            neck: null,
             overall: false
         };
 
@@ -1242,7 +1300,6 @@
                     "status": "stable", // "stable" | "unstable" | "no_face"
                     "isStable": true // boolean
                 }
-            }
             */
             try {
                 const results = await sendFrameToBackend(videoElement);
@@ -1690,14 +1747,71 @@
         function stopPreCheck() {
             isPrecheckRunning = false;
             if (analysisFrameId) {
-                cancelAnimationFrame(analysisFrameId);
+                clearTimeout(analysisFrameId);
                 analysisFrameId = null;
             }
+            // Освобождаем ресурсы локального анализатора
+            if (localAnalyzer) {
+                localAnalyzer.reset();
+            }
+        }
+
+        /**
+         * Локальный анализ кадра (без бэкенда)
+         * Использует PrecheckAnalyzer для анализа освещения, лица, позы и шеи
+         */
+        async function runLocalPrecheckAnalysis(videoElement) {
+            // Инициализируем анализатор если ещё не создан
+            if (!localAnalyzer) {
+                localAnalyzer = new PrecheckAnalyzer({
+                    onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
+                    onError: (err) => console.error('[PreCheck] Ошибка анализатора:', err)
+                });
+            }
+            
+            try {
+                // Анализируем кадр локально
+                const results = await localAnalyzer.analyzeFrame(videoElement);
+                
+                // Сохраняем в историю для QC-метрик
+                precheckFramesHistory.push(results);
+                
+                // Ограничиваем размер истории (последние 100 кадров)
+                if (precheckFramesHistory.length > 100) {
+                    precheckFramesHistory.shift();
+                }
+                
+                return results;
+                
+            } catch (error) {
+                console.error('[PreCheck] Ошибка локального анализа:', error);
+                return {
+                    error: true,
+                    errorMessage: error.message,
+                    illumination: { value: 0, status: 'error' },
+                    face: { detected: false, size: 0, status: 'error' },
+                    pose: { status: 'error', isStable: false },
+                    neck: { visible: false, status: 'error' },
+                    timestamp: Date.now()
+                };
+            }
+        }
+
+        /**
+         * Проверка готовности к калибровке
+         * Возвращает объект с ready: boolean и списком проблем
+         */
+        function checkCalibrationReadiness() {
+            if (!localAnalyzer || !precheckData) {
+                return { ready: false, issues: ['analyzer_not_ready'] };
+            }
+            return localAnalyzer.checkCalibrationReadiness(precheckData);
         }
 
         function startContinuousAnalysis() {
             isPrecheckRunning = true;
             successFrames = 0;
+            precheckFramesHistory = []; // Сбрасываем историю
             
             const video = document.getElementById('precheckVideo');
     
@@ -1705,8 +1819,8 @@
                 if (!isPrecheckRunning) return;
                 
                 try {
-                    // Отправляем кадр в бэк
-                    const results = await analyzeVideoFrame(video);
+                    // Используем ЛОКАЛЬНЫЙ анализатор вместо бэкенда
+                    const results = await runLocalPrecheckAnalysis(video);
                     
                     // Обновляем индикаторы с реальными данными
                     updateIndicators(results);
@@ -1716,10 +1830,13 @@
                     // Проверяем все индикаторы
                     checkAllIndicators();
                 } catch (error) {
-                    console.error('Ошибка отправки кадра:', error);
+                    console.error('Ошибка анализа кадра:', error);
                 }
                 
-                analysisFrameId = setTimeout(analyzeFrame, BACKEND_CONFIG.SEND_INTERVAL);
+                // Интервал анализа (300мс = ~3.3 FPS)
+                if (isPrecheckRunning) {
+                    analysisFrameId = setTimeout(analyzeFrame, BACKEND_CONFIG.SEND_INTERVAL);
+                }
             }
     
             // Запускаем цикл анализа
@@ -1800,6 +1917,14 @@
                             : translations[currentLang].status_too_large;
                         indicatorClass = 'failed';
                         break;
+                    case 'out_of_zone':
+                        statusText = translations[currentLang].status_out_of_zone;
+                        indicatorClass = 'failed';
+                        break;
+                    case 'tilted':
+                        statusText = translations[currentLang].status_tilted;
+                        indicatorClass = 'failed';
+                        break;
                     default: 
                         statusText = translations[currentLang].status_optimal;
                         indicatorClass = 'passed';
@@ -1827,16 +1952,45 @@
             
             let progressValue, statusText, indicatorClass;
             
-            if (data.status === 'no_face') {
-                progressValue = 0;
-                statusText = translations[currentLang].status_no_face;
-                indicatorClass = 'failed';
-            } else {
-                progressValue = data.isStable ? 100 : 50;
-                statusText = data.isStable 
-                    ? translations[currentLang].status_stable 
-                    : translations[currentLang].status_unstable;
-                indicatorClass = data.isStable ? 'passed' : 'failed';
+            switch(data.status) {
+                case 'no_face':
+                    progressValue = 0;
+                    statusText = translations[currentLang].status_no_face;
+                    indicatorClass = 'failed';
+                    break;
+                case 'partial_face':
+                    progressValue = 30;
+                    statusText = translations[currentLang].status_partial_face;
+                    indicatorClass = 'failed';
+                    break;
+                case 'off_center':
+                    progressValue = 50;
+                    statusText = translations[currentLang].status_off_center;
+                    indicatorClass = 'failed';
+                    break;
+                case 'tilted':
+                    progressValue = 60;
+                    statusText = translations[currentLang].status_tilted;
+                    indicatorClass = 'failed';
+                    break;
+                case 'unstable':
+                    progressValue = 70;
+                    statusText = translations[currentLang].status_unstable;
+                    indicatorClass = 'failed';
+                    break;
+                case 'stable':
+                default:
+                    // Дополнительная проверка isStable для случаев, когда status stable, но isStable false
+                    if (!data.isStable) {
+                        progressValue = 70;
+                        statusText = translations[currentLang].status_unstable;
+                        indicatorClass = 'failed';
+                    } else {
+                        progressValue = 100;
+                        statusText = translations[currentLang].status_stable;
+                        indicatorClass = 'passed';
+                    }
+                    break;
             }
             
             progressBar.style.width = progressValue + '%';
@@ -1861,7 +2015,12 @@
             
             if (faceData.detected && faceData.bbox) {
                 const bbox = faceData.bbox;
-                const x = bbox.x * canvas.width;
+                
+                // Инвертируем X координату для зеркального отображения
+                // Видео отображается с transform: scaleX(-1), поэтому bbox тоже нужно отзеркалить
+                const mirroredX = 1 - bbox.x - bbox.width;
+                
+                const x = mirroredX * canvas.width;
                 const y = bbox.y * canvas.height;
                 const width = bbox.width * canvas.width;
                 const height = bbox.height * canvas.height;
@@ -1874,6 +2033,8 @@
                         break;
                     case 'too_small':
                     case 'too_large':
+                    case 'out_of_zone':
+                    case 'tilted':
                         color = '#EF4444'; // red
                         lineWidth = 3;
                         break;
@@ -1886,14 +2047,6 @@
                 ctx.strokeStyle = color;
                 ctx.lineWidth = lineWidth;
                 ctx.strokeRect(x, y, width, height);
-                
-                ctx.fillStyle = color;
-                ctx.font = 'bold 14px Arial';
-                ctx.fillText(
-                    `${Math.round(faceData.size)}%`,
-                    x + width + 5,
-                    y + height / 2
-                );
                 
                 ctx.fillStyle = color;
                 ctx.font = 'bold 14px Arial';
@@ -1915,7 +2068,7 @@
                     tips.push(translations[currentLang].tip_light_dark);
                 } else if (precheckData.illumination.status === 'too_bright') {
                     tips.push(translations[currentLang].tip_light_bright);
-                    }
+                }
             }
             
             // проверка размера лица (только для failed)
@@ -1926,16 +2079,68 @@
                     tips.push(translations[currentLang].tip_face_too_small);
                 } else if (precheckData.face.status === 'too_large') {
                     tips.push(translations[currentLang].tip_face_too_large);
+                } else if (precheckData.face.status === 'out_of_zone') {
+                    tips.push(translations[currentLang].tip_face_out_of_zone);
+                } else if (precheckData.face.status === 'tilted') {
+                    tips.push(translations[currentLang].tip_face_tilted);
                 }
             }
             
-            // проверка позы (только для failed)
+            // проверка позы (расширенная логика для всех новых статусов)
             if (indicatorsStatus.pose === 'failed' && precheckData.pose) {
-                if (precheckData.pose.status === 'no_face') {
+                const pose = precheckData.pose;
+                
+                if (pose.status === 'no_face') {
                     tips.push(translations[currentLang].tip_pose_no_face);
-                } else {
+                } else if (pose.status === 'partial_face') {
+                    // Часть лица не видна
+                    tips.push(translations[currentLang].tip_pose_partial_face);
+                } else if (pose.status === 'off_center') {
+                    // Глаза не по центру экрана
+                    tips.push(translations[currentLang].tip_pose_eyes_off_center);
+                    
+                    // Добавляем конкретные подсказки о направлении смещения
+                    if (pose.eyesCentering && pose.eyesCentering.hint) {
+                        pose.eyesCentering.hint.forEach(hint => {
+                            if (hint === 'move_left') tips.push(translations[currentLang].tip_pose_move_left);
+                            if (hint === 'move_right') tips.push(translations[currentLang].tip_pose_move_right);
+                            if (hint === 'move_up') tips.push(translations[currentLang].tip_pose_move_up);
+                            if (hint === 'move_down') tips.push(translations[currentLang].tip_pose_move_down);
+                        });
+                    }
+                } else if (pose.status === 'tilted' || pose.isTilted) {
+                    // Голова наклонена — даём конкретные подсказки
+                    if (pose.issues) {
+                        if (pose.issues.includes('yaw_exceeded')) {
+                            // yaw > 0 — голова повёрнута вправо, нужно повернуть влево
+                            if (pose.yaw > 0) {
+                                tips.push(translations[currentLang].tip_pose_turn_left);
+                            } else {
+                                tips.push(translations[currentLang].tip_pose_turn_right);
+                            }
+                        }
+                        if (pose.issues.includes('pitch_exceeded')) {
+                            // pitch > 0 — голова опущена, нужно поднять
+                            if (pose.pitch > 0) {
+                                tips.push(translations[currentLang].tip_pose_tilt_up);
+                            } else {
+                                tips.push(translations[currentLang].tip_pose_tilt_down);
+                            }
+                        }
+                        if (pose.issues.includes('roll_exceeded')) {
+                            tips.push(translations[currentLang].tip_pose_straighten);
+                        }
+                    } else {
+                        tips.push(translations[currentLang].tip_face_tilted);
+                    }
+                } else if (!pose.isStable) {
                     tips.push(translations[currentLang].tip_pose_unstable);
                 }
+            }
+            
+            // Проверка глаз (если закрыты)
+            if (precheckData.eyes && !precheckData.eyes.bothOpen) {
+                tips.push(translations[currentLang].tip_eyes_closed);
             }
             
             return tips;
@@ -2088,52 +2293,33 @@
                         }
                     })
                     .begin();
-
-                // НЕ отключаем обучение по мыши - оно нужно для калибровки!
-                // webgazer.removeMouseEventListeners();
                 
-                webgazer.showVideo(true);
-                webgazer.showFaceOverlay(true);
-                webgazer.showFaceFeedbackBox(true);
-                webgazer.showPredictionPoints(false);
-
-                loading.innerText = translations[currentLang].msg_wait_stable;
+                // Проверка готовности видео и лица
+                let attempts = 0;
+                const checkInterval = setInterval(() => {
+                    attempts++;
+                    const videoElement = document.getElementById('webgazerVideoFeed');
+                    const videoReady = videoElement && videoElement.readyState >= 2;
+                    
+                    if (videoReady || faceDetected) {
+                        clearInterval(checkInterval);
+                        faceDetected = true;
+                        loading.innerText = translations[currentLang].msg_face_locked;
+                        setTimeout(runCalibrationRoutine, 2000);
+                    } 
+                    
+                    if (attempts > 150) {
+                        clearInterval(checkInterval);
+                        loading.innerText = translations[currentLang].msg_no_face;
+                        // Всё равно запускаем калибровку через 3 секунды
+                        setTimeout(runCalibrationRoutine, 3000);
+                    }
+                }, 100);
                 
-                // Проверяем наличие видео-потока вместо faceDetected
-                waitForVideoAndStart();
-
-            } catch (e) {
-                alert("Camera Access Error: " + e.message);
-                console.error(e);
-                btn.style.display = 'block';
+            } catch (error) {
+                console.error('Ошибка инициализации WebGazer:', error);
+                loading.innerText = translations[currentLang].status_error + ': ' + error.message;
             }
-        }
-
-        function waitForVideoAndStart() {
-            const loading = document.getElementById('loadingMsg');
-            let attempts = 0;
-            
-            const checkInterval = setInterval(() => {
-                attempts++;
-                
-                // Проверяем наличие видео-элемента WebGazer
-                const videoElement = document.getElementById('webgazerVideoFeed');
-                const videoReady = videoElement && videoElement.readyState >= 2;
-                
-                if (videoReady || faceDetected) {
-                    clearInterval(checkInterval);
-                    faceDetected = true;
-                    loading.innerText = translations[currentLang].msg_face_locked;
-                    setTimeout(runCalibrationRoutine, 2000);
-                } 
-                
-                if (attempts > 150) {
-                    clearInterval(checkInterval);
-                    loading.innerText = translations[currentLang].msg_no_face;
-                    // Всё равно запускаем калибровку через 3 секунды
-                    setTimeout(runCalibrationRoutine, 3000);
-                }
-            }, 100);
         }
 
         function runCalibrationRoutine() {
@@ -2189,15 +2375,18 @@
                     if (i >= positions.length) {
                         // Калибровка завершена
                         point.onclick = null;
-                        instructionText.innerText = currentLang === 'ru'
-                            ? '✅ Калибровка завершена! Запускаем тест...'
-                            : '✅ Calibration done! Starting test...';
-                        progressText.innerText = '';
-                        isRecording = true;
                         
-                        // Скрываем калибровку и запускаем тест
+                        instructionText.innerText = currentLang === 'ru'
+                            ? '✅ Калибровка завершена!'
+                            : '✅ Calibration complete!';
+                        progressText.innerText = '';
+                        point.style.display = 'none';
+                        
                         setTimeout(() => {
                             calibScreen.classList.remove('active');
+                            
+                            // Запускаем запись и тест слежения
+                            isRecording = true;
                             startTrackingTest();
                         }, 1500);
                         return;
@@ -2209,7 +2398,7 @@
 
             updatePoint();
         }
-
+        
         // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
         function startTrackingTest() {
             const testArea = document.getElementById('trackingTestArea');
@@ -2219,19 +2408,6 @@
             const customDot = document.getElementById('customGazeDot');
             
             // Скрываем основной контейнер и показываем тест на весь экран
-            document.querySelector('.container').style.display = 'none';
-            document.querySelector('.top-bar').style.display = 'none';
-            testArea.classList.add('active');
-            
-            // Показываем точку взгляда
-            customDot.style.display = 'block';
-            customDot.style.zIndex = '3000';
-            
-            progressText.innerText = translations[currentLang].test_follow_shape;
-            
-            const screenW = window.innerWidth;
-            const screenH = window.innerHeight;
-            
             // Траектории движения фигур
             const trajectories = [
                 // 1. Круг — горизонтальная линия слева направо
@@ -2363,4 +2539,5 @@
     </script>
 </body>
 </html>
+``` 
 
