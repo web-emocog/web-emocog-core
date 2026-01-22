@@ -1,5 +1,5 @@
 /**
- * PreCheck Analyzer Module v2.0
+ * PreCheck Analyzer Module v2.1
  * Анализ лица через MediaPipe Face Landmarker
  * 
  * Возможности:
@@ -9,7 +9,9 @@
  * - Iris tracking
  * - EAR (Eye Aspect Ratio) для детекции морганий
  * 
- * @version 2.0.0 - MediaPipe Face Landmarker
+ * Примечание: Проверка окклюзий (волосы, руки) выполняется через FaceSegmenter
+ * 
+ * @version 2.1.0 - Упрощённая версия без дублирования логики FaceSegmenter
  */
 
 class PrecheckAnalyzer {
@@ -35,7 +37,7 @@ class PrecheckAnalyzer {
                 optimalMax: 180
             },
             face: {
-                minSize: options.faceMinSize ?? 5,    // % от кадра (уменьшено для комфорта)
+                minSize: options.faceMinSize ?? 5,
                 maxSize: options.faceMaxSize ?? 60,
                 minConfidence: 0.5,
                 validZone: {
@@ -46,60 +48,31 @@ class PrecheckAnalyzer {
                 }
             },
             pose: {
-                maxYaw: options.maxYaw ?? 10,        // градусы (ужесточено с 15)
-                maxPitch: options.maxPitch ?? 10,   // градусы (ужесточено с 15)
-                maxRoll: options.maxRoll ?? 8,      // градусы (ужесточено с 10)
-                stabilityThreshold: 0.05,           // 5% движения
-                stabilityWindow: 500,               // мс
-                // Новые пороги для центрирования глаз
-                eyesCenterMaxDeviation: 0.15,       // максимальное отклонение от центра (15%)
-                eyesCenterOptimalDeviation: 0.08    // идеальное отклонение (8%)
+                maxYaw: options.maxYaw ?? 10,
+                maxPitch: options.maxPitch ?? 10,
+                maxRoll: options.maxRoll ?? 8,
+                stabilityThreshold: 0.05,
+                stabilityWindow: 500,
+                // Пороги для центрирования глаз
+                eyesCenterMaxDeviation: 0.15,
+                eyesCenterOptimalDeviation: 0.08
             },
             eyes: {
-                earThreshold: 0.2,                  // порог моргания
+                earThreshold: 0.2,
                 minOpenRatio: 0.25
-            },
-            // Новые пороги для проверки видимости лэндмарок
-            landmarks: {
-                minVisibleRatio: 0.95,              // минимум 95% точек должны быть видимы
-                boundaryMargin: 0.02                // отступ от края кадра (2%)
             }
         };
         
-        // Индексы лэндмарок MediaPipe Face Mesh
+        // Индексы лэндмарок MediaPipe Face Mesh (только необходимые)
         this.LANDMARKS = {
             // Глаза (для EAR)
             LEFT_EYE: [362, 385, 387, 263, 373, 380],
             RIGHT_EYE: [33, 160, 158, 133, 153, 144],
-            // Центры глаз (для центрирования)
-            LEFT_EYE_CENTER: [468],   // центр левого iris
-            RIGHT_EYE_CENTER: [473],  // центр правого iris
-            // Iris
+            // Iris (для центрирования и направления взгляда)
             LEFT_IRIS: [468, 469, 470, 471, 472],
             RIGHT_IRIS: [473, 474, 475, 476, 477],
-            // Контур лица
-            FACE_OVAL: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109],
-            // Губы
-            LIPS_OUTER: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95],
-            LIPS_INNER: [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78],
-            // Брови
-            LEFT_BROW: [276, 283, 282, 295, 285],
-            RIGHT_BROW: [46, 53, 52, 65, 55],
-            // Нос
-            NOSE: [1, 2, 98, 327, 4, 5, 195, 197, 6],
-            // Критические точки для проверки видимости (должны быть все видны)
-            CRITICAL_POINTS: [
-                // Глаза (углы)
-                33, 133, 362, 263,
-                // Брови (края)
-                46, 55, 276, 285,
-                // Нос (кончик и крылья)
-                1, 4, 98, 327,
-                // Губы (углы и центр)
-                61, 291, 13, 14,
-                // Контур лица (ключевые точки)
-                10, 152, 234, 454
-            ]
+            // Губы (для анализа рта)
+            LIPS_OUTER: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
         };
         
         // Callbacks
@@ -121,7 +94,7 @@ class PrecheckAnalyzer {
         if (this.isInitialized) return true;
         
         try {
-            console.log('[PrecheckAnalyzer] Инициализация v2.0 (MediaPipe Face Landmarker)...');
+            console.log('[PrecheckAnalyzer] Инициализация v2.1 (MediaPipe Face Landmarker)...');
             
             // Проверяем наличие MediaPipe
             if (typeof FilesetResolver === 'undefined' || typeof FaceLandmarker === 'undefined') {
@@ -168,6 +141,7 @@ class PrecheckAnalyzer {
 
     /**
      * Полный анализ кадра видео
+     * Примечание: для проверки окклюзий используйте FaceSegmenter отдельно
      */
     async analyzeFrame(videoElement) {
         if (!this.isInitialized) {
@@ -213,23 +187,15 @@ class PrecheckAnalyzer {
             // Получаем landmarks для дополнительных проверок
             const landmarks = mpResults.faceLandmarks?.[0] || null;
             
-            // Проверка видимости критических точек лица
-            const visibility = this._checkLandmarksVisibility(landmarks);
-            
-            // Проверка центрирования глаз
+            // Проверка центрирования глаз (быстрая проверка по координатам)
             const eyesCentering = this._checkEyesCentering(landmarks);
             
-            // Расширяем данные позы информацией о видимости и центрировании
-            pose.visibility = visibility;
+            // Расширяем данные позы информацией о центрировании
             pose.eyesCentering = eyesCentering;
             
-            // Обновляем статус позы с учётом всех проверок
+            // Обновляем статус позы с учётом центрирования
             if (faceData.detected) {
-                if (!visibility.allVisible) {
-                    pose.status = 'partial_face';
-                    pose.issues = pose.issues || [];
-                    pose.issues.push('partial_face');
-                } else if (!eyesCentering.centered) {
+                if (!eyesCentering.centered) {
                     pose.status = 'off_center';
                     pose.issues = pose.issues || [];
                     pose.issues.push('eyes_off_center');
@@ -261,12 +227,12 @@ class PrecheckAnalyzer {
             const stability = this._checkStability();
             pose.isStable = stability.isStable;
             
-            // Финальный статус позы (приоритет: partial_face > off_center > tilted > unstable > stable)
-            if (pose.status !== 'partial_face' && pose.status !== 'off_center' && pose.status !== 'tilted') {
+            // Финальный статус позы
+            if (pose.status !== 'off_center' && pose.status !== 'tilted') {
                 pose.status = stability.isStable ? 'stable' : 'unstable';
             }
             
-            // Анализ рта (для будущего использования)
+            // Анализ рта
             const mouth = this._analyzeMouth(mpResults);
             
             const analysisTime = performance.now() - startTime;
@@ -388,10 +354,8 @@ class PrecheckAnalyzer {
         const matrix = mpResults.facialTransformationMatrixes[0].data;
         
         // Извлекаем углы из матрицы трансформации
-        // Matrix layout: [r11, r12, r13, tx, r21, r22, r23, ty, r31, r32, r33, tz, 0, 0, 0, 1]
-        const r11 = matrix[0], r12 = matrix[1], r13 = matrix[2];
-        const r21 = matrix[4], r22 = matrix[5], r23 = matrix[6];
-        const r31 = matrix[8], r32 = matrix[9], r33 = matrix[10];
+        const r11 = matrix[0], r21 = matrix[4], r31 = matrix[8];
+        const r32 = matrix[9], r33 = matrix[10];
         
         // Вычисляем углы Эйлера
         const pitch = Math.asin(-r31) * (180 / Math.PI);
@@ -416,7 +380,7 @@ class PrecheckAnalyzer {
             yaw: Math.round(yaw * 10) / 10,
             pitch: Math.round(pitch * 10) / 10,
             roll: Math.round(roll * 10) / 10,
-            isStable: true,  // Будет обновлено после проверки стабильности
+            isStable: true,
             isTilted,
             status: isTilted ? 'tilted' : 'stable',
             issues
@@ -449,21 +413,19 @@ class PrecheckAnalyzer {
         const leftOpen = leftEAR > this.thresholds.eyes.earThreshold;
         const rightOpen = rightEAR > this.thresholds.eyes.earThreshold;
         
-        // Направление взгляда (упрощённое)
+        // Направление взгляда
         const gazeDirection = this._estimateGazeDirection(landmarks, leftIris, rightIris);
         
         return {
             left: {
                 ear: Math.round(leftEAR * 1000) / 1000,
                 isOpen: leftOpen,
-                iris: leftIris,
-                landmarks: this.LANDMARKS.LEFT_EYE.map(i => landmarks[i])
+                iris: leftIris
             },
             right: {
                 ear: Math.round(rightEAR * 1000) / 1000,
                 isOpen: rightOpen,
-                iris: rightIris,
-                landmarks: this.LANDMARKS.RIGHT_EYE.map(i => landmarks[i])
+                iris: rightIris
             },
             bothOpen: leftOpen && rightOpen,
             gazeDirection
@@ -472,20 +434,15 @@ class PrecheckAnalyzer {
 
     /**
      * Вычисление Eye Aspect Ratio (EAR)
-     * EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)
      */
     _calculateEAR(landmarks, eyeIndices) {
         const p = eyeIndices.map(i => landmarks[i]);
         
-        // Вертикальные расстояния
         const v1 = this._distance(p[1], p[5]);
         const v2 = this._distance(p[2], p[4]);
-        
-        // Горизонтальное расстояние
         const h = this._distance(p[0], p[3]);
         
         if (h === 0) return 0;
-        
         return (v1 + v2) / (2 * h);
     }
 
@@ -508,19 +465,13 @@ class PrecheckAnalyzer {
         const center = landmarks[irisIndices[0]];
         const points = irisIndices.slice(1).map(i => landmarks[i]);
         
-        // Вычисляем радиус как среднее расстояние от центра до краёв
         let radius = 0;
         for (const p of points) {
             radius += this._distance(center, p);
         }
         radius /= points.length;
         
-        return {
-            x: center.x,
-            y: center.y,
-            z: center.z,
-            radius
-        };
+        return { x: center.x, y: center.y, z: center.z, radius };
     }
 
     /**
@@ -529,18 +480,11 @@ class PrecheckAnalyzer {
     _estimateGazeDirection(landmarks, leftIris, rightIris) {
         if (!leftIris || !rightIris) return 'unknown';
         
-        // Получаем центры глаз
         const leftEyeCenter = this._getCenter(this.LANDMARKS.LEFT_EYE.map(i => landmarks[i]));
         const rightEyeCenter = this._getCenter(this.LANDMARKS.RIGHT_EYE.map(i => landmarks[i]));
         
-        // Смещение зрачков относительно центров глаз
-        const leftOffsetX = leftIris.x - leftEyeCenter.x;
-        const rightOffsetX = rightIris.x - rightEyeCenter.x;
-        const avgOffsetX = (leftOffsetX + rightOffsetX) / 2;
-        
-        const leftOffsetY = leftIris.y - leftEyeCenter.y;
-        const rightOffsetY = rightIris.y - rightEyeCenter.y;
-        const avgOffsetY = (leftOffsetY + rightOffsetY) / 2;
+        const avgOffsetX = ((leftIris.x - leftEyeCenter.x) + (rightIris.x - rightEyeCenter.x)) / 2;
+        const avgOffsetY = ((leftIris.y - leftEyeCenter.y) + (rightIris.y - rightEyeCenter.y)) / 2;
         
         const threshold = 0.01;
         
@@ -563,15 +507,8 @@ class PrecheckAnalyzer {
      * Центр набора точек
      */
     _getCenter(points) {
-        const sum = points.reduce((acc, p) => ({
-            x: acc.x + p.x,
-            y: acc.y + p.y
-        }), { x: 0, y: 0 });
-        
-        return {
-            x: sum.x / points.length,
-            y: sum.y / points.length
-        };
+        const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+        return { x: sum.x / points.length, y: sum.y / points.length };
     }
 
     /**
@@ -584,29 +521,24 @@ class PrecheckAnalyzer {
         
         const landmarks = mpResults.faceLandmarks[0];
         
-        // Верхняя и нижняя губа (центральные точки)
         const upperLip = landmarks[13];
         const lowerLip = landmarks[14];
         const leftCorner = landmarks[61];
         const rightCorner = landmarks[291];
         
-        // Расстояние между губами
         const mouthHeight = this._distance(upperLip, lowerLip);
         const mouthWidth = this._distance(leftCorner, rightCorner);
         
         const openRatio = mouthWidth > 0 ? mouthHeight / mouthWidth : 0;
-        const isOpen = openRatio > 0.1;
         
         return {
-            isOpen,
-            openRatio: Math.round(openRatio * 100) / 100,
-            landmarks: this.LANDMARKS.LIPS_OUTER.map(i => landmarks[i])
+            isOpen: openRatio > 0.1,
+            openRatio: Math.round(openRatio * 100) / 100
         };
     }
 
     /**
      * Извлечение blend shapes из результатов MediaPipe
-     * Blend shapes описывают мимику лица (52 параметра)
      */
     _getBlendShapes(mpResults) {
         if (!mpResults.faceBlendshapes || mpResults.faceBlendshapes.length === 0) {
@@ -614,20 +546,15 @@ class PrecheckAnalyzer {
         }
         
         const blendshapesData = mpResults.faceBlendshapes[0];
-        
-        // MediaPipe возвращает массив объектов с categoryName и score
-        // или объект с categories
         const categories = blendshapesData.categories || blendshapesData;
         
         if (!categories || !Array.isArray(categories)) {
             return null;
         }
         
-        // Преобразуем в удобный формат { categoryName: score }
         const result = {};
-        for (let i = 0; i < categories.length; i++) {
-            const shape = categories[i];
-            if (shape && shape.categoryName !== undefined) {
+        for (const shape of categories) {
+            if (shape?.categoryName !== undefined) {
                 result[shape.categoryName] = Math.round(shape.score * 1000) / 1000;
             }
         }
@@ -643,13 +570,8 @@ class PrecheckAnalyzer {
         let totalBrightness = 0;
         const pixelCount = data.length / 4;
         
-        // Вычисляем среднюю яркость (luminance)
         for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            // Формула luminance: 0.299*R + 0.587*G + 0.114*B
-            const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+            const brightness = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
             totalBrightness += brightness;
         }
         
@@ -663,11 +585,7 @@ class PrecheckAnalyzer {
             status = 'too_bright';
         }
         
-        return {
-            value: normalizedValue,
-            rawValue: Math.round(avgBrightness),
-            status
-        };
+        return { value: normalizedValue, rawValue: Math.round(avgBrightness), status };
     }
 
     /**
@@ -678,10 +596,8 @@ class PrecheckAnalyzer {
             return { isStable: false, reason: 'insufficient_data' };
         }
         
-        // Берём последние N записей
         const recent = this.poseHistory.slice(-10);
         
-        // Вычисляем стандартное отклонение для каждого параметра
         const calcStdDev = (values) => {
             const mean = values.reduce((a, b) => a + b, 0) / values.length;
             const sqDiffs = values.map(v => Math.pow(v - mean, 2));
@@ -694,9 +610,8 @@ class PrecheckAnalyzer {
         const centerXStd = calcStdDev(recent.map(p => p.centerX));
         const centerYStd = calcStdDev(recent.map(p => p.centerY));
         
-        // Пороги стабильности
-        const angleThreshold = 3;  // градусы
-        const positionThreshold = 0.03;  // 3% от размера кадра
+        const angleThreshold = 3;
+        const positionThreshold = 0.03;
         
         const isStable = yawStd < angleThreshold && 
                         pitchStd < angleThreshold && 
@@ -704,268 +619,239 @@ class PrecheckAnalyzer {
                         centerXStd < positionThreshold &&
                         centerYStd < positionThreshold;
         
-        return {
-            isStable,
-            metrics: {
-                yawStd: Math.round(yawStd * 10) / 10,
-                pitchStd: Math.round(pitchStd * 10) / 10,
-                rollStd: Math.round(rollStd * 10) / 10,
-                centerXStd: Math.round(centerXStd * 1000) / 1000,
-                centerYStd: Math.round(centerYStd * 1000) / 1000
-            }
-        };
-    }
-
-    /**
-     * Проверка видимости всех ключевых точек лица
-     * Точки считаются невидимыми, если они выходят за пределы кадра
-     */
-    _checkLandmarksVisibility(landmarks) {
-        if (!landmarks || landmarks.length === 0) {
-            return {
-                allVisible: false,
-                visibleRatio: 0,
-                missingPoints: [],
-                status: 'no_landmarks'
-            };
-        }
-
-        const margin = this.thresholds.landmarks.boundaryMargin;
-        const criticalPoints = this.LANDMARKS.CRITICAL_POINTS;
-        const missingPoints = [];
-        let visibleCount = 0;
-
-        // Проверяем критические точки
-        for (const idx of criticalPoints) {
-            const point = landmarks[idx];
-            if (!point) {
-                missingPoints.push({ index: idx, reason: 'missing' });
-                continue;
-            }
-
-            // Точка видима, если она внутри кадра с отступом
-            const isVisible = 
-                point.x >= margin && 
-                point.x <= (1 - margin) && 
-                point.y >= margin && 
-                point.y <= (1 - margin);
-
-            if (isVisible) {
-                visibleCount++;
-            } else {
-                missingPoints.push({ 
-                    index: idx, 
-                    reason: 'out_of_frame',
-                    x: point.x,
-                    y: point.y
-                });
-            }
-        }
-
-        const visibleRatio = visibleCount / criticalPoints.length;
-        const allVisible = visibleRatio >= this.thresholds.landmarks.minVisibleRatio;
-
-        return {
-            allVisible,
-            visibleRatio: Math.round(visibleRatio * 100) / 100,
-            visibleCount,
-            totalCritical: criticalPoints.length,
-            missingPoints,
-            status: allVisible ? 'all_visible' : 'partial_face'
-        };
-    }
-
-    /**
-     * Проверка центрирования глаз относительно центра экрана
-     * Для eye-tracking важно, чтобы глаза были напротив камеры
-     */
-    _checkEyesCentering(landmarks) {
-        if (!landmarks || landmarks.length === 0) {
-            return {
-                centered: false,
-                deviation: 1,
-                status: 'no_landmarks'
-            };
-        }
-
-        // Получаем центры глаз (используем iris центры если доступны)
-        const leftIrisCenter = landmarks[468];  // LEFT_IRIS center
-        const rightIrisCenter = landmarks[473]; // RIGHT_IRIS center
-
-        if (!leftIrisCenter || !rightIrisCenter) {
-            return {
-                centered: false,
-                deviation: 1,
-                status: 'no_iris'
-            };
-        }
-
-        // Вычисляем центр между глазами
-        const eyesCenterX = (leftIrisCenter.x + rightIrisCenter.x) / 2;
-        const eyesCenterY = (leftIrisCenter.y + rightIrisCenter.y) / 2;
-
-        // Отклонение от центра экрана (0.5, 0.5)
-        const deviationX = eyesCenterX - 0.5;
-        const deviationY = eyesCenterY - 0.5;
-        const deviation = Math.sqrt(deviationX * deviationX + deviationY * deviationY);
-
-        // Определяем статус
-        const optimalThreshold = this.thresholds.pose.eyesCenterOptimalDeviation;
-        const maxThreshold = this.thresholds.pose.eyesCenterMaxDeviation;
-
-        let status, centered;
-        if (deviation <= optimalThreshold) {
-            status = 'optimal';
-            centered = true;
-        } else if (deviation <= maxThreshold) {
-            status = 'acceptable';
-            centered = true;
-        } else {
-            status = 'off_center';
-            centered = false;
-        }
-
-        // Определяем направление смещения для подсказки пользователю
-        let hint = null;
-        if (!centered) {
-            const hints = [];
-            if (deviationX < -0.05) hints.push('move_right');
-            if (deviationX > 0.05) hints.push('move_left');
-            if (deviationY < -0.05) hints.push('move_down');
-            if (deviationY > 0.05) hints.push('move_up');
-            hint = hints;
-        }
-
-        return {
-            centered,
-            deviation: Math.round(deviation * 1000) / 1000,
-            deviationX: Math.round(deviationX * 1000) / 1000,
-            deviationY: Math.round(deviationY * 1000) / 1000,
-            eyesCenter: {
-                x: Math.round(eyesCenterX * 1000) / 1000,
-                y: Math.round(eyesCenterY * 1000) / 1000
-            },
-            status,
-            hint
-        };
-    }
-
-    /**
-     * Комплексная проверка позы для eye-tracking
-     * Объединяет все проверки: наклон, видимость, центрирование
-     */
-    checkPoseQuality(precheckData) {
-        if (!precheckData || !precheckData.landmarks) {
-            return {
-                quality: 'poor',
-                score: 0,
-                issues: ['no_face_data'],
-                details: {}
-            };
-        }
-
-        const issues = [];
-        let score = 100;
-
-        // 1. Проверка наклона головы
-        const pose = precheckData.pose;
-        if (pose.isTilted) {
-            issues.push('head_tilted');
-            score -= 30;
-            
-            if (pose.issues.includes('yaw_exceeded')) {
-                issues.push(`yaw_${pose.yaw > 0 ? 'right' : 'left'}_${Math.abs(pose.yaw).toFixed(0)}deg`);
-            }
-            if (pose.issues.includes('pitch_exceeded')) {
-                issues.push(`pitch_${pose.pitch > 0 ? 'down' : 'up'}_${Math.abs(pose.pitch).toFixed(0)}deg`);
-            }
-            if (pose.issues.includes('roll_exceeded')) {
-                issues.push(`roll_${Math.abs(pose.roll).toFixed(0)}deg`);
-            }
-        }
-
-        // 2. Проверка видимости лэндмарок
-        const visibility = this._checkLandmarksVisibility(precheckData.landmarks);
-        if (!visibility.allVisible) {
-            issues.push('partial_face');
-            score -= 25;
-        }
-
-        // 3. Проверка центрирования глаз
-        const centering = this._checkEyesCentering(precheckData.landmarks);
-        if (!centering.centered) {
-            issues.push('eyes_off_center');
-            if (centering.hint) {
-                issues.push(...centering.hint);
-            }
-            score -= 20;
-        } else if (centering.status !== 'optimal') {
-            score -= 5; // небольшой штраф за неидеальное центрирование
-        }
-
-        // 4. Проверка стабильности
-        if (!pose.isStable) {
-            issues.push('head_unstable');
-            score -= 15;
-        }
-
-        // 5. Проверка открытости глаз
-        if (!precheckData.eyes?.bothOpen) {
-            issues.push('eyes_closed');
-            score -= 10;
-        }
-
-        // Определяем качество
-        let quality;
-        if (score >= 90) {
-            quality = 'excellent';
-        } else if (score >= 70) {
-            quality = 'good';
-        } else if (score >= 50) {
-            quality = 'acceptable';
-        } else {
-            quality = 'poor';
-        }
-
-        return {
-            quality,
-            score: Math.max(0, score),
-            issues,
-            details: {
-                pose: {
-                    yaw: pose.yaw,
-                    pitch: pose.pitch,
-                    roll: pose.roll,
-                    isTilted: pose.isTilted,
-                    isStable: pose.isStable
-                },
-                visibility,
-                centering,
-                eyesOpen: precheckData.eyes?.bothOpen ?? false
-            }
-        };
+        return { isStable, metrics: { yawStd, pitchStd, rollStd, centerXStd, centerYStd } };
     }
 
     /**
      * Создание результата с ошибкой
      */
-    _createErrorResult(errorMessage) {
+    _createErrorResult(message) {
         return {
-            error: true,
-            errorMessage,
-            illumination: { value: 0, status: 'error' },
-            face: { detected: false, size: 0, status: 'error' },
-            pose: { status: 'error', isStable: false },
-            eyes: { left: { ear: 0, isOpen: false }, right: { ear: 0, isOpen: false } },
+            illumination: { value: 0, rawValue: 0, status: 'unknown' },
+            face: { detected: false, confidence: 0, size: 0, status: 'error', bbox: null, issues: ['error'] },
+            pose: { yaw: null, pitch: null, roll: null, isStable: false, status: 'error', issues: ['error'] },
+            eyes: { left: { ear: 0, isOpen: false, iris: null }, right: { ear: 0, isOpen: false, iris: null }, bothOpen: false, gazeDirection: 'unknown' },
             mouth: { isOpen: false, openRatio: 0 },
             blendShapes: null,
             landmarks: null,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            frameSize: { width: 0, height: 0 },
+            analysisTime: 0,
+            error: message
         };
     }
 
     /**
-     * Сброс состояния анализатора
+     * Проверка центрирования глаз относительно центра кадра
+     * (быстрая проверка по координатам, не требует сегментации)
+     */
+    _checkEyesCentering(landmarks) {
+        if (!landmarks || landmarks.length < 478) {
+            return { centered: false, deviation: { x: 0, y: 0 }, hint: ['no_landmarks'] };
+        }
+
+        const leftEyeCenter = landmarks[468];
+        const rightEyeCenter = landmarks[473];
+
+        if (!leftEyeCenter || !rightEyeCenter) {
+            return { centered: false, deviation: { x: 0, y: 0 }, hint: ['no_eye_landmarks'] };
+        }
+
+        const eyesMidpoint = {
+            x: (leftEyeCenter.x + rightEyeCenter.x) / 2,
+            y: (leftEyeCenter.y + rightEyeCenter.y) / 2
+        };
+
+        const deviationX = eyesMidpoint.x - 0.5;
+        const deviationY = eyesMidpoint.y - 0.5;
+
+        const maxDeviation = this.thresholds.pose.eyesCenterMaxDeviation;
+        const optimalDeviation = this.thresholds.pose.eyesCenterOptimalDeviation;
+
+        const isCenteredX = Math.abs(deviationX) <= maxDeviation;
+        const isCenteredY = Math.abs(deviationY) <= maxDeviation;
+        const centered = isCenteredX && isCenteredY;
+
+        const hint = [];
+        if (!isCenteredX) {
+            hint.push(deviationX > 0 ? 'move_left' : 'move_right');
+        }
+        if (!isCenteredY) {
+            hint.push(deviationY > 0 ? 'move_up' : 'move_down');
+        }
+
+        const totalDeviation = Math.sqrt(deviationX * deviationX + deviationY * deviationY);
+        const quality = Math.max(0, Math.min(100, Math.round((1 - totalDeviation / maxDeviation) * 100)));
+
+        return {
+            centered,
+            deviation: { x: Math.round(deviationX * 1000) / 1000, y: Math.round(deviationY * 1000) / 1000 },
+            eyesMidpoint,
+            quality,
+            isOptimal: totalDeviation <= optimalDeviation,
+            hint: hint.length > 0 ? hint : null
+        };
+    }
+
+    /**
+     * Проверка готовности условий для начала эксперимента
+     * Примечание: для полной проверки используйте результаты FaceSegmenter
+     * @param {Object} result - результат analyzeFrame
+     * @param {Object} segmenterResult - результат FaceSegmenter.segmentFrame (опционально)
+     */
+    checkReadiness(result = null, segmenterResult = null) {
+        const data = result || this.lastResult;
+        
+        if (!data) {
+            return { ready: false, score: 0, issues: ['no_analysis_data'], details: {} };
+        }
+
+        const issues = [];
+        let score = 100;
+
+        // 1. Проверка освещения
+        if (data.illumination.status === 'too_dark') {
+            issues.push('illumination_too_dark');
+            score -= 25;
+        } else if (data.illumination.status === 'too_bright') {
+            issues.push('illumination_too_bright');
+            score -= 20;
+        }
+
+        // 2. Проверка лица
+        if (!data.face.detected) {
+            issues.push('face_not_detected');
+            score -= 50;
+        } else {
+            if (data.face.status === 'too_small') {
+                issues.push('face_too_small');
+                score -= 15;
+            } else if (data.face.status === 'too_large') {
+                issues.push('face_too_large');
+                score -= 10;
+            } else if (data.face.status === 'out_of_zone') {
+                issues.push('face_out_of_zone');
+                score -= 15;
+            }
+        }
+
+        // 3. Проверка позы
+        if (data.pose.status === 'off_center') {
+            issues.push('eyes_not_centered');
+            score -= 20;
+        } else if (data.pose.isTilted) {
+            issues.push('head_tilted');
+            score -= 15;
+        }
+
+        if (!data.pose.isStable) {
+            issues.push('head_not_stable');
+            score -= 10;
+        }
+
+        // 4. Проверка глаз
+        if (!data.eyes.bothOpen) {
+            issues.push('eyes_not_open');
+            score -= 20;
+        }
+
+        // 5. Проверка окклюзий через FaceSegmenter (если передан)
+        if (segmenterResult && !segmenterResult.isComplete) {
+            const segIssues = segmenterResult.issues || [];
+            
+            if (segIssues.includes('left_side_occluded') || segIssues.includes('left_cheek_occluded')) {
+                issues.push('left_side_occluded');
+                score -= 20;
+            }
+            if (segIssues.includes('right_side_occluded') || segIssues.includes('right_cheek_occluded')) {
+                issues.push('right_side_occluded');
+                score -= 20;
+            }
+            if (segIssues.includes('hair_occlusion') || segIssues.includes('forehead_occluded')) {
+                issues.push('face_occluded');
+                score -= 15;
+            }
+        }
+
+        const ready = score >= 70 && issues.length === 0;
+
+        return {
+            ready,
+            score: Math.max(0, score),
+            issues,
+            details: {
+                illumination: data.illumination,
+                face: data.face,
+                pose: data.pose,
+                eyes: {
+                    leftOpen: data.eyes.left.isOpen,
+                    rightOpen: data.eyes.right.isOpen,
+                    gazeDirection: data.eyes.gazeDirection
+                },
+                segmentation: segmenterResult ? {
+                    isComplete: segmenterResult.isComplete,
+                    score: segmenterResult.score,
+                    issues: segmenterResult.issues
+                } : null
+            }
+        };
+    }
+
+    /**
+     * Генерация человекочитаемых рекомендаций
+     */
+    getRecommendations(result = null, segmenterResult = null) {
+        const readiness = this.checkReadiness(result, segmenterResult);
+        const recommendations = [];
+
+        const issueMessages = {
+            'no_analysis_data': 'Подождите, идёт анализ...',
+            'illumination_too_dark': 'Увеличьте освещение или включите дополнительный свет',
+            'illumination_too_bright': 'Уменьшите яркость света или отойдите от окна',
+            'face_not_detected': 'Расположите лицо в центре кадра',
+            'face_too_small': 'Приблизьтесь к камере',
+            'face_too_large': 'Отодвиньтесь от камеры',
+            'face_out_of_zone': 'Переместите лицо в центр кадра',
+            'face_occluded': 'Уберите волосы с лица',
+            'left_side_occluded': 'Левая сторона лица закрыта — уберите волосы',
+            'right_side_occluded': 'Правая сторона лица закрыта — уберите волосы',
+            'eyes_not_centered': 'Расположите глаза в центре кадра',
+            'head_tilted': 'Держите голову прямо, смотрите в камеру',
+            'head_not_stable': 'Держите голову неподвижно',
+            'eyes_not_open': 'Откройте глаза и смотрите в камеру'
+        };
+
+        // Подсказки направления из eyesCentering
+        if (readiness.details.pose?.eyesCentering?.hint) {
+            const directionMessages = {
+                'move_left': 'Сместитесь немного влево',
+                'move_right': 'Сместитесь немного вправо',
+                'move_up': 'Поднимите камеру или опустите голову',
+                'move_down': 'Опустите камеру или поднимите голову'
+            };
+            
+            for (const hint of readiness.details.pose.eyesCentering.hint) {
+                if (directionMessages[hint]) {
+                    recommendations.push(directionMessages[hint]);
+                }
+            }
+        }
+
+        for (const issue of readiness.issues) {
+            if (issueMessages[issue]) {
+                recommendations.push(issueMessages[issue]);
+            }
+        }
+
+        return {
+            ready: readiness.ready,
+            score: readiness.score,
+            recommendations: [...new Set(recommendations)]
+        };
+    }
+
+    /**
+     * Сброс истории
      */
     reset() {
         this.poseHistory = [];
@@ -974,53 +860,21 @@ class PrecheckAnalyzer {
     }
 
     /**
-     * Проверка готовности к калибровке
-     * Использует комплексную проверку позы
+     * Освобождение ресурсов
      */
-    checkCalibrationReadiness(precheckData) {
-        const issues = [];
-        
-        if (!precheckData) {
-            return { ready: false, issues: ['no_data'], poseQuality: null };
+    dispose() {
+        if (this.faceLandmarker) {
+            this.faceLandmarker.close();
+            this.faceLandmarker = null;
         }
-        
-        // Проверка освещения
-        if (precheckData.illumination?.status === 'too_dark') {
-            issues.push('lighting_too_dark');
-        } else if (precheckData.illumination?.status === 'too_bright') {
-            issues.push('lighting_too_bright');
-        }
-        
-        // Проверка лица
-        if (!precheckData.face?.detected) {
-            issues.push('face_not_detected');
-        } else if (precheckData.face?.status === 'too_small') {
-            issues.push('face_too_small');
-        } else if (precheckData.face?.status === 'too_large') {
-            issues.push('face_too_large');
-        } else if (precheckData.face?.status === 'out_of_zone') {
-            issues.push('face_out_of_zone');
-        }
-        
-        // Комплексная проверка позы (новая логика)
-        const poseQuality = this.checkPoseQuality(precheckData);
-        
-        // Добавляем проблемы из проверки позы
-        if (poseQuality.quality === 'poor') {
-            // Фильтруем только критические проблемы позы
-            for (const issue of poseQuality.issues) {
-                if (issue === 'head_tilted') issues.push('head_tilted');
-                if (issue === 'partial_face') issues.push('partial_face_visible');
-                if (issue === 'eyes_off_center') issues.push('eyes_not_centered');
-                if (issue === 'head_unstable') issues.push('head_unstable');
-                if (issue === 'eyes_closed') issues.push('eyes_closed');
-            }
-        }
-        
-        return {
-            ready: issues.length === 0,
-            issues,
-            poseQuality
-        };
+        this._canvas = null;
+        this._ctx = null;
+        this.isInitialized = false;
+        this.reset();
     }
+}
+
+// Экспорт для использования как модуль
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = PrecheckAnalyzer;
 }

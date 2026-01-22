@@ -13,7 +13,8 @@
             .then(vision => {
                 window.FilesetResolver = vision.FilesetResolver;
                 window.FaceLandmarker = vision.FaceLandmarker;
-                console.log('[MediaPipe] Vision modules loaded');
+                window.ImageSegmenter = vision.ImageSegmenter;
+                console.log('[MediaPipe] Vision modules loaded (FaceLandmarker + ImageSegmenter)');
             })
             .catch(err => console.error('[MediaPipe] Load error:', err));
     </script>
@@ -23,6 +24,8 @@
     
     <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
     <script src="js/precheck-analyzer.js?v=2.0.1"></script>
+    <!-- Face Segmenter Module (проверка видимости частей лица) -->
+    <script src="js/face-segmenter.js?v=1.2.0"></script>
     <!-- QC Metrics Module -->
     <script src="js/qc-metrics.js?v=1.0.1"></script>
     
@@ -810,6 +813,15 @@
                         </div>
                         <div class="status" id="PoseStatus" data-i18n="status_waiting">Ожидание...</div>
                     </div>
+                    
+                    <div class="indicator" id="VisibilityIndicator">
+                        <div class="icon">👁️</div>
+                        <div class="label" data-i18n="label_visibility">Видимость лица</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="VisibilityProgress"></div>
+                        </div>
+                        <div class="status" id="VisibilityStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
                 </div>
                 
                 <!-- Статус -->
@@ -943,6 +955,7 @@
                 label_light: "Освещение",
                 label_face: "Лицо",
                 label_pose: "Поза головы",
+                label_visibility: "Видимость лица",
                 status_waiting: "Ожидание...",
                 guide_text: "Расположите лицо внутри рамки",
                 precheck_initial: "Нажмите \"Начать проверку\" чтобы включить камеру",
@@ -952,6 +965,7 @@
                 precheck_all_good: "✅ Все условия выполнены! Можно начинать калибровку",
                 btn_start_precheck: "🎥 Начать проверку",
                 btn_start_calib: "✅ Начать калибровку",
+                status_error: "❌ Ошибка",
                 // статусы индикаторов (pre-check)
                 status_too_dark: "Темно",
                 status_too_bright: "Ярко",
@@ -970,6 +984,9 @@
                 status_checking: "⏳ Проверяем условия",
                 status_partial_face: "Часть лица скрыта",
                 status_off_center: "Не по центру",
+                status_face_occluded: "Лицо закрыто",
+                status_hair_occlusion: "Волосы закрывают лицо",
+                status_face_visible: "Лицо видно полностью",
                 //подсказки
                 tip_light_dark: "Слишком темно, необходимо включить лампу или подойти к окну",
                 tip_light_bright: "Слишком ярко, не направляйте свет прямо в камеру или отойдите от окна",
@@ -982,16 +999,28 @@
                 tip_pose_unstable: "Постарайтесь смотреть прямо в камеру и не двигаться",
                 tip_pose_partial_face: "Часть лица не видна. Расположитесь так, чтобы всё лицо было в кадре",
                 tip_pose_eyes_off_center: "Глаза не по центру экрана. Сместитесь так, чтобы смотреть прямо в камеру",
-                tip_pose_move_left: "Сместитесь немного влево",
-                tip_pose_move_right: "Сместитесь немного вправо", 
+                tip_pose_move_right: "Сместитесь немного вправо",
+                tip_pose_move_left: "Сместитесь немного влево", 
                 tip_pose_move_up: "Поднимите камеру или опуститесь ниже",
                 tip_pose_move_down: "Опустите камеру или поднимитесь выше",
-                tip_pose_turn_left: "Поверните голову немного влево",
-                tip_pose_turn_right: "Поверните голову немного вправо",
-                tip_pose_tilt_up: "Поднимите подбородок",
-                tip_pose_tilt_down: "Опустите подбородок",
+                tip_pose_turn_down: "Наклоните голову немного вниз",
+                tip_pose_turn_up: "Наклоните голову немного вверх",
+                tip_pose_tilt_right: "поверните голову влево",
+                tip_pose_tilt_left: "поверните голову вправо",
                 tip_pose_straighten: "Выровняйте голову, не наклоняйте её вбок",
                 tip_eyes_closed: "Откройте глаза и смотрите в камеру",
+                tip_face_occluded: "Уберите предметы, закрывающие лицо (руки, волосы)",
+                tip_hand_on_face: "Уберите руку от лица",
+                tip_hair_covers_face: "Уберите волосы с лица, чтобы щёки и лоб были видны",
+                tip_left_side_occluded: "Левая сторона лица закрыта — поверните голову или уберите помеху",
+                tip_right_side_occluded: "Правая сторона лица закрыта — поверните голову или уберите помеху",
+                tip_left_hand_on_face: "Уберите левую руку от лица",
+                tip_right_hand_on_face: "Уберите правую руку от лица",
+                tip_forehead_covered: "Лоб закрыт — уберите руку или волосы со лба",
+                tip_chin_covered: "Подбородок закрыт — уберите руку от подбородка",
+                tip_eyes_area_covered: "Область глаз закрыта — уберите помеху",
+                tip_nose_covered: "Нос закрыт — уберите руку от носа",
+                tip_mouth_covered: "Рот закрыт — уберите руку от рта",
                 // Dynamic JS strings
                 id_participant: "Ваш ID участника:",
                 id_not_generated: "ID не сгенерирован",
@@ -1001,7 +1030,6 @@
                 msg_wait_stable: "Ждем стабилизации лица...",
                 msg_face_locked: "Лицо захвачено! Калибровка через 2 сек...",
                 msg_no_face: "Не вижу лица. Проверьте освещение.",
-                status_error: "❌ Ошибка",
                 // Тест слежения
                 test_tracking_title: "Тест слежения",
                 test_follow_shape: "Следите глазами за фигурой",
@@ -1078,6 +1106,7 @@
                 label_light: "Lighting",
                 label_face: "Face",
                 label_pose: "Head Pose",
+                label_visibility: "Face Visibility",
                 status_waiting: "Waiting...",
                 guide_text: "Position your face inside the frame",
                 precheck_initial: "Click \"Start Check\" to enable camera",
@@ -1102,10 +1131,10 @@
                 status_unstable: "Unstable",
                 status_no_face: "No Face",
                 status_all_good: "🎉 All good! You can start calibration",
-                status_needs_fix: "🔴 Needs fixing",
-                status_checking: "⏳ Checking conditions",
-                status_partial_face: "Face partially hidden",
                 status_off_center: "Off center",
+                status_face_occluded: "Face Occluded",
+                status_hair_occlusion: "Hair Covers Face",
+                status_face_visible: "Face Fully Visible",
                 //подсказки
                 tip_light_dark: "Too dark, turn on a lamp or move closer to a window",
                 tip_light_bright: "Too bright, don't point light directly at the camera or move away from the window",
@@ -1118,16 +1147,28 @@
                 tip_pose_unstable: "Try to look straight at the camera and don't move",
                 tip_pose_partial_face: "Part of your face is not visible. Position yourself so your entire face is in frame",
                 tip_pose_eyes_off_center: "Eyes are not centered on screen. Move so you're looking straight at the camera",
-                tip_pose_move_left: "Move slightly to the left",
                 tip_pose_move_right: "Move slightly to the right",
+                tip_pose_move_left: "Move slightly to the left",
                 tip_pose_move_up: "Raise the camera or lower yourself",
                 tip_pose_move_down: "Lower the camera or raise yourself",
-                tip_pose_turn_left: "Turn your head slightly to the left",
-                tip_pose_turn_right: "Turn your head slightly to the right",
-                tip_pose_tilt_up: "Raise your chin",
-                tip_pose_tilt_down: "Lower your chin",
+                tip_pose_turn_down: "Turn your head slightly to the top",
+                tip_pose_turn_up: "Turn your head slightly to the bottom",
+                tip_pose_tilt_right: "Move your head to the left",
+                tip_pose_tilt_left: "Move your head to the right",
                 tip_pose_straighten: "Straighten your head, don't tilt it sideways",
                 tip_eyes_closed: "Open your eyes and look at the camera",
+                tip_face_occluded: "Remove objects covering your face (hands, hair)",
+                tip_hand_on_face: "Remove your hand from your face",
+                tip_hair_covers_face: "Move hair away from your face so cheeks and forehead are visible",
+                tip_left_side_occluded: "Left side of the face is covered — turn your head or remove the obstruction",
+                tip_right_side_occluded: "Right side of the face is covered — turn your head or remove the obstruction",
+                tip_left_hand_on_face: "Remove your left hand from your face",
+                tip_right_hand_on_face: "Remove your right hand from your face",
+                tip_forehead_covered: "Forehead is covered — remove your hand or hair from forehead",
+                tip_chin_covered: "Chin is covered — remove your hand from chin",
+                tip_eyes_area_covered: "Eyes area is covered — remove the obstruction",
+                tip_nose_covered: "Nose is covered — remove your hand from nose",
+                tip_mouth_covered: "Mouth is covered — remove your hand from mouth",
                 // Dynamic JS strings
                 id_participant: "Your Participant ID:",
                 id_not_generated: "ID not generated",
@@ -1199,6 +1240,7 @@
         
         // Локальный анализатор (вместо бэкенда)
         let localAnalyzer = null;
+        let faceSegmenter = null; // FaceSegmenter для проверки видимости областей лица
         let precheckFramesHistory = []; // История кадров для QC
 
         let precheckData = {
@@ -1206,13 +1248,15 @@
             face: null,
             pose: null,
             neck: null,
+            visibility: null, // Данные о видимости областей лица
             overall: false
         };
 
         let indicatorsStatus = {
             illumination: null,
             face: null,
-            pose: null
+            pose: null,
+            visibility: null // Статус видимости лица
         };
         
         // Отправка одного кадра на анализ
@@ -1759,6 +1803,7 @@
         /**
          * Локальный анализ кадра (без бэкенда)
          * Использует PrecheckAnalyzer для анализа освещения, лица, позы и шеи
+         * Использует FaceSegmenter для проверки видимости областей лица
          */
         async function runLocalPrecheckAnalysis(videoElement) {
             // Инициализируем анализатор если ещё не создан
@@ -1769,9 +1814,43 @@
                 });
             }
             
+            // Инициализируем FaceSegmenter если ещё не создан
+            if (!faceSegmenter) {
+                faceSegmenter = new FaceSegmenter({
+                    segmentationType: 'selfie_multiclass',
+                    onInitialized: () => console.log('[PreCheck] FaceSegmenter инициализирован'),
+                    onError: (err) => console.error('[PreCheck] Ошибка FaceSegmenter:', err)
+                });
+            }
+            
             try {
                 // Анализируем кадр локально
                 const results = await localAnalyzer.analyzeFrame(videoElement);
+                
+                // Анализируем видимость областей лица через FaceSegmenter
+                let visibilityResults = null;
+                try {
+                    // Передаём landmarks из результатов Face Landmarker для более точного анализа
+                    const faceLandmarks = results.landmarks || null;
+                    visibilityResults = await faceSegmenter.segmentFrame(videoElement, faceLandmarks);
+                    
+                    // Добавляем результаты видимости в общие результаты
+                    results.visibility = {
+                        isComplete: visibilityResults.isComplete,
+                        score: visibilityResults.score,
+                        issues: visibilityResults.issues || [],
+                        regions: visibilityResults.faceVisibility?.regions || {},
+                        timestamp: visibilityResults.timestamp
+                    };
+                } catch (segmentError) {
+                    console.warn('[PreCheck] Ошибка FaceSegmenter:', segmentError);
+                    results.visibility = {
+                        isComplete: false,
+                        score: 0,
+                        issues: visibilityResults.issues || ['segmenter_error'],
+                        error: true
+                    };
+                }
                 
                 // Сохраняем в историю для QC-метрик
                 precheckFramesHistory.push(results);
@@ -1792,6 +1871,7 @@
                     face: { detected: false, size: 0, status: 'error' },
                     pose: { status: 'error', isStable: false },
                     neck: { visible: false, status: 'error' },
+                    visibility: { isComplete: false, score: 0, issues: ['analysis_error'], error: true },
                     timestamp: Date.now()
                 };
             }
@@ -1847,6 +1927,7 @@
             updateIlluminationIndicator(data.illumination);
             updateFaceIndicator(data.face);
             updatePoseIndicator(data.pose);
+            updateVisibilityIndicator(data.visibility);
 
             if (data.face && data.face.detected && data.face.bbox) {
                 drawFaceOverlay(data.face);
@@ -1980,23 +2061,82 @@
                     break;
                 case 'stable':
                 default:
-                    // Дополнительная проверка isStable для случаев, когда status stable, но isStable false
-                    if (!data.isStable) {
-                        progressValue = 70;
-                        statusText = translations[currentLang].status_unstable;
-                        indicatorClass = 'failed';
-                    } else {
-                        progressValue = 100;
-                        statusText = translations[currentLang].status_stable;
-                        indicatorClass = 'passed';
-                    }
-                    break;
+                    progressValue = 100;
+                    statusText = translations[currentLang].status_stable;
+                    indicatorClass = 'passed';
             }
             
             progressBar.style.width = progressValue + '%';
             statusEl.textContent = statusText;
             indicator.className = `indicator ${indicatorClass}`;
             indicatorsStatus.pose = indicatorClass;
+        }
+
+        function updateVisibilityIndicator(data) {
+            const indicator = document.getElementById('VisibilityIndicator');
+            const progressBar = document.getElementById('VisibilityProgress');
+            const statusEl = document.getElementById('VisibilityStatus');
+            
+            // Если нет данных о видимости
+            if (!data) {
+                progressBar.style.width = '0%';
+                statusEl.textContent = translations[currentLang].status_waiting;
+                indicator.className = 'indicator';
+                indicatorsStatus.visibility = null;
+                return;
+            }
+            
+            // Если ошибка
+            if (data.error) {
+                progressBar.style.width = '0%';
+                statusEl.textContent = translations[currentLang].status_error;
+                indicator.className = 'indicator failed';
+                indicatorsStatus.visibility = 'failed';
+                return;
+            }
+            
+            let progressValue, statusText, indicatorClass;
+            
+            // Используем score из FaceSegmenter (0-100)
+            progressValue = data.score || 0;
+            
+            if (data.isComplete) {
+                // Лицо видно полностью
+                statusText = translations[currentLang].status_face_visible;
+                indicatorClass = 'passed';
+            } else if (data.issues && data.issues.length > 0) {
+                // Есть проблемы с видимостью
+                const issues = data.issues;
+                
+                if (issues.includes('hair_occlusion') || issues.includes('forehead_occluded')) {
+                    statusText = translations[currentLang].status_hair_occlusion;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('left_side_occluded') || issues.includes('right_side_occluded')) {
+                    statusText = translations[currentLang].status_face_occluded;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('left_cheek_occluded') || issues.includes('right_cheek_occluded')) {
+                    statusText = translations[currentLang].status_partial_face;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('insufficient_face_visibility') || issues.includes('low_skin_visibility')) {
+                    statusText = translations[currentLang].status_partial_face;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('hand_on_face')) {
+                    statusText = translations[currentLang].tip_hand_on_face;
+                    indicatorClass = 'failed';
+                } else {
+                    statusText = translations[currentLang].status_face_occluded;
+                    indicatorClass = 'failed';
+                }
+            } else {
+                // Нет данных или неопределённый статус
+                statusText = translations[currentLang].status_waiting;
+                indicatorClass = '';
+            }
+            
+            progressBar.style.width = progressValue + '%';
+            statusEl.textContent = statusText;
+            indicator.className = `indicator ${indicatorClass}`;
+            indicatorsStatus.visibility = indicatorClass || null;
         }
 
         function drawFaceOverlay(faceData) {
@@ -2102,8 +2242,8 @@
                     // Добавляем конкретные подсказки о направлении смещения
                     if (pose.eyesCentering && pose.eyesCentering.hint) {
                         pose.eyesCentering.hint.forEach(hint => {
-                            if (hint === 'move_left') tips.push(translations[currentLang].tip_pose_move_left);
                             if (hint === 'move_right') tips.push(translations[currentLang].tip_pose_move_right);
+                            if (hint === 'move_left') tips.push(translations[currentLang].tip_pose_move_left);
                             if (hint === 'move_up') tips.push(translations[currentLang].tip_pose_move_up);
                             if (hint === 'move_down') tips.push(translations[currentLang].tip_pose_move_down);
                         });
@@ -2114,17 +2254,17 @@
                         if (pose.issues.includes('yaw_exceeded')) {
                             // yaw > 0 — голова повёрнута вправо, нужно повернуть влево
                             if (pose.yaw > 0) {
-                                tips.push(translations[currentLang].tip_pose_turn_left);
+                                tips.push(translations[currentLang].tip_pose_turn_down);
                             } else {
-                                tips.push(translations[currentLang].tip_pose_turn_right);
+                                tips.push(translations[currentLang].tip_pose_turn_up);
                             }
                         }
                         if (pose.issues.includes('pitch_exceeded')) {
                             // pitch > 0 — голова опущена, нужно поднять
                             if (pose.pitch > 0) {
-                                tips.push(translations[currentLang].tip_pose_tilt_up);
+                                tips.push(translations[currentLang].tip_pose_tilt_right);
                             } else {
-                                tips.push(translations[currentLang].tip_pose_tilt_down);
+                                tips.push(translations[currentLang].tip_pose_tilt_left);
                             }
                         }
                         if (pose.issues.includes('roll_exceeded')) {
@@ -2141,6 +2281,40 @@
             // Проверка глаз (если закрыты)
             if (precheckData.eyes && !precheckData.eyes.bothOpen) {
                 tips.push(translations[currentLang].tip_eyes_closed);
+            }
+            
+            // Проверка видимости лица (FaceSegmenter)
+            if (indicatorsStatus.visibility === 'failed' && precheckData.visibility) {
+                const visibility = precheckData.visibility;
+                
+                if (visibility.issues && visibility.issues.length > 0) {
+                    const issues = visibility.issues;
+                    
+                    // Волосы закрывают лицо
+                    if (issues.includes('hair_occlusion') || issues.includes('forehead_occluded')) {
+                        tips.push(translations[currentLang].tip_hair_covers_face);
+                    }
+                    
+                    // Левая сторона лица закрыта
+                    if (issues.includes('left_side_occluded') || issues.includes('left_cheek_occluded')) {
+                        tips.push(translations[currentLang].tip_left_side_occluded);
+                    }
+                    
+                    // Правая сторона лица закрыта
+                    if (issues.includes('right_side_occluded') || issues.includes('right_cheek_occluded')) {
+                        tips.push(translations[currentLang].tip_right_side_occluded);
+                    }
+                    
+                    // Общая проблема с видимостью (руки, предметы)
+                    if (issues.includes('face_occluded') || issues.includes('insufficient_face_visibility')) {
+                        tips.push(translations[currentLang].tip_face_occluded);
+                    }
+                    
+                    // Рука на лице
+                    if (issues.includes('hand_on_face')) {
+                        tips.push(translations[currentLang].tip_hand_on_face);
+                    }
+                }
             }
             
             return tips;
@@ -2186,11 +2360,13 @@
             let statusHTML = '';
             
             if (allPassed && isConsistentSuccess) {
+                // Все проверки пройдены стабильно
                 statusHTML = translations[currentLang].status_all_good;
                 statusMessage.className = 'status-message';
                 precheckStatus.className = 'precheck-status success-bg';
                 startCalibBtn.disabled = false;
             } else if (hasFailed) {
+                // Есть проблемы — показываем подсказки
                 const tips = collectTips();
                 if (tips.length > 0) {
                     statusHTML = `
@@ -2206,6 +2382,7 @@
                 precheckStatus.className = 'precheck-status error-bg';
                 startCalibBtn.disabled = true;
             } else {
+                // Ожидание стабильности
                 statusHTML = translations[currentLang].status_checking;
                 statusMessage.className = 'status-message';
                 precheckStatus.className = 'precheck-status waiting-bg';
@@ -2539,5 +2716,4 @@
     </script>
 </body>
 </html>
-``` 
 
