@@ -863,9 +863,14 @@
         <div id="step6" class="step">
             <h2 data-i18n="final_title">Сессия завершена!</h2>
             <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
-            <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; border: 1px solid #BBF7D0; color: #166534; margin-bottom: 20px;">
-                <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
+            
+            <!-- Динамический блок QC статуса -->
+            <div id="qcStatusBlock">
+                <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; border: 1px solid #BBF7D0; color: #166534; margin-bottom: 20px;">
+                    <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
+                </div>
             </div>
+            
             <button class="btn" onclick="downloadData()" data-i18n="btn_download">📥 Скачать JSON</button>
             <button class="btn btn-secondary" onclick="location.reload()" data-i18n="btn_restart">Начать заново</button>
         </div>
@@ -902,7 +907,7 @@
                 consent_checkbox: "Я прочитал(а), мне есть 18 лет, и я согласен(а).",
                 btn_confirm: "Подтвердить и продолжить",
                 reg_title: "Регистрация участника",
-                reg_desc: "Пожалуйста, укажите ваш Email для связи.",
+                reg_desc: "Пожалуйста, укажите ваш Email.",
                 email_label: "Email",
                 btn_next: "Далее",
                 form_title: "Анкета участника",
@@ -962,7 +967,7 @@
                 precheck_requesting: "⏳ Запрашиваем доступ к камере...",
                 precheck_checking: "⏳ Проверяем условия...",
                 precheck_camera_error: "❌ Ошибка: ",
-                precheck_all_good: "✅ Все условия выполнены! Можно начинать калибровку",
+                precheck_all_good: "✅ Сheck is passed! You can start calibration",
                 btn_start_precheck: "🎥 Начать проверку",
                 btn_start_calib: "✅ Начать калибровку",
                 status_error: "❌ Ошибка",
@@ -1224,12 +1229,17 @@
             eyeTracking: [],
             trackingTest: [], // Данные теста слежения
             events: [],
+            qcSummary: null, // QC отчёт добавляется в конце сессии
             startTime: Date.now()
         };
 
         let isRecording = false;
         let faceDetected = false;
         let currentGaze = { x: null, y: null }; // Текущие координаты взгляда
+        
+        // === QC METRICS (real-time tracking) ===
+        let qcMetrics = null; // Инициализируется при старте калибровки
+        let sessionStartTime = null; // Время начала записи для QC
         
         // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ (pre-check) ---
         let cameraStream = null;
@@ -2408,6 +2418,14 @@
                 }
             };
             
+            // === ИНИЦИАЛИЗАЦИЯ QC METRICS ===
+            qcMetrics = new QCMetrics({
+                screenWidth: window.screen.width,
+                screenHeight: window.screen.height
+            });
+            sessionStartTime = Date.now();
+            console.log('[QC] QCMetrics инициализирован');
+            
             // показываем калибровочную область
             document.getElementById('precheckContainer').style.display = 'none';
             document.getElementById('calibArea').style.display = 'block';
@@ -2528,7 +2546,7 @@
                 { x: '50%', y: '90%' },   // низ-центр
                 { x: '90%', y: '90%' }    // низ-право
             ];
-
+            
             let i = 0;
             let clickCount = 0;
             
@@ -2584,7 +2602,13 @@
             const progressFill = document.getElementById('testProgressFill');
             const customDot = document.getElementById('customGazeDot');
             
-            // Скрываем основной контейнер и показываем тест на весь экран
+            // Показываем область теста
+            testArea.classList.add('active');
+            
+            // Размеры экрана для траекторий
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+            
             // Траектории движения фигур
             const trajectories = [
                 // 1. Круг — горизонтальная линия слева направо
@@ -2647,6 +2671,24 @@
                         t: Date.now() - testStartTime
                     });
                     
+                    // === QC METRICS: добавляем точку взгляда ===
+                    if (qcMetrics && currentGaze.x !== null && currentGaze.y !== null) {
+                        qcMetrics.addGazePoint(
+                            currentGaze.x,
+                            currentGaze.y,
+                            Date.now() - sessionStartTime,
+                            true // faceDetected
+                        );
+                    } else if (qcMetrics) {
+                        // Взгляд не определён — записываем как потерю лица
+                        qcMetrics.addGazePoint(
+                            null,
+                            null,
+                            Date.now() - sessionStartTime,
+                            false // faceDetected = false
+                        );
+                    }
+                    
                     // Обновляем прогресс
                     const totalProgress = ((currentTrajectory + t) / trajectories.length) * 100;
                     progressFill.style.width = totalProgress + '%';
@@ -2687,7 +2729,64 @@
             webgazer.pause();
             document.getElementById('webgazerVideoContainer').style.display = 'none';
             document.getElementById('customGazeDot').style.display = 'none';
+            
+            // === QC METRICS: получаем итоговый отчёт ===
+            if (qcMetrics) {
+                const qcSummary = qcMetrics.getSummary();
+                sessionData.qcSummary = qcSummary;
+                console.log('[QC] Summary:', qcSummary);
+                
+                // Обновляем UI на основе QC результата
+                updateFinalStepWithQC(qcSummary);
+            }
+            
             nextStep(6);
+        }
+        
+        // === Обновление UI шага 6 на основе QC ===
+        function updateFinalStepWithQC(qcSummary) {
+            const qcStatusEl = document.getElementById('qcStatusBlock');
+            if (!qcStatusEl || !qcSummary) return;
+            
+            const passed = qcSummary.passed;
+            const metrics = qcSummary.metrics;
+            
+            if (passed) {
+                qcStatusEl.innerHTML = `
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; border: 1px solid #BBF7D0; color: #166534; margin-bottom: 20px;">
+                        <strong>✅ ${currentLang === 'ru' ? 'Данные валидны (QC Passed)' : 'Data Valid (QC Passed)'}</strong>
+                        <div style="font-size: 12px; margin-top: 8px; opacity: 0.8;">
+                            ${currentLang === 'ru' ? 'Точек взгляда' : 'Gaze points'}: ${metrics.totalPoints} | 
+                            ${currentLang === 'ru' ? 'Валидных' : 'Valid'}: ${metrics.validGazePercent.toFixed(1)}% | 
+                            ${currentLang === 'ru' ? 'Лицо видно' : 'Face detected'}: ${metrics.faceDetectedPercent.toFixed(1)}%
+                        </div>
+                    </div>
+                `;
+            } else {
+                const issues = qcSummary.issues || [];
+                const issueTexts = {
+                    'insufficient_data': currentLang === 'ru' ? 'Недостаточно данных' : 'Insufficient data',
+                    'low_valid_gaze': currentLang === 'ru' ? 'Мало валидных точек взгляда' : 'Low valid gaze percentage',
+                    'low_face_detection': currentLang === 'ru' ? 'Лицо часто терялось' : 'Face frequently lost',
+                    'high_offscreen': currentLang === 'ru' ? 'Взгляд часто за пределами экрана' : 'Gaze often offscreen',
+                    'short_duration': currentLang === 'ru' ? 'Слишком короткая сессия' : 'Session too short'
+                };
+                const issuesList = issues.map(issue => issueTexts[issue] || issue).join(', ');
+                
+                qcStatusEl.innerHTML = `
+                    <div style="background: #FEF2F2; padding: 15px; border-radius: 8px; border: 1px solid #FECACA; color: #991B1B; margin-bottom: 20px;">
+                        <strong>⚠️ ${currentLang === 'ru' ? 'Качество данных ниже нормы' : 'Data quality below threshold'}</strong>
+                        <div style="font-size: 12px; margin-top: 8px;">
+                            ${currentLang === 'ru' ? 'Проблемы' : 'Issues'}: ${issuesList || 'N/A'}
+                        </div>
+                        <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">
+                            ${currentLang === 'ru' ? 'Точек' : 'Points'}: ${metrics.totalPoints} | 
+                            ${currentLang === 'ru' ? 'Валидных' : 'Valid'}: ${metrics.validGazePercent.toFixed(1)}% | 
+                            ${currentLang === 'ru' ? 'Лицо' : 'Face'}: ${metrics.faceDetectedPercent.toFixed(1)}%
+                        </div>
+                    </div>
+                `;
+            }
         }
 
         function downloadData() {
@@ -2716,4 +2815,5 @@
     </script>
 </body>
 </html>
+```
 
