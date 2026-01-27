@@ -20,14 +20,9 @@ RT-компонент:
 - `stimulus_on`: `stimulus_id`, `stimulus_type`, `expected_response`, `timeout_ms`
 - `keypress`: `button_id`
 
-## Быстрый тест (офлайн)
-### 1) Десктоп демо (Tkinter)
-```bash
-cd rt_component
-python scripts/run_tk_experiment.py --task simple --trials 20
-```
+## Быстрый тест
 
-### 2) Анализ лога
+### Анализ лога
 ```bash
 python scripts/analyze_log.py logs/<file>.jsonl --task simple
 ```
