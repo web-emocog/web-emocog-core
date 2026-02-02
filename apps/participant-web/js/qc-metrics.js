@@ -1,1191 +1,475 @@
 /**
- * QC Metrics Module
- * Расчёт метрик качества сигналов для eye-tracking сессий
+ * QC Metrics Module v3.2 - Browser Wrapper
  * 
- * @version 1.0.0
+ * Этот файл служит обёрткой для обратной совместимости.
+ * Основной код находится в папке ./qc-metrics/
+ * 
+ * ИЗМЕНЕНИЯ v3.2:
+ * - Удалены неиспользуемые методы: setGazeScreenState(), setValidationData()
+ * - Удалён неиспользуемый threshold: fps_camera_min
+ * 
+ * ИЗМЕНЕНИЯ v3.1:
+ * - Разделение FPS: analysisFps (частота анализа) и cameraFps (реальный FPS камеры)
+ * - setCameraFps() для передачи реального FPS камеры
+ * - lowFps проверка теперь использует cameraFps
+ * 
+ * @version 3.2.0
  */
 
+/**
+ * ============================================================================
+ * MIGRATION CHECKLIST (when gaze-tracker.js is ready):
+ * ============================================================================
+ * See ./qc-metrics/constants.js for full checklist
+ * ============================================================================
+ */
+
+// Встроенный класс для browser
 class QCMetrics {
     constructor(options = {}) {
-        // Пороговые значения для метрик
         this.thresholds = {
-            // Минимальный % кадров с обнаруженным лицом
-            faceOkPct: options.faceOkPctMin ?? 90,
-            // Минимальный % валидных точек взгляда
-            gazeValidPct: options.gazeValidPctMin ?? 80,
-            // Максимальный % выпадений (dropout)
-            dropoutPct: options.dropoutPctMax ?? 10,
-            // Минимальный % стабильной позы
-            poseStablePct: options.poseStablePctMin ?? 85,
-            // Минимальный % оптимального освещения
-            illuminationOkPct: options.illuminationOkPctMin ?? 90,
-            // Минимальный общий QC score для валидности
-            minQcScore: options.minQcScore ?? 75,
-            // Минимальный QC score для borderline
-            borderlineQcScore: options.borderlineQcScore ?? 60,
-            // Максимальная длительность dropout подряд (мс)
-            maxConsecutiveDropout: options.maxConsecutiveDropout ?? 500,
-            // Минимальное количество точек калибровки
-            minCalibrationPoints: options.minCalibrationPoints ?? 9,
-            
-            // === НОВЫЕ ПОРОГИ v2.0 ===
-            // Минимальный % кадров с открытыми глазами
-            eyesOpenPct: options.eyesOpenPctMin ?? 85,
-            // Нормальная частота морганий (раз/мин)
-            blinkRateMin: options.blinkRateMin ?? 8,
-            blinkRateMax: options.blinkRateMax ?? 30,
-            // Максимальный % кадров с окклюзиями
-            occlusionPct: options.occlusionPctMax ?? 15,
-            // Максимальное время без лица (мс)
-            maxFaceLostTime: options.maxFaceLostTime ?? 3000,
-            // Максимальное время плохого освещения (мс)
-            maxLowLightTime: options.maxLowLightTime ?? 5000,
-            // Максимальный % пропущенных стимулов
-            omissionRate: options.omissionRateMax ?? 20,
-            // Максимальный % ложных срабатываний
-            commissionRate: options.commissionRateMax ?? 15,
-            // Максимальная доля RT выбросов
-            rtOutlierFrac: options.rtOutlierFracMax ?? 0.15,
-            // Минимальный % времени взгляда на экране
-            gazeOnScreenPct: options.gazeOnScreenPctMin ?? 90
+            minDurationMs: 8000,
+            face_visible_pct_min: 85,
+            face_ok_pct_min: 85,
+            pose_ok_pct_min: 85,
+            illumination_ok_pct_min: 90,
+            eyes_open_pct_min: 85,
+            occlusion_pct_max: 20,
+            gaze_valid_pct_min: 80,
+            gaze_on_screen_pct_min: 85,
+            gaze_accuracy_pct_max: 8,
+            gaze_precision_pct_max: 4,
+            fps_baseline_warmup_ms: 2000,
+            fps_low_factor: 0.5,
+            fps_low_abs_cap: 10,
+            fps_low_abs_floor: 6,
+            fps_absolute_min: 12, // Абсолютный минимум FPS камеры (ниже — всегда low)
+            maxLowFpsTimeMs: 4000,
+            maxConsecutiveLowFpsMs: 2000,
+            pose_yaw_on_max: 20,
+            pose_pitch_on_max: 18,
+            pose_yaw_off_min: 35,
+            pose_pitch_off_min: 30,
+            maxConsecutiveDropoutMs: 1200,
+            ...options
         };
         
-        // Веса для расчёта итогового score
-        this.weights = {
-            // === Инструментальный QC (60%) ===
-            faceOkPct: 0.15,
-            gazeValidPct: 0.15,
-            dropoutPct: 0.10,
-            poseStablePct: 0.10,
-            illuminationOkPct: 0.05,
-            eyesOpenPct: 0.05,
-            
-            // === Поведенческий QC (25%) ===
-            omissionRate: 0.10,
-            commissionRate: 0.05,
-            rtOutlierFrac: 0.05,
-            gazeOnScreenPct: 0.05,
-            
-            // === Калибровка и точность (15%) ===
-            calibrationQuality: 0.10,
-            trackingAccuracy: 0.05
-        };
+        this._counters = this._createCounters();
+        this._gazeState = { valid: false, onScreen: null, validTimeMs: 0, onScreenTimeMs: 0, hasData: false };
+        this._validationState = { points: [], errors: [], isComplete: false };
+        this._fpsHistory = [];        // История FPS анализа
+        this._cameraFpsHistory = [];  // История FPS камеры
+        this._currentFps = 0;         // Текущий FPS анализа (processFrame calls)
+        this._cameraFps = 0;          // Реальный FPS камеры (передаётся извне)
+        this._baselineFps = null;     // Baseline FPS камеры
+        this._frameCount = 0;
+        this._lastFpsTime = 0;
+        this._startTime = 0;
+        this._lastFrameTime = 0;
+        this._isRunning = false;
+        this._warmupComplete = false;
         
-        // === REAL-TIME TRACKING STATE ===
-        this.frameMetrics = {
-            // Счётчики кадров
-            totalFrames: 0,
-            faceOkFrames: 0,
-            poseStableFrames: 0,
-            illuminationOkFrames: 0,
-            eyesOpenFrames: 0,
-            occlusionFrames: 0,
-            
-            // Счётчики gaze
-            totalGazePoints: 0,
-            validGazePoints: 0,
-            onScreenGazePoints: 0,
-            
-            // Временные метрики (мс)
-            sessionStartTime: null,
-            lastFrameTime: null,
-            faceLostTime: 0,
-            lowLightTime: 0,
-            currentFaceLostStart: null,
-            currentLowLightStart: null,
-            
-            // Морганиния
-            blinkCount: 0,
-            lastEyeState: 'open', // 'open' | 'closed'
-            blinkTimestamps: [],
-            
-            // Поведенческие метрики
-            stimulusEvents: [],     // { time, responded }
-            responseEvents: [],     // { time, stimulusId }
-            reactionTimes: [],      // RT в мс
-            
-            // Dropout tracking
-            dropoutSegments: [],    // { start, end }
-            currentDropoutStart: null
-        };
-        
-        // Конфигурация экрана
-        this.screenConfig = {
-            width: options.screenWidth || (typeof window !== 'undefined' ? window.screen?.width : 1920),
-            height: options.screenHeight || (typeof window !== 'undefined' ? window.screen?.height : 1080)
+        this.onMetricsUpdate = options.onMetricsUpdate || null;
+    }
+
+    _createCounters() {
+        return {
+            totalFrames: 0, faceVisible: 0, faceOk: 0, poseOk: 0,
+            illuminationOk: 0, eyesOpen: 0, occlusionDetected: 0,
+            gazeValid: 0, gazeOnScreen: 0, gazeTotal: 0, // gazeTotal - общее число кадров когда был вызван addGazePoint
+            lowFpsFrames: 0,
+            consecutiveLowFpsMs: 0, maxConsecutiveLowFpsMs: 0, totalLowFpsMs: 0
         };
     }
 
+    start() {
+        this._startTime = Date.now();
+        this._lastFrameTime = performance.now();
+        this._lastFpsTime = this._lastFrameTime;
+        this._isRunning = true;
+        this._counters = this._createCounters();
+        this._gazeState = { valid: false, onScreen: null, validTimeMs: 0, onScreenTimeMs: 0, hasData: false };
+        this._fpsHistory = [];
+        this._cameraFpsHistory = [];
+        this._warmupComplete = false;
+        this._baselineFps = null;
+        this._cameraFps = 0;
+        console.log('[QCMetrics] Started');
+    }
+
+    stop() {
+        this._isRunning = false;
+        console.log('[QCMetrics] Stopped');
+    }
+
     /**
-     * Покадровое обновление метрик в реальном времени
-     * @param {number} frameTime - время кадра от начала сессии (мс)
-     * @param {Object} frameData - данные текущего кадра
-     * @returns {Object} текущее состояние всех метрик
+     * Устанавливает реальный FPS камеры (вызывается извне)
+     * @param {number} fps - измеренный FPS камеры
      */
-    updateFrameMetrics(frameTime, frameData) {
-        const fm = this.frameMetrics;
+    setCameraFps(fps) {
+        if (typeof fps !== 'number' || fps < 0) return;
         
-        // Инициализация времени начала сессии
-        if (fm.sessionStartTime === null) {
-            fm.sessionStartTime = frameTime;
+        this._cameraFps = fps;
+        this._cameraFpsHistory.push(fps);
+        if (this._cameraFpsHistory.length > 60) this._cameraFpsHistory.shift();
+        
+        // Обновляем baseline на основе camera FPS
+        if (!this._warmupComplete && this._cameraFpsHistory.length >= 3) {
+            const sorted = [...this._cameraFpsHistory].sort((a, b) => b - a);
+            this._baselineFps = sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
+            this._warmupComplete = true;
+            console.log(`[QCMetrics] Camera baseline FPS: ${this._baselineFps}`);
         }
-        fm.lastFrameTime = frameTime;
-        fm.totalFrames++;
+    }
+
+    processFrame(precheckResult, segmenterResult = null) {
+        if (!this._isRunning) return;
         
-        // === 1. Face detection ===
-        const faceDetected = frameData.face?.detected === true;
-        if (faceDetected) {
-            fm.faceOkFrames++;
-            // Закрываем период потери лица
-            if (fm.currentFaceLostStart !== null) {
-                fm.faceLostTime += frameTime - fm.currentFaceLostStart;
-                fm.currentFaceLostStart = null;
-            }
+        const now = performance.now();
+        const deltaMs = now - this._lastFrameTime;
+        this._lastFrameTime = now;
+        
+        // FPS calculation (это FPS анализа, не камеры!)
+        this._frameCount++;
+        if (now - this._lastFpsTime >= 1000) {
+            this._currentFps = Math.round((this._frameCount * 1000) / (now - this._lastFpsTime));
+            this._fpsHistory.push(this._currentFps);
+            if (this._fpsHistory.length > 60) this._fpsHistory.shift();
+            this._frameCount = 0;
+            this._lastFpsTime = now;
+        }
+        
+        // lowFps теперь проверяет CAMERA FPS, а не analysis FPS
+        const isLowFps = this._checkLowFps();
+        const flags = this._computeFlags(precheckResult, segmenterResult);
+        
+        this._counters.totalFrames++;
+        if (flags.faceVisible) this._counters.faceVisible++;
+        if (flags.faceOk) this._counters.faceOk++;
+        if (flags.poseOk) this._counters.poseOk++;
+        if (flags.illuminationOk) this._counters.illuminationOk++;
+        if (flags.eyesOpen) this._counters.eyesOpen++;
+        if (flags.occlusionDetected) this._counters.occlusionDetected++;
+        
+        // ИСПРАВЛЕНО: gazeValid и gazeOnScreen НЕ считаем здесь
+        // Они считаются только в addGazePoint() когда есть реальные данные взгляда
+        
+        if (isLowFps) {
+            this._counters.lowFpsFrames++;
+            this._counters.consecutiveLowFpsMs += deltaMs;
+            this._counters.totalLowFpsMs += deltaMs;
+            this._counters.maxConsecutiveLowFpsMs = Math.max(this._counters.maxConsecutiveLowFpsMs, this._counters.consecutiveLowFpsMs);
         } else {
-            // Начинаем период потери лица
-            if (fm.currentFaceLostStart === null) {
-                fm.currentFaceLostStart = frameTime;
+            this._counters.consecutiveLowFpsMs = 0;
+        }
+        
+        // Gaze time accumulation (только если hasData = true, т.е. был вызов addGazePoint)
+        if (this._gazeState.hasData && this._gazeState.valid) {
+            this._gazeState.validTimeMs += deltaMs;
+            if (this._gazeState.onScreen === true) this._gazeState.onScreenTimeMs += deltaMs;
+        }
+        
+        if (this.onMetricsUpdate) this.onMetricsUpdate(this.getCurrentMetrics());
+    }
+
+    _checkLowFps() {
+        // Используем CAMERA FPS для проверки, а не analysis FPS
+        const fpsToCheck = this._cameraFps > 0 ? this._cameraFps : this._currentFps;
+        
+        // Если FPS ещё не измерен — не считаем lowFps
+        if (fpsToCheck === 0) return false;
+        
+        // Абсолютный минимум FPS — если ниже, всегда считаем low
+        if (fpsToCheck < this.thresholds.fps_absolute_min) {
+            return true;
+        }
+        
+        // Если baseline ещё не вычислен — используем только абсолютный порог
+        if (!this._baselineFps) {
+            return false; // Уже проверили абсолютный минимум выше
+        }
+        
+        // Относительный порог на основе baseline
+        const threshold = Math.max(this.thresholds.fps_low_abs_floor, 
+            Math.min(this.thresholds.fps_low_abs_cap, this._baselineFps * this.thresholds.fps_low_factor));
+        return fpsToCheck < threshold;
+    }
+
+    _computeFlags(pr, sr) {
+        const f = { faceVisible: false, faceOk: false, poseOk: false, illuminationOk: false, eyesOpen: false, occlusionDetected: false };
+        if (!pr) return f;
+        
+        // === Occlusion detection (ИСПРАВЛЕНО - менее агрессивная логика) ===
+        // Окклюзия только если FaceSegmenter ЯВНО детектирует руку или серьёзную проблему
+        let isOccluded = false;
+        if (sr && sr.faceVisibility) {
+            // Проверяем только явную детекцию руки
+            if (sr.faceVisibility.handDetected === true) {
+                isOccluded = true;
+            }
+            // Или если есть критические issues (но НЕ low_skin_visibility - это часто ложное)
+            const issues = sr.issues || sr.faceVisibility?.issues || [];
+            if (Array.isArray(issues)) {
+                const criticalIssues = issues.filter(i => 
+                    i === 'hand_on_face' || 
+                    i.includes('hand_occluded')
+                );
+                if (criticalIssues.length > 0) isOccluded = true;
             }
         }
+        f.occlusionDetected = isOccluded;
         
-        // === 2. Pose stability ===
-        if (frameData.pose?.isStable === true) {
-            fm.poseStableFrames++;
-        }
-        
-        // === 3. Illumination ===
-        const illuminationOk = frameData.illumination?.status === 'optimal';
-        if (illuminationOk) {
-            fm.illuminationOkFrames++;
-            // Закрываем период плохого освещения
-            if (fm.currentLowLightStart !== null) {
-                fm.lowLightTime += frameTime - fm.currentLowLightStart;
-                fm.currentLowLightStart = null;
-            }
-        } else {
-            // Начинаем период плохого освещения
-            if (fm.currentLowLightStart === null) {
-                fm.currentLowLightStart = frameTime;
-            }
-        }
-        
-        // === 4. Eyes open (EAR-based) ===
-        const eyesOpen = this._checkEyesOpen(frameData);
-        if (eyesOpen) {
-            fm.eyesOpenFrames++;
-            // Детекция моргания: переход closed → open
-            if (fm.lastEyeState === 'closed') {
-                fm.blinkCount++;
-                fm.blinkTimestamps.push(frameTime);
-            }
-            fm.lastEyeState = 'open';
-        } else {
-            fm.lastEyeState = 'closed';
-        }
-        
-        // === 5. Occlusion ===
-        const hasOcclusion = frameData.occlusion?.detected === true || 
-                            frameData.segmenter?.handOnFace === true ||
-                            frameData.segmenter?.hairOcclusion === true;
-        if (hasOcclusion) {
-            fm.occlusionFrames++;
-        }
-        
-        // === 6. Gaze tracking ===
-        if (frameData.gaze) {
-            fm.totalGazePoints++;
-            const gazeValid = frameData.gaze.x !== null && frameData.gaze.y !== null;
+        // === Face detection ===
+        if (pr.face) {
+            const faceDetected = pr.face.detected === true;
+            const faceStatus = pr.face.status;
+            const badStatuses = ['too_small', 'too_large', 'out_of_bounds', 'not_found'];
             
-            if (gazeValid) {
-                fm.validGazePoints++;
-                
-                // Проверка на экране
-                const onScreen = frameData.gaze.x >= 0 && 
-                                frameData.gaze.x <= this.screenConfig.width &&
-                                frameData.gaze.y >= 0 && 
-                                frameData.gaze.y <= this.screenConfig.height;
-                if (onScreen) {
-                    fm.onScreenGazePoints++;
-                }
-                
-                // Закрываем dropout
-                if (fm.currentDropoutStart !== null) {
-                    fm.dropoutSegments.push({
-                        start: fm.currentDropoutStart,
-                        end: frameTime,
-                        duration: frameTime - fm.currentDropoutStart
-                    });
-                    fm.currentDropoutStart = null;
-                }
-            } else {
-                // Начинаем dropout
-                if (fm.currentDropoutStart === null) {
-                    fm.currentDropoutStart = frameTime;
-                }
+            // faceVisible НЕ зависит от окклюзии - лицо может быть видно даже с частичной окклюзией
+            f.faceVisible = faceDetected;
+            // faceOk учитывает окклюзию
+            f.faceOk = faceDetected && !isOccluded && !badStatuses.includes(faceStatus);
+        }
+        
+        // === Pose (LEGACY-compatible) ===
+        if (pr.pose) {
+            f.poseOk = (pr.pose.status === 'stable') || 
+                       (pr.pose.isStable === true && pr.pose.isTilted !== true);
+        }
+        
+        // === Illumination ===
+        if (pr.illumination) f.illuminationOk = pr.illumination.status === 'optimal';
+        
+        // === Eyes ===
+        if (pr.eyes) {
+            const eyesBothOpen = pr.eyes.bothOpen ?? 
+                ((pr.eyes.left?.open ?? true) && (pr.eyes.right?.open ?? true));
+            f.eyesOpen = !!eyesBothOpen;
+        }
+        
+        return f;
+    }
+
+    addGazePoint(gazeData, poseData, occluded = false) {
+        // Увеличиваем счётчик вызовов addGazePoint
+        this._counters.gazeTotal++;
+        this._gazeState.hasData = true;
+        
+        // If face is occluded, gaze is invalid
+        if (occluded) {
+            this._gazeState.valid = false;
+            this._gazeState.onScreen = null;
+            return;
+        }
+        
+        // ИСПРАВЛЕНО: Если нет данных взгляда — gaze невалиден
+        if (!gazeData || gazeData.x == null || gazeData.y == null) {
+            this._gazeState.valid = false;
+            this._gazeState.onScreen = null;
+            // НЕ увеличиваем gazeValid — данных нет
+            return;
+        }
+        
+        // Есть данные взгляда — увеличиваем счётчик
+        this._counters.gazeValid++;
+        this._gazeState.valid = true;
+        
+        // Проверяем onScreen
+        if (poseData?.yaw != null && poseData?.pitch != null) {
+            const absYaw = Math.abs(poseData.yaw), absPitch = Math.abs(poseData.pitch);
+            if (absYaw > this.thresholds.pose_yaw_off_min || absPitch > this.thresholds.pose_pitch_off_min) {
+                this._gazeState.onScreen = false;
+                return;
+            }
+            if (absYaw < this.thresholds.pose_yaw_on_max && absPitch < this.thresholds.pose_pitch_on_max) {
+                const w = window.innerWidth || 1920, h = window.innerHeight || 1080;
+                const isOnScreen = gazeData.x >= 0 && gazeData.x <= w && gazeData.y >= 0 && gazeData.y <= h;
+                this._gazeState.onScreen = isOnScreen;
+                if (isOnScreen) this._counters.gazeOnScreen++;
+                return;
             }
         }
         
-        // Возвращаем текущие рассчитанные метрики
-        return this.getCurrentMetrics();
+        // Без данных позы — проверяем только координаты
+        const w = window.innerWidth || 1920, h = window.innerHeight || 1080;
+        const isOnScreen = gazeData.x >= 0 && gazeData.x <= w && gazeData.y >= 0 && gazeData.y <= h;
+        this._gazeState.onScreen = isOnScreen;
+        if (isOnScreen) this._counters.gazeOnScreen++;
     }
-    
-    /**
-     * Проверка открыты ли глаза (по EAR или явному флагу)
-     */
-    _checkEyesOpen(frameData) {
-        // Если есть явный флаг
-        if (frameData.eyes?.open !== undefined) {
-            return frameData.eyes.open;
-        }
-        // Если есть EAR (Eye Aspect Ratio)
-        if (frameData.eyes?.ear !== undefined) {
-            return frameData.eyes.ear > 0.2; // Порог EAR для открытых глаз
-        }
-        // По умолчанию считаем открытыми если лицо обнаружено
-        return frameData.face?.detected === true;
-    }
-    
-    /**
-     * Получить текущие метрики на основе накопленных данных
-     */
+
     getCurrentMetrics() {
-        const fm = this.frameMetrics;
-        const totalFrames = fm.totalFrames || 1;
-        const totalGaze = fm.totalGazePoints || 1;
-        const sessionDuration = (fm.lastFrameTime - fm.sessionStartTime) || 1;
+        const t = this._counters.totalFrames || 1;
+        // ИСПРАВЛЕНО: gazeValidPct считается от gazeTotal (сколько раз вызывали addGazePoint), а не от totalFrames
+        const gazeTotal = this._counters.gazeTotal || 1;
+        const gazeValid = this._counters.gazeValid || 0;
         
-        // Рассчитываем текущие проценты
-        const metrics = {
-            // Инструментальный QC
-            face_ok_pct: Math.round((fm.faceOkFrames / totalFrames) * 1000) / 10,
-            pose_stable_pct: Math.round((fm.poseStableFrames / totalFrames) * 1000) / 10,
-            illumination_ok_pct: Math.round((fm.illuminationOkFrames / totalFrames) * 1000) / 10,
-            eyes_open_pct: Math.round((fm.eyesOpenFrames / totalFrames) * 1000) / 10,
-            occlusion_pct: Math.round((fm.occlusionFrames / totalFrames) * 1000) / 10,
-            
-            // Gaze метрики
-            gaze_valid_pct: Math.round((fm.validGazePoints / totalGaze) * 1000) / 10,
-            gaze_on_screen_pct: Math.round((fm.onScreenGazePoints / totalGaze) * 1000) / 10,
-            dropout_pct: Math.round(((totalGaze - fm.validGazePoints) / totalGaze) * 1000) / 10,
-            
-            // Временные метрики
-            face_lost_time_ms: fm.faceLostTime + (fm.currentFaceLostStart ? 
-                (fm.lastFrameTime - fm.currentFaceLostStart) : 0),
-            low_light_time_ms: fm.lowLightTime + (fm.currentLowLightStart ? 
-                (fm.lastFrameTime - fm.currentLowLightStart) : 0),
-            
-            // Моргания
-            blink_count: fm.blinkCount,
-            blink_rate_per_min: sessionDuration > 0 ? 
-                Math.round((fm.blinkCount / (sessionDuration / 60000)) * 10) / 10 : 0,
-            
-            // Счётчики
-            total_frames: fm.totalFrames,
-            total_gaze_points: fm.totalGazePoints,
-            session_duration_ms: sessionDuration,
-            
-            // Dropout статистика
-            dropout_count: fm.dropoutSegments.length,
-            max_dropout_ms: fm.dropoutSegments.length > 0 ? 
-                Math.max(...fm.dropoutSegments.map(d => d.duration)) : 0
+        const pcts = {
+            faceVisiblePct: (this._counters.faceVisible / t) * 100,
+            faceOkPct: (this._counters.faceOk / t) * 100,
+            poseOkPct: (this._counters.poseOk / t) * 100,
+            illuminationOkPct: (this._counters.illuminationOk / t) * 100,
+            eyesOpenPct: (this._counters.eyesOpen / t) * 100,
+            occlusionPct: (this._counters.occlusionDetected / t) * 100,
+            // ИСПРАВЛЕНО: gazeValidPct = gazeValid / gazeTotal (только от вызовов addGazePoint)
+            gazeValidPct: gazeTotal > 0 ? (gazeValid / gazeTotal) * 100 : 0,
+            // gazeOnScreenPct считается от валидных точек взгляда
+            gazeOnScreenPct: gazeValid > 0 ? (this._counters.gazeOnScreen / gazeValid) * 100 : 0,
+            lowFpsPct: (this._counters.lowFpsFrames / t) * 100
         };
-        
-        // Рассчитываем текущий QC score
-        metrics.current_qc_score = this._calculateRealtimeQcScore(metrics);
-        
-        return metrics;
-    }
-    
-    /**
-     * Расчёт QC score в реальном времени
-     */
-    _calculateRealtimeQcScore(metrics) {
-        const dropoutNorm = 100 - metrics.dropout_pct;
-        const occlusionNorm = 100 - metrics.occlusion_pct;
-        
-        const score = 
-            metrics.face_ok_pct * this.weights.faceOkPct +
-            metrics.gaze_valid_pct * this.weights.gazeValidPct +
-            dropoutNorm * this.weights.dropoutPct +
-            metrics.pose_stable_pct * this.weights.poseStablePct +
-            metrics.illumination_ok_pct * this.weights.illuminationOkPct +
-            metrics.eyes_open_pct * this.weights.eyesOpenPct +
-            metrics.gaze_on_screen_pct * this.weights.gazeOnScreenPct;
-        
-        return Math.round(score * 10) / 10;
-    }
-
-    // === МЕТОДЫ ДЛЯ ПОВЕДЕНЧЕСКИХ МЕТРИК ===
-    
-    /**
-     * Регистрация события стимула
-     * @param {number} time - время появления стимула (мс)
-     * @param {string} stimulusId - ID стимула
-     * @param {string} stimulusType - тип: 'target' | 'nontarget'
-     */
-    registerStimulusEvent(time, stimulusId, stimulusType = 'target') {
-        this.frameMetrics.stimulusEvents.push({
-            time,
-            stimulusId,
-            stimulusType,
-            responded: false,
-            responseTime: null
-        });
-    }
-    
-    /**
-     * Регистрация события ответа пользователя
-     * @param {number} time - время ответа (мс)
-     * @param {string} stimulusId - ID стимула на который ответ (опционально)
-     */
-    registerResponseEvent(time, stimulusId = null) {
-        const fm = this.frameMetrics;
-        
-        fm.responseEvents.push({ time, stimulusId });
-        
-        // Связываем с последним стимулом если не указан ID
-        if (stimulusId === null && fm.stimulusEvents.length > 0) {
-            // Ищем последний неотвеченный target стимул
-            for (let i = fm.stimulusEvents.length - 1; i >= 0; i--) {
-                const stim = fm.stimulusEvents[i];
-                if (!stim.responded && stim.stimulusType === 'target') {
-                    stim.responded = true;
-                    stim.responseTime = time;
-                    const rt = time - stim.time;
-                    fm.reactionTimes.push(rt);
-                    break;
-                }
-            }
-        } else if (stimulusId) {
-            // Ищем конкретный стимул по ID
-            const stim = fm.stimulusEvents.find(s => s.stimulusId === stimulusId && !s.responded);
-            if (stim) {
-                stim.responded = true;
-                stim.responseTime = time;
-                const rt = time - stim.time;
-                fm.reactionTimes.push(rt);
-            }
-        }
-    }
-    
-    /**
-     * Получить поведенческие метрики
-     */
-    getBehavioralMetrics() {
-        const fm = this.frameMetrics;
-        
-        // Omission rate: % target стимулов без ответа
-        const targetStimuli = fm.stimulusEvents.filter(s => s.stimulusType === 'target');
-        const missedTargets = targetStimuli.filter(s => !s.responded);
-        const omissionRate = targetStimuli.length > 0 
-            ? Math.round((missedTargets.length / targetStimuli.length) * 1000) / 10 
-            : 0;
-        
-        // Commission rate: % ответов на nontarget стимулы
-        const nontargetStimuli = fm.stimulusEvents.filter(s => s.stimulusType === 'nontarget');
-        const falseAlarms = nontargetStimuli.filter(s => s.responded);
-        const commissionRate = nontargetStimuli.length > 0 
-            ? Math.round((falseAlarms.length / nontargetStimuli.length) * 1000) / 10 
-            : 0;
-        
-        // RT статистика
-        const rtStats = this._calculateRTStats(fm.reactionTimes);
-        
+        const qcScore = this._computeQcScore(pcts);
+        const r = v => Math.round(v * 10) / 10;
         return {
-            omission_rate: omissionRate,
-            commission_rate: commissionRate,
-            total_stimuli: fm.stimulusEvents.length,
-            target_stimuli: targetStimuli.length,
-            nontarget_stimuli: nontargetStimuli.length,
-            missed_targets: missedTargets.length,
-            false_alarms: falseAlarms.length,
-            total_responses: fm.responseEvents.length,
-            rt_stats: rtStats
-        };
-    }
-    
-    /**
-     * Расчёт статистики времени реакции
-     */
-    _calculateRTStats(reactionTimes) {
-        if (!reactionTimes || reactionTimes.length === 0) {
-            return {
-                mean: null,
-                median: null,
-                std: null,
-                min: null,
-                max: null,
-                outlier_count: 0,
-                outlier_frac: 0
-            };
-        }
-        
-        const sorted = [...reactionTimes].sort((a, b) => a - b);
-        const n = sorted.length;
-        
-        // Mean
-        const mean = sorted.reduce((a, b) => a + b, 0) / n;
-        
-        // Median
-        const median = n % 2 === 0 
-            ? (sorted[n/2 - 1] + sorted[n/2]) / 2 
-            : sorted[Math.floor(n/2)];
-        
-        // Standard deviation
-        const squaredDiffs = sorted.map(x => Math.pow(x - mean, 2));
-        const std = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / n);
-        
-        // Outliers (>3σ от медианы)
-        const outlierThreshold = 3 * std;
-        const outliers = sorted.filter(rt => Math.abs(rt - median) > outlierThreshold);
-        
-        return {
-            mean: Math.round(mean),
-            median: Math.round(median),
-            std: Math.round(std),
-            min: sorted[0],
-            max: sorted[n - 1],
-            outlier_count: outliers.length,
-            outlier_frac: Math.round((outliers.length / n) * 1000) / 1000
-        };
-    }
-
-    /**
-     * Сброс накопленных метрик (для новой сессии)
-     */
-    reset() {
-        this.frameMetrics = {
-            totalFrames: 0,
-            faceOkFrames: 0,
-            poseStableFrames: 0,
-            illuminationOkFrames: 0,
-            eyesOpenFrames: 0,
-            occlusionFrames: 0,
-            totalGazePoints: 0,
-            validGazePoints: 0,
-            onScreenGazePoints: 0,
-            sessionStartTime: null,
-            lastFrameTime: null,
-            faceLostTime: 0,
-            lowLightTime: 0,
-            currentFaceLostStart: null,
-            currentLowLightStart: null,
-            blinkCount: 0,
-            lastEyeState: 'open',
-            blinkTimestamps: [],
-            stimulusEvents: [],
-            responseEvents: [],
-            reactionTimes: [],
-            dropoutSegments: [],
-            currentDropoutStart: null
-        };
-    }
-
-    // === УПРОЩЁННЫЕ МЕТОДЫ ДЛЯ ИНТЕГРАЦИИ С HTML ===
-    
-    /**
-     * Добавить точку взгляда (упрощённый метод для HTML интеграции)
-     * @param {number|null} x - координата X взгляда
-     * @param {number|null} y - координата Y взгляда  
-     * @param {number} timestamp - время от начала сессии (мс)
-     * @param {boolean} faceDetected - обнаружено ли лицо
-     */
-    addGazePoint(x, y, timestamp, faceDetected = true) {
-        const fm = this.frameMetrics;
-        
-        // Инициализация времени начала
-        if (fm.sessionStartTime === null) {
-            fm.sessionStartTime = 0;
-        }
-        fm.lastFrameTime = timestamp;
-        fm.totalFrames++;
-        
-        // Face detection
-        if (faceDetected) {
-            fm.faceOkFrames++;
-            if (fm.currentFaceLostStart !== null) {
-                fm.faceLostTime += timestamp - fm.currentFaceLostStart;
-                fm.currentFaceLostStart = null;
-            }
-        } else {
-            if (fm.currentFaceLostStart === null) {
-                fm.currentFaceLostStart = timestamp;
-            }
-        }
-        
-        // Gaze tracking
-        fm.totalGazePoints++;
-        const gazeValid = x !== null && y !== null;
-        
-        if (gazeValid) {
-            fm.validGazePoints++;
-            
-            // Проверка на экране
-            const onScreen = x >= 0 && x <= this.screenConfig.width &&
-                            y >= 0 && y <= this.screenConfig.height;
-            if (onScreen) {
-                fm.onScreenGazePoints++;
-            }
-            
-            // Закрываем dropout
-            if (fm.currentDropoutStart !== null) {
-                fm.dropoutSegments.push({
-                    start: fm.currentDropoutStart,
-                    end: timestamp,
-                    duration: timestamp - fm.currentDropoutStart
-                });
-                fm.currentDropoutStart = null;
-            }
-        } else {
-            // Начинаем dropout
-            if (fm.currentDropoutStart === null) {
-                fm.currentDropoutStart = timestamp;
-            }
-        }
-    }
-    
-    /**
-     * Получить упрощённый QC summary (для HTML интеграции)
-     * @returns {Object} упрощённый QC отчёт
-     */
-    getSummary() {
-        const fm = this.frameMetrics;
-        const totalPoints = fm.totalGazePoints || 1;
-        const totalFrames = fm.totalFrames || 1;
-        
-        // Рассчитываем базовые метрики
-        const validGazePercent = (fm.validGazePoints / totalPoints) * 100;
-        const faceDetectedPercent = (fm.faceOkFrames / totalFrames) * 100;
-        const onScreenPercent = fm.validGazePoints > 0 
-            ? (fm.onScreenGazePoints / fm.validGazePoints) * 100 
-            : 0;
-        const dropoutPercent = ((totalPoints - fm.validGazePoints) / totalPoints) * 100;
-        
-        // Определяем passed/failed
-        const issues = [];
-        
-        if (fm.totalGazePoints < 50) {
-            issues.push('insufficient_data');
-        }
-        if (validGazePercent < this.thresholds.gazeValidPct) {
-            issues.push('low_valid_gaze');
-        }
-        if (faceDetectedPercent < this.thresholds.faceOkPct) {
-            issues.push('low_face_detection');
-        }
-        if (onScreenPercent < this.thresholds.gazeOnScreenPct) {
-            issues.push('high_offscreen');
-        }
-        
-        const sessionDuration = fm.lastFrameTime - (fm.sessionStartTime || 0);
-        if (sessionDuration < 5000) { // минимум 5 секунд
-            issues.push('short_duration');
-        }
-        
-        const passed = issues.length === 0;
-        
-        return {
-            passed,
-            issues,
-            metrics: {
-                totalPoints: fm.totalGazePoints,
-                validGazePoints: fm.validGazePoints,
-                validGazePercent: Math.round(validGazePercent * 10) / 10,
-                faceDetectedPercent: Math.round(faceDetectedPercent * 10) / 10,
-                onScreenPercent: Math.round(onScreenPercent * 10) / 10,
-                dropoutPercent: Math.round(dropoutPercent * 10) / 10,
-                sessionDurationMs: sessionDuration,
-                dropoutCount: fm.dropoutSegments.length,
-                maxDropoutMs: fm.dropoutSegments.length > 0 
-                    ? Math.max(...fm.dropoutSegments.map(d => d.duration)) 
-                    : 0
-            },
+            durationMs: Date.now() - this._startTime,
+            totalFrames: this._counters.totalFrames,
+            qcScore,
+            faceVisiblePct: r(pcts.faceVisiblePct),
+            faceOkPct: r(pcts.faceOkPct),
+            poseOkPct: r(pcts.poseOkPct),
+            illuminationOkPct: r(pcts.illuminationOkPct),
+            eyesOpenPct: r(pcts.eyesOpenPct),
+            occlusionPct: r(pcts.occlusionPct),
+            gazeValidPct: r(pcts.gazeValidPct),
+            gazeOnScreenPct: r(pcts.gazeOnScreenPct),
+            // FPS: теперь показываем оба значения
+            currentFps: this._currentFps,      // FPS анализа
+            cameraFps: this._cameraFps,        // Реальный FPS камеры
+            baselineFps: this._baselineFps,
+            lowFpsPct: r(pcts.lowFpsPct),
+            gazeValidTimeMs: this._gazeState.validTimeMs,
+            gazeOnScreenTimeMs: this._gazeState.onScreenTimeMs,
+            gazeTotal: this._counters.gazeTotal, // Добавляем для отладки
             timestamp: Date.now()
         };
     }
 
-    /**
-     * Расчёт всех QC-метрик для сессии
-     * @param {Object} sessionData - данные сессии
-     * @returns {Object} QC summary
-     */
-    calculateMetrics(sessionData) {
-        const precheckFrames = sessionData.precheckFrames || [];
-        const eyeTrackingData = sessionData.eyeTracking || [];
-        const trackingTestData = sessionData.trackingTest || [];
-        const calibrationData = sessionData.calibration || {};
-        
-        // Расчёт отдельных метрик
-        const metrics = {
-            // 1. Процент кадров с обнаруженным лицом
-            face_ok_pct: this._calculateFaceOkPct(precheckFrames),
-            
-            // 2. Процент валидных точек взгляда
-            gaze_valid_pct: this._calculateGazeValidPct(eyeTrackingData),
-            
-            // 3. Процент выпадений (dropout)
-            dropout_pct: this._calculateDropoutPct(eyeTrackingData),
-            
-            // 4. Процент стабильной позы
-            pose_stable_pct: this._calculatePoseStablePct(precheckFrames),
-            
-            // 5. Процент оптимального освещения
-            illumination_ok_pct: this._calculateIlluminationOkPct(precheckFrames),
-            
-            // 6. Метрики калибровки
-            calibration_quality: this._calculateCalibrationQuality(calibrationData),
-            
-            // 7. Метрики теста слежения
-            tracking_accuracy: this._calculateTrackingAccuracy(trackingTestData),
-            
-            // 8. Статистика dropout
-            dropout_stats: this._calculateDropoutStats(eyeTrackingData),
-            
-            // 9. Видимость шеи (необязательно)
-            neck_visible_pct: this._calculateNeckVisiblePct(precheckFrames)
+    _computeQcScore(p) {
+        const th = this.thresholds;
+        // LEGACY-compatible weights (sum = 1.0)
+        const w = {
+            faceVis: 0.14,
+            faceOk: 0.16,
+            poseOk: 0.08,
+            lightOk: 0.06,
+            eyesOpen: 0.06,
+            occlInv: 0.10,
+            gazeValid: 0.14,
+            gazeOn: 0.16,
+            dropoutInv: 0.04,
+            fpsOk: 0.06,
         };
         
-        // Расчёт итогового QC score
-        const qcScore = this._calculateQcScore(metrics);
+        const clamp01 = v => Math.max(0, Math.min(1, v));
+        const nPct = x => clamp01(x / 100);
+        const nInvPct = x => clamp01(1 - x / 100);
         
-        // Определение валидности и причин брака
-        const validation = this._validateSession(metrics, qcScore);
+        // Normalize metrics
+        const faceVis = nPct(p.faceVisiblePct);
+        const faceOk = nPct(p.faceOkPct);
+        const poseOk = nPct(p.poseOkPct);
+        const lightOk = nPct(p.illuminationOkPct);
+        const eyesOpen = nPct(p.eyesOpenPct);
+        const occlInv = nInvPct(p.occlusionPct);
+        const gazeValid = nPct(p.gazeValidPct);
+        const gazeOn = nPct(p.gazeOnScreenPct);
+        const dropoutInv = nInvPct(100 - p.gazeValidPct); // dropout = 100 - valid
         
+        // FPS score (approximation - legacy uses time-based)
+        const fpsOk = nInvPct(p.lowFpsPct || 0);
+        
+        // Weighted average
+        let score =
+            faceVis * w.faceVis +
+            faceOk * w.faceOk +
+            poseOk * w.poseOk +
+            lightOk * w.lightOk +
+            eyesOpen * w.eyesOpen +
+            occlInv * w.occlInv +
+            gazeValid * w.gazeValid +
+            gazeOn * w.gazeOn +
+            dropoutInv * w.dropoutInv +
+            fpsOk * w.fpsOk;
+        
+        // LEGACY hard penalties to avoid "high score but invalid" artifacts
+        const durationMs = Date.now() - this._startTime;
+        if (durationMs < th.minDurationMs) score *= 0.35;
+        if (p.faceVisiblePct < th.face_visible_pct_min) score *= 0.6;
+        if (p.faceOkPct < th.face_ok_pct_min) score *= 0.6;
+        if (p.occlusionPct > th.occlusion_pct_max) score *= 0.7;
+        if (p.gazeValidPct < th.gaze_valid_pct_min) score *= 0.7;
+        if (p.gazeOnScreenPct < th.gaze_on_screen_pct_min) score *= 0.7;
+        if (this._counters.totalLowFpsMs > th.maxLowFpsTimeMs) score *= 0.6;
+        
+        // Return as 0-1 (legacy) with 3 decimal places
+        return Math.round(clamp01(score) * 1000) / 1000;
+    }
+
+    getSummary() {
+        const m = this.getCurrentMetrics();
+        const th = this.thresholds;
+        const v = this._getValidationMetrics();
+        const checks = {
+            duration: m.durationMs >= th.minDurationMs,
+            faceVisible: m.faceVisiblePct >= th.face_visible_pct_min,
+            faceOk: m.faceOkPct >= th.face_ok_pct_min,
+            poseOk: m.poseOkPct >= th.pose_ok_pct_min,
+            illuminationOk: m.illuminationOkPct >= th.illumination_ok_pct_min,
+            eyesOpen: m.eyesOpenPct >= th.eyes_open_pct_min,
+            occlusion: m.occlusionPct <= th.occlusion_pct_max,
+            gazeValid: m.gazeValidPct >= th.gaze_valid_pct_min,
+            gazeOnScreen: m.gazeOnScreenPct >= th.gaze_on_screen_pct_min,
+            lowFps: this._counters.totalLowFpsMs <= th.maxLowFpsTimeMs,
+            consecutiveLowFps: this._counters.maxConsecutiveLowFpsMs <= th.maxConsecutiveLowFpsMs
+        };
+        if (v.accuracyPct !== null) {
+            checks.gazeAccuracy = v.accuracyPct <= th.gaze_accuracy_pct_max;
+            checks.gazePrecision = v.precisionPct <= th.gaze_precision_pct_max;
+        }
+        const passed = Object.values(checks).filter(x => x === true).length;
+        return { ...m, validation: v, checks, passedChecks: passed, totalChecks: Object.keys(checks).length, overallPass: passed === Object.keys(checks).length, counters: { ...this._counters }, fpsHistory: [...this._fpsHistory], maxConsecutiveLowFpsMs: this._counters.maxConsecutiveLowFpsMs, totalLowFpsMs: this._counters.totalLowFpsMs };
+    }
+
+    _getValidationMetrics() {
+        if (!this._validationState.isComplete || this._validationState.errors.length === 0) {
+            return { accuracyPx: null, precisionPx: null, accuracyPct: null, precisionPct: null, sampleCount: 0 };
+        }
+        const e = this._validationState.errors;
+        const avg = e.reduce((a, b) => a + b, 0) / e.length;
+        const sqDiffs = e.map(v => Math.pow(v - avg, 2));
+        const std = Math.sqrt(sqDiffs.reduce((a, b) => a + b, 0) / e.length);
+        const diag = Math.sqrt(Math.pow(window.innerWidth || 1920, 2) + Math.pow(window.innerHeight || 1080, 2));
         return {
-            metrics,
-            qc_score: qcScore,
-            is_valid: validation.isValid,
-            validation_status: validation.status,
-            rejection_reasons: validation.reasons,
-            warnings: validation.warnings,
-            timestamp: Date.now(),
-            session_id: sessionData.ids?.session || null,
-            participant_id: sessionData.ids?.participant || null
+            accuracyPx: Math.round(avg * 10) / 10,
+            precisionPx: Math.round(std * 10) / 10,
+            accuracyPct: Math.round((avg / diag) * 1000) / 10,
+            precisionPct: Math.round((std / diag) * 1000) / 10,
+            sampleCount: e.length
         };
     }
 
-    /**
-     * 1. Процент кадров с обнаруженным лицом
-     * Формула: (кадры с face.detected=true / всего кадров) * 100
-     */
-    _calculateFaceOkPct(frames) {
-        if (!frames || frames.length === 0) return 0;
-        
-        const faceOkCount = frames.filter(f => f.face?.detected === true).length;
-        return Math.round((faceOkCount / frames.length) * 100 * 10) / 10;
+    reset() {
+        this._counters = this._createCounters();
+        this._gazeState = { valid: false, onScreen: null, validTimeMs: 0, onScreenTimeMs: 0, hasData: false };
+        this._validationState = { points: [], errors: [], isComplete: false };
+        this._fpsHistory = [];
+        this._cameraFpsHistory = [];
+        this._currentFps = 0;
+        this._cameraFps = 0;
+        this._baselineFps = null;
+        this._startTime = 0;
+        this._lastFrameTime = 0;
+        this._isRunning = false;
+        this._warmupComplete = false;
     }
 
-    /**
-     * 2. Процент валидных точек взгляда
-     * Формула: (точки с x,y !== null и в пределах экрана / всего точек) * 100
-     */
-    _calculateGazeValidPct(gazeData) {
-        if (!gazeData || gazeData.length === 0) return 0;
-        
-        const screenW = window.screen?.width || 1920;
-        const screenH = window.screen?.height || 1080;
-        
-        const validCount = gazeData.filter(point => {
-            return point.x !== null && 
-                   point.y !== null && 
-                   point.x >= 0 && point.x <= screenW &&
-                   point.y >= 0 && point.y <= screenH;
-        }).length;
-        
-        return Math.round((validCount / gazeData.length) * 100 * 10) / 10;
-    }
-
-    /**
-     * 3. Процент выпадений (dropout)
-     * Формула: (точки с x=null или y=null / всего точек) * 100
-     */
-    _calculateDropoutPct(gazeData) {
-        if (!gazeData || gazeData.length === 0) return 100;
-        
-        const dropoutCount = gazeData.filter(point => 
-            point.x === null || point.y === null
-        ).length;
-        
-        return Math.round((dropoutCount / gazeData.length) * 100 * 10) / 10;
-    }
-
-    /**
-     * 4. Процент стабильной позы
-     * Формула: (кадры с pose.isStable=true / всего кадров) * 100
-     */
-    _calculatePoseStablePct(frames) {
-        if (!frames || frames.length === 0) return 0;
-        
-        const stableCount = frames.filter(f => f.pose?.isStable === true).length;
-        return Math.round((stableCount / frames.length) * 100 * 10) / 10;
-    }
-
-    /**
-     * 5. Процент оптимального освещения
-     * Формула: (кадры с illumination.status='optimal' / всего кадров) * 100
-     */
-    _calculateIlluminationOkPct(frames) {
-        if (!frames || frames.length === 0) return 0;
-        
-        const optimalCount = frames.filter(f => 
-            f.illumination?.status === 'optimal'
-        ).length;
-        
-        return Math.round((optimalCount / frames.length) * 100 * 10) / 10;
-    }
-
-    /**
-     * 6. Качество калибровки
-     * Формула: (успешных точек калибровки / требуемых точек) * 100
-     */
-    _calculateCalibrationQuality(calibrationData) {
-        const pointsCollected = calibrationData.pointsCollected || 0;
-        const pointsRequired = calibrationData.pointsRequired || this.thresholds.minCalibrationPoints;
-        
-        const completeness = Math.min(100, Math.round((pointsCollected / pointsRequired) * 100));
-        
-        return {
-            completeness,
-            points_collected: pointsCollected,
-            points_required: pointsRequired,
-            is_complete: pointsCollected >= pointsRequired
-        };
-    }
-
-    /**
-     * 7. Точность слежения за фигурами
-     * Формула: средняя евклидова дистанция между позицией фигуры и взглядом
-     */
-    _calculateTrackingAccuracy(trackingData) {
-        if (!trackingData || trackingData.length === 0) {
-            return { accuracy: 0, avg_distance: null, valid_samples: 0 };
-        }
-        
-        let totalDistance = 0;
-        let validSamples = 0;
-        
-        trackingData.forEach(sample => {
-            if (sample.gazeX !== null && sample.gazeY !== null) {
-                const dx = sample.shapeX - sample.gazeX;
-                const dy = sample.shapeY - sample.gazeY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                totalDistance += distance;
-                validSamples++;
-            }
-        });
-        
-        if (validSamples === 0) {
-            return { accuracy: 0, avg_distance: null, valid_samples: 0 };
-        }
-        
-        const avgDistance = totalDistance / validSamples;
-        
-        // Нормализуем к шкале 0-100 (где 100 = идеально)
-        // Считаем что 200px дистанция = 0% точности
-        const maxAcceptableDistance = 200;
-        const accuracy = Math.max(0, Math.round((1 - avgDistance / maxAcceptableDistance) * 100));
-        
-        return {
-            accuracy,
-            avg_distance: Math.round(avgDistance),
-            valid_samples: validSamples,
-            total_samples: trackingData.length
-        };
-    }
-
-    /**
-     * 8. Статистика dropout
-     * Вычисляет максимальную и среднюю длительность dropout
-     */
-    _calculateDropoutStats(gazeData) {
-        if (!gazeData || gazeData.length === 0) {
-            return { max_consecutive_ms: 0, avg_consecutive_ms: 0, dropout_count: 0 };
-        }
-        
-        const dropouts = [];
-        let currentDropoutStart = null;
-        let currentDropoutDuration = 0;
-        
-        for (let i = 0; i < gazeData.length; i++) {
-            const point = gazeData[i];
-            const isDropout = point.x === null || point.y === null;
-            
-            if (isDropout) {
-                if (currentDropoutStart === null) {
-                    currentDropoutStart = point.t;
-                }
-            } else {
-                if (currentDropoutStart !== null) {
-                    const duration = point.t - currentDropoutStart;
-                    dropouts.push(duration);
-                    currentDropoutStart = null;
-                }
-            }
-        }
-        
-        // Если последняя точка была dropout
-        if (currentDropoutStart !== null && gazeData.length > 0) {
-            const lastPoint = gazeData[gazeData.length - 1];
-            dropouts.push(lastPoint.t - currentDropoutStart);
-        }
-        
-        if (dropouts.length === 0) {
-            return { max_consecutive_ms: 0, avg_consecutive_ms: 0, dropout_count: 0 };
-        }
-        
-        const maxConsecutive = Math.max(...dropouts);
-        const avgConsecutive = Math.round(dropouts.reduce((a, b) => a + b, 0) / dropouts.length);
-        
-        return {
-            max_consecutive_ms: maxConsecutive,
-            avg_consecutive_ms: avgConsecutive,
-            dropout_count: dropouts.length
-        };
-    }
-
-    /**
-     * 9. Процент видимости шеи (необязательный)
-     */
-    _calculateNeckVisiblePct(frames) {
-        if (!frames || frames.length === 0) return 0;
-        
-        const neckVisibleCount = frames.filter(f => f.neck?.visible === true).length;
-        return Math.round((neckVisibleCount / frames.length) * 100 * 10) / 10;
-    }
-
-    /**
-     * Расчёт итогового QC score
-     * Формула: взвешенная сумма нормализованных метрик
-     */
-    _calculateQcScore(metrics) {
-        // Нормализуем dropout (инвертируем, т.к. меньше = лучше)
-        const dropoutNormalized = 100 - metrics.dropout_pct;
-        
-        const score = 
-            metrics.face_ok_pct * this.weights.faceOkPct +
-            metrics.gaze_valid_pct * this.weights.gazeValidPct +
-            dropoutNormalized * this.weights.dropoutPct +
-            metrics.pose_stable_pct * this.weights.poseStablePct +
-            metrics.illumination_ok_pct * this.weights.illuminationOkPct;
-        
-        return Math.round(score * 10) / 10;
-    }
-
-    /**
-     * Валидация сессии
-     * Возвращает статус valid/borderline/invalid и причины брака
-     */
-    _validateSession(metrics, qcScore) {
-        const reasons = [];
-        const warnings = [];
-        
-        // Проверка обязательных метрик
-        if (metrics.face_ok_pct < this.thresholds.faceOkPct) {
-            reasons.push({
-                code: 'FACE_DETECTION_LOW',
-                message: `Лицо обнаружено только в ${metrics.face_ok_pct}% кадров (требуется ${this.thresholds.faceOkPct}%)`,
-                metric: 'face_ok_pct',
-                value: metrics.face_ok_pct,
-                threshold: this.thresholds.faceOkPct,
-                severity: metrics.face_ok_pct < 70 ? 'critical' : 'warning'
-            });
-        }
-        
-        if (metrics.gaze_valid_pct < this.thresholds.gazeValidPct) {
-            reasons.push({
-                code: 'GAZE_VALIDITY_LOW',
-                message: `Валидных точек взгляда ${metrics.gaze_valid_pct}% (требуется ${this.thresholds.gazeValidPct}%)`,
-                metric: 'gaze_valid_pct',
-                value: metrics.gaze_valid_pct,
-                threshold: this.thresholds.gazeValidPct,
-                severity: metrics.gaze_valid_pct < 60 ? 'critical' : 'warning'
-            });
-        }
-        
-        if (metrics.dropout_pct > this.thresholds.dropoutPct) {
-            reasons.push({
-                code: 'DROPOUT_HIGH',
-                message: `Процент выпадений ${metrics.dropout_pct}% (максимум ${this.thresholds.dropoutPct}%)`,
-                metric: 'dropout_pct',
-                value: metrics.dropout_pct,
-                threshold: this.thresholds.dropoutPct,
-                severity: metrics.dropout_pct > 30 ? 'critical' : 'warning'
-            });
-        }
-        
-        if (metrics.pose_stable_pct < this.thresholds.poseStablePct) {
-            reasons.push({
-                code: 'POSE_UNSTABLE',
-                message: `Стабильная поза в ${metrics.pose_stable_pct}% кадров (требуется ${this.thresholds.poseStablePct}%)`,
-                metric: 'pose_stable_pct',
-                value: metrics.pose_stable_pct,
-                threshold: this.thresholds.poseStablePct,
-                severity: metrics.pose_stable_pct < 60 ? 'critical' : 'warning'
-            });
-        }
-        
-        if (metrics.illumination_ok_pct < this.thresholds.illuminationOkPct) {
-            reasons.push({
-                code: 'ILLUMINATION_POOR',
-                message: `Оптимальное освещение в ${metrics.illumination_ok_pct}% кадров (требуется ${this.thresholds.illuminationOkPct}%)`,
-                metric: 'illumination_ok_pct',
-                value: metrics.illumination_ok_pct,
-                threshold: this.thresholds.illuminationOkPct,
-                severity: metrics.illumination_ok_pct < 60 ? 'critical' : 'warning'
-            });
-        }
-        
-        // Проверка dropout подряд
-        if (metrics.dropout_stats.max_consecutive_ms > this.thresholds.maxConsecutiveDropout) {
-            reasons.push({
-                code: 'CONSECUTIVE_DROPOUT_HIGH',
-                message: `Максимальный dropout ${metrics.dropout_stats.max_consecutive_ms}мс (максимум ${this.thresholds.maxConsecutiveDropout}мс)`,
-                metric: 'max_consecutive_dropout',
-                value: metrics.dropout_stats.max_consecutive_ms,
-                threshold: this.thresholds.maxConsecutiveDropout,
-                severity: metrics.dropout_stats.max_consecutive_ms > 1000 ? 'critical' : 'warning'
-            });
-        }
-        
-        // Проверка калибровки
-        if (!metrics.calibration_quality.is_complete) {
-            reasons.push({
-                code: 'CALIBRATION_INCOMPLETE',
-                message: `Калибровка не завершена: ${metrics.calibration_quality.points_collected}/${metrics.calibration_quality.points_required} точек`,
-                metric: 'calibration_completeness',
-                value: metrics.calibration_quality.points_collected,
-                threshold: metrics.calibration_quality.points_required,
-                severity: 'critical'
-            });
-        }
-        
-        // Предупреждения (не влияют на валидность)
-        if (metrics.neck_visible_pct < 50) {
-            warnings.push({
-                code: 'NECK_VISIBILITY_LOW',
-                message: `Шея видна только в ${metrics.neck_visible_pct}% кадров`,
-                metric: 'neck_visible_pct',
-                value: metrics.neck_visible_pct
-            });
-        }
-        
-        if (metrics.tracking_accuracy.accuracy < 50 && metrics.tracking_accuracy.valid_samples > 0) {
-            warnings.push({
-                code: 'TRACKING_ACCURACY_LOW',
-                message: `Точность слежения ${metrics.tracking_accuracy.accuracy}%`,
-                metric: 'tracking_accuracy',
-                value: metrics.tracking_accuracy.accuracy
-            });
-        }
-        
-        // Определение статуса на основе severity и qcScore
-        const criticalReasons = reasons.filter(r => r.severity === 'critical');
-        const warningReasons = reasons.filter(r => r.severity === 'warning');
-        
-        let status;
-        let isValid;
-        
-        if (criticalReasons.length > 0 || qcScore < this.thresholds.borderlineQcScore) {
-            status = 'invalid';
-            isValid = false;
-        } else if (warningReasons.length > 0 || qcScore < this.thresholds.minQcScore) {
-            status = 'borderline';
-            isValid = false;
-        } else {
-            status = 'valid';
-            isValid = true;
-        }
-        
-        return {
-            isValid,
-            status,
-            reasons,
-            warnings
-        };
-    }
-
-    /**
-     * Генерация QC summary в формате JSON
-     * @param {Object} sessionData - данные сессии
-     * @returns {Object} полный QC отчёт
-     */
-    generateSummary(sessionData) {
-        const qcResult = this.calculateMetrics(sessionData);
-        const realtimeMetrics = this.getCurrentMetrics();
-        const behavioralMetrics = this.getBehavioralMetrics();
-        
-        return {
-            version: '2.0.0',
-            generated_at: new Date().toISOString(),
-            
-            // === Идентификаторы сессии ===
-            session: {
-                id: qcResult.session_id,
-                participant_id: qcResult.participant_id,
-                duration_ms: realtimeMetrics.session_duration_ms,
-                total_frames: realtimeMetrics.total_frames,
-                total_gaze_points: realtimeMetrics.total_gaze_points
-            },
-            
-            // === Общий результат ===
-            summary: {
-                qc_score: qcResult.qc_score,
-                is_valid: qcResult.is_valid,
-                status: qcResult.validation_status, // 'valid' | 'borderline' | 'invalid'
-                recommendation: this._getRecommendation(qcResult.validation_status)
-            },
-            
-            // === Инструментальный QC ===
-            instrumental_qc: {
-                face_ok_pct: {
-                    value: qcResult.metrics.face_ok_pct,
-                    threshold: this.thresholds.faceOkPct,
-                    passed: qcResult.metrics.face_ok_pct >= this.thresholds.faceOkPct,
-                    formula: '(кадры с face.detected=true / всего кадров) × 100'
-                },
-                gaze_valid_pct: {
-                    value: qcResult.metrics.gaze_valid_pct,
-                    threshold: this.thresholds.gazeValidPct,
-                    passed: qcResult.metrics.gaze_valid_pct >= this.thresholds.gazeValidPct,
-                    formula: '(точки с x,y ≠ null и в пределах экрана / всего точек) × 100'
-                },
-                dropout_pct: {
-                    value: qcResult.metrics.dropout_pct,
-                    threshold: this.thresholds.dropoutPct,
-                    passed: qcResult.metrics.dropout_pct <= this.thresholds.dropoutPct,
-                    formula: '(точки с x=null или y=null / всего точек) × 100'
-                },
-                pose_stable_pct: {
-                    value: qcResult.metrics.pose_stable_pct,
-                    threshold: this.thresholds.poseStablePct,
-                    passed: qcResult.metrics.pose_stable_pct >= this.thresholds.poseStablePct,
-                    formula: '(кадры с pose.isStable=true / всего кадров) × 100'
-                },
-                illumination_ok_pct: {
-                    value: qcResult.metrics.illumination_ok_pct,
-                    threshold: this.thresholds.illuminationOkPct,
-                    passed: qcResult.metrics.illumination_ok_pct >= this.thresholds.illuminationOkPct,
-                    formula: '(кадры с illumination.status="optimal" / всего кадров) × 100'
-                },
-                eyes_open_pct: {
-                    value: realtimeMetrics.eyes_open_pct,
-                    threshold: this.thresholds.eyesOpenPct,
-                    passed: realtimeMetrics.eyes_open_pct >= this.thresholds.eyesOpenPct,
-                    formula: '(кадры с EAR > 0.2 / всего кадров) × 100'
-                },
-                occlusion_pct: {
-                    value: realtimeMetrics.occlusion_pct,
-                    threshold: this.thresholds.occlusionPct,
-                    passed: realtimeMetrics.occlusion_pct <= this.thresholds.occlusionPct,
-                    formula: '(кадры с окклюзией / всего кадров) × 100'
-                },
-                face_lost_time_ms: {
-                    value: realtimeMetrics.face_lost_time_ms,
-                    threshold: this.thresholds.maxFaceLostTime,
-                    passed: realtimeMetrics.face_lost_time_ms <= this.thresholds.maxFaceLostTime,
-                    formula: 'Σ(время без лица) в мс'
-                },
-                low_light_time_ms: {
-                    value: realtimeMetrics.low_light_time_ms,
-                    threshold: this.thresholds.maxLowLightTime,
-                    passed: realtimeMetrics.low_light_time_ms <= this.thresholds.maxLowLightTime,
-                    formula: 'Σ(время с плохим освещением) в мс'
-                },
-                gaze_on_screen_pct: {
-                    value: realtimeMetrics.gaze_on_screen_pct,
-                    threshold: this.thresholds.gazeOnScreenPct,
-                    passed: realtimeMetrics.gaze_on_screen_pct >= this.thresholds.gazeOnScreenPct,
-                    formula: '(точки в пределах экрана / валидных точек) × 100'
-                }
-            },
-            
-            // === Поведенческий QC ===
-            behavioral_qc: {
-                omission_rate: {
-                    value: behavioralMetrics.omission_rate,
-                    threshold: this.thresholds.omissionRate,
-                    passed: behavioralMetrics.omission_rate <= this.thresholds.omissionRate,
-                    formula: '(пропущенные target стимулы / всего target стимулов) × 100'
-                },
-                commission_rate: {
-                    value: behavioralMetrics.commission_rate,
-                    threshold: this.thresholds.commissionRate,
-                    passed: behavioralMetrics.commission_rate <= this.thresholds.commissionRate,
-                    formula: '(ответы на nontarget / всего nontarget) × 100'
-                },
-                rt_outlier_frac: {
-                    value: behavioralMetrics.rt_stats.outlier_frac,
-                    threshold: this.thresholds.rtOutlierFrac,
-                    passed: behavioralMetrics.rt_stats.outlier_frac <= this.thresholds.rtOutlierFrac,
-                    formula: '(RT выбросы > 3σ от медианы / всего RT) × 100'
-                },
-                rt_stats: behavioralMetrics.rt_stats,
-                stimulus_stats: {
-                    total: behavioralMetrics.total_stimuli,
-                    targets: behavioralMetrics.target_stimuli,
-                    nontargets: behavioralMetrics.nontarget_stimuli,
-                    missed: behavioralMetrics.missed_targets,
-                    false_alarms: behavioralMetrics.false_alarms
-                }
-            },
-            
-            // === Blink метрики ===
-            blink_metrics: {
-                count: realtimeMetrics.blink_count,
-                rate_per_min: realtimeMetrics.blink_rate_per_min,
-                rate_normal: realtimeMetrics.blink_rate_per_min >= this.thresholds.blinkRateMin && 
-                            realtimeMetrics.blink_rate_per_min <= this.thresholds.blinkRateMax,
-                normal_range: `${this.thresholds.blinkRateMin}-${this.thresholds.blinkRateMax} раз/мин`
-            },
-            
-            // === Калибровка ===
-            calibration: qcResult.metrics.calibration_quality,
-            
-            // === Точность слежения ===
-            tracking: qcResult.metrics.tracking_accuracy,
-            
-            // === Dropout статистика ===
-            dropout_stats: {
-                ...qcResult.metrics.dropout_stats,
-                max_allowed_ms: this.thresholds.maxConsecutiveDropout
-            },
-            
-            // === Причины брака и предупреждения ===
-            rejection_reasons: qcResult.rejection_reasons,
-            warnings: qcResult.warnings,
-            
-            // === Формула итогового QC Score ===
-            qc_score_formula: {
-                description: 'Взвешенная сумма нормализованных метрик',
-                weights: this.weights,
-                formula: 'Σ(metric_i × weight_i), где dropout инвертирован'
-            }
-        };
-    }
-    
-    /**
-     * Получить рекомендацию на основе статуса
-     */
-    _getRecommendation(status) {
-        switch (status) {
-            case 'valid':
-                return 'Данные пригодны для анализа';
-            case 'borderline':
-                return 'Данные могут использоваться с осторожностью. Рекомендуется ручная проверка';
-            case 'invalid':
-                return 'Данные не пригодны для анализа. Требуется повторная сессия';
-            default:
-                return 'Статус неизвестен';
-        }
-    }
+    isRunning() { return this._isRunning; }
 }
 
-// Экспорт для использования в HTML
-if (typeof window !== 'undefined') {
-    window.QCMetrics = QCMetrics;
-}
-
-// ES Module export
+// CommonJS export
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = QCMetrics;
+}
+
+// Browser global
+if (typeof window !== 'undefined') {
+    window.QCMetrics = QCMetrics;
 }
