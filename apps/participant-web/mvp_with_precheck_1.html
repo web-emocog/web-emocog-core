@@ -5,8 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EmoCog Research (Multilingual)</title>
     
+    <!-- MediaPipe Vision (Face Landmarker) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
+    <script>
+        // Загruзка MediaPipe как глобальных объектов для non-module скриптов
+        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs')
+            .then(vision => {
+                window.FilesetResolver = vision.FilesetResolver;
+                window.FaceLandmarker = vision.FaceLandmarker;
+                window.ImageSegmenter = vision.ImageSegmenter;
+                console.log('[MediaPipe] Vision modules loaded (FaceLandmarker + ImageSegmenter)');
+            })
+            .catch(err => console.error('[MediaPipe] Load error:', err));
+    </script>
+    
     <!-- CDN WebGazer -->
     <script src="https://cdn.jsdelivr.net/npm/webgazer@3.3.0/dist/webgazer.min.js"></script>
+    
+    <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
+    <script src="js/precheck-analyzer.js?v=2.1.1"></script>
+    <!-- Face Segmenter Module (проверка видимости частей лица) -->
+    <script src="js/face-segmenter.js?v=1.2.1"></script>
+    <!-- QC Metrics Module -->
+    <script src="js/qc-metrics.js?v=1.0.2"></script>
     
     <style>
         /* CSS - Стили */
@@ -685,9 +706,9 @@
                     <div class="form-group">
                         <label data-i18n="label_lang">Родной язык</label>
                         <select id="language">
-                            <option value="ru" data-i18n="opt_ru">Русский</option>
+                            <option value="ru" data-i18n="opt_ru">ruсский</option>
                             <option value="en" data-i18n="opt_en">English</option>
-                            <option value="other" data-i18n="opt_other">Другой</option>
+                            <option value="other" data-i18n="opt_other">Дruгой</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -701,7 +722,7 @@
                     </div>
                 </div>
 
-                <h3 data-i18n="form_section_tech">👁️ Зрение и Оборудование</h3>
+                <h3 data-i18n="form_section_tech">👁️ Зрение и Обоruдование</h3>
                 <div class="form-row">
                     <div class="form-group">
                         <label data-i18n="label_vision">Зрение</label>
@@ -723,7 +744,7 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label data-i18n="label_hand">Ведущая рука</label>
+                        <label data-i18n="label_hand">Ведущая ruка</label>
                         <select id="hand">
                             <option value="right" data-i18n="opt_hand_r">Правая</option>
                             <option value="left" data-i18n="opt_hand_l">Левая</option>
@@ -752,14 +773,13 @@
 
         <!-- ШАГ 5: настройка камеры (pre-check) -->
         <div id="step5" class="step">
-            <h2 data-i18n="calib_title">Проверка камеры</h2>
-            <p style="text-align: center;" data-i18n="calib_desc">Сначала проверим камеру для участия в исследовании, затем начнём калибровку.</p>
+            <h2 data-i18n="calib_title">Настройка камеры</h2>
+            <p data-i18n="calib_desc">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
             
-            <!-- pre-check контейнер -->
-            <div class="precheck-container" id="precheckContainer">
-                <!-- видео превью -->
-                <div class="camera-preview" id="cameraPreview">
-                    <video id="precheckVideo" autoplay muted playsinline></video>
+            <div id="precheckContainer" class="precheck-container">
+                <!-- Превью камеры -->
+                <div id="cameraPreview" class="camera-preview">
+                    <video id="precheckVideo" autoplay playsinline muted></video>
                     <canvas id="overlayCanvas"></canvas>
                     <div class="face-guide"></div>
                     <div class="guide-text" data-i18n="guide_text">Расположите лицо внутри рамки</div>
@@ -793,12 +813,21 @@
                         </div>
                         <div class="status" id="PoseStatus" data-i18n="status_waiting">Ожидание...</div>
                     </div>
+                    
+                    <div class="indicator" id="VisibilityIndicator">
+                        <div class="icon">👁️</div>
+                        <div class="label" data-i18n="label_visibility">Видимость лица</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="VisibilityProgress"></div>
+                        </div>
+                        <div class="status" id="VisibilityStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
                 </div>
                 
                 <!-- Статус -->
                 <div class="precheck-status">
                     <p class="status-message" id="statusMessage" data-i18n="precheck_initial">
-                        Нажмите "Начать проверку" чтобы включить камеру
+                        Нажмите "Начать проверку" чтобы включить камеru
                     </p>
                 </div>
             </div>
@@ -834,9 +863,14 @@
         <div id="step6" class="step">
             <h2 data-i18n="final_title">Сессия завершена!</h2>
             <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
-            <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; border: 1px solid #BBF7D0; color: #166534; margin-bottom: 20px;">
-                <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
+            
+            <!-- Динамический блок QC статуса -->
+            <div id="qcStatusBlock">
+                <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; border: 1px solid #BBF7D0; color: #166534; margin-bottom: 20px;">
+                    <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
+                </div>
             </div>
+            
             <button class="btn" onclick="downloadData()" data-i18n="btn_download">📥 Скачать JSON</button>
             <button class="btn btn-secondary" onclick="location.reload()" data-i18n="btn_restart">Начать заново</button>
         </div>
@@ -873,7 +907,7 @@
                 consent_checkbox: "Я прочитал(а), мне есть 18 лет, и я согласен(а).",
                 btn_confirm: "Подтвердить и продолжить",
                 reg_title: "Регистрация участника",
-                reg_desc: "Пожалуйста, укажите ваш Email для связи.",
+                reg_desc: "Пожалуйста, укажите ваш Email.",
                 email_label: "Email",
                 btn_next: "Далее",
                 form_title: "Анкета участника",
@@ -884,15 +918,15 @@
                 opt_m: "Мужской",
                 opt_f: "Женский",
                 label_lang: "Родной язык",
-                opt_ru: "Русский",
+                opt_ru: "ruсский",
                 opt_en: "English",
-                opt_other: "Другой",
+                opt_other: "Дruгой",
                 label_edu: "Образование",
                 opt_edu_school: "Среднее",
                 opt_edu_student: "Студент",
                 opt_edu_higher: "Высшее",
                 opt_edu_degree: "Ученая степень",
-                form_section_tech: "👁️ Зрение и Оборудование",
+                form_section_tech: "👁️ Зрение & Обоruдование",
                 label_vision: "Зрение",
                 opt_vis_norm: "Норма",
                 opt_vis_glass: "Очки",
@@ -902,10 +936,10 @@
                 opt_path_hemi: "Гемианопсия",
                 opt_path_scot: "Скотома",
                 opt_path_color: "Дальтонизм",
-                label_hand: "Ведущая рука",
+                label_hand: "Ведущая ruка",
                 opt_hand_r: "Правая",
                 opt_hand_l: "Левая",
-                label_device: "Устройство ввода",
+                label_device: "Input Device",
                 opt_dev_mouse: "Мышь",
                 opt_dev_touch: "Тачпад",
                 label_keyboard: "Клавиатура",
@@ -916,7 +950,7 @@
                 msg_press_btn: "Подготовка калибровки...",
                 status_label: "Статус:",
                 points_label: "Записано точек:",
-                btn_camera: "Включить камеру",
+                btn_camera: "Включить камеru",
                 final_title: "Сессия завершена!",
                 final_desc: "Спасибо за участие. Данные сформированы.",
                 qc_passed: "✅ Данные валидны (QC Passed)",
@@ -926,15 +960,17 @@
                 label_light: "Освещение",
                 label_face: "Лицо",
                 label_pose: "Поза головы",
+                label_visibility: "Видимость лица",
                 status_waiting: "Ожидание...",
                 guide_text: "Расположите лицо внутри рамки",
-                precheck_initial: "Нажмите \"Начать проверку\" чтобы включить камеру",
+                precheck_initial: "Нажмите \"Начать проверку\" чтобы включить камеru",
                 precheck_requesting: "⏳ Запрашиваем доступ к камере...",
                 precheck_checking: "⏳ Проверяем условия...",
                 precheck_camera_error: "❌ Ошибка: ",
-                precheck_all_good: "✅ Все условия выполнены! Можно начинать калибровку",
+                precheck_all_good: "✅ Сheck is passed! You can start calibration",
                 btn_start_precheck: "🎥 Начать проверку",
                 btn_start_calib: "✅ Начать калибровку",
+                status_error: "❌ Error",
                 // статусы индикаторов (pre-check)
                 status_too_dark: "Темно",
                 status_too_bright: "Ярко",
@@ -943,20 +979,53 @@
                 status_not_found: "Не найдено",
                 status_too_small: "Далеко от камеры",
                 status_too_large: "Близко к камере",
+                status_out_of_zone: "Вне зоны",
+                status_tilted: "Голова наклонена",
                 status_stable: "Стабильно",
                 status_unstable: "Нестабильно",
                 status_no_face: "Нет лица",
                 status_all_good: "🎉  Проверка пройдена! Можно начинать калибровку",
                 status_needs_fix: "🔴 Требуется исправить",
                 status_checking: "⏳ Проверяем условия",
+                status_partial_face: "Часть лица скрыта",
+                status_off_center: "Не по центru",
+                status_face_occluded: "Лицо закрыто",
+                status_hair_occlusion: "Волосы закрывают лицо",
+                status_face_visible: "Лицо видно полностью",
                 //подсказки
                 tip_light_dark: "Слишком темно, необходимо включить лампу или подойти к окну",
-                tip_light_bright: "Слишком ярко, не направляйте свет прямо в камеру или отойдите от окна",
-                tip_face_not_found: "Лицо не обнаружено, убедитесь, что вы в центре кадра",
-                tip_face_too_small: "Вы слишком далеко, подвиньтесь ближе к камере",
+                tip_light_bright: "Слишком ярко, не направляйте свет прямо в камеru или отойдите от окна",
+                tip_face_not_found: "Лицо не обнаruжено, убедитесь, что вы в центре кадра",
+                tip_face_too_small: "Подвиньтесь ближе к камере, лицо должно быть полностью видно",
                 tip_face_too_large: "Вы слишком близко, отодвиньтесь от камеры",
-                tip_pose_no_face: "Лицо не обнаружено, расположитесь по центру кадра",
-                tip_pose_unstable: "Постарайтесь смотреть прямо в камеру и не двигаться",
+                tip_face_out_of_zone: "Расположите лицо по центru кадра",
+                tip_face_tilted: "Держите голову прямо, не наклоняйте её",
+                tip_pose_no_face: "Лицо не обнаruжено, расположитесь по центru кадра",
+                tip_pose_unstable: "Постарайтесь смотреть прямо в камеru и не двигаться",
+                tip_pose_partial_face: "Часть лица не видна. Расположитесь так, чтобы всё лицо было в кадре",
+                tip_pose_eyes_off_center: "Глаза не по центru экрана. Сместитесь так, чтобы смотреть прямо в камеru",
+                tip_pose_move_right: "Сместитесь немного вправо",
+                tip_pose_move_left: "Сместитесь немного влево", 
+                tip_pose_move_up: "Поднимите камеru или опуститесь ниже",
+                tip_pose_move_down: "Опустите камеru или поднимитесь выше",
+                tip_pose_turn_down: "Наклоните голову немного вниз",
+                tip_pose_turn_up: "Наклоните голову немного вверх",
+                tip_pose_tilt_right: "поверните голову влево",
+                tip_pose_tilt_left: "поверните голову вправо",
+                tip_pose_straighten: "Выровняйте голову, не наклоняйте её вбок",
+                tip_eyes_closed: "Откройте глаза и смотрите в камеru",
+                tip_face_occluded: "Уберите предметы, закрывающие лицо (ruки, волосы)",
+                tip_hand_on_face: "Уберите руку от лица",
+                tip_hair_covers_face: "Уберите волосы с лица, чтобы щёки и лоб были видны",
+                tip_left_side_occluded: "Левая сторона лица закрыта — поверните голову или уберите помеху",
+                tip_right_side_occluded: "Правая сторона лица закрыта — поверните голову или уберите помеху",
+                tip_left_hand_on_face: "Уберите левую руку от лица",
+                tip_right_hand_on_face: "Уберите правую руку от лица",
+                tip_forehead_covered: "Лоб закрыт — уберите руку или волосы со лба",
+                tip_chin_covered: "Подбородок закрыт — уберите руку от подбородка",
+                tip_eyes_area_covered: "Область глаз закрыта — уберите помеху",
+                tip_nose_covered: "Нос закрыт — уберите руку от носа",
+                tip_mouth_covered: "Рот закрыт — уберите руку от рта",
                 // Dynamic JS strings
                 id_participant: "Ваш ID участника:",
                 id_not_generated: "ID не сгенерирован",
@@ -966,7 +1035,6 @@
                 msg_wait_stable: "Ждем стабилизации лица...",
                 msg_face_locked: "Лицо захвачено! Калибровка через 2 сек...",
                 msg_no_face: "Не вижу лица. Проверьте освещение.",
-                status_error: "❌ Ошибка",
                 // Тест слежения
                 test_tracking_title: "Тест слежения",
                 test_follow_shape: "Следите глазами за фигурой",
@@ -1043,6 +1111,7 @@
                 label_light: "Lighting",
                 label_face: "Face",
                 label_pose: "Head Pose",
+                label_visibility: "Face Visibility",
                 status_waiting: "Waiting...",
                 guide_text: "Position your face inside the frame",
                 precheck_initial: "Click \"Start Check\" to enable camera",
@@ -1061,20 +1130,50 @@
                 status_not_found: "Not Found",
                 status_too_small: "Far from the camera",
                 status_too_large: "Close to the camera",
+                status_out_of_zone: "Out of frame",
+                status_tilted: "Head tilted",
                 status_stable: "Stable",
                 status_unstable: "Unstable",
                 status_no_face: "No Face",
                 status_all_good: "🎉 All good! You can start calibration",
-                status_needs_fix: "🔴 Needs fixing",
-                status_checking: "⏳ Checking conditions",
+                status_off_center: "Off center",
+                status_face_occluded: "Face Occluded",
+                status_hair_occlusion: "Hair Covers Face",
+                status_face_visible: "Face Fully Visible",
                 //подсказки
                 tip_light_dark: "Too dark, turn on a lamp or move closer to a window",
                 tip_light_bright: "Too bright, don't point light directly at the camera or move away from the window",
                 tip_face_not_found: "Face not detected, make sure you're in the center of the frame",
-                tip_face_too_small: "You're too far away, move closer to the camera",
+                tip_face_too_small: "Move closer to the camera, your face must be fully visible",
                 tip_face_too_large: "You're too close, move away from the camera",
+                tip_face_out_of_zone: "Position your face in the center of the frame",
+                tip_face_tilted: "Keep your head straight, don't tilt it",
                 tip_pose_no_face: "Face not detected, position yourself in the center of the frame",
                 tip_pose_unstable: "Try to look straight at the camera and don't move",
+                tip_pose_partial_face: "Part of your face is not visible. Position yourself so your entire face is in frame",
+                tip_pose_eyes_off_center: "Eyes are not centered on screen. Move so you're looking straight at the camera",
+                tip_pose_move_right: "Move slightly to the right",
+                tip_pose_move_left: "Move slightly to the left",
+                tip_pose_move_up: "Raise the camera or lower yourself",
+                tip_pose_move_down: "Lower the camera or raise yourself",
+                tip_pose_turn_down: "Turn your head slightly to the top",
+                tip_pose_turn_up: "Turn your head slightly to the bottom",
+                tip_pose_tilt_right: "Move your head to the left",
+                tip_pose_tilt_left: "Move your head to the right",
+                tip_pose_straighten: "Straighten your head, don't tilt it sideways",
+                tip_eyes_closed: "Open your eyes and look at the camera",
+                tip_face_occluded: "Remove objects covering your face (hands, hair)",
+                tip_hand_on_face: "Remove your hand from your face",
+                tip_hair_covers_face: "Move hair away from your face so cheeks and forehead are visible",
+                tip_left_side_occluded: "Left side of the face is covered — turn your head or remove the obstruction",
+                tip_right_side_occluded: "Right side of the face is covered — turn your head or remove the obstruction",
+                tip_left_hand_on_face: "Remove your left hand from your face",
+                tip_right_hand_on_face: "Remove your right hand from your face",
+                tip_forehead_covered: "Forehead is covered — remove your hand or hair from forehead",
+                tip_chin_covered: "Chin is covered — remove your hand from chin",
+                tip_eyes_area_covered: "Eyes area is covered — remove the obstruction",
+                tip_nose_covered: "Nose is covered — remove your hand from nose",
+                tip_mouth_covered: "Mouth is covered — remove your hand from mouth",
                 // Dynamic JS strings
                 id_participant: "Your Participant ID:",
                 id_not_generated: "ID not generated",
@@ -1129,7 +1228,9 @@
             precheck: {},
             eyeTracking: [],
             trackingTest: [], // Данные теста слежения
+            gazeValidation: null, // Данные валидации точности gaze
             events: [],
+            qcSummary: null, // QC отчёт добавляется в конце сессии
             startTime: Date.now()
         };
 
@@ -1137,26 +1238,162 @@
         let faceDetected = false;
         let currentGaze = { x: null, y: null }; // Текущие координаты взгляда
         
+        // === QC METRICS (real-time tracking) ===
+        let qcMetrics = null; // Инициализиruется при старте калибровки
+        let sessionStartTime = null; // Время начала записи для QC
+        
+        // === GAZE VALIDATION ===
+        let validationPoints = []; // Собранные точки валидации
+        let isValidating = false; // Флаг режима валидации
+        
         // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ (pre-check) ---
         let cameraStream = null;
         let isPrecheckRunning = false;
         let analysisFrameId = null;
         let successFrames = 0;
         const requiredSuccessFrames = 15;
-
-        let precheckData = {
-            illumination: null,
-            face: null,
-            pose: null,
-            overall: false
-        };
-
-        let indicatorsStatus = {
-            illumination: null,
-            face: null,
-            pose: null
+        
+        // Локальный анализатор (вместо бэкенда)
+        let localAnalyzer = null;
+        let faceSegmenter = null; // FaceSegmenter для проверки видимости областей лица
+        let precheckFramesHistory = []; // История кадров для QC
+        
+        // === CAMERA FPS MONITOR ===
+        // Простые функции для измерения реального FPS камеры
+        // Используем requestVideoFrameCallback для точного измерения
+        
+        let cameraFpsState = {
+            isRunning: false,
+            frameCount: 0,
+            lastTime: 0,
+            currentFps: 0,
+            fpsHistory: [],
+            videoFrameCallbackId: null,
+            video: null
         };
         
+        /**
+         * Запускает мониторинг FPS камеры
+         * @param {HTMLVideoElement} videoElement - элемент видео
+         */
+        function startCameraFpsMonitor(videoElement) {
+            if (cameraFpsState.isRunning) return;
+            
+            cameraFpsState.video = videoElement;
+            cameraFpsState.isRunning = true;
+            cameraFpsState.frameCount = 0;
+            cameraFpsState.lastTime = performance.now();
+            cameraFpsState.fpsHistory = [];
+            
+            if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+                console.log('[CameraFPS] Используем requestVideoFrameCallback');
+                startVideoFrameCallback();
+            } else {
+                console.log('[CameraFPS] requestVideoFrameCallback не поддерживается, используем fallback');
+                startFallbackFpsMonitor();
+            }
+        }
+        
+        /**
+         * Останавливает мониторинг FPS камеры
+         */
+        function stopCameraFpsMonitor() {
+            cameraFpsState.isRunning = false;
+            
+            if (cameraFpsState.videoFrameCallbackId && cameraFpsState.video) {
+                if (cameraFpsState.video.cancelVideoFrameCallback) {
+                    cameraFpsState.video.cancelVideoFrameCallback(cameraFpsState.videoFrameCallbackId);
+                }
+                cameraFpsState.videoFrameCallbackId = null;
+            }
+        }
+        
+        /**
+         * Возвращает средний FPS за время мониторинга
+         */
+        function getAverageCameraFps() {
+            if (cameraFpsState.fpsHistory.length === 0) return 0;
+            return Math.round(cameraFpsState.fpsHistory.reduce((a, b) => a + b, 0) / cameraFpsState.fpsHistory.length);
+        }
+        
+        /**
+         * Внутренняя функция: мониторинг через requestVideoFrameCallback
+         */
+        function startVideoFrameCallback() {
+            const onFrame = (now, metadata) => {
+                if (!cameraFpsState.isRunning) return;
+                
+                cameraFpsState.frameCount++;
+                
+                // Вычисляем FPS каждую секунду
+                const elapsed = now - cameraFpsState.lastTime;
+                if (elapsed >= 1000) {
+                    cameraFpsState.currentFps = Math.round((cameraFpsState.frameCount * 1000) / elapsed);
+                    cameraFpsState.fpsHistory.push(cameraFpsState.currentFps);
+                    if (cameraFpsState.fpsHistory.length > 30) cameraFpsState.fpsHistory.shift();
+                    
+                    // Передаём FPS в QCMetrics
+                    if (qcMetrics && qcMetrics.isRunning()) {
+                        qcMetrics.setCameraFps(cameraFpsState.currentFps);
+                    }
+                    
+                    cameraFpsState.frameCount = 0;
+                    cameraFpsState.lastTime = now;
+                }
+                
+                // Запрашиваем следующий кадр
+                cameraFpsState.videoFrameCallbackId = cameraFpsState.video.requestVideoFrameCallback(onFrame);
+            };
+            
+            cameraFpsState.videoFrameCallbackId = cameraFpsState.video.requestVideoFrameCallback(onFrame);
+        }
+        
+        /**
+         * Внутренняя функция: fallback мониторинг через currentTime
+         */
+        function startFallbackFpsMonitor() {
+            let lastVideoTime = cameraFpsState.video.currentTime;
+            let rafId = null;
+            
+            const checkFrame = () => {
+                if (!cameraFpsState.isRunning) return;
+                
+                const now = performance.now();
+                
+                // Проверяем, изменился ли кадр видео
+                if (cameraFpsState.video.currentTime !== lastVideoTime) {
+                    cameraFpsState.frameCount++;
+                    lastVideoTime = cameraFpsState.video.currentTime;
+                }
+                
+                // Вычисляем FPS каждую секунду
+                const elapsed = now - cameraFpsState.lastTime;
+                if (elapsed >= 1000) {
+                    cameraFpsState.currentFps = Math.round((cameraFpsState.frameCount * 1000) / elapsed);
+                    cameraFpsState.fpsHistory.push(cameraFpsState.currentFps);
+                    if (cameraFpsState.fpsHistory.length > 30) cameraFpsState.fpsHistory.shift();
+                    
+                    // Передаём FPS в QCMetrics
+                    if (qcMetrics && qcMetrics.isRunning()) {
+                        qcMetrics.setCameraFps(cameraFpsState.currentFps);
+                    }
+                    
+                    cameraFpsState.frameCount = 0;
+                    cameraFpsState.lastTime = now;
+                }
+                
+                rafId = requestAnimationFrame(checkFrame);
+            };
+            
+            rafId = requestAnimationFrame(checkFrame);
+            
+            // Сохраняем rafId для возможности остановки (через videoFrameCallbackId для унификации)
+            cameraFpsState.videoFrameCallbackId = rafId;
+        }
+        
+        // Для обратной совместимости (если где-то используется старый API)
+        let cameraFpsMonitor = null;
+
         // Отправка одного кадра на анализ
         async function sendFrameToBackend(videoElement) {
             /*
@@ -1242,7 +1479,6 @@
                     "status": "stable", // "stable" | "unstable" | "no_face"
                     "isStable": true // boolean
                 }
-            }
             */
             try {
                 const results = await sendFrameToBackend(videoElement);
@@ -1391,7 +1627,7 @@
                 }
                 errorMsg.textContent = emailValidation.error;
                 
-                // Блокируем переход
+                // Блокиruем переход
                 return;
             }
             
@@ -1419,13 +1655,19 @@
                 timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
             };
 
-            measureFPS().then(fps => {
-                sessionData.tech.measuredFPS = fps;
+            // Измеряем FPS рендеринга (для справки)
+            measureRenderFPS().then(renderFps => {
+                sessionData.tech.measuredFPS = renderFps;
+                sessionData.tech.renderFPS = renderFps;
                 nextStep(4);
             });
         }
 
-        function measureFPS() {
+        /**
+         * Измеряет FPS рендеринга браузера (requestAnimationFrame)
+         * Это НЕ FPS камеры, а частота обновления экрана/браузера
+         */
+        function measureRenderFPS() {
             return new Promise(resolve => {
                 let frames = 0;
                 let startTime = performance.now();
@@ -1441,6 +1683,43 @@
                 }
                 requestAnimationFrame(loop);
             });
+        }
+
+        /**
+         * Измеряет реальный FPS видеопотока камеры
+         * @param {HTMLVideoElement} videoElement - элемент видео
+         * @param {number} durationMs - длительность измерения в мс (по умолчанию 2000)
+         * @returns {Promise<{fps: number, frames: number}>}
+         */
+        function measureCameraFPS(videoElement, durationMs = 2000) {
+            return new Promise(resolve => {
+                let frameCount = 0;
+                let lastTime = 0;
+                const startTime = performance.now();
+                
+                function checkFrame(currentTime) {
+                    // Проверяем, изменился ли кадр видео
+                    if (videoElement.currentTime !== lastTime) {
+                        frameCount++;
+                        lastTime = videoElement.currentTime;
+                    }
+                    
+                    if (performance.now() - startTime < durationMs) {
+                        requestAnimationFrame(checkFrame);
+                    } else {
+                        const elapsed = (performance.now() - startTime) / 1000;
+                        const fps = Math.round(frameCount / elapsed);
+                        resolve({ fps, frames: frameCount, duration: elapsed });
+                    }
+                }
+                
+                requestAnimationFrame(checkFrame);
+            });
+        }
+
+        // Для обратной совместимости
+        function measureFPS() {
+            return measureRenderFPS();
         }
 
         // --- ВАЛИДАЦИЯ АНКЕТЫ ---
@@ -1512,7 +1791,7 @@
                 }
             }
             
-            // Блокируем кнопку если форма невалидна
+            // Блокиruем кнопку если форма невалидна
             const formBtn = document.getElementById('formBtn');
             if (formBtn) {
                 formBtn.disabled = !isValid;
@@ -1649,9 +1928,13 @@
             precheckStatus.className = 'precheck-status waiting-bg';
     
             try {
-                // Запрос доступа к камере
+                // Запрос доступа к камере с ЯВНЫМ указанием высокого frameRate
                 cameraStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true 
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30, min: 15 }  // Запрашиваем 30 FPS, минимум 15
+                    }
                 });
                 
                 const video = document.getElementById('precheckVideo');
@@ -1662,6 +1945,23 @@
                         video.play();
                         console.log(`Разрешение видео: ${video.videoWidth}x${video.videoHeight}`);
                         
+                        // Получаем реальные настройки камеры
+                        const videoTrack = cameraStream.getVideoTracks()[0];
+                        if (videoTrack) {
+                            const settings = videoTrack.getSettings();
+                            console.log('[Camera] Реальные настройки:', settings);
+                            console.log(`[Camera] Реальный frameRate: ${settings.frameRate || 'unknown'}`);
+                            
+                            // Сохраняем в sessionData
+                            sessionData.tech.camera = {
+                                width: settings.width,
+                                height: settings.height,
+                                frameRate: settings.frameRate,
+                                deviceId: settings.deviceId,
+                                facingMode: settings.facingMode
+                            };
+                        }
+                        
                         // размеры canvas для overlay
                         const canvas = document.getElementById('overlayCanvas');
                         canvas.width = video.videoWidth;
@@ -1670,6 +1970,20 @@
                         resolve();
                     };
                 });
+                
+                // Измеряем реальный FPS камеры (2 секунды)
+                console.log('[Camera] Измеряем реальный FPS камеры...');
+                const cameraFpsResult = await measureCameraFPS(video, 2000);
+                console.log(`[Camera] Измеренный FPS: ${cameraFpsResult.fps} (${cameraFpsResult.frames} кадров за ${cameraFpsResult.duration.toFixed(2)}s)`);
+                
+                // Сохраняем измеренный FPS
+                sessionData.tech.cameraFPS = cameraFpsResult.fps;
+                sessionData.tech.cameraFPSDetails = cameraFpsResult;
+                
+                // Предупреждение если FPS слишком низкий для BPM детекции
+                if (cameraFpsResult.fps < 15) {
+                    console.warn(`[Camera] ⚠️ FPS камеры (${cameraFpsResult.fps}) слишком низкий для детекции BPM! Нужно минимум 15 FPS.`);
+                }
                 
                 statusMessage.textContent = translations[currentLang].precheck_checking;
                 
@@ -1690,14 +2004,107 @@
         function stopPreCheck() {
             isPrecheckRunning = false;
             if (analysisFrameId) {
-                cancelAnimationFrame(analysisFrameId);
+                clearTimeout(analysisFrameId);
                 analysisFrameId = null;
             }
+            // Освобождаем ресурсы локального анализатора
+            if (localAnalyzer) {
+                localAnalyzer.reset();
+            }
+        }
+
+        /**
+         * Локальный анализ кадра (без бэкенда)
+         * Использует PrecheckAnalyzer для анализа освещения, лица, позы и шеи
+         * Использует FaceSegmenter для проверки видимости областей лица
+         */
+        async function runLocalPrecheckAnalysis(videoElement) {
+            // Инициализиruем анализатор если ещё не создан
+            if (!localAnalyzer) {
+                localAnalyzer = new PrecheckAnalyzer({
+                    onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
+                    onError: (err) => console.error('[PreCheck] Ошибка анализатора:', err)
+                });
+            }
+            
+            // Инициализиruем FaceSegmenter если ещё не создан
+            if (!faceSegmenter) {
+                faceSegmenter = new FaceSegmenter({
+                    segmentationType: 'selfie_multiclass',
+                    onInitialized: () => console.log('[PreCheck] FaceSegmenter инициализирован'),
+                    onError: (err) => console.error('[PreCheck] Ошибка FaceSegmenter:', err)
+                });
+            }
+            
+            try {
+                // Анализиruем кадр локально
+                const results = await localAnalyzer.analyzeFrame(videoElement);
+                
+                // Анализиruем видимость областей лица через FaceSegmenter
+                let visibilityResults = null;
+                try {
+                    // Передаём landmarks из результатов Face Landmarker для более точного анализа
+                    const faceLandmarks = results.landmarks || null;
+                    visibilityResults = await faceSegmenter.segmentFrame(videoElement, faceLandmarks);
+                    
+                    // Добавляем результаты видимости в общие результаты
+                    results.visibility = {
+                        isComplete: visibilityResults.isComplete,
+                        score: visibilityResults.score,
+                        issues: visibilityResults.issues || [],
+                        regions: visibilityResults.faceVisibility?.regions || {},
+                        timestamp: visibilityResults.timestamp
+                    };
+                } catch (segmentError) {
+                    console.warn('[PreCheck] Ошибка FaceSegmenter:', segmentError);
+                    results.visibility = {
+                        isComplete: false,
+                        score: 0,
+                        issues: visibilityResults.issues || ['segmenter_error'],
+                        error: true
+                    };
+                }
+                
+                // Сохраняем в историю для QC-метрик
+                precheckFramesHistory.push(results);
+                
+                // Ограничиваем размер истории (последние 100 кадров)
+                if (precheckFramesHistory.length > 100) {
+                    precheckFramesHistory.shift();
+                }
+                
+                return results;
+                
+            } catch (error) {
+                console.error('[PreCheck] Ошибка локального анализа:', error);
+                return {
+                    error: true,
+                    errorMessage: error.message,
+                    illumination: { value: 0, status: 'error' },
+                    face: { detected: false, size: 0, status: 'error' },
+                    pose: { status: 'error', isStable: false },
+                    neck: { visible: false, status: 'error' },
+                    visibility: { isComplete: false, score: 0, issues: ['analysis_error'], error: true },
+                    timestamp: Date.now()
+                };
+            }
+        }
+
+        /**
+         * Проверка готовности к калибровке
+         * Возвращает объект с ready: boolean и списком проблем
+         */
+        function checkCalibrationReadiness() {
+            if (!localAnalyzer || !precheckData) {
+                return { ready: false, issues: ['analyzer_not_ready'] };
+            }
+            return localAnalyzer.checkCalibrationReadiness(precheckData);
         }
 
         function startContinuousAnalysis() {
             isPrecheckRunning = true;
             successFrames = 0;
+            precheckFramesHistory = []; // Сбрасываем историю
             
             const video = document.getElementById('precheckVideo');
     
@@ -1705,8 +2112,8 @@
                 if (!isPrecheckRunning) return;
                 
                 try {
-                    // Отправляем кадр в бэк
-                    const results = await analyzeVideoFrame(video);
+                    // Используем ЛОКАЛЬНЫЙ анализатор вместо бэкенда
+                    const results = await runLocalPrecheckAnalysis(video);
                     
                     // Обновляем индикаторы с реальными данными
                     updateIndicators(results);
@@ -1716,10 +2123,13 @@
                     // Проверяем все индикаторы
                     checkAllIndicators();
                 } catch (error) {
-                    console.error('Ошибка отправки кадра:', error);
+                    console.error('Ошибка анализа кадра:', error);
                 }
                 
-                analysisFrameId = setTimeout(analyzeFrame, BACKEND_CONFIG.SEND_INTERVAL);
+                // Интервал анализа (300мс = ~3.3 FPS)
+                if (isPrecheckRunning) {
+                    analysisFrameId = setTimeout(analyzeFrame, BACKEND_CONFIG.SEND_INTERVAL);
+                }
             }
     
             // Запускаем цикл анализа
@@ -1730,6 +2140,7 @@
             updateIlluminationIndicator(data.illumination);
             updateFaceIndicator(data.face);
             updatePoseIndicator(data.pose);
+            updateVisibilityIndicator(data.visibility);
 
             if (data.face && data.face.detected && data.face.bbox) {
                 drawFaceOverlay(data.face);
@@ -1800,6 +2211,14 @@
                             : translations[currentLang].status_too_large;
                         indicatorClass = 'failed';
                         break;
+                    case 'out_of_zone':
+                        statusText = translations[currentLang].status_out_of_zone;
+                        indicatorClass = 'failed';
+                        break;
+                    case 'tilted':
+                        statusText = translations[currentLang].status_tilted;
+                        indicatorClass = 'failed';
+                        break;
                     default: 
                         statusText = translations[currentLang].status_optimal;
                         indicatorClass = 'passed';
@@ -1827,22 +2246,110 @@
             
             let progressValue, statusText, indicatorClass;
             
-            if (data.status === 'no_face') {
-                progressValue = 0;
-                statusText = translations[currentLang].status_no_face;
-                indicatorClass = 'failed';
-            } else {
-                progressValue = data.isStable ? 100 : 50;
-                statusText = data.isStable 
-                    ? translations[currentLang].status_stable 
-                    : translations[currentLang].status_unstable;
-                indicatorClass = data.isStable ? 'passed' : 'failed';
+            switch(data.status) {
+                case 'no_face':
+                    progressValue = 0;
+                    statusText = translations[currentLang].status_no_face;
+                    indicatorClass = 'failed';
+                    break;
+                case 'partial_face':
+                    progressValue = 30;
+                    statusText = translations[currentLang].status_partial_face;
+                    indicatorClass = 'failed';
+                    break;
+                case 'off_center':
+                    progressValue = 50;
+                    statusText = translations[currentLang].status_off_center;
+                    indicatorClass = 'failed';
+                    break;
+                case 'tilted':
+                    progressValue = 60;
+                    statusText = translations[currentLang].status_tilted;
+                    indicatorClass = 'failed';
+                    break;
+                case 'unstable':
+                    progressValue = 70;
+                    statusText = translations[currentLang].status_unstable;
+                    indicatorClass = 'failed';
+                    break;
+                case 'stable':
+                default:
+                    progressValue = 100;
+                    statusText = translations[currentLang].status_stable;
+                    indicatorClass = 'passed';
             }
             
             progressBar.style.width = progressValue + '%';
             statusEl.textContent = statusText;
             indicator.className = `indicator ${indicatorClass}`;
             indicatorsStatus.pose = indicatorClass;
+        }
+
+        function updateVisibilityIndicator(data) {
+            const indicator = document.getElementById('VisibilityIndicator');
+            const progressBar = document.getElementById('VisibilityProgress');
+            const statusEl = document.getElementById('VisibilityStatus');
+            
+            // Если нет данных о видимости
+            if (!data) {
+                progressBar.style.width = '0%';
+                statusEl.textContent = translations[currentLang].status_waiting;
+                indicator.className = 'indicator';
+                indicatorsStatus.visibility = null;
+                return;
+            }
+            
+            // Если ошибка
+            if (data.error) {
+                progressBar.style.width = '0%';
+                statusEl.textContent = translations[currentLang].status_error;
+                indicator.className = 'indicator failed';
+                indicatorsStatus.visibility = 'failed';
+                return;
+            }
+            
+            let progressValue, statusText, indicatorClass;
+            
+            // Используем score из FaceSegmenter (0-100)
+            progressValue = data.score || 0;
+            
+            if (data.isComplete) {
+                // Лицо видно полностью
+                statusText = translations[currentLang].status_face_visible;
+                indicatorClass = 'passed';
+            } else if (data.issues && data.issues.length > 0) {
+                // Есть проблемы с видимостью
+                const issues = data.issues;
+                
+                if (issues.includes('hair_occlusion') || issues.includes('forehead_occluded')) {
+                    statusText = translations[currentLang].status_hair_occlusion;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('left_side_occluded') || issues.includes('right_side_occluded')) {
+                    statusText = translations[currentLang].status_face_occluded;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('left_cheek_occluded') || issues.includes('right_cheek_occluded')) {
+                    statusText = translations[currentLang].status_partial_face;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('insufficient_face_visibility') || issues.includes('low_skin_visibility')) {
+                    statusText = translations[currentLang].status_partial_face;
+                    indicatorClass = 'failed';
+                } else if (issues.includes('hand_on_face')) {
+                    statusText = translations[currentLang].tip_hand_on_face;
+                    indicatorClass = 'failed';
+                } else {
+                    statusText = translations[currentLang].status_face_occluded;
+                    indicatorClass = 'failed';
+                }
+            } else {
+                // Нет данных или неопределённый статус
+                statusText = translations[currentLang].status_waiting;
+                indicatorClass = '';
+            }
+            
+            progressBar.style.width = progressValue + '%';
+            statusEl.textContent = statusText;
+            indicator.className = `indicator ${indicatorClass}`;
+            indicatorsStatus.visibility = indicatorClass || null;
         }
 
         function drawFaceOverlay(faceData) {
@@ -1861,7 +2368,12 @@
             
             if (faceData.detected && faceData.bbox) {
                 const bbox = faceData.bbox;
-                const x = bbox.x * canvas.width;
+                
+                // Инвертиruем X координату для зеркального отображения
+                // Видео отображается с transform: scaleX(-1), поэтому bbox тоже нужно отзеркалить
+                const mirroredX = 1 - bbox.x - bbox.width;
+                
+                const x = mirroredX * canvas.width;
                 const y = bbox.y * canvas.height;
                 const width = bbox.width * canvas.width;
                 const height = bbox.height * canvas.height;
@@ -1874,6 +2386,8 @@
                         break;
                     case 'too_small':
                     case 'too_large':
+                    case 'out_of_zone':
+                    case 'tilted':
                         color = '#EF4444'; // red
                         lineWidth = 3;
                         break;
@@ -1886,14 +2400,6 @@
                 ctx.strokeStyle = color;
                 ctx.lineWidth = lineWidth;
                 ctx.strokeRect(x, y, width, height);
-                
-                ctx.fillStyle = color;
-                ctx.font = 'bold 14px Arial';
-                ctx.fillText(
-                    `${Math.round(faceData.size)}%`,
-                    x + width + 5,
-                    y + height / 2
-                );
                 
                 ctx.fillStyle = color;
                 ctx.font = 'bold 14px Arial';
@@ -1915,7 +2421,7 @@
                     tips.push(translations[currentLang].tip_light_dark);
                 } else if (precheckData.illumination.status === 'too_bright') {
                     tips.push(translations[currentLang].tip_light_bright);
-                    }
+                }
             }
             
             // проверка размера лица (только для failed)
@@ -1926,15 +2432,101 @@
                     tips.push(translations[currentLang].tip_face_too_small);
                 } else if (precheckData.face.status === 'too_large') {
                     tips.push(translations[currentLang].tip_face_too_large);
+                } else if (precheckData.face.status === 'out_of_zone') {
+                    tips.push(translations[currentLang].tip_face_out_of_zone);
+                } else if (precheckData.face.status === 'tilted') {
+                    tips.push(translations[currentLang].tip_face_tilted);
                 }
             }
             
-            // проверка позы (только для failed)
+            // проверка позы (расширенная логика для всех новых статусов)
             if (indicatorsStatus.pose === 'failed' && precheckData.pose) {
-                if (precheckData.pose.status === 'no_face') {
+                const pose = precheckData.pose;
+                
+                if (pose.status === 'no_face') {
                     tips.push(translations[currentLang].tip_pose_no_face);
-                } else {
+                } else if (pose.status === 'partial_face') {
+                    // Часть лица не видна
+                    tips.push(translations[currentLang].tip_pose_partial_face);
+                } else if (pose.status === 'off_center') {
+                    // Глаза не по центru экрана
+                    tips.push(translations[currentLang].tip_pose_eyes_off_center);
+                    
+                    // Добавляем конкретные подсказки о направлении смещения
+                    if (pose.eyesCentering && pose.eyesCentering.hint) {
+                        pose.eyesCentering.hint.forEach(hint => {
+                            if (hint === 'move_right') tips.push(translations[currentLang].tip_pose_move_right);
+                            if (hint === 'move_left') tips.push(translations[currentLang].tip_pose_move_left);
+                            if (hint === 'move_up') tips.push(translations[currentLang].tip_pose_move_up);
+                            if (hint === 'move_down') tips.push(translations[currentLang].tip_pose_move_down);
+                        });
+                    }
+                } else if (pose.status === 'tilted' || pose.isTilted) {
+                    // Голова наклонена — даём конкретные подсказки
+                    if (pose.issues) {
+                        if (pose.issues.includes('yaw_exceeded')) {
+                            // yaw > 0 — голова повёрнута вправо, нужно повернуть влево
+                            if (pose.yaw > 0) {
+                                tips.push(translations[currentLang].tip_pose_turn_down);
+                            } else {
+                                tips.push(translations[currentLang].tip_pose_turn_up);
+                            }
+                        }
+                        if (pose.issues.includes('pitch_exceeded')) {
+                            // pitch > 0 — голова опущена, нужно поднять
+                            if (pose.pitch > 0) {
+                                tips.push(translations[currentLang].tip_pose_tilt_right);
+                            } else {
+                                tips.push(translations[currentLang].tip_pose_tilt_left);
+                            }
+                        }
+                        if (pose.issues.includes('roll_exceeded')) {
+                            tips.push(translations[currentLang].tip_pose_straighten);
+                        }
+                    } else {
+                        tips.push(translations[currentLang].tip_face_tilted);
+                    }
+                } else if (!pose.isStable) {
                     tips.push(translations[currentLang].tip_pose_unstable);
+                }
+            }
+            
+            // Проверка глаз (если закрыты)
+            if (precheckData.eyes && !precheckData.eyes.bothOpen) {
+                tips.push(translations[currentLang].tip_eyes_closed);
+            }
+            
+            // Проверка видимости лица (FaceSegmenter)
+            if (indicatorsStatus.visibility === 'failed' && precheckData.visibility) {
+                const visibility = precheckData.visibility;
+                
+                if (visibility.issues && visibility.issues.length > 0) {
+                    const issues = visibility.issues;
+                    
+                    // Волосы закрывают лицо
+                    if (issues.includes('hair_occlusion') || issues.includes('forehead_occluded')) {
+                        tips.push(translations[currentLang].tip_hair_covers_face);
+                    }
+                    
+                    // Левая сторона лица закрыта
+                    if (issues.includes('left_side_occluded') || issues.includes('left_cheek_occluded')) {
+                        tips.push(translations[currentLang].tip_left_side_occluded);
+                    }
+                    
+                    // Правая сторона лица закрыта
+                    if (issues.includes('right_side_occluded') || issues.includes('right_cheek_occluded')) {
+                        tips.push(translations[currentLang].tip_right_side_occluded);
+                    }
+                    
+                    // Общая проблема с видимостью (ruки, предметы)
+                    if (issues.includes('face_occluded') || issues.includes('insufficient_face_visibility')) {
+                        tips.push(translations[currentLang].tip_face_occluded);
+                    }
+                    
+                    // ruка на лице
+                    if (issues.includes('hand_on_face')) {
+                        tips.push(translations[currentLang].tip_hand_on_face);
+                    }
                 }
             }
             
@@ -1981,11 +2573,13 @@
             let statusHTML = '';
             
             if (allPassed && isConsistentSuccess) {
+                // Все проверки пройдены стабильно
                 statusHTML = translations[currentLang].status_all_good;
                 statusMessage.className = 'status-message';
                 precheckStatus.className = 'precheck-status success-bg';
                 startCalibBtn.disabled = false;
             } else if (hasFailed) {
+                // Есть проблемы — показываем подсказки
                 const tips = collectTips();
                 if (tips.length > 0) {
                     statusHTML = `
@@ -2001,6 +2595,7 @@
                 precheckStatus.className = 'precheck-status error-bg';
                 startCalibBtn.disabled = true;
             } else {
+                // Ожидание стабильности
                 statusHTML = translations[currentLang].status_checking;
                 statusMessage.className = 'status-message';
                 precheckStatus.className = 'precheck-status waiting-bg';
@@ -2026,6 +2621,15 @@
                 }
             };
             
+            // === ИНИЦИАЛИЗАЦИЯ QC METRICS ===
+            qcMetrics = new QCMetrics({
+                screenWidth: window.screen.width,
+                screenHeight: window.screen.height
+            });
+            qcMetrics.start(); // ВАЖНО: запускаем трекинг!
+            sessionStartTime = Date.now();
+            console.log('[QC] QCMetrics инициализирован и запущен');
+            
             // показываем калибровочную область
             document.getElementById('precheckContainer').style.display = 'none';
             document.getElementById('calibArea').style.display = 'block';
@@ -2036,7 +2640,7 @@
                 stopPreCheck();
             }
             
-            // Инициализируем WebGazer
+            // Инициализиruем WebGazer
             await initWebGazer();
         }
 
@@ -2089,65 +2693,21 @@
                     })
                     .begin();
 
-                // НЕ отключаем обучение по мыши - оно нужно для калибровки!
-                // webgazer.removeMouseEventListeners();
-                
-                webgazer.showVideo(true);
-                webgazer.showFaceOverlay(true);
-                webgazer.showFaceFeedbackBox(true);
-                webgazer.showPredictionPoints(false);
-
-                loading.innerText = translations[currentLang].msg_wait_stable;
-                
-                // Проверяем наличие видео-потока вместо faceDetected
-                waitForVideoAndStart();
-
-            } catch (e) {
-                alert("Camera Access Error: " + e.message);
-                console.error(e);
-                btn.style.display = 'block';
-            }
-        }
-
-        function waitForVideoAndStart() {
-            const loading = document.getElementById('loadingMsg');
-            let attempts = 0;
-            
-            const checkInterval = setInterval(() => {
-                attempts++;
-                
-                // Проверяем наличие видео-элемента WebGazer
-                const videoElement = document.getElementById('webgazerVideoFeed');
-                const videoReady = videoElement && videoElement.readyState >= 2;
-                
-                if (videoReady || faceDetected) {
-                    clearInterval(checkInterval);
-                    faceDetected = true;
-                    loading.innerText = translations[currentLang].msg_face_locked;
-                    setTimeout(runCalibrationRoutine, 2000);
-                } 
-                
-                if (attempts > 150) {
-                    clearInterval(checkInterval);
-                    loading.innerText = translations[currentLang].msg_no_face;
-                    // Всё равно запускаем калибровку через 3 секунды
-                    setTimeout(runCalibrationRoutine, 3000);
-                }
-            }, 100);
-        }
-
-        function runCalibrationRoutine() {
-            // Скрываем основной интерфейс
-            document.querySelector('.container').style.display = 'none';
-            document.querySelector('.top-bar').style.display = 'none';
-            
             // Показываем fullscreen калибровку
             const calibScreen = document.getElementById('fullscreenCalibration');
             const point = document.getElementById('fullscreenCalibPoint');
             const instructionText = document.getElementById('calibInstructionText');
             const progressText = document.getElementById('calibProgressText');
             
+            // Скрываем контейнер и шапку
+            document.querySelector('.container').style.display = 'none';
+            document.querySelector('.top-bar').style.display = 'none';
+            
+            // Показываем fullscreen калибровку
             calibScreen.classList.add('active');
+            point.style.display = 'block';
+            
+            loading.style.display = 'none';
             
             instructionText.innerText = currentLang === 'ru' 
                 ? '👆 Кликайте на красную точку, смотря на неё' 
@@ -2165,7 +2725,7 @@
                 { x: '50%', y: '90%' },   // низ-центр
                 { x: '90%', y: '90%' }    // низ-право
             ];
-
+            
             let i = 0;
             let clickCount = 0;
             
@@ -2189,16 +2749,16 @@
                     if (i >= positions.length) {
                         // Калибровка завершена
                         point.onclick = null;
-                        instructionText.innerText = currentLang === 'ru'
-                            ? '✅ Калибровка завершена! Запускаем тест...'
-                            : '✅ Calibration done! Starting test...';
-                        progressText.innerText = '';
-                        isRecording = true;
                         
-                        // Скрываем калибровку и запускаем тест
+                        instructionText.innerText = currentLang === 'ru'
+                            ? '✅ Калибровка завершена!'
+                            : '✅ Calibration complete!';
+                        progressText.innerText = '';
+                        point.style.display = 'none';
+                        
                         setTimeout(() => {
-                            calibScreen.classList.remove('active');
-                            startTrackingTest();
+                            // После калибровки запускаем валидацию точности
+                            startGazeValidation();
                         }, 1500);
                         return;
                     }
@@ -2208,8 +2768,233 @@
             };
 
             updatePoint();
+            } catch (err) {
+                console.error('[WebGazer] Ошибка инициализации:', err);
+                loading.innerText = translations[currentLang].msg_no_face;
+                faceStatus.style.display = 'none';
+            }
         }
-
+        
+        // === GAZE VALIDATION: Валидация точности после калибровки ===
+        /**
+         * Запускает этап валидации точности gaze
+         * Показывает 5 точек, собирает данные взгляда, вычисляет accuracy/precision
+         */
+        function startGazeValidation() {
+            const calibScreen = document.getElementById('fullscreenCalibration');
+            const point = document.getElementById('fullscreenCalibPoint');
+            const instructionText = document.getElementById('calibInstructionText');
+            const progressText = document.getElementById('calibProgressText');
+            
+            // Показываем экран валидации (используем тот же fullscreen)
+            calibScreen.classList.add('active');
+            point.style.display = 'block';
+            point.style.backgroundColor = '#10B981'; // Зелёная точка для валидации
+            point.style.cursor = 'default'; // Не кликабельная
+            point.onclick = null; // Убираем обработчик клика
+            
+            instructionText.innerText = currentLang === 'ru'
+                ? '👁️ Смотрите на зелёную точку (не кликайте)'
+                : '👁️ Look at the green dot (don\'t click)';
+            
+            // 5 точек валидации (дruгие позиции чем калибровка)
+            const validationPositions = [
+                { x: 25, y: 25 },   // верх-лево
+                { x: 75, y: 25 },   // верх-право
+                { x: 50, y: 50 },   // центр
+                { x: 25, y: 75 },   // низ-лево
+                { x: 75, y: 75 }    // низ-право
+            ];
+            
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+            
+            let currentPoint = 0;
+            validationPoints = []; // Сброс
+            isValidating = true;
+            
+            const SAMPLES_PER_POINT = 30; // ~1 секунда при 30 FPS
+            const SAMPLE_INTERVAL = 33; // ~30 FPS
+            let currentSamples = [];
+            let sampleCount = 0;
+            let samplingInterval = null;
+            
+            function showNextPoint() {
+                if (currentPoint >= validationPositions.length) {
+                    // Валидация завершена
+                    finishValidation();
+                    return;
+                }
+                
+                const pos = validationPositions[currentPoint];
+                const targetX = (pos.x / 100) * screenW;
+                const targetY = (pos.y / 100) * screenH;
+                
+                point.style.left = pos.x + '%';
+                point.style.top = pos.y + '%';
+                
+                progressText.innerText = currentLang === 'ru'
+                    ? `Точка ${currentPoint + 1} из ${validationPositions.length}`
+                    : `Point ${currentPoint + 1} of ${validationPositions.length}`;
+                
+                // Сброс семплов
+                currentSamples = [];
+                sampleCount = 0;
+                
+                // Небольшая задержка перед началом сбора (чтобы глаза успели перейти)
+                setTimeout(() => {
+                    // Начинаем сбор семплов
+                    samplingInterval = setInterval(() => {
+                        if (currentGaze.x !== null && currentGaze.y !== null) {
+                            currentSamples.push({
+                                gazeX: currentGaze.x,
+                                gazeY: currentGaze.y,
+                                targetX: targetX,
+                                targetY: targetY,
+                                t: Date.now()
+                            });
+                        }
+                        sampleCount++;
+                        
+                        if (sampleCount >= SAMPLES_PER_POINT) {
+                            clearInterval(samplingInterval);
+                            
+                            // Сохраняем результаты для этой точки
+                            validationPoints.push({
+                                pointIndex: currentPoint,
+                                targetX: targetX,
+                                targetY: targetY,
+                                samples: currentSamples,
+                                timestamp: Date.now()
+                            });
+                            
+                            currentPoint++;
+                            showNextPoint();
+                        }
+                    }, SAMPLE_INTERVAL);
+                }, 500); // 500ms задержка перед сбором
+            }
+            
+            function finishValidation() {
+                isValidating = false;
+                
+                // Вычисляем метрики
+                const metrics = calculateValidationMetrics(validationPoints);
+                
+                // Сохраняем в sessionData
+                sessionData.gazeValidation = {
+                    timestamp: Date.now(),
+                    points: validationPoints,
+                    metrics: metrics
+                };
+                
+                console.log('[Validation] Результаты:', metrics);
+                
+                // Показываем результат на экране
+                instructionText.innerHTML = currentLang === 'ru'
+                    ? `✅ Валидация завершена!<br><small>Точность: ${metrics.accuracyPx.toFixed(0)}px | Precision: ${metrics.precisionPx.toFixed(0)}px</small>`
+                    : `✅ Validation complete!<br><small>Accuracy: ${metrics.accuracyPx.toFixed(0)}px | Precision: ${metrics.precisionPx.toFixed(0)}px</small>`;
+                progressText.innerText = '';
+                point.style.display = 'none';
+                
+                // Восстанавливаем стиль точки для будущего использования
+                point.style.backgroundColor = '#DC2626';
+                point.style.cursor = 'pointer';
+                
+                // Переходим к тесту слежения
+                setTimeout(() => {
+                    calibScreen.classList.remove('active');
+                    isRecording = true;
+                    startTrackingTest();
+                }, 2000);
+            }
+            
+            // Запускаем первую точку
+            showNextPoint();
+        }
+        
+        /**
+         * Вычисляет метрики валидации: accuracy, precision, bias
+         */
+        function calculateValidationMetrics(points) {
+            if (!points || points.length === 0) {
+                return {
+                    accuracyPx: Infinity,
+                    accuracyDeg: Infinity,
+                    precisionPx: Infinity,
+                    precisionDeg: Infinity,
+                    biasX: 0,
+                    biasY: 0,
+                    validSamples: 0,
+                    totalSamples: 0
+                };
+            }
+            
+            let allErrors = [];
+            let allBiasX = [];
+            let allBiasY = [];
+            let totalSamples = 0;
+            let validSamples = 0;
+            
+            points.forEach(pointData => {
+                const samples = pointData.samples || [];
+                totalSamples += samples.length;
+                
+                samples.forEach(s => {
+                    if (s.gazeX !== null && s.gazeY !== null) {
+                        validSamples++;
+                        const errorX = s.gazeX - s.targetX;
+                        const errorY = s.gazeY - s.targetY;
+                        const error = Math.sqrt(errorX * errorX + errorY * errorY);
+                        allErrors.push(error);
+                        allBiasX.push(errorX);
+                        allBiasY.push(errorY);
+                    }
+                });
+            });
+            
+            if (allErrors.length === 0) {
+                return {
+                    accuracyPx: Infinity,
+                    accuracyDeg: Infinity,
+                    precisionPx: Infinity,
+                    precisionDeg: Infinity,
+                    biasX: 0,
+                    biasY: 0,
+                    validSamples: 0,
+                    totalSamples: totalSamples
+                };
+            }
+            
+            // Accuracy = средняя ошибка (mean error)
+            const accuracyPx = allErrors.reduce((a, b) => a + b, 0) / allErrors.length;
+            
+            // Precision = стандартное отклонение ошибки
+            const mean = accuracyPx;
+            const squaredDiffs = allErrors.map(e => Math.pow(e - mean, 2));
+            const precisionPx = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / squaredDiffs.length);
+            
+            // Bias = систематическое смещение (средний вектор ошибки)
+            const biasX = allBiasX.reduce((a, b) => a + b, 0) / allBiasX.length;
+            const biasY = allBiasY.reduce((a, b) => a + b, 0) / allBiasY.length;
+            
+            // Конвертация в градусы (приблизительно, при типичном расстоянии ~60см)
+            // 1 градус ≈ 35 пикселей при 60см и типичном мониторе
+            const PX_PER_DEGREE = 35;
+            
+            return {
+                accuracyPx: accuracyPx,
+                accuracyDeg: accuracyPx / PX_PER_DEGREE,
+                precisionPx: precisionPx,
+                precisionDeg: precisionPx / PX_PER_DEGREE,
+                biasX: biasX,
+                biasY: biasY,
+                validSamples: validSamples,
+                totalSamples: totalSamples,
+                validPct: totalSamples > 0 ? (validSamples / totalSamples * 100).toFixed(1) : '0.0'
+            };
+        }
+        
         // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
         function startTrackingTest() {
             const testArea = document.getElementById('trackingTestArea');
@@ -2218,23 +3003,16 @@
             const progressFill = document.getElementById('testProgressFill');
             const customDot = document.getElementById('customGazeDot');
             
-            // Скрываем основной контейнер и показываем тест на весь экран
-            document.querySelector('.container').style.display = 'none';
-            document.querySelector('.top-bar').style.display = 'none';
+            // Показываем область теста
             testArea.classList.add('active');
             
-            // Показываем точку взгляда
-            customDot.style.display = 'block';
-            customDot.style.zIndex = '3000';
-            
-            progressText.innerText = translations[currentLang].test_follow_shape;
-            
+            // Размеры экрана для траекторий
             const screenW = window.innerWidth;
             const screenH = window.innerHeight;
             
             // Траектории движения фигур
             const trajectories = [
-                // 1. Круг — горизонтальная линия слева направо
+                // 1. Кruг — горизонтальная линия слева направо
                 { shape: 'circle', duration: 4000, path: (t) => ({ 
                     x: 50 + (screenW - 100) * t, 
                     y: screenH / 2 
@@ -2249,7 +3027,7 @@
                     x: 50 + (screenW - 100) * t, 
                     y: 50 + (screenH - 100) * t 
                 })},
-                // 4. Круг — круговое движение
+                // 4. Кruг — кruговое движение
                 { shape: 'circle', duration: 5000, path: (t) => ({ 
                     x: screenW / 2 + Math.cos(t * 2 * Math.PI) * (screenW / 4), 
                     y: screenH / 2 + Math.sin(t * 2 * Math.PI) * (screenH / 4) 
@@ -2264,8 +3042,46 @@
             let currentTrajectory = 0;
             const testStartTime = Date.now();
             
+            // === QC: Запускаем фоновый анализ лица во время теста ===
+            let qcAnalysisInterval = null;
+            const video = document.getElementById('precheckVideo');
+            
+            // === CAMERA FPS MONITOR: Запускаем измерение реального FPS камеры ===
+            if (video && video.srcObject) {
+                // Создаём и запускаем монитор FPS камеры
+                startCameraFpsMonitor(video);
+                console.log('[TrackingTest] CameraFPSMonitor запущен');
+            }
+            
+            // Если видео ещё доступно, запускаем периодический анализ для QC
+            if (video && video.srcObject && localAnalyzer) {
+                qcAnalysisInterval = setInterval(async () => {
+                    try {
+                        const precheckResult = await localAnalyzer.analyzeFrame(video);
+                        let segmenterResult = null;
+                        if (faceSegmenter) {
+                            segmenterResult = await faceSegmenter.segmentFrame(video, precheckResult.landmarks);
+                        }
+                        // Передаём результаты в QCMetrics для подсчёта face/pose/illumination
+                        if (qcMetrics && qcMetrics.isRunning()) {
+                            qcMetrics.processFrame(precheckResult, segmenterResult);
+                        }
+                    } catch (e) {
+                        // Игнориruем ошибки анализа во время теста
+                    }
+                }, 100); // ~10 FPS для QC анализа
+            }
+            
             function runTrajectory() {
                 if (currentTrajectory >= trajectories.length) {
+                    // Останавливаем QC анализ
+                    if (qcAnalysisInterval) {
+                        clearInterval(qcAnalysisInterval);
+                        qcAnalysisInterval = null;
+                    }
+                    // Останавливаем CameraFPSMonitor
+                    stopCameraFpsMonitor();
+                    console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
                     finishTrackingTest();
                     return;
                 }
@@ -2294,6 +3110,26 @@
                         t: Date.now() - testStartTime
                     });
                     
+                    // === QC METRICS: передаём данные взгляда ===
+                    if (qcMetrics && qcMetrics.isRunning()) {
+                        // Новая сигнатура: addGazePoint(gazeData, poseData)
+                        // gazeData = { x, y } - координаты взгляда
+                        // poseData = { yaw, pitch } - углы головы (опционально)
+                        const gazeData = currentGaze.x !== null ? { x: currentGaze.x, y: currentGaze.y } : null;
+                        
+                        // Получаем данные позы из последнего precheck анализа (если есть)
+                        let poseData = null;
+                        if (precheckData && precheckData.pose) {
+                            poseData = {
+                                yaw: precheckData.pose.yaw || 0,
+                                pitch: precheckData.pose.pitch || 0
+                            };
+                        }
+                        
+                        qcMetrics.addGazePoint(gazeData, poseData);
+                    }
+                    // === END QC METRICS ===
+                    
                     // Обновляем прогресс
                     const totalProgress = ((currentTrajectory + t) / trajectories.length) * 100;
                     progressFill.style.width = totalProgress + '%';
@@ -2321,20 +3157,130 @@
             
             setTimeout(() => {
                 testArea.classList.remove('active');
-                document.querySelector('.container').style.display = 'block';
-                document.querySelector('.top-bar').style.display = 'flex';
                 customDot.style.display = 'none';
                 
+                // Сначала завершаем сессию, потом показываем UI
                 finishSession();
             }, 1500);
         }
 
-        function finishSession() {
+        async function finishSession() {
             isRecording = false;
-            webgazer.pause();
-            document.getElementById('webgazerVideoContainer').style.display = 'none';
+            
+            // Останавливаем WebGazer
+            try {
+                webgazer.pause();
+            } catch (e) {
+                console.warn('[finishSession] Ошибка при остановке WebGazer:', e);
+            }
+            
+            const webgazerContainer = document.getElementById('webgazerVideoContainer');
+            if (webgazerContainer) webgazerContainer.style.display = 'none';
             document.getElementById('customGazeDot').style.display = 'none';
+            
+            // === QC METRICS: получаем итоговый отчёт ===
+            if (qcMetrics) {
+                try {
+                    if (qcMetrics.flush) {
+                        // Таймаут на flush чтобы не зависнуть
+                        await Promise.race([
+                            qcMetrics.flush(),
+                            new Promise((_, reject) => setTimeout(() => reject('flush timeout'), 2000))
+                        ]).catch(e => console.warn('[QC] Flush timeout or error:', e));
+                    }
+                    const qcSummary = qcMetrics.getSummary();
+                    sessionData.qcSummary = qcSummary;
+                    console.log('[QC] Summary:', qcSummary);
+                    
+                    // Обновляем UI на основе QC результата
+                    updateFinalStepWithQC(qcSummary);
+                } catch (e) {
+                    console.warn('[finishSession] Ошибка QC metrics:', e);
+                }
+            }
+            
+            // ВАЖНО: Убираем класс active со step5 до вызова nextStep,
+            // чтобы stopPreCheckOnLeave() не вызывался повторно
+            document.getElementById('step5').classList.remove('active');
+            
+            // Показываем интерфейс
+            document.querySelector('.container').style.display = 'block';
+            document.querySelector('.top-bar').style.display = 'flex';
+            
+            // Переходим на финальный шаг
             nextStep(6);
+            
+            console.log('[finishSession] Сессия завершена, показан step6');
+        }
+
+        // === Обновление UI шага 6 на основе QC ===
+        function updateFinalStepWithQC(qcSummary) {
+            const qcStatusEl = document.getElementById('qcStatusBlock');
+            if (!qcStatusEl || !qcSummary) return;
+            
+            // getSummary() возвращает поля напрямую, не во вложенном объекте metrics
+            const passed = qcSummary.overallPass;
+            const totalFrames = qcSummary.totalFrames || 0;
+            const validGazePct = qcSummary.gazeValidPct || 0;
+            const faceOkPct = qcSummary.faceOkPct || 0;
+            const durationMs = qcSummary.durationMs || 0;
+            
+            if (passed) {
+                qcStatusEl.innerHTML = `
+                    <div style="background: #F0FDF4; padding: 15px; border-radius: 8px; border: 1px solid #BBF7D0; color: #166534; margin-bottom: 20px;">
+                        <strong>✅ ${currentLang === 'ru' ? 'Данные валидны (QC Passed)' : 'Data Valid (QC Passed)'}</strong>
+                        <div style="font-size: 12px; margin-top: 8px; opacity: 0.8;">
+                            ${currentLang === 'ru' ? 'Длительность' : 'Duration'}: ${Math.round(durationMs / 1000)}s | 
+                            ${currentLang === 'ru' ? 'Валидных' : 'Valid'}: ${validGazePct.toFixed(1)}% | 
+                            ${currentLang === 'ru' ? 'Лицо OK' : 'Face OK'}: ${faceOkPct.toFixed(1)}%
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Собираем список проблем из объекта checks
+                const issues = [];
+                if (qcSummary.checks) {
+                    if (!qcSummary.checks.duration) issues.push('short_duration');
+                    if (!qcSummary.checks.faceVisible) issues.push('low_face_visible');
+                    if (!qcSummary.checks.faceOk) issues.push('low_face_ok_pct');
+                    if (!qcSummary.checks.poseOk) issues.push('low_pose_ok_pct');
+                    if (!qcSummary.checks.illuminationOk) issues.push('low_illumination_ok_pct');
+                    if (!qcSummary.checks.eyesOpen) issues.push('low_eyes_open_pct');
+                    if (!qcSummary.checks.occlusion) issues.push('high_occlusion_pct');
+                    if (!qcSummary.checks.gazeValid) issues.push('low_gaze_valid_pct');
+                    if (!qcSummary.checks.gazeOnScreen) issues.push('high_offscreen');
+                    if (!qcSummary.checks.lowFps) issues.push('low_fps_time');
+                }
+                
+                const issueTexts = {
+                    'insufficient_data': currentLang === 'ru' ? 'Недостаточно данных' : 'Insufficient data',
+                    'low_gaze_valid_pct': currentLang === 'ru' ? 'Мало валидных точек взгляда' : 'Low valid gaze percentage',
+                    'low_face_ok_pct': currentLang === 'ru' ? 'Лицо часто терялось' : 'Face frequently lost',
+                    'high_offscreen': currentLang === 'ru' ? 'Взгляд часто за пределами экрана' : 'Gaze often offscreen',
+                    'short_duration': currentLang === 'ru' ? 'Слишком короткая сессия' : 'Session too short',
+                    'low_face_visible': currentLang === 'ru' ? 'Лицо плохо видно' : 'Face poorly visible',
+                    'low_pose_ok_pct': currentLang === 'ru' ? 'Нестабильная поза головы' : 'Unstable head pose',
+                    'low_illumination_ok_pct': currentLang === 'ru' ? 'Плохое освещение' : 'Poor lighting',
+                    'low_eyes_open_pct': currentLang === 'ru' ? 'Глаза часто закрыты' : 'Eyes often closed',
+                    'high_occlusion_pct': currentLang === 'ru' ? 'Лицо часто закрыто' : 'Face often occluded',
+                    'low_fps_time': currentLang === 'ru' ? 'Низкий FPS камеры' : 'Low camera FPS'
+                };
+                const issuesList = issues.map(issue => issueTexts[issue] || issue).join(', ');
+                
+                qcStatusEl.innerHTML = `
+                    <div style="background: #FEF2F2; padding: 15px; border-radius: 8px; border: 1px solid #FECACA; color: #991B1B; margin-bottom: 20px;">
+                        <strong>⚠️ ${currentLang === 'ru' ? 'Качество данных ниже нормы' : 'Data quality below threshold'}</strong>
+                        <div style="font-size: 12px; margin-top: 8px;">
+                            ${currentLang === 'ru' ? 'Проблемы' : 'Issues'}: ${issuesList || 'N/A'}
+                        </div>
+                        <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">
+                            ${currentLang === 'ru' ? 'Длительность' : 'Duration'}: ${Math.round(durationMs / 1000)}s | 
+                            ${currentLang === 'ru' ? 'Валидных' : 'Valid'}: ${validGazePct.toFixed(1)}% | 
+                            ${currentLang === 'ru' ? 'Лицо OK' : 'Face OK'}: ${faceOkPct.toFixed(1)}%
+                        </div>
+                    </div>
+                `;
+            }
         }
 
         function downloadData() {

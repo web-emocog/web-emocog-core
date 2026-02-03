@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>QC Metrics Test</title>
+    <script src="js/qc-metrics.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+        .test { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .pass { background: #166534; }
+        .fail { background: #991B1B; }
+        .info { background: #1e40af; }
+        pre { background: #0f0f1a; padding: 10px; border-radius: 5px; overflow-x: auto; }
+        h2 { color: #4ECDC4; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>🧪 QC Metrics Module Test</h1>
+    
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        let testsPassed = 0;
+        let testsFailed = 0;
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `test ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+            
+            if (type === 'pass') testsPassed++;
+            if (type === 'fail') testsFailed++;
+        }
+        
+        function assert(condition, testName, details = '') {
+            if (condition) {
+                log(`✅ ${testName}`, 'pass');
+            } else {
+                log(`❌ ${testName}<br><small>${details}</small>`, 'fail');
+            }
+        }
+        
+        // ========== ТЕСТЫ ==========
+        
+        log('<h2>1. Проверка загрузки модуля</h2>');
+        
+        assert(typeof QCMetrics !== 'undefined', 'QCMetrics класс доступен глобально');
+        assert(typeof QCMetrics === 'function', 'QCMetrics является конструктором');
+        
+        // ========== ТЕСТ 2: Создание экземпляра ==========
+        log('<h2>2. Создание экземпляра</h2>');
+        
+        let qc;
+        try {
+            qc = new QCMetrics({
+                screenWidth: 1920,
+                screenHeight: 1080
+            });
+            assert(true, 'Экземпляр QCMetrics создан успешно');
+        } catch (e) {
+            assert(false, 'Создание экземпляра', e.message);
+        }
+        
+        assert(typeof qc.addGazePoint === 'function', 'Метод addGazePoint существует');
+        assert(typeof qc.getSummary === 'function', 'Метод getSummary существует');
+        assert(typeof qc.reset === 'function', 'Метод reset существует');
+        
+        // ========== ТЕСТ 3: Добавление точек взгляда ==========
+        log('<h2>3. Добавление точек взгляда</h2>');
+        
+        qc.reset();
+        
+        // Симулируем 100 точек взгляда (80% валидных)
+        for (let i = 0; i < 100; i++) {
+            const isValid = i < 80; // 80 валидных, 20 невалидных
+            const x = isValid ? Math.random() * 1920 : null;
+            const y = isValid ? Math.random() * 1080 : null;
+            qc.addGazePoint(x, y, i * 50, isValid); // каждые 50мс
+        }
+        
+        const summary1 = qc.getSummary();
+        log(`<pre>${JSON.stringify(summary1, null, 2)}</pre>`, 'info');
+        
+        assert(summary1.metrics.totalPoints === 100, 'Всего точек = 100', `Получено: ${summary1.metrics.totalPoints}`);
+        assert(summary1.metrics.validGazePoints === 80, 'Валидных точек = 80', `Получено: ${summary1.metrics.validGazePoints}`);
+        assert(summary1.metrics.validGazePercent === 80, 'Процент валидных = 80%', `Получено: ${summary1.metrics.validGazePercent}`);
+        
+        // ========== ТЕСТ 4: QC Pass/Fail логика ==========
+        log('<h2>4. QC Pass/Fail логика</h2>');
+        
+        // Тест с хорошими данными (должен pass)
+        qc.reset();
+        for (let i = 0; i < 200; i++) {
+            qc.addGazePoint(
+                Math.random() * 1920, 
+                Math.random() * 1080, 
+                i * 50, 
+                true
+            );
+        }
+        const goodSummary = qc.getSummary();
+        assert(goodSummary.passed === true, 'Хорошие данные → passed = true', `passed: ${goodSummary.passed}, issues: ${goodSummary.issues.join(', ')}`);
+        
+        // Тест с плохими данными (должен fail)
+        qc.reset();
+        for (let i = 0; i < 50; i++) {
+            // Только 30% валидных
+            const isValid = i < 15;
+            qc.addGazePoint(
+                isValid ? Math.random() * 1920 : null,
+                isValid ? Math.random() * 1080 : null,
+                i * 50,
+                isValid
+            );
+        }
+        const badSummary = qc.getSummary();
+        assert(badSummary.passed === false, 'Плохие данные → passed = false', `passed: ${badSummary.passed}`);
+        assert(badSummary.issues.length > 0, 'Есть проблемы в issues', `issues: ${badSummary.issues.join(', ')}`);
+        
+        // ========== ТЕСТ 5: Недостаточно данных ==========
+        log('<h2>5. Проверка insufficient_data</h2>');
+        
+        qc.reset();
+        for (let i = 0; i < 10; i++) { // Только 10 точек
+            qc.addGazePoint(Math.random() * 1920, Math.random() * 1080, i * 50, true);
+        }
+        const fewPointsSummary = qc.getSummary();
+        assert(
+            fewPointsSummary.issues.includes('insufficient_data'), 
+            'Мало точек → insufficient_data issue',
+            `issues: ${fewPointsSummary.issues.join(', ')}`
+        );
+        
+        // ========== ТЕСТ 6: Offscreen gaze ==========
+        log('<h2>6. Проверка offscreen gaze</h2>');
+        
+        qc.reset();
+        for (let i = 0; i < 100; i++) {
+            // 50% за пределами экрана
+            const x = i < 50 ? Math.random() * 1920 : 2500; // за экраном
+            const y = i < 50 ? Math.random() * 1080 : -100; // за экраном
+            qc.addGazePoint(x, y, i * 50, true);
+        }
+        const offscreenSummary = qc.getSummary();
+        log(`<pre>onScreenPercent: ${offscreenSummary.metrics.onScreenPercent}%</pre>`, 'info');
+        assert(
+            offscreenSummary.metrics.onScreenPercent < 60,
+            'Половина offscreen → onScreenPercent < 60%',
+            `onScreenPercent: ${offscreenSummary.metrics.onScreenPercent}`
+        );
+        
+        // ========== ТЕСТ 7: Dropout tracking ==========
+        log('<h2>7. Dropout tracking</h2>');
+        
+        qc.reset();
+        // Симулируем dropout: 20 валидных, 30 null, 50 валидных
+        for (let i = 0; i < 100; i++) {
+            const isDropout = i >= 20 && i < 50;
+            const x = isDropout ? null : Math.random() * 1920;
+            const y = isDropout ? null : Math.random() * 1080;
+            qc.addGazePoint(x, y, i * 50, !isDropout);
+        }
+        const dropoutSummary = qc.getSummary();
+        log(`<pre>dropoutCount: ${dropoutSummary.metrics.dropoutCount}, maxDropoutMs: ${dropoutSummary.metrics.maxDropoutMs}</pre>`, 'info');
+        assert(
+            dropoutSummary.metrics.dropoutCount >= 1,
+            'Обнаружен dropout сегмент',
+            `dropoutCount: ${dropoutSummary.metrics.dropoutCount}`
+        );
+        
+        // ========== ИТОГИ ==========
+        log('<h2>📊 Итоги тестирования</h2>');
+        log(`<strong>Пройдено: ${testsPassed}</strong> | <strong style="color: #f87171;">Провалено: ${testsFailed}</strong>`, 
+            testsFailed === 0 ? 'pass' : 'fail');
+        
+        if (testsFailed === 0) {
+            log('🎉 Все тесты пройдены! QC Metrics работает корректно.', 'pass');
+        } else {
+            log('⚠️ Некоторые тесты провалены. Проверьте логику.', 'fail');
+        }
+    </script>
+</body>
+</html>
