@@ -19,11 +19,11 @@ class FaceSegmenter {
         this.thresholds = {
             maskConfidence: options.maskConfidence ?? 0.5,
             // ПОВЫШЕНЫ пороги чтобы уменьшить ложные срабатывания
-            minSkinVisibility: options.minSkinVisibility ?? 0.6,      // было 0.60
-            minTotalFaceSkin: options.minTotalFaceSkin ?? 0.55,        // было 0.55
-            hairOcclusionThreshold: options.hairOcclusionThreshold ?? 0.25,  // было 0.25
-            handOcclusionThreshold: options.handOcclusionThreshold ?? 0.05,  // было 0.05
-            globalHandThreshold: options.globalHandThreshold ?? 0.08,  // было 0.08 - ГЛАВНАЯ ПРОБЛЕМА
+            minSkinVisibility: options.minSkinVisibility ?? 0.6,
+            minTotalFaceSkin: options.minTotalFaceSkin ?? 0.55,
+            hairOcclusionThreshold: options.hairOcclusionThreshold ?? 0.25,
+            handOcclusionThreshold: options.handOcclusionThreshold ?? 0.05,
+            globalHandThreshold: options.globalHandThreshold ?? 0.08,
             maxAsymmetry: options.maxAsymmetry ?? 0.30
         };
         
