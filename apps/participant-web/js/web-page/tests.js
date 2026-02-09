@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { translations } from '../../translations.js';
-import { updateFinalStepWithQC } from './ui.js';
+import { updateFinalStepWithQC, nextStep } from './ui.js';
 import { stopPreCheck } from './precheck.js';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
 
@@ -384,15 +384,16 @@ export function startTrackingTest() {
             try {
                 const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(video);
                 let segmenterResult = null;
-                if (faceSegmenter) {
-                    segmenterResult = await faceSegmenter.segmentFrame(video, precheckResult.landmarks);
+                if (state.runtime.faceSegmenter) {
+                    segmenterResult = await state.runtime.faceSegmenter.segmentFrame(video, precheckResult.landmarks);
                 }
                 // Передаём результаты в QCMetrics для подсчёта face/pose/illumination
                 if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
                     state.runtime.qcMetrics.processFrame(precheckResult, segmenterResult);
                 }
             } catch (e) {
-                // Игнорируем ошибки анализа во время теста
+                // Игнорируем ошибки анализа во время теста(добавил вывод ошибок, при необходимоти уберём потом)
+                console.warn('[TrackingTest] Ошибка QC анализа:', e);
             }
         }, 100); // ~10 FPS для QC анализа
     }
@@ -434,26 +435,28 @@ export function startTrackingTest() {
                 gazeY: state.runtime.currentGaze.y,
                 t: Date.now() - testStartTime
             });
-            
-            // === QC METRICS: передаём данные взгляда ===
-            if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-                // Новая сигнатура: addGazePoint(gazeData, poseData)
-                // gazeData = { x, y } - координаты взгляда
-                // poseData = { yaw, pitch } - углы головы (опционально)
-                const gazeData = state.runtime.currentGaze.x !== null ? { x: state.runtime.currentGaze.x, y: state.runtime.currentGaze.y } : null;
+            // Данные взгляда передаются в QC через handleGazeUpdate (app.js)
+            // Здесь НЕ вызываем addGazePoint чтобы избежать двойного подсчёта
+
+            //// === QC METRICS: передаём данные взгляда ===
+            //if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
+            //    // Новая сигнатура: addGazePoint(gazeData, poseData)
+            //    // gazeData = { x, y } - координаты взгляда
+            //    // poseData = { yaw, pitch } - углы головы (опционально)
+            //    const gazeData = state.runtime.currentGaze.x !== null ? { x: state.runtime.currentGaze.x, y: state.runtime.currentGaze.y } : null;
                 
-                // Получаем данные позы из последнего precheck анализа (если есть)
-                let poseData = null;
-                if (state.runtime.precheckData && state.runtime.precheckData.pose) {
-                    poseData = {
-                        yaw: state.runtime.precheckData.pose.yaw || 0,
-                        pitch: state.runtime.precheckData.pose.pitch || 0
-                    };
-                }
+            //    // Получаем данные позы из последнего precheck анализа (если есть)
+            //    let poseData = null;
+            //    if (state.runtime.precheckData && state.runtime.precheckData.pose) {
+            //        poseData = {
+            //            yaw: state.runtime.precheckData.pose.yaw || 0,
+            //            pitch: state.runtime.precheckData.pose.pitch || 0
+            //        };
+            //    }
                 
-                state.runtime.qcMetrics.addGazePoint(gazeData, poseData);
-            }
-            // === END QC METRICS ===
+            //    state.runtime.qcMetrics.addGazePoint(gazeData, poseData);
+            //}
+            //// === END QC METRICS ===
             
             // Обновляем прогресс
             const totalProgress = ((currentTrajectory + t) / trajectories.length) * 100;
