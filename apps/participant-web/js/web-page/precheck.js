@@ -606,7 +606,7 @@ export function updateVisibilityIndicator(data) {
         }
     } else {
         // Нет данных или неопределённый статус
-        statusText = translations[currentLang].status_waiting;
+        statusText = translations[state.currentLang].status_waiting;
         indicatorClass = '';
     }
     
@@ -722,7 +722,7 @@ async function runLocalPrecheckAnalysis(videoElement) {
             results.visibility = {
                 isComplete: false,
                 score: 0,
-                issues: visibilityResults.issues || ['segmenter_error'],
+                issues: (visibilityResults && visibilityResults.issues) || ['segmenter_error'],
                 error: true
             };
         }
