@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { translations } from '../../translations.js';
-import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck.js';
 import { measureRenderFPS } from './camera.js';
 
 export function setLanguage(lang) {

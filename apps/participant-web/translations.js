@@ -29,7 +29,7 @@ export const translations = {
                 opt_m: "Мужской",
                 opt_f: "Женский",
                 label_lang: "Родной язык",
-                opt_ru: "русский",
+                opt_ru: "Русский",
                 opt_en: "English",
                 opt_other: "Другой",
                 label_edu: "Образование",
@@ -212,7 +212,10 @@ export const translations = {
                 
                 // Tracking test
                 test_follow_shape: "Следите глазами за фигурой",
-                test_complete: "Тест завершён!"
+                test_complete: "Тест завершён!",
+
+                seconds: " сек",
+                percent: "%"
             },
             en: {
                 welcome_title: "Welcome",
@@ -309,6 +312,9 @@ export const translations = {
                 status_unstable: "Unstable",
                 status_no_face: "No Face",
                 status_all_good: "🎉 All good! You can start calibration",
+                status_needs_fix: "🔴 Needs Correction",
+                status_checking: "⏳ Under Review",
+                status_partial_face: "Partially obscured Face",
                 status_off_center: "Off center",
                 status_face_occluded: "Face Occluded",
                 status_hair_occlusion: "Hair Covers Face",
@@ -422,6 +428,9 @@ export const translations = {
                 
                 // Tracking test
                 test_follow_shape: "Follow the shape with your eyes",
-                test_complete: "Test complete!"
+                test_complete: "Test complete!",
+
+                seconds: " sec", 
+                percent: "%"
             }
         };

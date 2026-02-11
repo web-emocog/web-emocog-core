@@ -3,6 +3,7 @@ import { translations } from '../../translations.js';
 import { updateFinalStepWithQC, nextStep } from './ui.js';
 import { stopPreCheck } from './precheck.js';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
+import { loadAndStartCognitiveTask } from './experimental_task.js';
 
 export async function startCalibration() {
     console.log('Запуск калибровки на основе MediaPipe Face Landmarker...');
@@ -401,13 +402,13 @@ export function startTrackingTest() {
     function runTrajectory() {
         if (currentTrajectory >= trajectories.length) {
             // Останавливаем QC анализ
-            if (qcAnalysisInterval) {
-                clearInterval(qcAnalysisInterval);
-                qcAnalysisInterval = null;
-            }
+            // if (qcAnalysisInterval) {
+            //     clearInterval(qcAnalysisInterval);
+            //     qcAnalysisInterval = null;
+            // }
             // Останавливаем CameraFPSMonitor
-            stopCameraFpsMonitor();
-            console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
+            // stopCameraFpsMonitor();
+            // console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
             finishTrackingTest();
             return;
         }
@@ -478,24 +479,48 @@ export function startTrackingTest() {
 
 export function finishTrackingTest() {
     const testArea = document.getElementById('trackingTestArea');
-    const progressText = document.getElementById('testProgressText');
-    const customDot = document.getElementById('customGazeDot');
+    const gazeDot = document.getElementById('customGazeDot');
     
-    progressText.innerText = translations[state.currentLang].test_complete;
-    
+    // Cкрываем область теста слежения
+    if (testArea) {
+        testArea.classList.remove('active');
+        testArea.style.opacity = '0';
+    }
+
+    if (gazeDot) {
+        gazeDot.style.display = 'none';
+    }
+
+    // Фиксируем событие в логах сессии
+    state.sessionData.events.push({
+        name: 'tracking_test_finished',
+        timestamp: Date.now()
+    });
+
     setTimeout(() => {
         testArea.classList.remove('active');
-        customDot.style.display = 'none';
+
+        document.querySelector('.container').style.display = 'block'; 
+        document.querySelector('.top-bar').style.display = 'flex';
         
-        // Сначала завершаем сессию, потом показываем UI
-        finishSession();
-    }, 1500);
+        // Запускаем загрузку JSON
+        loadAndStartCognitiveTask();
+        
+    }, 2500);
 }
 
 export async function finishSession() {
     state.flags.isRecording = false;
     
     document.getElementById('customGazeDot').style.display = 'none';
+
+    stopCameraFpsMonitor();
+    console.log(`[Session] CameraFPSMonitor окончательно остановлен. Средний FPS: ${getAverageCameraFps()}`);
+
+    if (typeof qcAnalysisInterval !== 'undefined' && qcAnalysisInterval) {
+        clearInterval(qcAnalysisInterval);
+        qcAnalysisInterval = null;
+    }
     
     // === QC METRICS: получаем итоговый отчёт ===
     if (state.runtime.qcMetrics) {
@@ -527,7 +552,7 @@ export async function finishSession() {
     document.querySelector('.top-bar').style.display = 'flex';
     
     // Переходим на финальный шаг
-    nextStep(6);
+    nextStep(7);
     
     console.log('[finishSession] Сессия завершена, показан step6');
 }
