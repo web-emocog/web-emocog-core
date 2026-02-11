@@ -148,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         startCalibBtn.addEventListener('click', startCalibration);
     }
 
-    // Кнопка скачивания JSON (шаг 6)
+    // Кнопка скачивания JSON (шаг 7)
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
         downloadBtn.addEventListener('click', () => {
@@ -156,7 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Кнопка перезапуска (шаг 6)
+    // Кнопка перезапуска (шаг 7)
     const restartBtn = document.getElementById('restartBtn');
     if (restartBtn) {
         restartBtn.addEventListener('click', () => {

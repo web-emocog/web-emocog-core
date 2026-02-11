@@ -25,6 +25,8 @@ export const state = {
         precheck: {},
         eyeTracking: [],
         trackingTest: [], 
+        cognitiveResults: [], 
+        experimentMeta: null, 
         gazeValidation: null,
         events: [],
         qcSummary: null,
@@ -79,5 +81,20 @@ export const state = {
         fpsHistory: [],
         videoFrameCallbackId: null,
         video: null
+    }
+};
+
+export const ex_state = {
+    instruction: {
+        container: document.getElementById('cognitiveInstruction'),
+        title: document.getElementById('cogTitle'),
+        text: document.getElementById('cogText'),
+        btn: document.getElementById('cogStartBtn')
+    },
+    task: {
+        area: document.getElementById('cognitiveStimulusArea'),
+        stimulus: document.getElementById('cogShape'),
+        fixation: document.getElementById('cogFixation'),
+        feedback: document.getElementById('cogFeedback')
     }
 };
