@@ -58,14 +58,18 @@ export const DEFAULT_THRESHOLDS = {
     gaze_on_screen_pct_min: 85,
 
     // gaze accuracy thresholds (from validation)
-    gaze_accuracy_pct_max: 8,
-    gaze_precision_pct_max: 4,
+    // v2.2.0: relaxed from 8%/4% to 12%/6% — realistic for webcam iris tracking
+    // Academic webcam eye-trackers achieve ~3-5° ≈ 5-10% diagonal in ideal conditions;
+    // with edge/corner points, 12%/6% is a reasonable pass threshold
+    gaze_accuracy_pct_max: 12, // previously 8
+    gaze_precision_pct_max: 6, // previously 4
 
     // fps QC
     fps_baseline_warmup_ms: 2000,
     fps_low_factor: 0.5,
     fps_low_abs_cap: 10,
     fps_low_abs_floor: 6,
+    fps_absolute_min: 12, // Абсолютный минимум FPS камеры (ниже — всегда low)
     maxLowFpsTimeMs: 4000,
     maxConsecutiveLowFpsMs: 2000,
 
@@ -93,16 +97,19 @@ export const VIDEO_ELEMENT_IDS = [
 
 /**
  * Весовые коэффициенты для QC Score
+ * LEGACY-compatible weights (sum = 1.0)
  */
 export const QC_WEIGHTS = {
-    face_visible: 0.15,
-    face_ok: 0.15,
-    pose_ok: 0.15,
-    illumination_ok: 0.10,
-    eyes_open: 0.10,
-    occlusion: 0.05,
-    gaze_valid: 0.15,
-    gaze_on_screen: 0.15
+    faceVis: 0.14,
+    faceOk: 0.16,
+    poseOk: 0.08,
+    lightOk: 0.06,
+    eyesOpen: 0.06,
+    occlInv: 0.10,
+    gazeValid: 0.14,
+    gazeOn: 0.16,
+    dropoutInv: 0.04,
+    fpsOk: 0.06,
 };
 
 /**

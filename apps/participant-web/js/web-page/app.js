@@ -49,7 +49,7 @@ export function handleGazeUpdate(gazeData) {
         if (customDot) customDot.style.display = 'none';
         
         if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-            state.runtime.qcMetrics.addGazePoint(null, null);
+            state.runtime.qcMetrics.addGazePoint(null, state.runtime.lastPoseData);
         }
         return;
     }
@@ -75,9 +75,9 @@ export function handleGazeUpdate(gazeData) {
         state.sessionData.eyeTracking.push({ x, y, t });
     }
 
-    // Отправка в QC Metrics
+    // Отправка в QC Metrics (с данными позы для pose-based offscreen inference)
     if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-        state.runtime.qcMetrics.addGazePoint({ x, y }, null);
+        state.runtime.qcMetrics.addGazePoint({ x, y }, state.runtime.lastPoseData);
     }
 }
 
@@ -148,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         startCalibBtn.addEventListener('click', startCalibration);
     }
 
-    // Кнопка скачивания JSON (шаг 7)
+    // Кнопка скачивания JSON (шаг 6)
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
         downloadBtn.addEventListener('click', () => {
@@ -156,7 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Кнопка перезапуска (шаг 7)
+    // Кнопка перезапуска (шаг 6)
     const restartBtn = document.getElementById('restartBtn');
     if (restartBtn) {
         restartBtn.addEventListener('click', () => {

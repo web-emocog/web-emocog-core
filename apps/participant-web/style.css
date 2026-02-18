@@ -266,6 +266,8 @@
             font-size: 18px;
             text-align: center;
             z-index: 2002;
+            pointer-events: none;
+            user-select: none;
         }
         
         .calib-progress {

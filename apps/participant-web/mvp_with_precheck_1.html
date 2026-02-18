@@ -26,7 +26,9 @@
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
     <script src="js/face-segmenter.js?v=1.2.1"></script>
     <!-- QC Metrics Module -->
-    <script src="js/qc-metrics.js?v=1.0.2"></script>
+    <script src="js/qc-metrics.js?v=3.3.0"></script>
+    <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
+    <script src="js/gaze-tracker.js?v=2.2.0"></script>
     
     
 </head>
@@ -36,7 +38,7 @@
         <div class="calib-instruction">
             <span id="calibInstructionText">👆 Кликайте на красную точку, смотря на неё</span>
             <div class="calib-progress">
-                <span id="calibProgressText">Точка 1 из 9</span>
+                <span id="calibProgressText">Точка 1 из 16</span>
             </div>
         </div>
         <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
@@ -215,7 +217,7 @@
         <!-- ШАГ 5: настройка камеры (pre-check) -->
         <div id="step5" class="step">
             <h2 data-i18n="calib_title">Настройка камеры</h2>
-            <p data-i18n="calib_desc" style="text-align: center;">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
+            <p data-i18n="calib_desc">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
             
             <div id="precheckContainer" class="precheck-container">
                 <!-- Превью камеры -->
@@ -285,6 +287,7 @@
             </div>
         </div>
 
+        <!-- ШАГ 6: Финал -->
         <div id="step6" class="step">
             <div id="cognitiveContainer" class="cognitive-container">
                 
@@ -318,7 +321,7 @@
         <!-- ШАГ 7: Финал -->
         <div id="step7" class="step">
             <h2 data-i18n="final_title">Сессия завершена!</h2>
-            <p data-i18n="final_desc" class="text-center">Спасибо за участие. Данные сформированы.</p>
+            <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
             
             <!-- Динамический блок QC статуса -->
             <div id="qcStatusBlock">

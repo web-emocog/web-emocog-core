@@ -29,7 +29,7 @@ export const translations = {
                 opt_m: "Мужской",
                 opt_f: "Женский",
                 label_lang: "Родной язык",
-                opt_ru: "Русский",
+                opt_ru: "русский",
                 opt_en: "English",
                 opt_other: "Другой",
                 label_edu: "Образование",
@@ -212,10 +212,7 @@ export const translations = {
                 
                 // Tracking test
                 test_follow_shape: "Следите глазами за фигурой",
-                test_complete: "Тест завершён!",
-
-                seconds: " сек",
-                percent: "%"
+                test_complete: "Тест завершён!"
             },
             en: {
                 welcome_title: "Welcome",
@@ -428,9 +425,6 @@ export const translations = {
                 
                 // Tracking test
                 test_follow_shape: "Follow the shape with your eyes",
-                test_complete: "Test complete!",
-
-                seconds: " sec", 
-                percent: "%"
+                test_complete: "Test complete!"
             }
         };

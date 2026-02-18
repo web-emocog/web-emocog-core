@@ -25,8 +25,8 @@ export const state = {
         precheck: {},
         eyeTracking: [],
         trackingTest: [], 
-        cognitiveResults: [], 
-        experimentMeta: null, 
+        cognitiveResults: [],
+        experimentMeta: null,
         gazeValidation: null,
         events: [],
         qcSummary: null,
@@ -47,13 +47,19 @@ export const state = {
 
         cameraStream: null,    // Объект MediaStream
         analysisFrameId: null, // ID таймера setTimeout
+        analysisInterval: null, // ID setTimeout для single-flight цикла анализа (gaze + QC)
+        _validationGazeInterval: null, // ID setTimeout для single-flight gaze prediction во время валидации
+        _analysisLoopActive: false, // Флаг single-flight цикла анализа (tracking test)
+        _validationLoopActive: false, // Флаг single-flight цикла предсказаний (validation)
         successFrames: 0,      // Счетчик успешных кадров пречека
         currentGaze: { x: null, y: null }, // Текущие координаты взгляда
+        lastPoseData: null,    // Последние данные позы из анализа (для QC gaze inference)
         
         // Объекты анализаторов
         localAnalyzer: null,
         faceSegmenter: null,
         qcMetrics: null,
+        gazeTracker: null,        // GazeTracker instance
 
         
         // Временные массивы
@@ -83,7 +89,7 @@ export const state = {
         video: null
     }
 };
-
+// убрать
 export const ex_state = {
     instruction: {
         container: document.getElementById('cognitiveInstruction'),

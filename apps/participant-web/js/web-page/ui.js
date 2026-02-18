@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { translations } from '../../translations.js';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck.js';
+import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js';
 import { measureRenderFPS } from './camera.js';
 
 export function setLanguage(lang) {
@@ -381,6 +381,18 @@ export function updateFinalStepWithQC(qcSummary) {
 export function stopPreCheckOnLeave() {
     if (state.flags.isPrecheckRunning) {
         stopPreCheck();
+    }
+    // Очищаем validation gaze interval (если уходим во время валидации)
+    state.runtime._validationLoopActive = false;
+    if (state.runtime._validationGazeInterval) {
+        clearTimeout(state.runtime._validationGazeInterval);
+        state.runtime._validationGazeInterval = null;
+    }
+    // Очищаем analysis interval (если уходим во время tracking test)
+    state.runtime._analysisLoopActive = false;
+    if (state.runtime.analysisInterval) {
+        clearTimeout(state.runtime.analysisInterval);
+        state.runtime.analysisInterval = null;
     }
     if (state.runtime.cameraStream) {
         state.runtime.cameraStream.getTracks().forEach(track => track.stop());
