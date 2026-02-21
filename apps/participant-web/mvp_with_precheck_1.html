@@ -8,10 +8,10 @@
     <link rel="stylesheet" href="style.css">
 
     <!-- MediaPipe Vision (Face Landmarker) -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs" type="module"></script>
     <script>
         // Загрузка MediaPipe как глобальных объектов для non-module скриптов
-        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs')
+        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs')
             .then(vision => {
                 window.FilesetResolver = vision.FilesetResolver;
                 window.FaceLandmarker = vision.FaceLandmarker;
@@ -22,9 +22,9 @@
     </script>
     
     <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
-    <script src="js/precheck-analyzer.js?v=2.1.1"></script>
+    <script src="js/precheck-analyzer.js?v=2.1.2"></script>
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
-    <script src="js/face-segmenter.js?v=1.2.1"></script>
+    <script src="js/face-segmenter.js?v=1.2.2"></script>
     <!-- QC Metrics Module -->
     <script src="js/qc-metrics.js?v=3.3.0"></script>
     <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
@@ -38,7 +38,7 @@
         <div class="calib-instruction">
             <span id="calibInstructionText">👆 Кликайте на красную точку, смотря на неё</span>
             <div class="calib-progress">
-                <span id="calibProgressText">Точка 1 из 16</span>
+                <span id="calibProgressText">Точка 1 из 25</span>
             </div>
         </div>
         <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
@@ -340,4 +340,3 @@
     
 </body>
 </html>
-

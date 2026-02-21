@@ -12,6 +12,7 @@ gaze-tracker/
   ├── constants.js       ← Landmark indices, defaults
   ├── features.js        ← Iris feature extraction (17-dim vector)
   ├── ridge.js           ← Ridge regression solver
+  ├── attention-metrics.js ← Research-only аналитика: blink/PERCLOS/saccade/micro-shift/hippus
   └── README.md
 ```
 
@@ -83,6 +84,36 @@ tracker.clearCalibrationData();
 - **v2.2.0**: 17-feature vector with 4 iris×head interaction terms for better corner/edge accuracy. 4×4 calibration grid (32 points). z-score standardization.
 - **v2.1.1**: 13-feature vector, z-score standardization, `addAveragedCalibrationPoint()`.
 - **v2.1.0**: 13-feature vector, λ=0.001, smoothing=0.10.
+
+## Attention Metrics Scope
+
+`attention-metrics.js` теперь находится в `js/gaze-tracker/` и отвечает за research-only метрики:
+- blink dynamics;
+- PERCLOS episodes + window stats (30s/60s);
+- saccade/fixation;
+- micro-shift proxy;
+- hippus proxy.
+
+Важно: слой attention-метрик не используется как gate для `qcSummary.overallPass`.
+
+## Потенциальная чистка (без изменений сейчас)
+
+Ниже зафиксированы кандидаты на будущий рефакторинг; сейчас они сохранены намеренно, чтобы не менять формат JSON и поведение.
+
+1. `rawBlinkEvents` в blink-детекции.
+Причина: сейчас это отладочное поле, но вне `attention-metrics.js` не потребляется; можно убрать или вынести под debug-flag для уменьшения payload.
+
+2. Дублирование `durationMs` и `eyeDurationMs` в subset-метриках.
+Причина: оба поля сейчас равны; можно оставить одно поле и алиас для совместимости.
+
+3. Дублирование `closedThresholdNorm` и `closedThresholdRel`.
+Причина: оба поля несут одно и то же значение порога; можно оставить один канонический ключ.
+
+4. Дублирование `perclosEpisodeMinMs` и `perclosCriteria.minDurationMs`.
+Причина: значение одно и то же; можно сохранить только критерии в одном объекте.
+
+5. Объёмные диагностические payload-поля (`blinkDynamics.blinks`, `blinkDynamics.closureEvents`, расширенный `bothOpenDiagnostics`).
+Причина: полезны для R&D-разборов, но заметно увеличивают JSON; можно делать условную сериализацию (summary-only vs debug).
 
 ## Зависимости
 

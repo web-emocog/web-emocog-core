@@ -1,9 +1,17 @@
-import { state } from './state.js';
+import {
+    state,
+    setSessionPhase,
+    recordSessionEvent,
+    clearTaskContext
+} from './state.js';
 import { translations } from '../../translations.js';
 import { updateFinalStepWithQC, nextStep } from './ui.js';
 import { stopPreCheck } from './precheck.js';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
 import { loadAndStartCognitiveTask } from './experimental_task.js';
+import { buildHeatmaps } from './heatmap.js';
+import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
+import { extractEyeSignalSample } from './eye-signal.js';
 
 
 const TARGET_LOOP_INTERVAL_MS = 33;
@@ -17,6 +25,9 @@ function getVideoTime(videoElement) {
 
 export async function startCalibration() {
     console.log('Запуск калибровки на основе MediaPipe Face Landmarker...');
+    setSessionPhase('calibration', { source: 'startCalibration' });
+    recordSessionEvent('calibration_start');
+    clearTaskContext();
     
     // Сохраняем данные pre-check
     state.sessionData.precheck = {
@@ -292,6 +303,10 @@ export async function startCalibration() {
         
         if (i >= positions.length) {
             // Калибровка завершена
+            recordSessionEvent('calibration_complete', {
+                calibrationPointCount: positions.length,
+                clicksPerPoint: CLICKS_PER_POINT
+            });
             
             // === GAZE: Обучаем модель ===
             if (state.runtime.gazeTracker) {
@@ -335,6 +350,7 @@ export async function startCalibration() {
  * Показывает 9 точек, собирает данные взгляда, вычисляет accuracy/precision
  */
 export function startGazeValidation() {
+    setSessionPhase('validation', { source: 'startGazeValidation' });
     const calibScreen = document.getElementById('fullscreenCalibration');
     const point = document.getElementById('fullscreenCalibPoint');
     const instructionText = document.getElementById('calibInstructionText');
@@ -363,6 +379,9 @@ export function startGazeValidation() {
         { x: 50, y: 85 },   // низ-центр
         { x: 85, y: 85 }    // низ-право
     ];
+    recordSessionEvent('validation_start', {
+        validationPointCount: validationPositions.length
+    });
     
     const screenW = window.innerWidth;
     const screenH = window.innerHeight;
@@ -480,6 +499,7 @@ export function startGazeValidation() {
                 
                 if (sampleCount >= SAMPLES_PER_POINT) {
                     clearInterval(samplingInterval);
+                    state.runtime.validationSamplingInterval = null;
                     
                     // Сохраняем результаты для этой точки
                     state.runtime.validationPoints.push({
@@ -494,11 +514,16 @@ export function startGazeValidation() {
                     showNextPoint();
                 }
             }, SAMPLE_INTERVAL);
+            state.runtime.validationSamplingInterval = samplingInterval;
         }, 500); // 500ms задержка перед сбором
     }
 
     function finishValidation() {
         state.flags.isValidating = false;
+        if (state.runtime.validationSamplingInterval) {
+            clearInterval(state.runtime.validationSamplingInterval);
+            state.runtime.validationSamplingInterval = null;
+        }
         
         // Очищаем ссылку на interval из state
         stopValidationPredictionLoop();
@@ -582,6 +607,13 @@ export function startGazeValidation() {
             filteredMetrics: filteredMetrics,
             postCalibrationCorrection
         };
+        recordSessionEvent('validation_complete', {
+            validationSampleCount: qcValidationSamples.length,
+            accuracyPct: metrics.accuracyPct,
+            precisionPct: metrics.precisionPct,
+            biasXPct: metrics.biasXPct,
+            biasYPct: metrics.biasYPct
+        });
         
         console.log('[Validation] Результаты:', metrics);
         
@@ -950,6 +982,11 @@ function shouldApplyValidationCorrection(rawMetrics, correctedMetrics) {
 
 // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
 export function startTrackingTest() {
+    setSessionPhase('tracking_test', { source: 'startTrackingTest' });
+    recordSessionEvent('tracking_test_start');
+    clearTaskContext();
+    if (!state.flags.isRecording) state.flags.isRecording = true;
+
     const testArea = document.getElementById('trackingTestArea');
     const shape = document.getElementById('testShape');
     const progressText = document.getElementById('testProgressText');
@@ -1058,6 +1095,12 @@ export function startTrackingTest() {
                 if (gaze && window.handleGazeUpdate) {
                     window.handleGazeUpdate(gaze);
                 }
+            }
+
+            // 3b) Eye-signal sample (EAR / pupil proxy) для attention-метрик
+            const eyeSignal = extractEyeSignalSample(precheckResult, Date.now());
+            if (eyeSignal && window.handleEyeSignalUpdate) {
+                window.handleEyeSignalUpdate(eyeSignal);
             }
 
             // 4) Тяжелый segmenter запускаем реже и не блокируем gaze path
@@ -1176,25 +1219,28 @@ export function finishTrackingTest() {
 
         document.querySelector('.container').style.display = 'block'; 
         document.querySelector('.top-bar').style.display = 'flex';
-        
-        // Запускаем загрузку JSON
-        loadAndStartCognitiveTask();
-
-        testArea.classList.remove('active');
-
         customDot.style.display = 'none';
-        
 
-        
-        // Сначала завершаем сессию, потом показываем UI
-        finishSession();
+        recordSessionEvent('tracking_test_complete', {
+            trackingSamples: state.sessionData.trackingTest.length,
+            averageCameraFps: getAverageCameraFps()
+        });
+        setSessionPhase('cognitive_instruction', { source: 'finishTrackingTest' });
+
+        // Запускаем когнитивный контур
+        loadAndStartCognitiveTask();
     }, 1500);
 }
 
 export async function finishSession() {
+    setSessionPhase('final', { source: 'finishSession' });
+    recordSessionEvent('session_finish_start');
     state.flags.isRecording = false;
     
-    document.getElementById('customGazeDot').style.display = 'none';
+    const customDot = document.getElementById('customGazeDot');
+    if (customDot) {
+        customDot.style.display = 'none';
+    }
     
     // === Очищаем validation gaze interval (если ещё работает) ===
     state.runtime._validationLoopActive = false;
@@ -1202,12 +1248,41 @@ export async function finishSession() {
         clearTimeout(state.runtime._validationGazeInterval);
         state.runtime._validationGazeInterval = null;
     }
+    if (state.runtime.validationSamplingInterval) {
+        clearInterval(state.runtime.validationSamplingInterval);
+        state.runtime.validationSamplingInterval = null;
+    }
 
     // === Очищаем single-flight analysis loop (если ещё работает) ===
     state.runtime._analysisLoopActive = false;
     if (state.runtime.analysisInterval) {
         clearTimeout(state.runtime.analysisInterval);
         state.runtime.analysisInterval = null;
+    }
+
+    // === Очищаем cognitive single-flight loop (если ещё работает) ===
+    state.runtime._cognitiveLoopActive = false;
+    if (state.runtime.cognitiveAnalysisInterval) {
+        clearTimeout(state.runtime.cognitiveAnalysisInterval);
+        state.runtime.cognitiveAnalysisInterval = null;
+    }
+
+    // === Heatmap + attention analytics (research-only) ===
+    try {
+        state.sessionData.heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
+            gridWidth: 96,
+            gridHeight: 54
+        });
+    } catch (e) {
+        console.warn('[finishSession] Ошибка расчёта heatmaps:', e);
+        state.sessionData.heatmaps = null;
+    }
+
+    try {
+        state.sessionData.attentionMetrics = buildAttentionMetrics(state.sessionData);
+    } catch (e) {
+        console.warn('[finishSession] Ошибка расчёта attention metrics:', e);
+        state.sessionData.attentionMetrics = null;
     }
     
     // === GAZE TRACKER: сброс ===
@@ -1218,6 +1293,8 @@ export async function finishSession() {
     
     // === Сброс данных позы ===
     state.runtime.lastPoseData = null;
+    state.runtime.lastEyeSignal = null;
+    clearTaskContext();
     
     // === QC METRICS: получаем итоговый отчёт ===
     if (state.runtime.qcMetrics) {
@@ -1260,6 +1337,7 @@ export async function finishSession() {
     
     // Переходим на финальный шаг
     nextStep(7);
+    recordSessionEvent('session_finish_complete');
     
     console.log('[finishSession] Сессия завершена, показан step7');
 }
