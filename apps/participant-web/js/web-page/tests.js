@@ -11,11 +11,13 @@ import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from
 import { loadAndStartCognitiveTask } from './experimental_task.js';
 import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
+import { startTestHub } from '../gaze-tracker/gaze-tests/index.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
+let trackingTestOptions = null;
 
 function getVideoTime(videoElement) {
     if (!videoElement || videoElement.readyState < 2) return -1;
@@ -631,11 +633,39 @@ export function startGazeValidation() {
         point.style.backgroundColor = '#DC2626';
         point.style.cursor = 'pointer';
         
-        // Переходим к тесту слежения
+        // Переходим к Test Hub после успешной калибровки и валидации
         setTimeout(() => {
             calibScreen.classList.remove('active');
             state.flags.isRecording = true;
-            startTrackingTest();
+            document.querySelector('.container').style.display = 'block';
+            document.querySelector('.top-bar').style.display = 'flex';
+
+            startTestHub({
+                runRTTest: () => new Promise(resolve => {
+                    loadAndStartCognitiveTask({
+                        autoFinishSession: false,
+                        onComplete: (payload) => {
+                            resolve(payload || {
+                                trialResults: state.sessionData.cognitiveResults.length
+                            });
+                        }
+                    });
+                }),
+                runTrackingTest: () => new Promise(resolve => {
+                    startTrackingTest({
+                        returnToHub: true,
+                        onComplete: (payload) => {
+                            resolve(payload || {
+                                trackingSamples: state.sessionData.trackingTest.length,
+                                averageCameraFps: getAverageCameraFps()
+                            });
+                        }
+                    });
+                }),
+                finishSession: async () => {
+                    await finishSession();
+                }
+            });
         }, 2000);
     }
     
@@ -981,7 +1011,8 @@ function shouldApplyValidationCorrection(rawMetrics, correctedMetrics) {
 }
 
 // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
-export function startTrackingTest() {
+export function startTrackingTest(options = {}) {
+    trackingTestOptions = options || {};
     setSessionPhase('tracking_test', { source: 'startTrackingTest' });
     recordSessionEvent('tracking_test_start');
     clearTaskContext();
@@ -1147,7 +1178,7 @@ export function startTrackingTest() {
             stopTrackingAnalysisLoop();
             stopCameraFpsMonitor();
             console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
-            finishTrackingTest();
+            finishTrackingTest(trackingTestOptions);
             return;
         }
         
@@ -1196,7 +1227,7 @@ export function startTrackingTest() {
     runTrajectory();
 }
 
-export function finishTrackingTest() {
+export function finishTrackingTest(options = trackingTestOptions || {}) {
     // === Останавливаем analysis interval (если ещё работает) ===
     state.runtime._analysisLoopActive = false;
     if (state.runtime.analysisInterval) {
@@ -1225,10 +1256,22 @@ export function finishTrackingTest() {
             trackingSamples: state.sessionData.trackingTest.length,
             averageCameraFps: getAverageCameraFps()
         });
-        setSessionPhase('cognitive_instruction', { source: 'finishTrackingTest' });
 
-        // Запускаем когнитивный контур
+        const completionPayload = {
+            trackingSamples: state.sessionData.trackingTest.length,
+            averageCameraFps: getAverageCameraFps()
+        };
+
+        if (typeof options.onComplete === 'function') {
+            options.onComplete(completionPayload);
+            trackingTestOptions = null;
+            return;
+        }
+
+        // Запускаем когнитивный контур (backward-compatible поведение)
+        setSessionPhase('cognitive_instruction', { source: 'finishTrackingTest' });
         loadAndStartCognitiveTask();
+        trackingTestOptions = null;
     }, 1500);
 }
 
@@ -1265,6 +1308,11 @@ export async function finishSession() {
     if (state.runtime.cognitiveAnalysisInterval) {
         clearTimeout(state.runtime.cognitiveAnalysisInterval);
         state.runtime.cognitiveAnalysisInterval = null;
+    }
+    state.runtime._gazeTestsLoopActive = false;
+    if (state.runtime.gazeTestsAnalysisInterval) {
+        clearTimeout(state.runtime.gazeTestsAnalysisInterval);
+        state.runtime.gazeTestsAnalysisInterval = null;
     }
 
     // === Heatmap + attention analytics (research-only) ===

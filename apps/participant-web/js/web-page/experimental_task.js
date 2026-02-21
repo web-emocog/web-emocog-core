@@ -26,6 +26,10 @@ let cognitiveLoopLastVideoTime = -1;
 let cognitiveSegmenterThrottleCounter = 0;
 let cognitiveSegmenterInFlight = false;
 let cognitiveLastSegmenterResult = null;
+let cognitiveTaskOptions = {
+    autoFinishSession: true,
+    onComplete: null
+};
 
 function getVideoTime(videoElement) {
     if (!videoElement || videoElement.readyState < 2) return -1;
@@ -234,14 +238,34 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     }
 
     clearTaskContext();
-    setSessionPhase('final', { source: 'finishCognitiveTask' });
+    const payload = {
+        reason,
+        errorMessage: errorMessage || null,
+        trialResults: state.sessionData.cognitiveResults.length,
+        blocksProcessed: currentBlockIndex
+    };
 
-    console.log('[Cognitive] Задача завершена');
-    finishSession();
+    if (cognitiveTaskOptions.autoFinishSession !== false) {
+        setSessionPhase('final', { source: 'finishCognitiveTask' });
+        console.log('[Cognitive] Задача завершена');
+        finishSession();
+        cognitiveTaskOptions = { autoFinishSession: true, onComplete: null };
+    } else {
+        setSessionPhase('cognitive_instruction', { source: 'finishCognitiveTask_return' });
+        console.log('[Cognitive] Задача завершена, возврат в Test Hub');
+        if (typeof cognitiveTaskOptions.onComplete === 'function') {
+            cognitiveTaskOptions.onComplete(payload);
+        }
+        cognitiveTaskOptions = { autoFinishSession: true, onComplete: null };
+    }
 }
 
-export async function loadAndStartCognitiveTask() {
+export async function loadAndStartCognitiveTask(options = {}) {
     console.log('[Cognitive] Инициализация задачи...');
+    cognitiveTaskOptions = {
+        autoFinishSession: options.autoFinishSession !== false,
+        onComplete: typeof options.onComplete === 'function' ? options.onComplete : null
+    };
 
     cognitiveFinished = false;
     clearTaskContext();
