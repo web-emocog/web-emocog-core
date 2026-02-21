@@ -31,6 +31,15 @@ export const state = {
         gazeValidation: null,
         heatmaps: null,
         attentionMetrics: null,
+        testHub: {
+            version: '1.0.0',
+            selections: [],
+            runs: []
+        },
+        gazeTests: {
+            vpcRuns: [],
+            visuospatialRuns: []
+        },
         events: [],
         qcSummary: null,
         startTime: Date.now()
@@ -57,6 +66,8 @@ export const state = {
         _validationLoopActive: false, // Флаг single-flight цикла предсказаний (validation)
         _cognitiveLoopActive: false, // Флаг single-flight цикла предсказаний (cognitive stage)
         cognitiveAnalysisInterval: null, // ID setTimeout для cognitive single-flight цикла
+        _gazeTestsLoopActive: false, // Флаг single-flight цикла для custom gaze tests (VPC/visuospatial)
+        gazeTestsAnalysisInterval: null, // ID setTimeout для custom gaze tests single-flight цикла
         successFrames: 0,      // Счетчик успешных кадров пречека
         currentGaze: { x: null, y: null }, // Текущие координаты взгляда
         lastPoseData: null,    // Последние данные позы из анализа (для QC gaze inference)
