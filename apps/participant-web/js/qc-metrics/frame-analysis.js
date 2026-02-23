@@ -20,6 +20,7 @@ export function createInstrumentCounters() {
         occlusionDetected: 0,
         gazeValid: 0,
         gazeOnScreen: 0,
+        gazeTotal: 0, // общее число кадров когда был вызван addGazePoint
         lowFpsFrames: 0,
         consecutiveLowFpsMs: 0,
         maxConsecutiveLowFpsMs: 0,
@@ -46,42 +47,22 @@ export function computeFrameFlags(precheckResult, segmenterResult = null) {
     
     if (!precheckResult) return flags;
     
-    // === Occlusion detection (check FIRST, affects other flags) ===
+    // === Occlusion detection (ИСПРАВЛЕНО - менее агрессивная логика) ===
+    // Окклюзия только если FaceSegmenter ЯВНО детектирует руку или серьёзную проблему
     let isOccluded = false;
-    
-    if (segmenterResult) {
-        const fv = segmenterResult.faceVisibility;
-        if (fv) {
-            // Hand detection
-            if (fv.handDetected === true) {
-                isOccluded = true;
-            }
-            
-            // Check issues array for any occlusion
-            if (Array.isArray(fv.issues) && fv.issues.length > 0) {
-                // Any issue indicates occlusion problem
-                const occlusionIssues = fv.issues.filter(issue => 
-                    issue.includes('occluded') || 
-                    issue.includes('hand') ||
-                    issue.includes('occlusion') ||
-                    issue === 'insufficient_face_visibility' ||
-                    issue === 'low_skin_visibility'
-                );
-                if (occlusionIssues.length > 0) {
-                    isOccluded = true;
-                }
-            }
-            
-            // Check isComplete flag from segmenter
-            if (fv.isComplete === false || segmenterResult.isComplete === false) {
-                isOccluded = true;
-            }
-            
-            // Check face visibility score (< 70 means significant occlusion)
-            const score = fv.score ?? segmenterResult.score;
-            if (typeof score === 'number' && score < 70) {
-                isOccluded = true;
-            }
+    if (segmenterResult && segmenterResult.faceVisibility) {
+        // Проверяем только явную детекцию руки
+        if (segmenterResult.faceVisibility.handDetected === true) {
+            isOccluded = true;
+        }
+        // Или если есть критические issues (но НЕ low_skin_visibility - это часто ложное)
+        const issues = segmenterResult.issues || segmenterResult.faceVisibility?.issues || [];
+        if (Array.isArray(issues)) {
+            const criticalIssues = issues.filter(i => 
+                i === 'hand_on_face' || 
+                i.includes('hand_occluded')
+            );
+            if (criticalIssues.length > 0) isOccluded = true;
         }
     }
     
@@ -90,21 +71,19 @@ export function computeFrameFlags(precheckResult, segmenterResult = null) {
     // === Face detection ===
     if (precheckResult.face) {
         const faceDetected = precheckResult.face.detected === true;
-        const faceStatusOk = precheckResult.face.status === 'optimal';
+        const faceStatus = precheckResult.face.status;
+        const badStatuses = ['too_small', 'too_large', 'out_of_bounds', 'not_found'];
         
-        // faceVisible: лицо детектировано И не закрыто окклюзией
-        flags.faceVisible = faceDetected && !isOccluded;
-        
-        // faceOk: лицо видно, статус optimal, нет окклюзии
-        flags.faceOk = faceDetected && faceStatusOk && !isOccluded;
+        // faceVisible НЕ зависит от окклюзии - лицо может быть видно даже с частичной окклюзией
+        flags.faceVisible = faceDetected;
+        // faceOk учитывает окклюзию
+        flags.faceOk = faceDetected && !isOccluded && !badStatuses.includes(faceStatus);
     }
     
-    // === Pose ===
+    // === Pose (LEGACY-compatible) ===
     if (precheckResult.pose) {
-        const pose = precheckResult.pose;
-        flags.poseOk = pose.status === 'stable' && 
-                       !pose.isTilted && 
-                       (pose.eyesCentering?.centered !== false);
+        flags.poseOk = (precheckResult.pose.status === 'stable') || 
+                       (precheckResult.pose.isStable === true && precheckResult.pose.isTilted !== true);
     }
     
     // === Illumination ===
@@ -114,8 +93,9 @@ export function computeFrameFlags(precheckResult, segmenterResult = null) {
     
     // === Eyes ===
     if (precheckResult.eyes) {
-        // Eyes can only be reliably detected if face is not occluded
-        flags.eyesOpen = precheckResult.eyes.bothOpen === true && !isOccluded;
+        const eyesBothOpen = precheckResult.eyes.bothOpen ?? 
+            ((precheckResult.eyes.left?.open ?? true) && (precheckResult.eyes.right?.open ?? true));
+        flags.eyesOpen = !!eyesBothOpen;
     }
     
     return flags;
@@ -165,12 +145,17 @@ export function updateInstrumentCounters(counters, flags, gazeState, isLowFps, d
 /**
  * Расчёт процентов из счётчиков
  * 
+ * ИСПРАВЛЕНО: gazeValidPct считается от gazeTotal (сколько раз вызывали addGazePoint),
+ * а не от totalFrames. gazeOnScreenPct считается от gazeValid.
+ * 
  * @param {Object} counters - счётчики
  * @returns {Object} проценты
  */
 export function computePercentages(counters) {
     const total = counters.totalFrames || 1;
-    const gazeValid = counters.gazeValid || 1;
+    // gazeTotal = количество вызовов addGazePoint; gazeValid = из них валидных
+    const gazeTotal = counters.gazeTotal || 0;
+    const gazeValid = counters.gazeValid || 0;
     
     return {
         faceVisiblePct: (counters.faceVisible / total) * 100,
@@ -179,8 +164,10 @@ export function computePercentages(counters) {
         illuminationOkPct: (counters.illuminationOk / total) * 100,
         eyesOpenPct: (counters.eyesOpen / total) * 100,
         occlusionPct: (counters.occlusionDetected / total) * 100,
-        gazeValidPct: (counters.gazeValid / total) * 100,
-        gazeOnScreenPct: (counters.gazeOnScreen / gazeValid) * 100,
+        // gazeValidPct = gazeValid / gazeTotal (только от вызовов addGazePoint)
+        gazeValidPct: gazeTotal > 0 ? (gazeValid / gazeTotal) * 100 : 0,
+        // gazeOnScreenPct считается от валидных точек взгляда
+        gazeOnScreenPct: gazeValid > 0 ? (counters.gazeOnScreen / gazeValid) * 100 : 0,
         lowFpsPct: (counters.lowFpsFrames / total) * 100
     };
 }
