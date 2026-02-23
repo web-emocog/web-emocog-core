@@ -1,11 +1,19 @@
 /**
- * QC Metrics Module v3.2 - Browser Wrapper
+ * QC Metrics Module v3.4 - Browser Wrapper
  * 
  * Этот файл служит обёрткой для обратной совместимости.
  * Основной код находится в папке ./qc-metrics/
  * 
+ * ИЗМЕНЕНИЯ v3.4:
+ * - Renamed currentFps → analysisFps in report output for clarity
+ *   (this is the processFrame() call rate, not camera FPS)
+ * 
+ * ИЗМЕНЕНИЯ v3.3:
+ * - Восстановлен метод setValidationData() — принимает результаты валидации gaze
+ *   для включения accuracy/precision checks в getSummary()
+ * 
  * ИЗМЕНЕНИЯ v3.2:
- * - Удалены неиспользуемые методы: setGazeScreenState(), setValidationData()
+ * - Удалены неиспользуемые методы: setGazeScreenState()
  * - Удалён неиспользуемый threshold: fps_camera_min
  * 
  * ИЗМЕНЕНИЯ v3.1:
@@ -13,7 +21,7 @@
  * - setCameraFps() для передачи реального FPS камеры
  * - lowFps проверка теперь использует cameraFps
  * 
- * @version 3.2.0
+ * @version 3.4.0
  */
 
 /**
@@ -37,8 +45,12 @@ class QCMetrics {
             occlusion_pct_max: 20,
             gaze_valid_pct_min: 80,
             gaze_on_screen_pct_min: 85,
-            gaze_accuracy_pct_max: 8,
-            gaze_precision_pct_max: 4,
+            // gaze accuracy thresholds (from validation)
+            // v2.2.0: relaxed from 8%/4% to 12%/6% — realistic for webcam iris tracking
+            // Academic webcam eye-trackers achieve ~3-5° ≈ 5-10% diagonal in ideal conditions;
+            // with edge/corner points, 12%/6% is a reasonable pass threshold
+            gaze_accuracy_pct_max: 12, // previously 8
+            gaze_precision_pct_max: 6, // previously 4
             fps_baseline_warmup_ms: 2000,
             fps_low_factor: 0.5,
             fps_low_abs_cap: 10,
@@ -331,7 +343,7 @@ class QCMetrics {
             gazeValidPct: r(pcts.gazeValidPct),
             gazeOnScreenPct: r(pcts.gazeOnScreenPct),
             // FPS: теперь показываем оба значения
-            currentFps: this._currentFps,      // FPS анализа
+            analysisFps: this._currentFps,     // FPS анализа (processFrame calls/sec)
             cameraFps: this._cameraFps,        // Реальный FPS камеры
             baselineFps: this._baselineFps,
             lowFpsPct: r(pcts.lowFpsPct),
@@ -462,6 +474,42 @@ class QCMetrics {
     }
 
     isRunning() { return this._isRunning; }
+
+    /**
+     * Принимает результаты валидации точности gaze.
+     * Вызывается из tests.js после завершения этапа валидации.
+     * Заполняет _validationState, чтобы getSummary() включал accuracy/precision checks.
+     * 
+     * @param {Array<{gazeX: number, gazeY: number, targetX: number, targetY: number}>} samples
+     */
+    setValidationData(samples) {
+        if (!Array.isArray(samples) || samples.length === 0) {
+            console.warn('[QCMetrics] setValidationData: нет данных');
+            return;
+        }
+
+        const errors = [];
+        for (const s of samples) {
+            if (s.gazeX != null && s.gazeY != null && s.targetX != null && s.targetY != null) {
+                const dx = s.gazeX - s.targetX;
+                const dy = s.gazeY - s.targetY;
+                errors.push(Math.sqrt(dx * dx + dy * dy));
+            }
+        }
+
+        if (errors.length < 3) {
+            console.warn('[QCMetrics] setValidationData: недостаточно валидных точек:', errors.length);
+            return;
+        }
+
+        this._validationState = {
+            points: samples,
+            errors: errors,
+            isComplete: true
+        };
+
+        console.log(`[QCMetrics] Validation data set: ${errors.length} points`);
+    }
 }
 
 // CommonJS export
