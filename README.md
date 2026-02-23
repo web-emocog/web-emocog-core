@@ -7,3 +7,5 @@ Web-платформа для когнитивных исследований:
 - ML runtime (browser inference)
 
 Monorepo без k8s/terraform, ориентирован на локальный dev.
+
+Порты: 80, 20, 333
