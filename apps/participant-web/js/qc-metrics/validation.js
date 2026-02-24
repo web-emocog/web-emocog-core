@@ -23,8 +23,12 @@ export function createValidationState() {
 /**
  * Установка данных валидации
  * 
+ * Accepts both formats:
+ *   - flat:   { gazeX, gazeY, targetX, targetY }  (from tests.js)
+ *   - nested: { target: {x,y}, gaze: {x,y} }
+ * 
  * @param {Object} state - текущее состояние
- * @param {Array} validationData - данные валидации [{target: {x,y}, gaze: {x,y}}, ...]
+ * @param {Array} validationData - данные валидации
  * @returns {Object} обновлённое состояние
  */
 export function setValidationData(state, validationData) {
@@ -36,11 +40,34 @@ export function setValidationData(state, validationData) {
     newState.points = validationData;
     newState.isComplete = true;
     
-    // Вычисляем ошибки
+    // Вычисляем ошибки (поддерживаем оба формата)
     newState.errors = validationData.map(point => {
-        if (!point.target || !point.gaze) return null;
-        const dx = point.gaze.x - point.target.x;
-        const dy = point.gaze.y - point.target.y;
+        let gazeX, gazeY, targetX, targetY;
+        
+        // Flat format: { gazeX, gazeY, targetX, targetY }
+        if (point.gazeX != null && point.targetX != null) {
+            gazeX = point.gazeX;
+            gazeY = point.gazeY;
+            targetX = point.targetX;
+            targetY = point.targetY;
+        }
+        // Nested format: { target: {x,y}, gaze: {x,y} }
+        else if (point.target && point.gaze) {
+            gazeX = point.gaze.x;
+            gazeY = point.gaze.y;
+            targetX = point.target.x;
+            targetY = point.target.y;
+        }
+        else {
+            return null;
+        }
+        
+        if (gazeX == null || gazeY == null || targetX == null || targetY == null) {
+            return null;
+        }
+        
+        const dx = gazeX - targetX;
+        const dy = gazeY - targetY;
         return Math.sqrt(dx * dx + dy * dy);
     }).filter(e => e !== null);
     

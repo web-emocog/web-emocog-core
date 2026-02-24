@@ -24,10 +24,22 @@ export const state = {
         tech: {}, 
         precheck: {},
         eyeTracking: [],
+        eyeSignals: [],
         trackingTest: [], 
-        cognitiveResults: [], 
-        experimentMeta: null, 
+        cognitiveResults: [],
+        experimentMeta: null,
         gazeValidation: null,
+        heatmaps: null,
+        attentionMetrics: null,
+        testHub: {
+            version: '1.0.0',
+            selections: [],
+            runs: []
+        },
+        gazeTests: {
+            vpcRuns: [],
+            visuospatialRuns: []
+        },
         events: [],
         qcSummary: null,
         startTime: Date.now()
@@ -47,13 +59,33 @@ export const state = {
 
         cameraStream: null,    // Объект MediaStream
         analysisFrameId: null, // ID таймера setTimeout
+        analysisInterval: null, // ID setTimeout для single-flight цикла анализа (gaze + QC)
+        _validationGazeInterval: null, // ID setTimeout для single-flight gaze prediction во время валидации
+        validationSamplingInterval: null, // ID setInterval для сбора validation-сэмплов
+        _analysisLoopActive: false, // Флаг single-flight цикла анализа (tracking test)
+        _validationLoopActive: false, // Флаг single-flight цикла предсказаний (validation)
+        _cognitiveLoopActive: false, // Флаг single-flight цикла предсказаний (cognitive stage)
+        cognitiveAnalysisInterval: null, // ID setTimeout для cognitive single-flight цикла
+        _gazeTestsLoopActive: false, // Флаг single-flight цикла для custom gaze tests (VPC/visuospatial)
+        gazeTestsAnalysisInterval: null, // ID setTimeout для custom gaze tests single-flight цикла
         successFrames: 0,      // Счетчик успешных кадров пречека
         currentGaze: { x: null, y: null }, // Текущие координаты взгляда
+        lastPoseData: null,    // Последние данные позы из анализа (для QC gaze inference)
+        lastEyeSignal: null,   // Последний eye-signal sample (EAR/iris proxy)
+        currentPhase: 'init',
+        taskContext: {
+            blockId: null,
+            trialId: null,
+            stimulusId: null,
+            stimulusType: null,
+            expectedResponse: null
+        },
         
         // Объекты анализаторов
         localAnalyzer: null,
         faceSegmenter: null,
         qcMetrics: null,
+        gazeTracker: null,        // GazeTracker instance
 
         
         // Временные массивы
@@ -84,6 +116,57 @@ export const state = {
     }
 };
 
+function getNowMs() {
+    return Date.now();
+}
+
+export function getRelativeSessionTimeMs(ts = getNowMs()) {
+    const start = state.sessionData.startTime || ts;
+    return Math.max(0, ts - start);
+}
+
+export function getCurrentTaskContext() {
+    return { ...(state.runtime.taskContext || {}) };
+}
+
+export function recordSessionEvent(type, payload = {}) {
+    const timestamp = getNowMs();
+    const event = {
+        type,
+        phase: state.runtime.currentPhase || null,
+        timestamp,
+        tRelMs: getRelativeSessionTimeMs(timestamp),
+        ...payload
+    };
+    state.sessionData.events.push(event);
+    return event;
+}
+
+export function setSessionPhase(phase, payload = {}) {
+    if (!phase) return;
+    if (state.runtime.currentPhase === phase && !payload.force) return;
+    state.runtime.currentPhase = phase;
+    recordSessionEvent('phase_change', { phase, ...payload });
+}
+
+export function setTaskContext(contextPatch = {}) {
+    state.runtime.taskContext = {
+        ...(state.runtime.taskContext || {}),
+        ...contextPatch
+    };
+    return getCurrentTaskContext();
+}
+
+export function clearTaskContext() {
+    state.runtime.taskContext = {
+        blockId: null,
+        trialId: null,
+        stimulusId: null,
+        stimulusType: null,
+        expectedResponse: null
+    };
+    return getCurrentTaskContext();
+}
 export const ex_state = {
     instruction: {
         container: document.getElementById('cognitiveInstruction'),

@@ -8,10 +8,10 @@
     <link rel="stylesheet" href="style.css">
 
     <!-- MediaPipe Vision (Face Landmarker) -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs" type="module"></script>
     <script>
         // Загрузка MediaPipe как глобальных объектов для non-module скриптов
-        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs')
+        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs')
             .then(vision => {
                 window.FilesetResolver = vision.FilesetResolver;
                 window.FaceLandmarker = vision.FaceLandmarker;
@@ -22,11 +22,13 @@
     </script>
     
     <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
-    <script src="js/precheck-analyzer.js?v=2.1.1"></script>
+    <script src="js/precheck-analyzer.js?v=2.1.2"></script>
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
-    <script src="js/face-segmenter.js?v=1.2.1"></script>
+    <script src="js/face-segmenter.js?v=1.2.2"></script>
     <!-- QC Metrics Module -->
-    <script src="js/qc-metrics.js?v=1.0.2"></script>
+    <script src="js/qc-metrics.js?v=3.3.0"></script>
+    <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
+    <script src="js/gaze-tracker.js?v=2.2.0"></script>
     
     
 </head>
@@ -36,7 +38,7 @@
         <div class="calib-instruction">
             <span id="calibInstructionText">👆 Кликайте на красную точку, смотря на неё</span>
             <div class="calib-progress">
-                <span id="calibProgressText">Точка 1 из 9</span>
+                <span id="calibProgressText">Точка 1 из 25</span>
             </div>
         </div>
         <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
@@ -286,6 +288,62 @@
         </div>
 
         <div id="step6" class="step">
+            <div id="testHubContainer" class="test-hub-container" style="display: none;">
+                <h2 data-i18n="test_hub_title">Выбор теста</h2>
+                <p id="testHubSubtitle" class="text-center" data-i18n="test_hub_subtitle">
+                    Выберите тест для запуска. После завершения можно запустить следующий.
+                </p>
+
+                <div class="test-hub-grid">
+                    <button class="test-card-btn" id="hubRunRtBtn" data-i18n="test_card_rt_title">RT test (Go/NoGo)</button>
+                    <button class="test-card-btn" id="hubRunTrackingBtn" data-i18n="test_card_tracking_title">Tracking test</button>
+                    <button class="test-card-btn" id="hubRunVpcBtn" data-i18n="test_card_vpc_title">VPC (Felidae)</button>
+                    <button class="test-card-btn" id="hubRunVisuospatialBtn" data-i18n="test_card_visuospatial_title">Visuospatial drawing</button>
+                </div>
+
+                <div id="testHubLastResult" class="test-hub-last-result"></div>
+
+                <div class="test-hub-actions">
+                    <button class="btn btn-secondary" id="hubFinishSessionBtn" data-i18n="test_hub_finish">Завершить сессию</button>
+                </div>
+            </div>
+
+            <div id="gazeTestsContainer" class="gaze-tests-container" style="display: none;">
+                <div id="vpcTestScreen" class="gaze-test-screen vpc-screen" style="display: none;">
+                    <h2 data-i18n="test_card_vpc_title">VPC (Felidae)</h2>
+                    <p class="text-center" data-i18n="vpc_instruction">
+                        Смотрите на изображения естественно. Нажимать ничего не нужно.
+                    </p>
+                    <div id="vpcProgressText" class="test-meta"></div>
+                    <div id="vpcPhaseText" class="test-meta"></div>
+
+                    <div id="vpcFixationMark" class="vpc-fixation">+</div>
+                    <img id="vpcCenterImage" class="vpc-center-image" alt="" style="display: none;">
+
+                    <div class="vpc-pair-row">
+                        <img id="vpcLeftImage" class="vpc-side-image" alt="" style="display: none;">
+                        <img id="vpcRightImage" class="vpc-side-image" alt="" style="display: none;">
+                    </div>
+                </div>
+
+                <div id="visuospatialTestScreen" class="gaze-test-screen visuospatial-screen" style="display: none;">
+                    <h2 data-i18n="test_card_visuospatial_title">Visuospatial drawing</h2>
+                    <h3 id="visuospatialPromptTitle"></h3>
+                    <p id="visuospatialPromptText" class="text-center"></p>
+                    <p id="visuospatialStatusText" class="test-meta"></p>
+
+                    <div class="visuospatial-controls">
+                        <button class="btn" id="visuospatialStartBtn" data-i18n="visuospatial_btn_start">Начать рисование</button>
+                        <button class="btn btn-secondary" id="visuospatialFinishBtn" data-i18n="visuospatial_btn_finish">Завершить</button>
+                    </div>
+
+                    <div class="visuospatial-canvas-wrap">
+                        <canvas id="visuospatialCanvas"></canvas>
+                        <div id="visuospatialGazeDot"></div>
+                    </div>
+                </div>
+            </div>
+
             <div id="cognitiveContainer" class="cognitive-container">
                 
                 <div id="cognitiveInstruction" class="card p-4">
@@ -318,7 +376,7 @@
         <!-- ШАГ 7: Финал -->
         <div id="step7" class="step">
             <h2 data-i18n="final_title">Сессия завершена!</h2>
-            <p data-i18n="final_desc" class="text-center">Спасибо за участие. Данные сформированы.</p>
+            <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
             
             <!-- Динамический блок QC статуса -->
             <div id="qcStatusBlock">
@@ -337,4 +395,3 @@
     
 </body>
 </html>
-

@@ -2,7 +2,7 @@
 
 Модуль контроля качества данных для eye-tracking исследований.
 
-**Версия:** 3.2.0
+**Версия:** 3.4.0
 
 ## Описание
 
@@ -123,13 +123,14 @@ new QCMetrics(options)
     lowFpsPct: 0,
     
     // FPS
-    currentFps: 28,              // FPS анализа
+    analysisFps: 28,             // FPS анализа (processFrame calls/sec)
     cameraFps: 30,               // Реальный FPS камеры
     baselineFps: 30,             // Baseline FPS
     
-    // Время взгляда
+    // Gaze time
     gazeValidTimeMs: 11000,
     gazeOnScreenTimeMs: 10500,
+    gazeTotal: 350,              // Всего вызовов addGazePoint
     
     timestamp: 1706889600000
 }
@@ -187,35 +188,37 @@ new QCMetrics(options)
 | `occlusion_pct_max` | 20% | Максимум окклюзии |
 | `gaze_valid_pct_min` | 80% | Минимум валидного взгляда |
 | `gaze_on_screen_pct_min` | 85% | Минимум взгляда на экран |
-| `gaze_accuracy_pct_max` | 8% | Максимум ошибки точности |
-| `gaze_precision_pct_max` | 4% | Максимум ошибки прецизии |
-| `fps_absolute_min` | 12 | Абсолютный минимум FPS |
+| `gaze_accuracy_pct_max` | 12% | Максимум ошибки точности (relaxed v2.2.0) |
+| `gaze_precision_pct_max` | 6% | Максимум ошибки прецизии (relaxed v2.2.0) |
+| `fps_absolute_min` | 12 | Абсолютный минимум FPS камеры |
 | `maxLowFpsTimeMs` | 4000 | Максимум времени низкого FPS |
 | `maxConsecutiveLowFpsMs` | 2000 | Максимум непрерывного низкого FPS |
 
 ## QC Score
 
-QC Score вычисляется как взвешенная сумма метрик:
+QC Score вычисляется как взвешенная сумма нормализованных метрик (0-1):
 
-| Метрика | Вес |
-|---------|-----|
-| Face Visible | 0.14 |
-| Face OK | 0.16 |
-| Pose OK | 0.08 |
-| Illumination OK | 0.06 |
-| Eyes Open | 0.06 |
-| No Occlusion | 0.10 |
-| Gaze Valid | 0.14 |
-| Gaze On Screen | 0.16 |
-| No Dropout | 0.04 |
-| FPS OK | 0.06 |
+| Метрика | Ключ | Вес |
+|---------|------|-----|
+| Face Visible | `faceVis` | 0.14 |
+| Face OK | `faceOk` | 0.16 |
+| Pose OK | `poseOk` | 0.08 |
+| Illumination OK | `lightOk` | 0.06 |
+| Eyes Open | `eyesOpen` | 0.06 |
+| No Occlusion | `occlInv` | 0.10 |
+| Gaze Valid | `gazeValid` | 0.14 |
+| Gaze On Screen | `gazeOn` | 0.16 |
+| No Dropout | `dropoutInv` | 0.04 |
+| FPS OK | `fpsOk` | 0.06 |
 
-**Штрафы:**
-- Короткая сессия: × 0.35
-- Низкая видимость лица: × 0.6
-- Высокая окклюзия: × 0.7
-- Низкий gaze valid: × 0.7
-- Много низкого FPS: × 0.6
+**Штрафы (hard penalties):**
+- Короткая сессия (< minDurationMs): × 0.35
+- Низкая видимость лица (< face_visible_pct_min): × 0.6
+- Низкий faceOk (< face_ok_pct_min): × 0.6
+- Высокая окклюзия (> occlusion_pct_max): × 0.7
+- Низкий gaze valid (< gaze_valid_pct_min): × 0.7
+- Низкий gaze on screen (< gaze_on_screen_pct_min): × 0.7
+- Много низкого FPS (> maxLowFpsTimeMs): × 0.6
 
 ## Интеграция с другими модулями
 

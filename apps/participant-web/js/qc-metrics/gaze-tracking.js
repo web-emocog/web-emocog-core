@@ -20,6 +20,7 @@ export function createGazeState() {
         onScreenTimeMs: 0,
         offScreenTimeMs: 0,
         totalGazePoints: 0,
+        hasData: false, // true after first addGazePoint call
         // Track occlusion state for gaze validity
         _lastOccluded: false
     };
@@ -43,6 +44,7 @@ export function setGazeScreenState(state, valid, onScreen, occluded = false) {
         valid: actualValid,
         onScreen: actualValid ? onScreen : null,
         lastValidTime: actualValid ? Date.now() : state.lastValidTime,
+        hasData: true,
         _lastOccluded: occluded
     };
 }
@@ -60,6 +62,7 @@ export function setGazeScreenState(state, valid, onScreen, occluded = false) {
 export function addGazePoint(state, gazeData, poseData, thresholds = DEFAULT_THRESHOLDS, occluded = false) {
     const newState = { ...state };
     newState.totalGazePoints++;
+    newState.hasData = true;
     newState._lastOccluded = occluded;
     
     // If face is occluded, gaze is invalid
@@ -130,6 +133,9 @@ export function inferOnScreenFromPoseAndGaze(gazeData, poseData, thresholds = DE
  */
 export function accumulateGazeTime(state, deltaMs) {
     const newState = { ...state };
+    
+    // Only accumulate if gaze data has been provided (hasData = true)
+    if (!state.hasData) return newState;
     
     if (state.valid) {
         newState.validTimeMs += deltaMs;

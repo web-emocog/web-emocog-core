@@ -19,6 +19,7 @@ export class VideoFpsMonitor {
         this._frameCount = 0;
         this._fpsHistory = [];
         this._currentFps = 0;
+        this._cameraFps = 0;
         this._baselineFps = null;
         this._warmupComplete = false;
         this._startTime = 0;
@@ -229,6 +230,7 @@ export class VideoFpsMonitor {
      * Установка FPS напрямую (для внешнего мониторинга)
      */
     setCameraFps(fps) {
+        this._cameraFps = fps;
         this._currentFps = fps;
         this._fpsHistory.push(fps);
         if (this._fpsHistory.length > 60) {
@@ -241,6 +243,13 @@ export class VideoFpsMonitor {
             this._baselineFps = sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
             this._warmupComplete = true;
         }
+    }
+
+    /**
+     * Получение реального FPS камеры (установленного через setCameraFps)
+     */
+    getCameraFps() {
+        return this._cameraFps || 0;
     }
 
     /**
@@ -290,6 +299,7 @@ export class VideoFpsMonitor {
         this._frameCount = 0;
         this._fpsHistory = [];
         this._currentFps = 0;
+        this._cameraFps = 0;
         this._baselineFps = null;
         this._warmupComplete = false;
         this._lastVideoTime = 0;

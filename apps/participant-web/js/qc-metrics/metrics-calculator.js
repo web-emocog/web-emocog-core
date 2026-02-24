@@ -14,56 +14,56 @@ import { getValidationMetrics } from './validation.js';
 /**
  * Вычисление QC Score
  * 
+ * Returns 0-1 (LEGACY-compatible) with 3 decimal places.
+ * Uses weighted average with hard penalties for critical failures.
+ * 
  * @param {Object} percentages - проценты метрик
  * @param {Object} thresholds - пороговые значения
  * @param {Object} weights - весовые коэффициенты
- * @returns {number} QC Score (0-100)
+ * @param {Object} counters - счётчики (для penalty checks)
+ * @param {number} durationMs - длительность сессии
+ * @returns {number} QC Score (0-1)
  */
-export function computeQcScore(percentages, thresholds = DEFAULT_THRESHOLDS, weights = QC_WEIGHTS) {
-    let score = 0;
-    let totalWeight = 0;
+export function computeQcScore(percentages, thresholds = DEFAULT_THRESHOLDS, weights = QC_WEIGHTS, counters = null, durationMs = 0) {
+    const nPct = x => clamp01(x / 100);
+    const nInvPct = x => clamp01(1 - x / 100);
     
-    // Face visible
-    const faceVisibleScore = clamp01(percentages.faceVisiblePct / thresholds.face_visible_pct_min);
-    score += faceVisibleScore * weights.face_visible;
-    totalWeight += weights.face_visible;
+    // Normalize metrics
+    const faceVis = nPct(percentages.faceVisiblePct);
+    const faceOk = nPct(percentages.faceOkPct);
+    const poseOk = nPct(percentages.poseOkPct);
+    const lightOk = nPct(percentages.illuminationOkPct);
+    const eyesOpen = nPct(percentages.eyesOpenPct);
+    const occlInv = nInvPct(percentages.occlusionPct);
+    const gazeValid = nPct(percentages.gazeValidPct);
+    const gazeOn = nPct(percentages.gazeOnScreenPct);
+    const dropoutInv = nInvPct(100 - percentages.gazeValidPct); // dropout = 100 - valid
+    const fpsOk = nInvPct(percentages.lowFpsPct || 0);
     
-    // Face OK
-    const faceOkScore = clamp01(percentages.faceOkPct / thresholds.face_ok_pct_min);
-    score += faceOkScore * weights.face_ok;
-    totalWeight += weights.face_ok;
+    // Weighted average
+    let score =
+        faceVis * weights.faceVis +
+        faceOk * weights.faceOk +
+        poseOk * weights.poseOk +
+        lightOk * weights.lightOk +
+        eyesOpen * weights.eyesOpen +
+        occlInv * weights.occlInv +
+        gazeValid * weights.gazeValid +
+        gazeOn * weights.gazeOn +
+        dropoutInv * weights.dropoutInv +
+        fpsOk * weights.fpsOk;
     
-    // Pose OK
-    const poseOkScore = clamp01(percentages.poseOkPct / thresholds.pose_ok_pct_min);
-    score += poseOkScore * weights.pose_ok;
-    totalWeight += weights.pose_ok;
+    // LEGACY hard penalties to avoid "high score but invalid" artifacts
+    if (durationMs > 0 && durationMs < thresholds.minDurationMs) score *= 0.35;
+    if (percentages.faceVisiblePct < thresholds.face_visible_pct_min) score *= 0.6;
+    if (percentages.faceOkPct < thresholds.face_ok_pct_min) score *= 0.6;
+    if (percentages.occlusionPct > thresholds.occlusion_pct_max) score *= 0.7;
+    if (percentages.gazeValidPct < thresholds.gaze_valid_pct_min) score *= 0.7;
+    if (percentages.gazeOnScreenPct < thresholds.gaze_on_screen_pct_min) score *= 0.7;
+    if (counters && counters.totalLowFpsMs > thresholds.maxLowFpsTimeMs) score *= 0.6;
     
-    // Illumination OK
-    const illumScore = clamp01(percentages.illuminationOkPct / thresholds.illumination_ok_pct_min);
-    score += illumScore * weights.illumination_ok;
-    totalWeight += weights.illumination_ok;
-    
-    // Eyes open
-    const eyesScore = clamp01(percentages.eyesOpenPct / thresholds.eyes_open_pct_min);
-    score += eyesScore * weights.eyes_open;
-    totalWeight += weights.eyes_open;
-    
-    // Occlusion (inverse - lower is better)
-    const occlusionScore = clamp01(1 - percentages.occlusionPct / thresholds.occlusion_pct_max);
-    score += occlusionScore * weights.occlusion;
-    totalWeight += weights.occlusion;
-    
-    // Gaze valid
-    const gazeValidScore = clamp01(percentages.gazeValidPct / thresholds.gaze_valid_pct_min);
-    score += gazeValidScore * weights.gaze_valid;
-    totalWeight += weights.gaze_valid;
-    
-    // Gaze on screen
-    const gazeOnScreenScore = clamp01(percentages.gazeOnScreenPct / thresholds.gaze_on_screen_pct_min);
-    score += gazeOnScreenScore * weights.gaze_on_screen;
-    totalWeight += weights.gaze_on_screen;
-    
-    return Math.round((score / totalWeight) * 100);
+    // Return as 0-1 (legacy) with 3 decimal places
+    return round3(clamp01(score));
 }
 
 /**
@@ -78,8 +78,8 @@ export function computeQcScore(percentages, thresholds = DEFAULT_THRESHOLDS, wei
  */
 export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS) {
     const percentages = computePercentages(counters);
-    const qcScore = computeQcScore(percentages, thresholds);
     const durationMs = Date.now() - startTime;
+    const qcScore = computeQcScore(percentages, thresholds, QC_WEIGHTS, counters, durationMs);
     
     return {
         durationMs,
@@ -96,14 +96,16 @@ export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, th
         gazeValidPct: round1(percentages.gazeValidPct),
         gazeOnScreenPct: round1(percentages.gazeOnScreenPct),
         
-        // FPS
-        currentFps: fpsMonitor?.getCurrentFps() || 0,
+        // FPS: теперь показываем оба значения
+        analysisFps: fpsMonitor?.getCurrentFps() || 0,     // FPS анализа (processFrame calls/sec)
+        cameraFps: fpsMonitor?.getCameraFps?.() || 0,      // Реальный FPS камеры
         baselineFps: fpsMonitor?.getBaselineFps() || null,
         lowFpsPct: round1(percentages.lowFpsPct),
         
         // Gaze time
         gazeValidTimeMs: gazeState.validTimeMs,
         gazeOnScreenTimeMs: gazeState.onScreenTimeMs,
+        gazeTotal: counters.gazeTotal || 0, // Для отладки
         
         timestamp: Date.now()
     };

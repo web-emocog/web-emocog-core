@@ -83,9 +83,13 @@ export function startCameraFpsMonitor(videoElement) {
 export function stopCameraFpsMonitor() {
     state.cameraFpsState.isRunning = false;
     
-    if (state.cameraFpsState.videoFrameCallbackId && state.cameraFpsState.video) {
-        if (state.cameraFpsState.video.cancelVideoFrameCallback) {
+    if (state.cameraFpsState.videoFrameCallbackId != null) {
+        if (state.cameraFpsState.video && state.cameraFpsState.video.cancelVideoFrameCallback) {
+            // Основной путь: requestVideoFrameCallback
             state.cameraFpsState.video.cancelVideoFrameCallback(state.cameraFpsState.videoFrameCallbackId);
+        } else {
+            // Fallback: requestAnimationFrame
+            cancelAnimationFrame(state.cameraFpsState.videoFrameCallbackId);
         }
         state.cameraFpsState.videoFrameCallbackId = null;
     }
