@@ -1,755 +1,933 @@
 /* CSS - Стили */
-        :root {
-            --primary: #2563EB;
-            --primary-hover: #1D4ED8;
-            --bg: #F3F4F6;
-            --card-bg: #FFFFFF;
-            --text-main: #111827;
-            --text-secondary: #4B5563;
-            --border: #E5E7EB;
-            --input-bg: #F9FAFB;
-            --header-bg: #FFFFFF;
-            --success: #16a34a;
-            --warning: #f59e0b;
-            --error: #dc2626;
-        }
-
-        body {
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            background-color: var(--bg);
-            color: var(--text-main);
-            margin: 0;
-            padding-top: 70px;
-            display: flex;
-            justify-content: center;
-            min-height: 100vh;
-        }
-
-        /* Верхняя панель */
-        .top-bar {
-            position: fixed; top: 0; left: 0; width: 100%; height: 60px;
-            background: var(--header-bg); border-bottom: 1px solid var(--border);
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 0 20px; box-sizing: border-box; z-index: 1000;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        
-        .id-badge {
-            font-family: 'Monaco', monospace; font-size: 12px; background: #EFF6FF;
-            color: var(--primary); padding: 6px 12px; border-radius: 6px;
-            border: 1px solid #BFDBFE; display: none; cursor: pointer; margin-right: 15px;
-        }
-
-        /* Переключатель языка */
-        .lang-switch {
-            display: flex; gap: 5px; font-size: 13px; font-weight: 600;
-        }
-        .lang-btn {
-            cursor: pointer; padding: 4px 8px; border-radius: 4px; color: var(--text-secondary);
-            transition: all 0.2s;
-        }
-        .lang-btn.active {
-            background-color: var(--primary); color: white;
-        }
-
-        .container {
-            background-color: var(--card-bg); width: 100%; max-width: 680px;
-            padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            margin-top: 20px; margin-bottom: 40px; position: relative;
-        }
-
-        .step { display: none; animation: fadeIn 0.4s ease; }
-        .step.active { display: block; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
-        h1 { font-size: 28px; margin-bottom: 10px; text-align: center; }
-        h2 { font-size: 24px; margin-bottom: 20px; text-align: center; }
-        h3 { font-size: 14px; margin-top: 25px; margin-bottom: 15px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
-        p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
-
-        /* Кнопки */
-        .btn {
-            background-color: var(--primary); color: white; border: none; padding: 16px 28px;
-            border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%;
-            transition: all 0.2s; margin-top: 20px;
-        }
-        .btn:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
-        .btn:disabled { background-color: #E5E7EB; color: #9CA3AF; cursor: not-allowed; transform: none; }
-        .btn-secondary { background-color: transparent; color: var(--text-secondary); margin-top: 10px; border: 1px solid var(--border); }
-
-        /* Поля ввода */
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; }
-        .form-group select, .form-group input {
-            width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px;
-            font-size: 15px; background-color: var(--input-bg); box-sizing: border-box;
-            transition: border-color 0.2s;
-        }
-        .form-group select.error, .form-group input.error {
-            border-color: var(--error);
-            background-color: #FEF2F2;
-        }
-        .form-group select[aria-invalid="true"], .form-group input[aria-invalid="true"] {
-            border-color: var(--error);
-            background-color: #FEF2F2;
-        }
-        .error-message, .field-error {
-            color: var(--error);
-            font-size: 12px;
-            margin-top: 5px;
-            display: block;
-        }
-        .form-row { display: flex; gap: 20px; }
-        .form-row .form-group { flex: 1; }
-
-        .consent-box { background: #F8FAFC; padding: 20px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 14px; margin-bottom: 20px; border: 1px solid var(--border); }
-        .checkbox-wrapper { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 15px; border: 2px solid var(--border); border-radius: 12px; }
-
-        .input-error {
-            border-color: var(--error) !important;
-            background-color: #FEF2F2 !important;
-        }
-
-        .error-text {
-            color: var(--error);
-            font-size: 12px;
-            margin-top: 5px;
-        }
-
-        /* Калибровка */
-        .calibration-area {
-            height: 350px; background: #F8FAFC; border: 2px dashed var(--border);
-            border-radius: 12px; position: relative; overflow: hidden;
-        }
-        
-        .calib-point {
-            width: 30px; height: 30px; background-color: #DC2626;
-            position: absolute; transition: all 0.5s ease; cursor: pointer; z-index: 20;
-            filter: drop-shadow(0 0 6px rgba(220, 38, 38, 0.6));
-        }
-        .calib-point.circle { border-radius: 50%; clip-path: none; }
-        .calib-point.square { border-radius: 4px; clip-path: none; transform: rotate(45deg); }
-        .calib-point.star {
-            border-radius: 0; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
-            background-color: #DC2626;
-        }
-        
-        /* Наша собственная точка для отображения реального взгляда */
-        #customGazeDot {
-            position: fixed;
-            width: 20px;
-            height: 20px;
-            background: rgba(0, 255, 0, 0.7);
-            border-radius: 50%;
-            pointer-events: none;
-            z-index: 9999;
-            transform: translate(-50%, -50%);
-            box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-            display: none;
-        }
-
-        .face-status { font-weight: bold; margin-top: 10px; font-size: 14px; }
-        .status-ok { color: var(--success); }
-        .status-err { color: var(--error); }
-
-        /* Тест слежения за фигурами */
-        .tracking-test-area {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: #1a1a2e;
-            z-index: 2000;
-            display: none;
-        }
-        
-        .tracking-test-area.active {
-            display: block;
-        }
-        
-        .test-shape {
-            position: absolute;
-            width: 50px;
-            height: 50px;
-            transition: all 0.3s ease;
-            pointer-events: none;
-        }
-        
-        .test-shape.circle {
-            background: #FF6B6B;
-            border-radius: 50%;
-            box-shadow: 0 0 20px rgba(255, 107, 107, 0.6);
-        }
-        
-        .test-shape.square {
-            background: #4ECDC4;
-            border-radius: 8px;
-            box-shadow: 0 0 20px rgba(78, 205, 196, 0.6);
-        }
-        
-        .test-shape.triangle {
-            width: 0;
-            height: 0;
-            border-left: 25px solid transparent;
-            border-right: 25px solid transparent;
-            border-bottom: 50px solid #FFE66D;
-            background: transparent;
-            filter: drop-shadow(0 0 10px rgba(255, 230, 109, 0.6));
-        }
-        
-        .test-progress {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: white;
-            font-size: 18px;
-            z-index: 2001;
-            text-align: center;
-        }
-        
-        .test-progress-bar {
-            width: 200px;
-            height: 6px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 3px;
-            margin-top: 10px;
-        }
-        
-        .test-progress-fill {
-            height: 100%;
-            background: #4ECDC4;
-            border-radius: 3px;
-            transition: width 0.3s ease;
-        }
-        
-        /* Fullscreen калибровка */
-        .fullscreen-calibration {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: #1a1a2e;
-            z-index: 2000;
-            display: none;
-        }
-        
-        .fullscreen-calibration.active {
-            display: block;
-        }
-        
-        .fullscreen-calib-point {
-            width: 40px;
-            height: 40px;
-            background-color: #DC2626;
-            position: absolute;
-            border-radius: 50%;
-            cursor: pointer;
-            z-index: 2001;
-            filter: drop-shadow(0 0 10px rgba(220, 38, 38, 0.8));
-            transform: translate(-50%, -50%);
-            transition: all 0.3s ease;
-        }
-        
-        .fullscreen-calib-point:hover {
-            transform: translate(-50%, -50%) scale(1.2);
-        }
-        
-        .calib-instruction {
-            position: fixed;
-            top: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: white;
-            font-size: 18px;
-            text-align: center;
-            z-index: 2002;
-        }
-        
-        .calib-progress {
-            margin-top: 10px;
-            font-size: 14px;
-            color: rgba(255,255,255,0.7);
-        }
-
-        /* pre-check */
-        .precheck-container {
-            margin: 25px 0;
-        }
-
-        .camera-preview {
-            position: relative;
-            width: 100%;
-            max-width: 640px;
-            height: 360px;
-            margin: 0 auto 25px;
-            border-radius: 12px;
-            overflow: hidden;
-            background: #1a1a2e;
-            border: 3px solid #E5E7EB;
-            transition: border-color 0.3s ease;
-        }
-
-        .camera-preview.green-border {
-            border-color: var(--success) !important;
-        }
-
-        .camera-preview.red-border {
-            border-color: var(--error) !important;
-        }
-
-        #precheckVideo {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
-
-        #overlayCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-        }
-
-        .face-guide {
-            position: absolute;
-            top: 20%;
-            left: 20%;
-            right: 20%;
-            bottom: 20%;
-            border: 2px dashed rgba(255, 255, 255, 0.4);
-            border-radius: 10px;
-            pointer-events: none;
-            transition: border-color 0.3s ease;
-        }
-
-        .guide-text {
-            position: absolute;
-            top: 15%;
-            left: 50%;
-            transform: translateX(-50%);
-            color: white;
-            font-size: 14px;
-            background: rgba(0,0,0,0.5);
-            padding: 5px 10px;
-            border-radius: 6px;
-            transition: all 0.3s ease;
-        }
-
-        /* Индикаторы (pre-check) */
-        .indicators {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin: 25px 0;
-            flex-wrap: wrap;
-        }
-
-        .indicator {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            width: 100px;
-        }
-
-        .indicator .icon {
-            font-size: 24px;
-            margin-bottom: 8px;
-            color: #9CA3AF;
-        }
-
-        .indicator .label {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-main);
-            text-align: center;
-            margin-bottom: 6px;
-        }
-
-        .progress-container {
-            width: 100%;
-            height: 6px;
-            background: #E5E7EB;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            width: 0%;
-            background: #9CA3AF;
-            transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-
-        .indicator .status {
-            font-size: 11px;
-            font-weight: 600;
-            margin-top: 4px;
-            text-align: center;
-            min-height: 16px;
-            color: #9CA3AF;
-        }
-
-        /* Статусы индикаторов (pre-check) */
-        .indicator.passed .progress-bar {
-            background-color: rgba(16, 163, 74, 0.7);
-        }
-
-        .indicator.passed .icon {
-            color: var(--success);
-        }
-
-        .indicator.passed .status {
-            color: var(--success);
-        }
-
-        .indicator.failed .progress-bar {
-            background-color: rgba(239, 68, 68, 0.7);
-        }
-
-        .indicator.failed .icon {
-            color: var(--error);
-        }
-
-        .indicator.failed .status {
-            color: var(--error);
-        }
-
-        /* Статус пречека - блок */
-        .precheck-status {
-            text-align: center;
-            margin: 20px 0;
-            padding: 18px;
-            border-radius: 8px;
-            background: #F0F9FF;
-            border: 1px solid #BAE6FD;
-            animation: fadeIn 0.4s ease;
-            transition: all 0.3s ease;
-        }
-
-        .precheck-status.success-bg {
-            background: #F0F9FF;
-            border-color: #BBF7D0;
-            color: #166534;
-        }
-
-        .precheck-status.error-bg {
-            background: #FEF2F2;
-            border-color: #FECACA;
-            color: #991B1B;
-        }
-
-        .precheck-status.waiting-bg {
-            background: #FFFBEB;
-            border-color: #FDE68A;
-            color: #92400E;
-        }
-
-        /* Стили для текста внутри статусного блока */
-        .precheck-status .status-message {
-            font-size: 15px;
-            font-weight: 500;
-            margin: 0;
-            line-height: 1.4;
-            color: inherit;
-        }
-
-        .precheck-status .status-message.success,
-        .precheck-status .status-message.error,
-        .precheck-status .status-message.waiting {
-            background: transparent !important;
-            border: none !important;
-            color: inherit !important;
-        }
-
-        /* Стили для заголовка и списка подсказок */
-        .status-header {
-            text-align: center;
-            font-weight: 600;
-            margin-bottom: 12px;
-            font-size: 16px;
-            display: block;
-            color: inherit;
-        }
-
-        .tips-list {
-            text-align: left;
-            margin: 10px 0 0 0;
-            padding-left: 20px;
-            color: inherit;
-        }
-
-        .tip-item {
-            font-size: 14px;
-            line-height: 1.5;
-            margin-bottom: 6px;
-            color: inherit;
-        }
-
-        .precheck-status.error-bg .tip-item {
-            color: #991B1B;
-        }
-
-        .precheck-status.error-bg .tips-subtitle {
-            text-align: left;
-            color: #991B1B;
-            font-weight: 600;
-            font-size: 13px;
-            margin-bottom: 8px;
-        }
-
-        .precheck-status.success-bg .tip-item {
-            color: #166534;
-        }
-
-        .precheck-status.waiting-bg .tip-item {
-            color: #92400E;
-        }
-
-        /* Стили для маркированного списка */
-        .tips-list {
-            text-align: left;
-            margin: 10px 0 0 0;
-            padding-left: 20px;
-            color: inherit;
-            list-style-type: none;
-        }
-
-        .tip-item {
-            font-size: 14px;
-            line-height: 1.5;
-            margin-bottom: 8px;
-            color: inherit;
-            position: relative;
-            padding-left: 16px;
-        }
-
-        .tip-item::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 8px;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background-color: currentColor;
-        }
-
-        .precheck-status.error-bg .tip-item::before {
-            background-color: #991B1B; /* Красный */
-        }
-
-        .action-buttons {
-            display: flex;
-            gap: 12px;
-            margin-top: 20px;
-        }
-
-        .action-buttons .btn {
-            flex: 1;
-            margin-top: 0;
-        }
-
-        /* Стили для контейнеров и предупреждений */
-        .warning-container {
-            background: #FEF2F2;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #FECACA;
-            margin: 20px 0;
-        }
-
-        .warning-title {
-            color: #991B1B;
-        }
-
-        .warning-list {
-            margin: 10px 0 0 20px;
-            color: #7F1D1D;
-            font-size: 14px;
-        }
-
-        /* Стили для центрирования текста */
-        .text-center {
-            text-align: center;
-        }
-
-        /* Стили для формы email */
-        .email-field-info {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 10px;
-        }
-
-        /* Стили для шапки */
-        .header-left {
-            font-weight: bold;
-            color: var(--text-main);
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-        }
-
-        /* Стили для QC статуса */
-        .qc-status-passed {
-            background: #F0FDF4;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #BBF7D0;
-            color: #166534;
-            margin-bottom: 20px;
-        }
-
-        .qc-status-failed {
-            background: #FEF2F2;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #FECACA;
-            color: #991B1B;
-            margin-bottom: 20px;
-        }
-
-        .qc-status-details {
-            font-size: 12px;
-            margin-top: 8px;
-            opacity: 0.8;
-        }
-
-        /* Стили для прогресса в тесте */
-        .test-progress-bar {
-            width: 200px;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
-            margin-top: 10px;
-        }
-
-        .test-progress-fill {
-            height: 100%;
-            background: #4ECDC4;
-            border-radius: 3px;
-            transition: width 0.3s ease;
-        }
-
-        /* Стили для индикаторов статуса */
-        .status-indicator {
-            position: relative;
-            padding-left: 16px;
-        }
-
-        .status-indicator::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 8px;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background-color: currentColor;
-        }
-
-        /* Flex utilities */
-        .flex-center {
-            display: flex;
-            align-items: center;
-        }
-
-        .flex-between {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .flex-row {
-            display: flex;
-            gap: 20px;
-        }
-
-        .flex-row > * {
-            flex: 1;
-        }
-
-        /* Margin utilities */
-        .mt-10 { margin-top: 10px; }
-        .mt-20 { margin-top: 20px; }
-        .mb-10 { margin-bottom: 10px; }
-        .mb-20 { margin-bottom: 20px; }
-
-        .text-center {
-            text-align: center;
-        }
-
-        /* Display utilities */
-        .hidden { display: none !important; }
-        .block { display: block; }
-        .flex { display: flex; }
-
-        .cognitive-container {
-            text-align: center;
-            min-height: 400px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-        }
-        
-        .cog-image {
-            max-width: 80%;
-            max-height: 80%;
-            object-fit: contain;
-        }
-
-        .cognitive-stimulus-area {
-            position: relative;
-            width: 100%;
-            height: 400px;
-            background: #e8e8e8;
-            border-radius: 8px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-            margin-bottom: 20px;
-        }
-
-        .cog-shape {
-            transition: transform 0.1s;
-            display: none;
-        }
-
-        .cog-fixation {
-            font-family: Arial, sans-serif;
-            user-select: none;
-            display: none;
-        }
-
-        .cog-feedback {
-            position: absolute;
-            bottom: 40px;
-            font-size: 24px;
-            font-weight: bold;
-            z-index: 10;
-        }
-
-        .instruction-confirmation {
-            display: flex;
-            justify-content: center;
-            animation: fadeIn 0.3s ease;
-        }
-
-        #cogText {
-            white-space: pre-wrap;
-            line-height: 1.6;
-            margin-bottom: 20px;
-            font-size: 16px;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
-        }
+:root {
+    --primary: #2563EB;
+    --primary-hover: #1D4ED8;
+    --bg: #F3F4F6;
+    --card-bg: #FFFFFF;
+    --text-main: #111827;
+    --text-secondary: #4B5563;
+    --border: #E5E7EB;
+    --input-bg: #F9FAFB;
+    --header-bg: #FFFFFF;
+    --success: #16a34a;
+    --warning: #f59e0b;
+    --error: #dc2626;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text-main);
+    margin: 0;
+    padding-top: 70px;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+/* Верхняя панель */
+.top-bar {
+    position: fixed; top: 0; left: 0; width: 100%; height: 60px;
+    background: var(--header-bg); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; box-sizing: border-box; z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.id-badge {
+    font-family: 'Monaco', monospace; font-size: 12px; background: #EFF6FF;
+    color: var(--primary); padding: 6px 12px; border-radius: 6px;
+    border: 1px solid #BFDBFE; display: none; cursor: pointer; margin-right: 15px;
+}
+
+/* Переключатель языка */
+.lang-switch {
+    display: flex; gap: 5px; font-size: 13px; font-weight: 600;
+}
+.lang-btn {
+    cursor: pointer; padding: 4px 8px; border-radius: 4px; color: var(--text-secondary);
+    transition: all 0.2s;
+}
+.lang-btn.active {
+    background-color: var(--primary); color: white;
+}
+
+.container {
+    background-color: var(--card-bg); width: 100%; max-width: 680px;
+    padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    margin-top: 20px; margin-bottom: 40px; position: relative;
+}
+
+.step { display: none; animation: fadeIn 0.4s ease; }
+.step.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+h1 { font-size: 28px; margin-bottom: 10px; text-align: center; }
+h2 { font-size: 24px; margin-bottom: 20px; text-align: center; }
+h3 { font-size: 14px; margin-top: 25px; margin-bottom: 15px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+
+/* Кнопки */
+.btn {
+    background-color: var(--primary); color: white; border: none; padding: 16px 28px;
+    border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%;
+    transition: all 0.2s; margin-top: 20px;
+}
+.btn:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
+.btn:disabled { background-color: #E5E7EB; color: #9CA3AF; cursor: not-allowed; transform: none; }
+.btn-secondary { background-color: transparent; color: var(--text-secondary); margin-top: 10px; border: 1px solid var(--border); }
+
+/* Поля ввода */
+.form-group { margin-bottom: 15px; }
+.form-group label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; }
+.form-group select, .form-group input {
+    width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 15px; background-color: var(--input-bg); box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+.form-group select.error, .form-group input.error {
+    border-color: var(--error);
+    background-color: #FEF2F2;
+}
+.form-group select[aria-invalid="true"], .form-group input[aria-invalid="true"] {
+    border-color: var(--error);
+    background-color: #FEF2F2;
+}
+.error-message, .field-error {
+    color: var(--error);
+    font-size: 12px;
+    margin-top: 5px;
+    display: block;
+}
+.form-row { display: flex; gap: 20px; }
+.form-row .form-group { flex: 1; }
+
+.consent-box { background: #F8FAFC; padding: 20px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 14px; margin-bottom: 20px; border: 1px solid var(--border); }
+.checkbox-wrapper { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 15px; border: 2px solid var(--border); border-radius: 12px; }
+
+.input-error {
+    border-color: var(--error) !important;
+    background-color: #FEF2F2 !important;
+}
+
+.error-text {
+    color: var(--error);
+    font-size: 12px;
+    margin-top: 5px;
+}
+
+/* Калибровка */
+.calibration-area {
+    height: 350px; background: #F8FAFC; border: 2px dashed var(--border);
+    border-radius: 12px; position: relative; overflow: hidden;
+}
+
+.calib-point {
+    width: 30px; height: 30px; background-color: #DC2626;
+    position: absolute; transition: all 0.5s ease; cursor: pointer; z-index: 20;
+    filter: drop-shadow(0 0 6px rgba(220, 38, 38, 0.6));
+}
+.calib-point.circle { border-radius: 50%; clip-path: none; }
+.calib-point.square { border-radius: 4px; clip-path: none; transform: rotate(45deg); }
+.calib-point.star {
+    border-radius: 0; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    background-color: #DC2626;
+}
+
+/* Наша собственная точка для отображения реального взгляда */
+#customGazeDot {
+    position: fixed;
+    width: 20px;
+    height: 20px;
+    background: rgba(0, 255, 0, 0.7);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 9999;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+    display: none;
+}
+
+.face-status { font-weight: bold; margin-top: 10px; font-size: 14px; }
+.status-ok { color: var(--success); }
+.status-err { color: var(--error); }
+
+/* Тест слежения за фигурами */
+.tracking-test-area {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #1a1a2e;
+    z-index: 2000;
+    display: none;
+}
+
+.tracking-test-area.active {
+    display: block;
+}
+
+.test-shape {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.test-shape.circle {
+    background: #FF6B6B;
+    border-radius: 50%;
+    box-shadow: 0 0 20px rgba(255, 107, 107, 0.6);
+}
+
+.test-shape.square {
+    background: #4ECDC4;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(78, 205, 196, 0.6);
+}
+
+.test-shape.triangle {
+    width: 0;
+    height: 0;
+    border-left: 25px solid transparent;
+    border-right: 25px solid transparent;
+    border-bottom: 50px solid #FFE66D;
+    background: transparent;
+    filter: drop-shadow(0 0 10px rgba(255, 230, 109, 0.6));
+}
+
+.test-progress {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 18px;
+    z-index: 2001;
+    text-align: center;
+}
+
+.test-progress-bar {
+    width: 200px;
+    height: 6px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 3px;
+    margin-top: 10px;
+}
+
+.test-progress-fill {
+    height: 100%;
+    background: #4ECDC4;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* Fullscreen калибровка */
+.fullscreen-calibration {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #1a1a2e;
+    z-index: 2000;
+    display: none;
+}
+
+.fullscreen-calibration.active {
+    display: block;
+}
+
+.fullscreen-calib-point {
+    width: 40px;
+    height: 40px;
+    background-color: #DC2626;
+    position: absolute;
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 2001;
+    filter: drop-shadow(0 0 10px rgba(220, 38, 38, 0.8));
+    transform: translate(-50%, -50%);
+    transition: all 0.3s ease;
+}
+
+.fullscreen-calib-point:hover {
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
+.calib-instruction {
+    position: fixed;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 18px;
+    text-align: center;
+    z-index: 2002;
+    pointer-events: none;
+    user-select: none;
+}
+
+.calib-progress {
+    margin-top: 10px;
+    font-size: 14px;
+    color: rgba(255,255,255,0.7);
+}
+
+/* pre-check */
+.precheck-container {
+    margin: 25px 0;
+}
+
+.camera-preview {
+    position: relative;
+    width: 100%;
+    max-width: 640px;
+    height: 360px;
+    margin: 0 auto 25px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #1a1a2e;
+    border: 3px solid #E5E7EB;
+    transition: border-color 0.3s ease;
+}
+
+.camera-preview.green-border {
+    border-color: var(--success) !important;
+}
+
+.camera-preview.red-border {
+    border-color: var(--error) !important;
+}
+
+#precheckVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+}
+
+#overlayCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.face-guide {
+    position: absolute;
+    top: 20%;
+    left: 20%;
+    right: 20%;
+    bottom: 20%;
+    border: 2px dashed rgba(255, 255, 255, 0.4);
+    border-radius: 10px;
+    pointer-events: none;
+    transition: border-color 0.3s ease;
+}
+
+.guide-text {
+    position: absolute;
+    top: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 14px;
+    background: rgba(0,0,0,0.5);
+    padding: 5px 10px;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+/* Индикаторы (pre-check) */
+.indicators {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin: 25px 0;
+    flex-wrap: wrap;
+}
+
+.indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100px;
+}
+
+.indicator .icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: #9CA3AF;
+}
+
+.indicator .label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-main);
+    text-align: center;
+    margin-bottom: 6px;
+}
+
+.progress-container {
+    width: 100%;
+    height: 6px;
+    background: #E5E7EB;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #9CA3AF;
+    transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.indicator .status {
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 4px;
+    text-align: center;
+    min-height: 16px;
+    color: #9CA3AF;
+}
+
+/* Статусы индикаторов (pre-check) */
+.indicator.passed .progress-bar {
+    background-color: rgba(16, 163, 74, 0.7);
+}
+
+.indicator.passed .icon {
+    color: var(--success);
+}
+
+.indicator.passed .status {
+    color: var(--success);
+}
+
+.indicator.failed .progress-bar {
+    background-color: rgba(239, 68, 68, 0.7);
+}
+
+.indicator.failed .icon {
+    color: var(--error);
+}
+
+.indicator.failed .status {
+    color: var(--error);
+}
+
+/* Статус пречека - блок */
+.precheck-status {
+    text-align: center;
+    margin: 20px 0;
+    padding: 18px;
+    border-radius: 8px;
+    background: #F0F9FF;
+    border: 1px solid #BAE6FD;
+    animation: fadeIn 0.4s ease;
+    transition: all 0.3s ease;
+}
+
+.precheck-status.success-bg {
+    background: #F0F9FF;
+    border-color: #BBF7D0;
+    color: #166534;
+}
+
+.precheck-status.error-bg {
+    background: #FEF2F2;
+    border-color: #FECACA;
+    color: #991B1B;
+}
+
+.precheck-status.waiting-bg {
+    background: #FFFBEB;
+    border-color: #FDE68A;
+    color: #92400E;
+}
+
+/* Стили для текста внутри статусного блока */
+.precheck-status .status-message {
+    font-size: 15px;
+    font-weight: 500;
+    margin: 0;
+    line-height: 1.4;
+    color: inherit;
+}
+
+.precheck-status .status-message.success,
+.precheck-status .status-message.error,
+.precheck-status .status-message.waiting {
+    background: transparent !important;
+    border: none !important;
+    color: inherit !important;
+}
+
+/* Стили для заголовка и списка подсказок */
+.status-header {
+    text-align: center;
+    font-weight: 600;
+    margin-bottom: 12px;
+    font-size: 16px;
+    display: block;
+    color: inherit;
+}
+
+.tips-list {
+    text-align: left;
+    margin: 10px 0 0 0;
+    padding-left: 20px;
+    color: inherit;
+}
+
+.tip-item {
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 6px;
+    color: inherit;
+}
+
+.precheck-status.error-bg .tip-item {
+    color: #991B1B;
+}
+
+.precheck-status.error-bg .tips-subtitle {
+    text-align: left;
+    color: #991B1B;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.precheck-status.success-bg .tip-item {
+    color: #166534;
+}
+
+.precheck-status.waiting-bg .tip-item {
+    color: #92400E;
+}
+
+/* Стили для маркированного списка */
+.tips-list {
+    text-align: left;
+    margin: 10px 0 0 0;
+    padding-left: 20px;
+    color: inherit;
+    list-style-type: none;
+}
+
+.tip-item {
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+    color: inherit;
+    position: relative;
+    padding-left: 16px;
+}
+
+.tip-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+}
+
+.precheck-status.error-bg .tip-item::before {
+    background-color: #991B1B; /* Красный */
+}
+
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.action-buttons .btn {
+    flex: 1;
+    margin-top: 0;
+}
+
+/* Стили для контейнеров и предупреждений */
+.warning-container {
+    background: #FEF2F2;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #FECACA;
+    margin: 20px 0;
+}
+
+.warning-title {
+    color: #991B1B;
+}
+
+.warning-list {
+    margin: 10px 0 0 20px;
+    color: #7F1D1D;
+    font-size: 14px;
+}
+
+/* Стили для центрирования текста */
+.text-center {
+    text-align: center;
+}
+
+/* Стили для формы email */
+.email-field-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 10px;
+}
+
+/* Стили для шапки */
+.header-left {
+    font-weight: bold;
+    color: var(--text-main);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+}
+
+/* Стили для QC статуса */
+.qc-status-passed {
+    background: #F0FDF4;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #BBF7D0;
+    color: #166534;
+    margin-bottom: 20px;
+}
+
+.qc-status-failed {
+    background: #FEF2F2;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #FECACA;
+    color: #991B1B;
+    margin-bottom: 20px;
+}
+
+.qc-status-details {
+    font-size: 12px;
+    margin-top: 8px;
+    opacity: 0.8;
+}
+
+/* Стили для прогресса в тесте */
+.test-progress-bar {
+    width: 200px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    margin-top: 10px;
+}
+
+.test-progress-fill {
+    height: 100%;
+    background: #4ECDC4;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* Стили для индикаторов статуса */
+.status-indicator {
+    position: relative;
+    padding-left: 16px;
+}
+
+.status-indicator::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+}
+
+/* Flex utilities */
+.flex-center {
+    display: flex;
+    align-items: center;
+}
+
+.flex-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.flex-row {
+    display: flex;
+    gap: 20px;
+}
+
+.flex-row > * {
+    flex: 1;
+}
+
+/* Margin utilities */
+.mt-10 { margin-top: 10px; }
+.mt-20 { margin-top: 20px; }
+.mb-10 { margin-bottom: 10px; }
+.mb-20 { margin-bottom: 20px; }
+
+.text-center {
+    text-align: center;
+}
+
+/* Display utilities */
+.hidden { display: none !important; }
+.block { display: block; }
+.flex { display: flex; }
+
+.cognitive-container {
+    text-align: center;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.cog-image {
+    max-width: 80%;
+    max-height: 80%;
+    object-fit: contain;
+}
+
+.cognitive-stimulus-area {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    background: #e8e8e8;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.cog-shape {
+    transition: transform 0.1s;
+    display: none;
+}
+
+.cog-fixation {
+    font-family: Arial, sans-serif;
+    user-select: none;
+    display: none;
+}
+
+.cog-feedback {
+    position: absolute;
+    bottom: 40px;
+    font-size: 24px;
+    font-weight: bold;
+    z-index: 10;
+}
+
+.instruction-confirmation {
+    display: flex;
+    justify-content: center;
+    animation: fadeIn 0.3s ease;
+}
+
+#cogText {
+    white-space: pre-wrap;
+    line-height: 1.6;
+    margin-bottom: 20px;
+    font-size: 16px;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.test-hub-container {
+    width: 100%;
+    animation: fadeIn 0.3s ease;
+}
+
+.test-hub-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 18px 0;
+}
+
+.test-card-btn {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 12px;
+    background: linear-gradient(135deg, #f8fafc 0%, #ecfeff 100%);
+    color: var(--text-main);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.test-card-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+.test-card-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.test-hub-last-result {
+    min-height: 22px;
+    margin: 8px 0 4px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.test-hub-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 14px;
+}
+
+.test-hub-actions .btn {
+    width: auto;
+    min-width: 220px;
+}
+
+.gaze-tests-container {
+    width: 100%;
+}
+
+.gaze-test-screen {
+    width: 100%;
+    animation: fadeIn 0.3s ease;
+}
+
+.test-meta {
+    text-align: center;
+    color: var(--text-secondary);
+    margin: 6px 0;
+}
+
+.vpc-screen {
+    text-align: center;
+}
+
+.vpc-fixation {
+    font-size: 40px;
+    font-weight: 700;
+    margin: 24px auto;
+    user-select: none;
+}
+
+.vpc-center-image {
+    max-width: min(80vw, 680px);
+    max-height: min(60vh, 420px);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    object-fit: contain;
+    background: #f9fafb;
+    margin: 10px auto;
+}
+
+.vpc-pair-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: center;
+    margin-top: 14px;
+}
+
+.vpc-side-image {
+    width: 100%;
+    max-height: 46vh;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    object-fit: contain;
+    background: #f9fafb;
+}
+
+.visuospatial-screen {
+    text-align: center;
+}
+
+.visuospatial-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 12px 0;
+}
+
+.visuospatial-controls .btn {
+    width: auto;
+    min-width: 180px;
+    margin-top: 0;
+}
+
+.visuospatial-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: min(68vh, 560px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            #ffffff 0px,
+            #ffffff 28px,
+            #f3f4f6 29px
+        );
+    overflow: hidden;
+}
+
+#visuospatialCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+#visuospatialGazeDot {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(15, 118, 110, 0.7);
+    box-shadow: 0 0 8px rgba(15, 118, 110, 0.5);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .test-hub-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vpc-pair-row {
+        grid-template-columns: 1fr;
+    }
+
+    .visuospatial-controls .btn,
+    .test-hub-actions .btn {
+        width: 100%;
+        min-width: 0;
+    }
+}

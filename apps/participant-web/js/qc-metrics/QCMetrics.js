@@ -1,9 +1,16 @@
 /**
- * QC Metrics Module v3.0
+ * QC Metrics Module v3.4
  * 
  * Основной класс для сбора и анализа QC метрик
  * 
- * @version 3.0.0
+ * ИЗМЕНЕНИЯ v3.4:
+ * - Renamed currentFps → analysisFps in report output for clarity
+ *   (this is the processFrame() call rate, not camera FPS)
+ * - QC Score now returns 0-1 (LEGACY-compatible) with hard penalties
+ * - QC_WEIGHTS updated to include dropout/fps components
+ * - Added fps_absolute_min threshold
+ * 
+ * @version 3.4.0
  * @module qc-metrics/QCMetrics
  */
 
@@ -138,6 +145,7 @@ class QCMetrics {
      * @param {boolean} occluded - флаг окклюзии (опционально)
      */
     addGazePoint(gazeData, poseData, occluded = false) {
+        this._counters.gazeTotal++;
         this._gazeState = addGazePoint(this._gazeState, gazeData, poseData, this.thresholds, occluded);
     }
 
@@ -222,7 +230,7 @@ class QCMetrics {
      * @returns {number}
      */
     getCameraFps() {
-        return this._fpsMonitor.getCurrentFps();
+        return this._fpsMonitor.getCameraFps();
     }
 
     /**

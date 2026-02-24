@@ -1,5 +1,5 @@
 // 1. Импорты всех модулей
-import { state } from './state.js';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs } from './state.js';
 import { 
     setLanguage, 
     nextStep, 
@@ -49,7 +49,7 @@ export function handleGazeUpdate(gazeData) {
         if (customDot) customDot.style.display = 'none';
         
         if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-            state.runtime.qcMetrics.addGazePoint(null, null);
+            state.runtime.qcMetrics.addGazePoint(null, state.runtime.lastPoseData);
         }
         return;
     }
@@ -57,9 +57,15 @@ export function handleGazeUpdate(gazeData) {
     // Обработка валидных данных
     const x = Math.round(gazeData.x);
     const y = Math.round(gazeData.y);
-    const t = gazeData.t || Date.now();
+    const t = gazeData.t || gazeData.timestamp || Date.now();
 
     state.runtime.currentGaze = { x, y };
+    const phase = state.runtime.currentPhase || null;
+    const taskContext = getCurrentTaskContext();
+    const screenWidth = window.innerWidth || 1;
+    const screenHeight = window.innerHeight || 1;
+    const onScreen = x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight;
+    const confidence = Number.isFinite(gazeData.confidence) ? gazeData.confidence : null;
 
     // Визуализация 
     if (customDot && (state.flags.isRecording || state.flags.isValidating)) {
@@ -72,16 +78,69 @@ export function handleGazeUpdate(gazeData) {
 
     // Запись сырых данных в сессию
     if (state.flags.isRecording) {
-        state.sessionData.eyeTracking.push({ x, y, t });
+        state.sessionData.eyeTracking.push({
+            x,
+            y,
+            t,
+            tRelMs: getRelativeSessionTimeMs(t),
+            phase,
+            blockId: taskContext.blockId ?? null,
+            trialId: taskContext.trialId ?? null,
+            stimulusId: taskContext.stimulusId ?? null,
+            stimulusType: taskContext.stimulusType ?? null,
+            expectedResponse: taskContext.expectedResponse ?? null,
+            onScreen,
+            confidence,
+            rawX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
+            rawY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
+            screenWidth,
+            screenHeight
+        });
     }
 
-    // Отправка в QC Metrics
+    // Отправка в QC Metrics (с данными позы для pose-based offscreen inference)
     if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-        state.runtime.qcMetrics.addGazePoint({ x, y }, null);
+        state.runtime.qcMetrics.addGazePoint({ x, y }, state.runtime.lastPoseData);
     }
 }
 
 window.handleGazeUpdate = handleGazeUpdate;
+
+/**
+ * Принимает eye-signal sample (EAR / iris proxy) из кадрового анализа.
+ */
+export function handleEyeSignalUpdate(signalData) {
+    if (!signalData || !Number.isFinite(signalData.t)) return;
+
+    const phase = state.runtime.currentPhase || null;
+    const taskContext = getCurrentTaskContext();
+    const sample = {
+        t: signalData.t,
+        tRelMs: getRelativeSessionTimeMs(signalData.t),
+        phase,
+        blockId: taskContext.blockId ?? null,
+        trialId: taskContext.trialId ?? null,
+        stimulusId: taskContext.stimulusId ?? null,
+        stimulusType: taskContext.stimulusType ?? null,
+        expectedResponse: taskContext.expectedResponse ?? null,
+        leftEAR: Number.isFinite(signalData.leftEAR) ? signalData.leftEAR : null,
+        rightEAR: Number.isFinite(signalData.rightEAR) ? signalData.rightEAR : null,
+        earAvg: Number.isFinite(signalData.earAvg) ? signalData.earAvg : null,
+        bothOpen: signalData.bothOpen === true,
+        leftIrisRadius: Number.isFinite(signalData.leftIrisRadius) ? signalData.leftIrisRadius : null,
+        rightIrisRadius: Number.isFinite(signalData.rightIrisRadius) ? signalData.rightIrisRadius : null,
+        leftEyeWidth: Number.isFinite(signalData.leftEyeWidth) ? signalData.leftEyeWidth : null,
+        rightEyeWidth: Number.isFinite(signalData.rightEyeWidth) ? signalData.rightEyeWidth : null,
+        pupilProxy: Number.isFinite(signalData.pupilProxy) ? signalData.pupilProxy : null
+    };
+
+    state.runtime.lastEyeSignal = sample;
+    if (state.flags.isRecording) {
+        state.sessionData.eyeSignals.push(sample);
+    }
+}
+
+window.handleEyeSignalUpdate = handleEyeSignalUpdate;
 
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -148,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
         startCalibBtn.addEventListener('click', startCalibration);
     }
 
-    // Кнопка скачивания JSON (шаг 7)
+    // Кнопка скачивания JSON (шаг 6)
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
         downloadBtn.addEventListener('click', () => {
@@ -156,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Кнопка перезапуска (шаг 7)
+    // Кнопка перезапуска (шаг 6)
     const restartBtn = document.getElementById('restartBtn');
     if (restartBtn) {
         restartBtn.addEventListener('click', () => {
