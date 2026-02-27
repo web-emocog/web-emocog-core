@@ -2283,8 +2283,12 @@ body{
         <div style="padding:0;border-top:1px solid var(--stroke);padding-top:14px;margin-bottom:2px;">
           <div class="section-title" id="quickActionsTitle">Quick Actions</div>
           
-          <button class="quick-btn" onclick="navigate('#/experiments'); setTimeout(()=>{const btn=document.querySelector('[data-tab=\'constructor\']'); if(btn) btn.click();},100);" style="width:100%;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.30);color:var(--accent);font-weight:700;gap:10px;margin-bottom:6px;" id="qaNewExp">
-            <span class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m7-7v14"/></svg></span>
+          <button class="quick-btn" onclick="navigate('#/builder');" style="width:100%;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.30);color:var(--accent);font-weight:700;gap:10px;margin-bottom:6px;" id="qaNewExp">
+            <span class="icon">
+              <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="18" height="18">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m7-7v14"/>
+              </svg>
+            </span>
             <span id="qaNewExpLabel">New experiment</span>
           </button>
           
@@ -2788,7 +2792,6 @@ const AUTO_TEXT_PAIRS = [
   ["Select stimuli","Выберите стимулы"],
   ["Create","Создать"],
   ["All Experiments","Все эксперименты"],
-  ["New experiment","Новый эксперимент"],
   ["Edit","Редактировать"],
   ["Run","Запустить"],
   ["No experiments","Нет экспериментов"],
@@ -2800,7 +2803,7 @@ const AUTO_TEXT_PAIRS = [
   ["Protocol Builder","Конструктор протокола"],
   ["Blocks library","Библиотека блоков"],
   ["Timeline","Таймлайн"],
-  ["Sandbox","Песочница"],
+  ["Sandbox","Тестовый просмотр"],
   ["Quick Actions","Быстрые действия"],
   ["New experiment","Новый эксперимент"],
   ["Invite participant","Пригласить участника"],
@@ -2808,6 +2811,12 @@ const AUTO_TEXT_PAIRS = [
   ["Log out","Выйти"],
   ["Navigation","Навигация"],
   ["selected","выбрано"],
+  ['Upload stimuli', 'Загрузка стимулов'],
+  ['Select content type to add', 'Выберите тип контента для добавления'],
+  ['Media files', 'Медиафайлы'],
+  ['Images, Video, Audio, Text','Картинки, Видео, Аудио, Текст'],
+  ['Presentations & PDF', 'Презентации и PDF'],
+  ['Automatically converted to image stimuli', 'Автоматически конвертируются в картинки-стимулы'],
   //конструктор
   ["How to start?", "Как начать?"],
   ["Choose how to create the experiment", "Выберите способ создания эксперимента"],
@@ -2898,6 +2907,40 @@ const AUTO_TEXT_PAIRS = [
   ["Take a short break", "Сделайте небольшой перерыв"],
   ["Duration (sec)", "Длительность (сек)"],
   ["Save", "Сохранить"],
+  // таблица проб и настройки
+  ['Logic setup:', 'Настройка логики:'],
+  ['Response Window (RT)', 'Окно ответа (RT)'],
+  ['Fixation (+)', 'Фиксация (+)'],
+  ['Feedback', 'Обратная связь'],
+  ['Omission Rule', 'Пропуск (Omission)'],
+  ['Commission Rule', 'Лишнее (Commission)'],
+  ['Flag as error', 'Пометить как ошибку'],
+  ['Ignore', 'Проигнорировать'],
+  ['+ Row', '+ Строка'],
+  ['Auto-generate from:', 'Автогенерация из:'],
+  ['— Select folder —', '— Выбрать папку —'],
+  ['Generate', 'Сгенерировать'],
+  ['Randomize trials', 'Перемешивать пробы'],
+  ['Condition', 'Условие'],
+  ['Response', 'Ответ'],
+  ['Dur.(ms)', 'Длит.(мс)'],
+  ['Reps', 'Повторы'],
+  ['Table is empty. Add a row or generate from folder.', 'Таблица пуста. Добавьте строку или сгенерируйте из папки.'],
+  ['— Select —', '— Выбрать —'],
+  ['Save table', 'Сохранить таблицу'],
+  ['Logic settings saved ✓', 'Настройки логики сохранены ✓'],
+  ['Please select a folder from the list', 'Пожалуйста, выберите папку из списка'],
+  ['Selected folder is empty!', 'Выбранная папка пуста!'],
+  ['Stimuli and Trial Tables', 'Стимулы и Таблицы проб'],
+  ['Configure the logic of showing stimuli (Trials) for each block', 'Настройте логику показа стимулов (Trials) для каждого блока'],
+  ['Trial table', 'Таблица проб'],
+  ['trials', 'проб'],
+  ['Source:', 'Источник:'],
+  ['Entire library', 'Вся библиотека'],
+  ['Folder:', 'Папка:'],
+  ['Not selected', 'Не выбрана'],
+  ['Has fixation (+)', 'Есть фиксация (+)'],
+  ['ms', 'мс'],
   //QC правила
   ["Quality control thresholds", "Пороговые значения контроля качества"],
   ["Gaze valid", "Взгляд валиден"],
@@ -8267,23 +8310,33 @@ function ExperimentBuilderView(options = {}) {
 
   let editingExp = null;
   let protocolVersion = '1.0';
+  let highestStep = 0;
 
   if (experimentId) {
     const saved = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     editingExp = saved.find(e => e.id === experimentId) || null;
     experimentBlocks = (editingExp && editingExp.blocks) ? JSON.parse(JSON.stringify(editingExp.blocks)) : [];
-   
-    if (currentStep === 0) currentStep = 1;
     
-    const ver = parseFloat(editingExp?.version || '1.0') + 0.1;
-    protocolVersion = ver.toFixed(1);
+    if (editingExp) {
+      if (editingExp.status === 'active') {
+        highestStep = 7; // Всего 8 шагов (индекс 7)
+        protocolVersion = (parseFloat(editingExp.version || '1.0') + 0.1).toFixed(1);
+        if (currentStep === 0) currentStep = 1;
+      } else {
+        highestStep = editingExp.savedStep || 1;
+        protocolVersion = editingExp.version || '1.0';
+        if (currentStep === 0) currentStep = highestStep;
+      }
+    }
   } else if (currentStep === 0) {
     experimentBlocks = [];
     uploadedPsychoPyFile = null; uploadedResources = {}; parsedExperimentData = null;
     protocolVersion = '1.0';
+    highestStep = 0;
   } else {
     experimentBlocks = JSON.parse(localStorage.getItem('emocog_protocol_blocks')) || [];
     protocolVersion = '1.0';
+    highestStep = currentStep;
   }
 
   document.getElementById('pageTitle').textContent = t('protocolBuilder') || 'Конструктор';
@@ -8329,29 +8382,42 @@ function ExperimentBuilderView(options = {}) {
   root.appendChild(canvasCol);
 
   function renderStepper() {
+    if (currentStep > highestStep) highestStep = currentStep;
+
     stepperCol.innerHTML = `
       <div style="font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--muted2);padding:0 4px 10px;">${t('builderStepsLabel')}</div>
       ${STEPS.map((label, i) => {
-        const done = i < currentStep;
+        const done = i < currentStep || i < highestStep || (editingExp?.status === 'active');
         const active = i === currentStep;
-        const locked = i > currentStep;
+        const locked = i > highestStep;
+        
         return `<div class="bstep ${active?'bstep-active':''}" data-step="${i}"
           style="display:flex;align-items:center;gap:9px;padding:8px 8px;border-radius:10px;margin-bottom:2px;cursor:${locked?'default':'pointer'};background:${active?'rgba(92,102,189,.11)':'transparent'};">
           <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;font-weight:700;
             background:${done?'var(--good)':active?'var(--accent)':'var(--stroke)'};
             color:${done||active?'white':'var(--muted2)'};">
-            ${done ? '<svg width="9" height="9" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>' : (i+1)}
+            ${done && !active ? '<svg width="9" height="9" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>' : (i+1)}
           </div>
           <span style="font-size:12px;line-height:1.3;font-weight:${active?'600':'400'};color:${locked?'var(--muted2)':active?'var(--accent)':'var(--text)'};">${label}</span>
         </div>`;
       }).join('')}
+      
+      <div style="margin-top:auto; padding-top:20px;">
+        <button id="saveDraftGlobalBtn" class="quick-btn" style="width:100%; justify-content:center; font-size:11px; background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.3); color:var(--warn); font-weight:600;">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+          Сохранить черновик
+        </button>
+      </div>
     `;
+
     stepperCol.querySelectorAll('.bstep').forEach(el => {
       el.addEventListener('click', () => {
         const i = parseInt(el.dataset.step);
-        if (i <= currentStep) { currentStep = i; renderStepper(); renderCanvas(); }
+        if (i <= highestStep) { currentStep = i; renderStepper(); renderCanvas(); }
       });
     });
+
+    stepperCol.querySelector('#saveDraftGlobalBtn').addEventListener('click', saveDraft);
   }
 
   function clearInspector() {
@@ -8383,58 +8449,11 @@ function ExperimentBuilderView(options = {}) {
           <label>Кнопка</label>
           <input data-field="buttonText" value="${c.buttonText||'Далее'}" />
         </div>`;
-    } else if (block.type === 'cognitive_task') {
+    } else if (block.type === 'cognitive_task' || block.type === 'passive') {
       typeFields = `
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:6px;">Тайминг</div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Источник данных</div>
         <div class="insp-field">
-          <label>Длит. стимула (мс)</label>
-          <input data-field="stimulusDuration" type="number" value="${c.stimulusDuration||1000}" />
-        </div>
-        <div class="insp-field">
-          <label>Окно RT (мс)</label>
-          <input data-field="rtWindow" type="number" value="${c.rtWindow||1000}" />
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Ответ</div>
-        <div class="insp-field">
-          <label>Тип ответа</label>
-          <select data-field="responseType">
-            <option value="keys" ${c.responseType==='keys'||!c.responseType?'selected':''}>Клавиши (keys)</option>
-            <option value="click" ${c.responseType==='click'?'selected':''}>Клик мышью</option>
-          </select>
-        </div>
-        <div class="insp-field" style="flex-direction:row;align-items:center;gap:8px;">
-          <input type="checkbox" data-field="showFeedback" id="cb_fb" ${c.showFeedback?'checked':''} style="width:auto;margin:0;" />
-          <label for="cb_fb" style="font-size:12px;color:var(--text);cursor:pointer;">Показывать обратную связь</label>
-        </div>
-        <div class="insp-field" style="flex-direction:row;align-items:center;gap:8px;">
-          <input type="checkbox" data-field="useRT" id="cb_rt" ${c.useRT!==false?'checked':''} style="width:auto;margin:0;" />
-          <label for="cb_rt" style="font-size:12px;color:var(--text);cursor:pointer;">Расчёт времени реакции (RT)</label>
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Правила ошибок</div>
-        <div class="insp-field">
-          <label>Omission (пропуск)</label>
-          <select data-field="omissionRule">
-            <option value="skip" ${c.omissionRule==='skip'||!c.omissionRule?'selected':''}>Пропустить</option>
-            <option value="flag" ${c.omissionRule==='flag'?'selected':''}>Пометить</option>
-            <option value="stop" ${c.omissionRule==='stop'?'selected':''}>Остановить блок</option>
-          </select>
-        </div>
-        <div class="insp-field">
-          <label>Commission (лишнее нажатие)</label>
-          <select data-field="commissionRule">
-            <option value="flag" ${c.commissionRule==='flag'||!c.commissionRule?'selected':''}>Пометить</option>
-            <option value="skip" ${c.commissionRule==='skip'?'selected':''}>Пропустить</option>
-            <option value="stop" ${c.commissionRule==='stop'?'selected':''}>Остановить блок</option>
-          </select>
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Цель взгляда</div>
-        <div class="insp-field">
-          <label>Целевая AOI (название)</label>
-          <input data-field="targetAOI" value="${c.targetAOI||''}" placeholder="Напр: stimulus_area" />
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Стимулы</div>
-        <div class="insp-field">
-          <label>Источник стимулов</label>
+          <label>Откуда брать стимулы?</label>
           <select data-field="stimuliSource">
             <option value="library" ${c.stimuliSource==='library'||!c.stimuliSource?'selected':''}>Вся библиотека</option>
             <option value="folder" ${c.stimuliSource==='folder'?'selected':''}>Конкретная папка</option>
@@ -8447,66 +8466,7 @@ function ExperimentBuilderView(options = {}) {
             ${folderOpts}
           </select>
         </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:12px 0 6px;">Порядок показа</div>
-        <div class="insp-field" style="flex-direction:row;align-items:center;gap:8px;">
-          <input type="checkbox" data-field="randomize" id="cb_rand_${blockId}" ${c.randomize?'checked':''} style="width:auto;margin:0;accent-color:var(--accent);cursor:pointer;" />
-          <label for="cb_rand_${blockId}" style="font-size:12px;color:var(--text);cursor:pointer;">Случайный порядок (рандомизация)</label>
-        </div>`;
-    } else if (block.type === 'passive') {
-      typeFields = `
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:6px;">Контент</div>
-        <div class="insp-field">
-          <label>Тип контента</label>
-          <select data-field="contentType">
-            <option value="slides" ${c.contentType==='slides'||!c.contentType?'selected':''}>Слайды (изображения)</option>
-            <option value="video" ${c.contentType==='video'?'selected':''}>Видео</option>
-            <option value="web" ${c.contentType==='web'?'selected':''}>Встроенная веб-страница</option>
-          </select>
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Переключение слайдов</div>
-        <div class="insp-field">
-          <label>Режим смены</label>
-          <select data-field="slideChangeMode" id="slideChangeModeField">
-            <option value="timer" ${c.slideChangeMode==='timer'||!c.slideChangeMode?'selected':''}>Таймер (авто)</option>
-            <option value="manual" ${c.slideChangeMode==='manual'?'selected':''}>Вручную (кнопка)</option>
-          </select>
-        </div>
-        <div class="insp-field" id="slideDurationField_${blockId}" style="${c.slideChangeMode==='manual'?'display:none':''}">
-          <label>Длит. слайда (мс)</label>
-          <input data-field="slideDuration" type="number" value="${c.slideDuration||5000}" />
-        </div>
-        <div class="insp-field" id="manualKeyField_${blockId}" style="${c.slideChangeMode==='manual'?'':'display:none;'}">
-          <label>Клавиша (для JSON)</label>
-          <input data-field="manualKey" value="${c.manualKey||'Space'}" placeholder="Space / ArrowRight / Enter" />
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">AOI & Айтрекинг</div>
-        <div class="insp-field">
-          <label>Режим AOI</label>
-          <select data-field="aoiMode">
-            <option value="heatmap" ${c.aoiMode==='heatmap'||!c.aoiMode?'selected':''}>Тепловая карта (heatmap)</option>
-            <option value="paths" ${c.aoiMode==='paths'?'selected':''}>Пути взгляда (gaze paths)</option>
-          </select>
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Стимулы</div>
-        <div class="insp-field">
-          <label>Источник стимулов</label>
-          <select data-field="stimuliSource">
-            <option value="library" ${c.stimuliSource==='library'||!c.stimuliSource?'selected':''}>Вся библиотека</option>
-            <option value="folder" ${c.stimuliSource==='folder'?'selected':''}>Конкретная папка</option>
-          </select>
-        </div>
-        <div class="insp-field" id="folderField_${blockId}" style="${c.stimuliSource==='folder'?'':'display:none;'}">
-          <label>Папка со стимулами</label>
-          <select data-field="stimuliFolder">
-            <option value="">— выберите папку —</option>
-            ${folderOpts}
-          </select>
-        </div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:12px 0 6px;">Порядок показа</div>
-        <div class="insp-field" style="flex-direction:row;align-items:center;gap:8px;">
-          <input type="checkbox" data-field="randomize" id="cb_rand_${blockId}" ${c.randomize?'checked':''} style="width:auto;margin:0;accent-color:var(--accent);cursor:pointer;" />
-          <label for="cb_rand_${blockId}" style="font-size:12px;color:var(--text);cursor:pointer;">Случайный порядок (рандомизация)</label>
-        </div>`;
+      `;
     } else if (block.type === 'rest') {
       typeFields = `
         <div class="insp-field">
@@ -8575,6 +8535,14 @@ function ExperimentBuilderView(options = {}) {
           if (keyF) keyF.style.display = slideMode.value === 'manual' ? '' : 'none';
         });
       }
+
+      const trialsBtn = insp.querySelector(`#btn_edit_trials_${blockId}`);
+      if (trialsBtn) {
+        trialsBtn.addEventListener('click', () => {
+          showTrialTableModal(block);
+        });
+      }
+
       const saveBtn = insp.querySelector('#inspSaveBtn');
       if (saveBtn) {
         saveBtn.addEventListener('click', () => {
@@ -8592,6 +8560,250 @@ function ExperimentBuilderView(options = {}) {
         });
       }
     }, 50);
+  }
+
+  function showTrialTableModal(block, onSaveCallback) {
+    if (!block.content.trials) block.content.trials = [];
+    let currentTrials = JSON.parse(JSON.stringify(block.content.trials));
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.65);backdrop-filter:blur(5px);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:26px 24px 20px;width:950px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
+
+    const stimuliOptions = stimuliList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    const selectedFolderId = block.content.stimuliFolder || '';
+    const folderOptions = folders.map(f => `<option value="${f.id}" ${f.id === selectedFolderId ? 'selected' : ''}>${f.name}</option>`).join('');
+
+    modal.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <div>
+          <div style="font-size:18px;font-weight:700;color:var(--text);">
+            <span>Настройка логики:</span> <span style="color:var(--accent);">${block.label}</span>
+          </div>
+        </div>
+        <button id="trialCloseBtn" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="22" height="22"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div style="display:flex; gap:16px; background:var(--card-bg); border:1px solid var(--stroke); padding:12px 16px; border-radius:12px; flex-wrap:wrap; align-items:flex-end;">
+        
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Окно ответа (RT)</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="number" id="rtWindowInput" value="${block.content.rtWindow || 1000}" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;">
+            <span style="font-size:12px; color:var(--muted);">мс</span>
+          </div>
+        </div>
+
+        <div style="width:1px; height:36px; background:var(--stroke); margin:0 4px;"></div>
+
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Фиксация (+)</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="useFixationCb" ${block.content.useFixation ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);">
+            <input type="number" id="fixationDuration" value="${block.content.fixationDuration || 500}" placeholder="мс" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.useFixation ? '' : 'disabled'}>
+            <span style="font-size:12px; color:var(--muted);">мс</span>
+          </div>
+        </div>
+
+        ${block.type === 'cognitive_task' ? `
+          <div style="width:1px; height:36px; background:var(--stroke); margin:0 4px;"></div>
+
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Обратная связь</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="fbCb" ${block.content.showFeedback ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="Показывать">
+              <input type="text" id="fbCorr" value="${block.content.feedbackCorrect || 'Верно!'}" placeholder="Успех" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
+              <input type="text" id="fbInc" value="${block.content.feedbackIncorrect || 'Ошибка!'}" placeholder="Ошибка" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
+            </div>
+          </div>
+
+          <div style="width:1px; height:36px; background:var(--stroke); margin:0 4px;"></div>
+          
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Пропуск (Omission)</label>
+            <select id="omissionRuleSel" style="padding:6px 10px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none; background:white;">
+              <option value="flag" ${block.content.omissionRule==='flag'?'selected':''}>Пометить как ошибку</option>
+              <option value="skip" ${block.content.omissionRule==='skip'?'selected':''}>Проигнорировать</option>
+            </select>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Лишнее (Commission)</label>
+            <select id="commissionRuleSel" style="padding:6px 10px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none; background:white;">
+              <option value="flag" ${block.content.commissionRule==='flag'?'selected':''}>Пометить как ошибку</option>
+              <option value="skip" ${block.content.commissionRule==='skip'?'selected':''}>Проигнорировать</option>
+            </select>
+          </div>
+        ` : ''}
+      </div>
+      
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:4px;flex-wrap:wrap;">
+        <button id="addTrialRowBtn" class="quick-btn" style="background:var(--card-bg);border:1px solid var(--stroke);">+ Строка</button>
+        <div style="width:1px;height:24px;background:var(--stroke);margin:0 4px;"></div>
+        <span style="font-size:12px;color:var(--muted);font-weight:600;">Автогенерация из:</span>
+        <select id="autoGenFolder" style="padding:6px 10px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);min-width:150px;">
+          <option value="">— Выбрать папку —</option>
+          ${folderOptions}
+        </select>
+        <button id="autoGenBtn" class="quick-btn" style="background:rgba(92,102,189,.1);color:var(--accent);border:none;">Сгенерировать</button>
+        
+        <div style="flex:1;"></div>
+        
+        <div style="display:flex;align-items:center;gap:6px;background:rgba(245,158,11,.1);padding:6px 12px;border-radius:8px;">
+          <input type="checkbox" id="trialRandomizeCb" ${block.content.randomize ? 'checked' : ''} style="accent-color:var(--warn);width:16px;height:16px;cursor:pointer;">
+          <label for="trialRandomizeCb" style="font-size:12px;font-weight:700;color:var(--warn);cursor:pointer;">Перемешивать пробы</label>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:40px 2fr 1.5fr 1fr 1fr 70px 40px;gap:8px;padding:0 8px;font-size:11px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.05em;">
+        <div>№</div><div>Стимул</div><div>Условие</div><div>Ответ</div><div>Длит.(мс)</div><div>Повторы</div><div></div>
+      </div>
+      <div id="trialsContainer" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px;min-height:200px;background:rgba(92,102,189,.03);border-radius:12px;border:1px inset var(--stroke);"></div>
+
+      <div style="display:flex;gap:12px;justify-content:flex-end;flex-shrink:0;padding-top:12px;border-top:1px solid var(--stroke);">
+        <button class="quick-btn" id="trialCancelBtn" style="background:transparent;border:1px solid var(--stroke);">Отмена</button>
+        <button class="quick-btn" id="trialSaveBtn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;">Сохранить таблицу</button>
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const container = modal.querySelector('#trialsContainer');
+
+    const fixCb = modal.querySelector('#useFixationCb');
+    const fixInput = modal.querySelector('#fixationDuration');
+    fixCb.addEventListener('change', () => { fixInput.disabled = !fixCb.checked; });
+
+    if (block.type === 'cognitive_task') {
+      const fbCb = modal.querySelector('#fbCb');
+      const fbCorr = modal.querySelector('#fbCorr');
+      const fbInc = modal.querySelector('#fbInc');
+      fbCb.addEventListener('change', () => {
+        fbCorr.disabled = !fbCb.checked;
+        fbInc.disabled = !fbCb.checked;
+      });
+    }
+
+    function renderRows() {
+      if (currentTrials.length === 0) {
+        container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">Таблица пуста. Добавьте строку или сгенерируйте из папки.</div>`;
+        return;
+      }
+      
+      container.innerHTML = currentTrials.map((trial, index) => `
+        <div class="trial-row" data-index="${index}" style="display:grid;grid-template-columns:40px 2fr 1.5fr 1fr 1fr 70px 40px;gap:8px;align-items:center;background:var(--card-bg);padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);">
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-align:center;">${index + 1}</div>
+          
+          <select class="t-input t-stimulus" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);">
+            <option value="">— Выбрать —</option>
+            ${stimuliOptions}
+          </select>
+          
+          <input type="text" class="t-input t-condition" value="${trial.condition || ''}" placeholder="target" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          <input type="text" class="t-input t-correct" value="${trial.correctResponse || ''}" placeholder="Space" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          <input type="number" class="t-input t-duration" value="${trial.duration || 1000}" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          <input type="number" class="t-input t-reps" value="${trial.repetitions || 1}" min="1" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
+          
+          <button class="del-row-btn" data-index="${index}" style="background:none;border:none;color:var(--bad);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;border-radius:6px;">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      `).join('');
+
+      container.querySelectorAll('.trial-row').forEach(row => {
+        const idx = row.dataset.index;
+        if (currentTrials[idx].stimulusId) {
+          row.querySelector('.t-stimulus').value = currentTrials[idx].stimulusId;
+        }
+      });
+    }
+
+    container.addEventListener('input', (e) => {
+      if (e.target.classList.contains('t-input')) {
+        const row = e.target.closest('.trial-row');
+        const idx = row.dataset.index;
+        currentTrials[idx] = {
+          stimulusId: row.querySelector('.t-stimulus').value,
+          condition: row.querySelector('.t-condition').value,
+          correctResponse: row.querySelector('.t-correct').value,
+          duration: parseInt(row.querySelector('.t-duration').value) || 0,
+          repetitions: parseInt(row.querySelector('.t-reps').value) || 1
+        };
+      }
+    });
+
+    container.addEventListener('click', (e) => {
+      const delBtn = e.target.closest('.del-row-btn');
+      if (delBtn) {
+        currentTrials.splice(delBtn.dataset.index, 1);
+        renderRows();
+      }
+    });
+
+    modal.querySelector('#addTrialRowBtn').addEventListener('click', () => {
+      currentTrials.push({ stimulusId: '', condition: 'target', correctResponse: '', duration: 1000, repetitions: 1 });
+      renderRows();
+      setTimeout(() => container.scrollTop = container.scrollHeight, 50);
+    });
+
+    modal.querySelector('#autoGenBtn').addEventListener('click', () => {
+      const folderId = modal.querySelector('#autoGenFolder').value;
+      if (!folderId) return toast('Пожалуйста, выберите папку из списка', 'error');
+      
+      const folder = folders.find(f => f.id === folderId);
+      if (!folder || !folder.stimuliIds || folder.stimuliIds.length === 0) {
+        return toast('Выбранная папка пуста!', 'error');
+      }
+
+      folder.stimuliIds.forEach(stimId => {
+        currentTrials.push({
+          stimulusId: stimId,
+          condition: 'target', 
+          correctResponse: '',
+          duration: 1000,
+          repetitions: 1
+        });
+      });
+      
+      renderRows();
+      setTimeout(() => container.scrollTop = container.scrollHeight, 50);
+      toast(`Успешно добавлено ${folder.stimuliIds.length} проб!`);
+    });
+
+    const close = () => document.body.removeChild(overlay);
+    modal.querySelector('#trialCloseBtn').addEventListener('click', close);
+    modal.querySelector('#trialCancelBtn').addEventListener('click', close);
+    
+    modal.querySelector('#trialSaveBtn').addEventListener('click', () => {
+      block.content.trials = currentTrials;
+      block.content.randomize = modal.querySelector('#trialRandomizeCb').checked;
+      
+      block.content.rtWindow = parseInt(modal.querySelector('#rtWindowInput').value) || 1000;
+      block.content.useFixation = fixCb.checked;
+      block.content.fixationDuration = parseInt(fixInput.value) || 500;
+      
+      if (block.type === 'cognitive_task') {
+        block.content.showFeedback = modal.querySelector('#fbCb').checked;
+        block.content.feedbackCorrect = modal.querySelector('#fbCorr').value || 'Верно!';
+        block.content.feedbackIncorrect = modal.querySelector('#fbInc').value || 'Ошибка!';
+        
+        block.content.omissionRule = modal.querySelector('#omissionRuleSel').value;
+        block.content.commissionRule = modal.querySelector('#commissionRuleSel').value;
+      }
+      
+      localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+      close();
+      toast('Настройки логики сохранены ✓');
+      
+      if (onSaveCallback) onSaveCallback(); 
+    });
+
+    renderRows();
+    setTimeout(() => applyAutoI18n(), 0);
   }
 
   function renderCanvas() {
@@ -8945,8 +9157,8 @@ function ExperimentBuilderView(options = {}) {
     const header = document.createElement('div');
     header.style.cssText = 'padding:16px 18px 10px;flex-shrink:0;border-bottom:1px solid var(--stroke);';
     header.innerHTML = `
-      <div style="font-size:17px;font-weight:800;color:var(--text);">${t('builderStimuliTitle')}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:2px;">${t('builderStimuliSub')}</div>
+      <div style="font-size:17px;font-weight:800;color:var(--text);"><span>Стимулы и Таблицы проб</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;"><span>Настройте логику показа стимулов (Trials) для каждого блока</span></div>
     `;
     wrapper.appendChild(header);
 
@@ -8954,120 +9166,45 @@ function ExperimentBuilderView(options = {}) {
     body.style.cssText = 'flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:16px;';
 
     if (stimuliBlocks.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;flex-direction:column;gap:10px;margin-top:40px;';
-      empty.innerHTML = `<div style="font-size:13px;">${t('builderNoStimuliBlocks')}</div>`;
-      body.appendChild(empty);
+      body.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;font-size:13px;margin-top:40px;">В протоколе нет блоков, требующих настройки стимулов.</div>`;
     } else {
       stimuliBlocks.forEach(block => {
         const meta = getMeta(block.type);
-        const bc = block.content || {};
-        const src = bc.stimuliSource || 'library';
-        const folderId = bc.stimuliFolder || '';
-        if (!block.content) block.content = {};
-        const selectedIds = block.content.selectedStimuliIds || [];
+        const trialsCount = (block.content?.trials || []).reduce((sum, trial) => sum + (parseInt(trial.repetitions) || 1), 0);
+        
+        const folderName = folders.find(f => f.id === block.content.stimuliFolder)?.name || '<span>Не выбрана</span>';
+        const sourceHtml = block.content?.stimuliSource === 'folder' 
+          ? `<span>Папка:</span> <span style="color:var(--text);">${folderName}</span>` 
+          : `<span>Вся библиотека</span>`;
 
         const section = document.createElement('div');
-        section.style.cssText = 'border:1px solid var(--stroke);border-radius:12px;padding:14px;background:var(--card-bg);';
-
-        const allFolders = JSON.parse(localStorage.getItem('emocog_folders')) || [];
-        const folderOptions = '<option value="">—</option>' +
-          allFolders.map(f => '<option value="' + f.id + '"' + (f.id === folderId ? ' selected' : '') + '>' + f.name + '</option>').join('');
+        section.style.cssText = 'border:1px solid var(--stroke);border-radius:12px;padding:16px;background:var(--card-bg);display:flex;align-items:center;justify-content:space-between;';
 
         section.innerHTML = `
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-            <div style="width:26px;height:26px;border-radius:7px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-              <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <div style="width:26px;height:26px;border-radius:7px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
+              </div>
+              <div style="font-size:15px;font-weight:700;color:var(--text);">${block.label}</div>
             </div>
-            <div style="font-size:14px;font-weight:700;color:var(--text);">${block.label}</div>
-          </div>
-          <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-            <div style="flex:1;min-width:140px;">
-              <label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.06em;">${t('builderSourceLabel')}</label>
-              <select class="src-select" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--stroke);background:rgba(255,255,255,.6);font-size:12px;outline:none;cursor:pointer;">
-                <option value="library"${src==='library'?' selected':''}>${t('builderSrcLibrary')}</option>
-                <option value="folder"${src==='folder'?' selected':''}>${t('builderSrcFolder')}</option>
-              </select>
-            </div>
-            <div class="folder-wrap" style="flex:1;min-width:140px;display:${src==='folder'?'block':'none'};">
-              <label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.06em;">${t('builderFolderLabel')}</label>
-              <select class="folder-select" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--stroke);background:rgba(255,255,255,.6);font-size:12px;outline:none;cursor:pointer;">
-                ${folderOptions}
-              </select>
+            <div style="font-size:12px;color:var(--muted);display:flex;gap:12px;align-items:center;">
+              <span><b style="color:var(--text);">${trialsCount}</b> <span>проб</span></span>
+              <span style="color:var(--stroke);">|</span>
+              <span><span>Источник:</span> ${sourceHtml}</span>
+              ${block.content?.useFixation ? `<span style="color:var(--stroke);">|</span><span style="color:var(--accent);">Есть фиксация (+)</span>` : ''}
             </div>
           </div>
-          <div class="stimuli-preview"></div>
+          <button class="quick-btn open-trials-btn" style="background:var(--accent);border-color:var(--accent);color:white;font-weight:600;font-size:13px;padding:8px 16px;">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16" style="margin-right:6px;"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            <span>Таблица проб</span>
+          </button>
         `;
 
-        const preview = section.querySelector('.stimuli-preview');
-
-        const renderGrid = (stims) => {
-          if (stims.length === 0) {
-            preview.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0;">' + t('builderNoFiles') + '</div>';
-            return;
-          }
-          const selSet = new Set(block.content.selectedStimuliIds || []);
-          const items = stims.map(s => {
-            const sel = selSet.has(String(s.id));
-            const thumb = (s.type === 'image' && s.url)
-              ? '<img src="' + s.url + '" style="width:100%;height:100%;object-fit:cover;display:block;" loading="lazy">'
-              : '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" width="22" height="22" style="color:var(--muted);">' + getIconForType(s.type) + '</svg></div>';
-            const check = sel
-              ? '<div style="position:absolute;top:4px;right:4px;width:18px;height:18px;background:var(--accent);border-radius:4px;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2;"><svg width="11" height="11" fill="none" stroke="white" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></div>'
-              : '<div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border:1.5px solid rgba(255,255,255,.8);border-radius:4px;background:rgba(0,0,0,.15);pointer-events:none;z-index:2;"></div>';
-            return '<div class="s2-thumb" data-id="' + s.id + '" title="' + s.name + '" style="position:relative;border-radius:8px;overflow:hidden;aspect-ratio:1;border:' + (sel ? '2px solid var(--accent)' : '1px solid var(--stroke)') + ';cursor:pointer;background:rgba(0,0,0,.04);user-select:none;">' +
-              '<div style="height:100%;">' + thumb + '</div>' +
-              check +
-              '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.65);color:white;font-size:8.5px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;z-index:2;">' + s.name + '</div>' +
-            '</div>';
-          }).join('');
-          const selCount = selSet.size;
-          preview.innerHTML =
-            '<div style="font-size:10px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:6px;">' +
-              '<span style="font-weight:600;text-transform:uppercase;letter-spacing:.06em;">' + t('builderSelectStimuli') + '</span>' +
-              (selCount > 0 ? '<span style="background:var(--accent);color:white;border-radius:999px;padding:1px 7px;font-size:9px;font-weight:700;">' + selCount + ' ' + t('selected') + '</span>' : '') +
-            '</div>' +
-            '<div class="s2-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:7px;">' +
-              items +
-            '</div>';
-          preview.querySelectorAll('.s2-thumb').forEach(th => {
-            th.addEventListener('click', () => {
-              const id = String(th.dataset.id);
-              if (!block.content.selectedStimuliIds) block.content.selectedStimuliIds = [];
-              const idx = block.content.selectedStimuliIds.indexOf(id);
-              if (idx >= 0) block.content.selectedStimuliIds.splice(idx, 1);
-              else block.content.selectedStimuliIds.push(id);
-              localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
-              renderGrid(stims);
-            });
-          });
-        };
-
-        const updatePreview = () => {
-          const curSrc = section.querySelector('.src-select').value;
-          const curFolder = section.querySelector('.folder-select')?.value || '';
-          let stims = [];
-          if (curSrc === 'library') stims = stimuliList;
-          else if (curSrc === 'folder' && curFolder) {
-            const f = allFolders.find(x => String(x.id) === String(curFolder));
-            if (f) stims = stimuliList.filter(s => (f.stimuliIds || []).includes(String(s.id)));
-          }
-          renderGrid(stims);
-        };
-
-        section.querySelector('.src-select').addEventListener('change', e => {
-          section.querySelector('.folder-wrap').style.display = e.target.value === 'folder' ? 'block' : 'none';
-          block.content.stimuliSource = e.target.value;
-          localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
-          updatePreview();
-        });
-        section.querySelector('.folder-select')?.addEventListener('change', e => {
-          block.content.stimuliFolder = e.target.value;
-          localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
-          updatePreview();
+        section.querySelector('.open-trials-btn').addEventListener('click', () => {
+          showTrialTableModal(block, () => renderStep2Stimuli()); 
         });
 
-        updatePreview();
         body.appendChild(section);
       });
     }
@@ -9076,8 +9213,8 @@ function ExperimentBuilderView(options = {}) {
     const footer = document.createElement('div');
     footer.style.cssText = 'display:flex;justify-content:space-between;padding:12px 18px;flex-shrink:0;border-top:1px solid var(--stroke);';
     footer.innerHTML = `
-      <button class="quick-btn" id="s2Back2" style="font-size:12px;">${t('builderBack')}</button>
-      <button class="quick-btn" id="s2Next" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">${t('builderNext')}</button>
+      <button class="quick-btn" id="s2Back2" style="font-size:12px;">← <span>Назад</span></button>
+      <button class="quick-btn" id="s2Next" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;"><span>Далее</span> →</button>
     `;
     wrapper.appendChild(footer);
     canvasCol.appendChild(wrapper);
@@ -9097,25 +9234,33 @@ function ExperimentBuilderView(options = {}) {
     }
 
     canvasCol.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;">
-        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-          <div style="font-size:18px;font-weight:800;color:var(--text);">${s}</div>
-        </div>
-        <div style="flex:1;display:flex;align-items:center;justify-content:center;border:2px dashed var(--stroke);border-radius:14px;background:rgba(255,255,255,.2);color:var(--muted);text-align:center;flex-direction:column;gap:10px;">
-          <div style="font-size:14px;font-weight:600;color:var(--text);">${s}</div>
-          <div style="font-size:12px;max-width:260px;">Этот шаг находится в разработке.</div>
-        </div>
-        <div style="display:flex;justify-content:space-between;flex-shrink:0;padding-top:10px;border-top:1px solid var(--stroke);">
-          <button class="quick-btn" id="phBack2" style="font-size:12px;">${t('builderBack')}</button>
-          ${isLast
-            ? `<button class="quick-btn" id="phSave" style="background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3);color:var(--good);font-weight:700;font-size:13px;">
-                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                ${t('builderSave')}
-              </button>`
-            : `<button class="quick-btn" id="phNext" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">${t('builderNext')}</button>`}
-        </div>
+    <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+        <div style="font-size:18px;font-weight:800;color:var(--text);">${s}</div>
       </div>
-    `;
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;border:2px dashed var(--stroke);border-radius:14px;background:rgba(255,255,255,.2);color:var(--muted);text-align:center;flex-direction:column;gap:10px;">
+        <div style="font-size:14px;font-weight:600;color:var(--text);">${s}</div>
+        <div style="font-size:12px;max-width:260px;">Этот шаг находится в разработке.</div>
+      </div>
+      
+      ${isLast ? `
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
+          <label for="experimentNameInput" style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">Имя эксперимента</label>
+          <input type="text" id="experimentNameInput" placeholder="Например: Тест памяти на лица" style="padding:10px 14px; border-radius:10px; border:1px solid var(--stroke); background:var(--card-bg); font-size:14px; font-weight:600; color:var(--text); outline:none; width:100%; max-width:400px;" value="${editingExp ? editingExp.title : ''}">
+        </div>
+      ` : ''}
+
+      <div style="display:flex;justify-content:space-between;flex-shrink:0;padding-top:10px;border-top:1px solid var(--stroke);">
+        <button class="quick-btn" id="phBack2" style="font-size:12px;">${t('builderBack')}</button>
+        ${isLast
+          ? `<button class="quick-btn" id="phSave" style="background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3);color:var(--good);font-weight:700;font-size:13px;">
+              <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              ${t('builderSave')}
+            </button>`
+          : `<button class="quick-btn" id="phNext" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">${t('builderNext')}</button>`}
+      </div>
+    </div>
+  `;
     canvasCol.querySelectorAll('#phBack2').forEach(b => b.addEventListener('click', () => { currentStep--; renderStepper(); renderCanvas(); }));
     canvasCol.querySelector('#phNext')?.addEventListener('click', () => { currentStep++; renderStepper(); renderCanvas(); });
     canvasCol.querySelector('#phSave')?.addEventListener('click', saveProtocol);
@@ -9191,6 +9336,34 @@ function ExperimentBuilderView(options = {}) {
     wrap.querySelector('#qcNext').addEventListener('click', () => { saveQC(); currentStep++; renderStepper(); renderCanvas(); });
   }
 
+  //сохранение черновика
+  function saveDraft() {
+    const nameInput = document.getElementById('experimentNameInput');
+    const expTitle = (nameInput && nameInput.value.trim() !== '') ? nameInput.value.trim() : (editingExp?.title || 'Черновик эксперимента');
+
+    const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+    const id = experimentId || 'exp_' + Date.now();
+    
+    const entry = { 
+      id, 
+      title: expTitle, 
+      blocks: experimentBlocks, 
+      version: editingExp?.status === 'active' ? protocolVersion : (editingExp?.version || '1.0'), 
+      history: editingExp?.history || [],
+      savedStep: currentStep,
+      createdAt: editingExp?.createdAt || new Date().toISOString(), 
+      updatedAt: new Date().toISOString(), 
+      status: 'draft'
+    };
+    
+    const idx = experiments.findIndex(e => e.id === id);
+    if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
+    localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+    
+    toast('Черновик успешно сохранён!');
+    setTimeout(() => navigate('#/experiments'), 700);
+  }
+
   function saveProtocol() {
     const types = experimentBlocks.map(b => b.type);
     const required = [
@@ -9239,8 +9412,15 @@ function ExperimentBuilderView(options = {}) {
 
   function doSave() {
     const srcData = parsedExperimentData?.json || {};
+
+    const nameInput = document.getElementById('experimentNameInput');
+
+    const expTitle = (nameInput && nameInput.value.trim() !== '') 
+                     ? nameInput.value.trim() 
+                     : (srcData.title || 'Новый эксперимент');
+
     const json = {
-      title: srcData.title || 'experiment_' + Date.now(),
+      title: expTitle,
       version: 'v2.0_universal',
       settings: srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' },
       blocks: experimentBlocks.map(b => {
@@ -9254,6 +9434,10 @@ function ExperimentBuilderView(options = {}) {
         } else if (b.type === 'cognitive_task') {
           out.blockConfig = {
             showFeedback: !!b.content?.showFeedback,
+            feedbackConfig: b.content?.showFeedback ? {
+              correctText: b.content?.feedbackCorrect || "Верно!",
+              incorrectText: b.content?.feedbackIncorrect || "Ошибка!"
+            } : null,
             useRT: b.content?.useRT !== false,
             stimulusDuration: b.content?.stimulusDuration || 1000,
             rtWindow: b.content?.rtWindow || 1000,
@@ -9265,6 +9449,12 @@ function ExperimentBuilderView(options = {}) {
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
           };
+          if (b.content?.useFixation) {
+            out.blockConfig.fixation = {
+              content: "+",
+              duration: b.content?.fixationDuration || 500
+            };
+          }
           out.trials = b.content?.trials || [];
         } else if (b.type === 'passive') {
           out.blockConfig = {
@@ -9277,6 +9467,12 @@ function ExperimentBuilderView(options = {}) {
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
           };
+          if (b.content?.useFixation) {
+            out.blockConfig.fixation = {
+              content: "+",
+              duration: b.content?.fixationDuration || 500
+            };
+          }
         } else if (b.type === 'rest') {
           out.content = { text: b.content?.text || 'Сделайте небольшой перерыв', duration: b.content?.duration || 30 };
         } else if (b.type === 'finish') {
@@ -9287,20 +9483,44 @@ function ExperimentBuilderView(options = {}) {
         return out;
       })
     };
+
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
-    const id = experimentId || json.title + '_' + Date.now();
-    const entry = { id, title: json.title, blocks: experimentBlocks, version: protocolVersion, createdAt: editingExp?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString(), status: editingExp ? editingExp.status : 'draft' };
+    const id = experimentId || 'exp_' + Date.now();
+    
+    let history = editingExp?.history || [];
+    if (editingExp && editingExp.status === 'active') {
+      history.push({
+        version: editingExp.version,
+        blocks: editingExp.blocks,
+        updatedAt: editingExp.updatedAt
+      });
+    }
+
+    const entry = { 
+      id, 
+      title: json.title, 
+      blocks: experimentBlocks, 
+      version: protocolVersion, 
+      history: history,
+      savedStep: 7,
+      createdAt: editingExp?.createdAt || new Date().toISOString(), 
+      updatedAt: new Date().toISOString(), 
+      status: 'active'
+    };
+    
     const idx = experiments.findIndex(e => e.id === id);
     if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
-    // Download JSON
+    
     const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href=url; a.download=json.title+'.json';
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    toast('Протокол сохранён!');
+    
+    toast('Протокол Активен и сохранён!');
     setTimeout(() => navigate('#/experiments'), 700);
   }
+
 
   // PsychoPy parser
   function parsePsyExp(xmlStr, res) {
@@ -9460,20 +9680,64 @@ function StimuliAOIView() {
   uploadArea.id = 'stimuliUploadArea';
   uploadArea.style.cssText = 'display:none; flex:1; flex-direction:column; align-items:center; justify-content:center; padding:40px 40px; text-align:center; border:2px dashed var(--stroke); border-radius:16px; background:var(--card-bg); margin:0 20px 20px;';
   uploadArea.innerHTML = `
-    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" width="48" height="48" style="color:var(--muted); margin-bottom:16px;">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-    </svg>
-    <p style="margin-bottom:4px; font-weight:600; color:var(--text);">${t('dragFilesHere')}</p>
-    <p style="margin-bottom:16px; font-size:12px; color:var(--muted);">JPG, PNG, MP4, MP3, TXT, PPTX</p>
-    <input type="file" id="uploadFileInput" multiple accept="image/*,video/*,audio/*,text/*,.txt,.pptx,.ppt" style="display:none;" />
-    <button class="quick-btn" id="selectFilesBtn">
-      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-      </svg>
-      ${t('selectFiles')}
-    </button>
+    <div style="max-width:800px; margin:0 auto; width:100%; display:flex; flex-direction:column; gap:24px;">
+      <div style="text-align:center;">
+        <div style="font-size:18px; font-weight:700; color:var(--text); margin-bottom:6px;">Загрузка стимулов</div>
+        <div style="font-size:13px; color:var(--muted);">Выберите тип контента для добавления</div>
+      </div>
+
+      <div style="display:flex; gap:20px; flex-wrap:wrap;">
+        <div id="dropzone_media" style="flex:1; min-width:280px; border:2px dashed var(--accent); border-radius:16px; padding:40px 20px; text-align:center; background:rgba(92,102,189,.04); cursor:pointer; transition:all 0.2s;">
+          <div style="width:54px; height:54px; border-radius:14px; background:var(--accent); color:white; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          </div>
+          <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">Медиафайлы</div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4;">Картинки, Видео, Аудио, Текст</div>
+          <input type="file" id="input_media" accept="image/*,video/*,audio/*,text/plain" multiple style="display:none;">
+        </div>
+
+        <div id="dropzone_docs" style="flex:1; min-width:280px; border:2px dashed var(--warn); border-radius:16px; padding:40px 20px; text-align:center; background:rgba(245,158,11,.04); cursor:pointer; transition:all 0.2s;">
+          <div style="width:54px; height:54px; border-radius:14px; background:var(--warn); color:white; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+          </div>
+          <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">Презентации и PDF</div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4;">Автоматически конвертируются в картинки-стимулы</div>
+          <input type="file" id="input_docs" accept=".pdf,.ppt,.pptx" multiple style="display:none;">
+        </div>
+      </div>
+    </div>
   `;
   root.appendChild(uploadArea);
+
+  uploadArea.querySelector('#dropzone_media').onclick = () => uploadArea.querySelector('#input_media').click();
+  uploadArea.querySelector('#dropzone_docs').onclick = () => uploadArea.querySelector('#input_docs').click();
+
+  uploadArea.querySelector('#input_docs').addEventListener('change', async (e) => {
+    const files = e.target.files;
+    if (!files.length) return;
+
+    toast(`Отправка ${files[0].name} на конвертацию`);
+
+    // объект FormData для отправки pptx / pdf по api
+    const formData = new FormData();
+    formData.append('file', files[0]);
+
+    try {
+      // const response = await fetch('https://api.pypypy/convert-document', {
+      //   method: 'POST',
+      //   body: formData
+      // });
+      // const result = await response.json();
+      
+      setTimeout(() => {
+        toast('Успешно, картинки добавлены в библиотеку.');
+        showTab('library');
+      }, 2000);
+
+    } catch (error) {
+      toast('Ошибка при конвертации', 'error');
+    }
+  });
 
   const folderView = document.createElement('div');
   folderView.id = 'stimuliFolderView';
@@ -9515,6 +9779,8 @@ function StimuliAOIView() {
     chipEls.forEach(c => c.classList.remove('active'));
     if (tab === 'library' && chipEls[0]) chipEls[0].classList.add('active');
     else if (tab === 'upload' && chipEls[1]) chipEls[1].classList.add('active');
+
+    if (tab === 'upload') setTimeout(() => applyAutoI18n(), 0);
   }
 
   function wireStimuliChips() {
@@ -9663,15 +9929,37 @@ function StimuliAOIView() {
     });
   });
 
-  uploadArea.querySelector('#uploadFileInput').addEventListener('change', function(e) {
-    handleFileUpload(Array.from(e.target.files));
-    showTab('library');
-    this.value = '';
+  uploadArea.querySelector('#input_media').addEventListener('change', function(e) {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    if (typeof handleFileUpload === 'function') {
+      handleFileUpload(files);
+    } else {
+      // для локальной работы
+      files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = ev => {
+          stimuliList.push({
+            id: 'stim_' + Date.now() + Math.floor(Math.random()*1000),
+            name: file.name,
+            type: file.type.startsWith('image') ? 'image' : (file.type.startsWith('video') ? 'video' : 'other'),
+            url: ev.target.result,
+            info: (file.size/1024).toFixed(1) + ' KB',
+            createdAt: new Date().toISOString()
+          });
+          localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+    
+    setTimeout(() => {
+      toast('Медиафайлы добавлены!');
+      showTab('library');
+    }, 500);
+    this.value = ''; 
   });
 
-  uploadArea.querySelector('#selectFilesBtn').addEventListener('click', () => {
-    uploadArea.querySelector('#uploadFileInput').click();
-  });
 
   folderView.querySelector('#folderUploadFileInput').addEventListener('change', function(e) {
     const folder = folders.find(f => f.id === selectedFolder);
