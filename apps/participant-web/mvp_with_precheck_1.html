@@ -217,7 +217,7 @@
         <!-- ШАГ 5: настройка камеры (pre-check) -->
         <div id="step5" class="step">
             <h2 data-i18n="calib_title">Настройка камеры</h2>
-            <p data-i18n="calib_desc">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
+            <p data-i18n="calib_desc" style="text-align: center;">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
             
             <div id="precheckContainer" class="precheck-container">
                 <!-- Превью камеры -->
@@ -287,7 +287,6 @@
             </div>
         </div>
 
-        <!-- ШАГ 6: Финал -->
         <div id="step6" class="step">
             <div id="testHubContainer" class="test-hub-container" style="display: none;">
                 <h2 data-i18n="test_hub_title">Выбор теста</h2>
@@ -366,9 +365,10 @@
 
                 <div id="cognitiveStimulusArea" class="cognitive-stimulus-area" style="display: none;">
                     <div id="cogShape" class="cog-shape"></div>
-                    <img id="cogImage" class="cog-image" style="display: none;">
-                    <div id="cogFixation" class="cog-fixation">+</div>
-                    <div id="cogFeedback" class="cog-feedback" style="display: none;"></div>
+                    <img id="cogImage" class="cog-image" style="display: none; max-width: 80vh; max-height: 80vh; object-fit: contain;">
+                    
+                    <div id="cogFixation" class="cog-fixation" style="display:none; font-size: 80px; font-weight: 300; color: white;">+</div>
+                    <div id="cogFeedback" class="cog-feedback" style="display: none; font-size: 40px; font-weight: bold; margin-top: 20px;"></div>
                 </div>
                 
             </div>
