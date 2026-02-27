@@ -17,6 +17,7 @@ let currentBlockIndex = 0;
 let currentTrialIndex = 0;
 let fixationTimeout = null;
 let trialTimeout = null;
+let rtTimeout = null;
 let responseHandler = null;
 let activeTrialRuntime = null;
 let cognitiveFinished = false;
@@ -365,7 +366,8 @@ function showInstructions(block) {
 
     const checkbox = document.getElementById('cogCheck');
     const checkContainer = document.getElementById('cogCheckContainer');
-    const btn = ex_state.instruction.btn;
+    checkContainer.style.display = 'none';
+    ex_state.instruction.btn.disabled = false;
 
     if (checkbox) checkbox.checked = false;
 
@@ -398,6 +400,25 @@ function showInstructions(block) {
 function startTaskBlock(block) {
     ex_state.instruction.container.style.display = 'none';
     ex_state.task.area.style.display = 'flex';
+    
+    blockConfig = block.blockConfig || {};
+    
+    trialSequence = [];
+    if (block.trials) {
+        block.trials.forEach(trial => {
+            const reps = trial.repetitions || 1;
+            for (let i = 0; i < reps; i++) {
+                trialSequence.push(JSON.parse(JSON.stringify(trial)));
+            }
+        });
+    }
+
+    if (blockConfig.randomize) {
+        trialSequence = trialSequence.sort(() => Math.random() - 0.5);
+    }
+
+    console.log(`Сгенерировано ${trialSequence.length} проб для блока ${block.id}`);
+    
     currentTrialIndex = 0;
 
     emitTaskEvent('task_block_ready', {
