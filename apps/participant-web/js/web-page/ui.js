@@ -210,7 +210,6 @@ export function checkForm() {
             education: document.getElementById('education').value,
             language: document.getElementById('language').value,
             vision: document.getElementById('vision').value,
-            visionIssues: document.getElementById('visionIssues').value,
             hand: document.getElementById('hand').value,
             inputDevice: document.getElementById('inputDevice').value,
             keyboardType: document.getElementById('keyboardType').value
