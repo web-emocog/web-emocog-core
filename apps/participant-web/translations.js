@@ -9,14 +9,31 @@ export const translations = {
         warning_2: "Данные о взгляде обрабатываются на вашем устройстве",
         warning_3: "Мы не сохраняем видео вашего лица",
         btn_start: "Начать исследование",
-        consent_header: "Информированное согласие",
+        
+        // ✅ Новые переводы для Step 2
         consent_1_title: "1. Цель исследования",
-        consent_1_text: "Мы проводим научное исследование когнитивных реакций. Ваше участие поможет нам понять, как люди воспринимают информацию",
-        consent_2_title: "2. Конфиденциальность",
-        consent_2_text: "Мы собираем обезличенные данные. Видеопоток обрабатывается локально",
-        consent_link: "Полный текст согласия",
-        consent_checkbox: "Я прочитал(а), мне есть 18 лет, и я согласен(а)",
-        btn_confirm: "Подтвердить и продолжить",
+        consent_1_text: "Мы проводим научное исследование когнитивных и эмоциональных реакций. Ваше участие поможет нам понять, как люди воспринимают визуальную информацию и реагируют на различные стимулы.",
+        
+        consent_2_title: "2. Процедура исследования",
+        consent_2_text: "Вам будет предложено выполнить несколько заданий перед веб-камерой. Система будет отслеживать движения ваших глаз для анализа внимания. Общая продолжительность участия — около 15-20 минут.",
+        
+        consent_3_title: "3. Конфиденциальность и безопасность данных",
+        consent_3_text: "Все данные обезличены и защищены. Мы НЕ сохраняем видеозапись вашего лица. Обработка видеопотока происходит локально в вашем браузере. На сервер передаются только обезличенные метрики (координаты взгляда, время реакции). Ваш email будет храниться отдельно от данных исследования и использоваться только для связи с вами по результатам.",
+        
+        consent_4_title: "4. Добровольность участия",
+        consent_4_text: "Ваше участие полностью добровольно. Вы можете прекратить участие в любой момент без объяснения причин. Это не повлечёт никаких негативных последствий.",
+        
+        consent_5_title: "5. Риски и дискомфорт",
+        consent_5_text: "Исследование не предполагает физических или психологических рисков. Если вы почувствуете дискомфорт, вы можете остановить участие в любой момент.",
+        
+        consent_6_title: "6. Контактная информация",
+        consent_6_text: "Если у вас возникнут вопросы о исследовании, вы можете связаться с нами по email: research@emocog.com",
+        
+        consent_checkbox_read: "Я прочитал(а) полный текст согласия и понимаю условия участия",
+        consent_checkbox_agree: "Мне есть 18 лет, и я добровольно согласен(а) участвовать в исследовании",
+        
+        consent_required: "Необходимо отметить оба согласия для продолжения",
+
         reg_title: "Регистрация участника",
         reg_desc: "Пожалуйста, укажите ваш Email",
         email_label: "Email",
@@ -37,21 +54,33 @@ export const translations = {
         opt_edu_student: "Студент",
         opt_edu_higher: "Высшее",
         opt_edu_degree: "Ученая степень",
-        form_section_tech: "Зрение и Оборудование",
-        label_vision: "Зрение",
-        opt_vis_norm: "Норма",
-        opt_vis_glass: "Очки",
-        opt_vis_lens: "Линзы",
-        // УДАЛЕНЫ: label_pathology и все opt_path_*
-        label_hand: "Ведущая рука",
-        opt_hand_r: "Правая",
-        opt_hand_l: "Левая",
-        label_device: "Устройство ввода",
-        opt_dev_mouse: "Мышь",
-        opt_dev_touch: "Тачпад",
-        label_keyboard: "Клавиатура",
-        opt_kb_int: "Встроенная",
+        // === ОБНОВЛЕННЫЕ ПЕРЕВОДЫ ДЛЯ STEP 4 ===
+        form_section_tech: "Оборудование и условия",
+        
+        // Зрение (БЕЗ медицинских терминов)
+        label_vision_condition: "Используете ли вы средства коррекции зрения во время исследования?",
+        opt_vis_none: "Нет, не использую",
+        opt_vis_glass: "Да, очки",
+        opt_vis_lens: "Да, контактные линзы",
+        
+        // Пол (добавляем опцию "Другой")
+        opt_other_gender: "Другой",
+        
+        // Клавиатура (уже есть, но проверим)
+        label_keyboard: "Тип клавиатуры",
+        opt_kb_int: "Встроенная (ноутбук)",
         opt_kb_ext: "Внешняя",
+        
+        // Дополнительные опросники (для будущего)
+        form_section_additional: "Дополнительные вопросы",
+        
+        // Валидация
+        age_min_error: "Возраст должен быть не менее 18 лет",
+        age_max_error: "Возраст должен быть не более 99 лет",
+        age_integer_error: "Возраст должен быть целым числом",
+        age_negative_error: "Возраст не может быть отрицательным",
+        age_zero_error: "Возраст не может быть равен нулю",
+
         calib_title: "Настройка камеры",
         calib_desc: "Перед началом нам нужно убедиться, что всё готово: проверим освещение и положение камеры, а затем настроим систему, чтобы она могла отслеживать движения ваших глаз",
         msg_press_btn: "Подготовка калибровки..",
@@ -63,6 +92,15 @@ export const translations = {
         qc_passed: "Данные валидны (QC Passed)",
         btn_download: "Скачать JSON",
         btn_restart: "Начать заново",
+
+        id_participant_label: "Ваш ID участника:",
+        email_consent_storage: "Я подтверждаю, что указанный email корректен и даю согласие на его хранение в связке с моим ID участника для целей данного исследования.",
+        email_consent_contact: "Я согласен(на) получать уведомления о статусе моих сессий и результатах исследования на указанный email.",
+        consent_required: "Необходимо отметить оба согласия для продолжения",
+        reg_desc: "Для участия в исследовании необходимо указать email. Он будет связан с вашим уникальным ID участника.",
+
+        final_privacy_note: "Ваши данные обезличены и защищены. Исследователь получит только анонимные результаты.",
+
         // pre-check
         label_light: "Освещение",
         label_face: "Лицо",
@@ -252,14 +290,32 @@ export const translations = {
         warning_2: "Gaze data is processed on your device",
         warning_3: "We do not save video of your face",
         btn_start: "Start Research",
-        consent_header: "Informed Consent",
-        consent_1_title: "1. Research Goal",
-        consent_1_text: "We are conducting scientific research on cognitive reactions. Your participation helps us understand perception",
-        consent_2_title: "2. Privacy",
-        consent_2_text: "We collect anonymized data. Video stream is processed locally",
-        consent_link: "Full Consent Text",
-        consent_checkbox: "I have read, I am 18+, and I agree",
-        btn_confirm: "Confirm and Continue",
+        
+        // ✅ Новые переводы для Step 2
+        consent_1_title: "1. Purpose of the Study",
+        consent_1_text: "We are conducting a scientific study of cognitive and emotional responses. Your participation will help us understand how people perceive visual information and respond to various stimuli.",
+        
+        consent_2_title: "2. Study Procedure",
+        consent_2_text: "You will be asked to complete several tasks in front of a webcam. The system will track your eye movements to analyze attention. Total participation time is approximately 15-20 minutes.",
+        
+        consent_3_title: "3. Privacy and Data Security",
+        consent_3_text: "All data is anonymized and protected. We DO NOT save video recordings of your face. Video stream processing occurs locally in your browser. Only anonymized metrics (gaze coordinates, reaction times) are transmitted to the server. Your email will be stored separately from research data and used only to contact you about results.",
+        
+        consent_4_title: "4. Voluntary Participation",
+        consent_4_text: "Your participation is completely voluntary. You may stop participating at any time without explanation. This will not result in any negative consequences.",
+        
+        consent_5_title: "5. Risks and Discomfort",
+        consent_5_text: "The study does not involve physical or psychological risks. If you feel discomfort, you can stop participating at any time.",
+        
+        consent_6_title: "6. Contact Information",
+        consent_6_text: "If you have questions about the study, you can contact us by email: research@emocog.com",
+        
+        consent_checkbox_read: "I have read the full consent text and understand the conditions of participation",
+        consent_checkbox_agree: "I am 18 years old or older and voluntarily agree to participate in the study",
+        
+        consent_required: "Both consents must be checked to continue",
+
+
         reg_title: "Participant Registration",
         reg_desc: "Please provide your Email",
         email_label: "Email",
@@ -280,21 +336,35 @@ export const translations = {
         opt_edu_student: "Student",
         opt_edu_higher: "Higher",
         opt_edu_degree: "PhD / Degree",
-        form_section_tech: "Vision & Hardware",
-        label_vision: "Vision",
-        opt_vis_norm: "Normal",
-        opt_vis_glass: "Glasses",
-        opt_vis_lens: "Contact Lenses",
-        // УДАЛЕНЫ: label_pathology и все opt_path_*
-        label_hand: "Dominant Hand",
-        opt_hand_r: "Right",
-        opt_hand_l: "Left",
-        label_device: "Input Device",
-        opt_dev_mouse: "Mouse",
-        opt_dev_touch: "Touchpad",
-        label_keyboard: "Keyboard",
-        opt_kb_int: "Internal",
+        // === ENGLISH TRANSLATIONS FOR STEP 4 ===
+        form_section_tech: "Equipment and conditions",
+        
+        // Vision (NO medical terms)
+        label_vision_condition: "Do you use vision correction during the study?",
+        opt_vis_none: "No, I don't",
+        opt_vis_glass: "Yes, glasses",
+        opt_vis_lens: "Yes, contact lenses",
+        
+        // Gender (add "Other" option)
+        opt_other_gender: "Other",
+        
+        // Keyboard
+        label_keyboard: "Keyboard type",
+        opt_kb_int: "Built-in (laptop)",
         opt_kb_ext: "External",
+        
+        // Additional surveys (for future)
+        form_section_additional: "Additional questions",
+        
+        // Validation
+        age_min_error: "Age must be at least 18",
+        age_max_error: "Age must be no more than 99",
+        age_integer_error: "Age must be an integer",
+        age_negative_error: "Age cannot be negative",
+        age_zero_error: "Age cannot be zero",
+
+        final_privacy_note: "Your data is anonymized and protected. The researcher will only receive anonymous results.",
+
         calib_title: "Camera Setup",
         calib_desc: "Before we begin, we need to make sure everything is ready: we'll check the lighting and camera position, then set up the system so it can track your eye movements",
         msg_press_btn: "Preparing calibration..",
@@ -306,6 +376,13 @@ export const translations = {
         qc_passed: "Data Valid (QC Passed)",
         btn_download: "Download JSON",
         btn_restart: "Start Over",
+
+        id_participant_label: "Your participant ID:",
+        email_consent_storage: "I confirm that the provided email is correct and consent to its storage linked to my participant ID for the purposes of this study.",
+        email_consent_contact: "I agree to receive notifications about my session status and study results via the provided email.",
+        consent_required: "Both consents must be checked to proceed",
+        reg_desc: "To participate in the study, please provide your email. It will be linked to your unique participant ID.",
+        
         // pre-check
         label_light: "Lighting",
         label_face: "Face",

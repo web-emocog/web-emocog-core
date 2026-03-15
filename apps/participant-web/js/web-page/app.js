@@ -5,7 +5,6 @@ import {
     nextStep, 
     toggleConsent, 
     generateIdsAndProceed, 
-    copyIds, 
     checkForm, 
     validateEmailField, 
     collectTechDataAndProceed, 
@@ -27,7 +26,6 @@ import {
 // Функции доступные для HTML
 window.setLanguage = setLanguage;
 window.nextStep = nextStep;
-window.copyIds = copyIds;
 window.validateEmailField = validateEmailField;
 window.downloadData = downloadData;
 
@@ -159,27 +157,109 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Кнопка подтверждения согласия (шаг 2)
-    const consentBtn = document.getElementById('consentBtn');
-    if (consentBtn) {
-        consentBtn.addEventListener('click', generateIdsAndProceed);
-    }
+    // Step 2: Согласие
     
+    const consentBtn = document.getElementById('consentBtn');
+    const consentRead = document.getElementById('consentRead');
+    const consentAgree = document.getElementById('consentAgree');
+
+    if (consentBtn && consentRead && consentAgree) {
+        // Добавляем слушатели на чекбоксы
+        consentRead.addEventListener('change', toggleConsent);
+        consentAgree.addEventListener('change', toggleConsent);
+        
+        // Обработчик кнопки "Подтвердить"
+        consentBtn.addEventListener('click', async () => {
+            // Проверяем, что оба чекбокса отмечены
+            if (!consentRead.checked || !consentAgree.checked) {
+                alert(translations[state.currentLang].consent_required || 
+                    'Необходимо отметить оба согласия');
+                return;
+            }
+            
+            // Блокируем кнопку на время обработки
+            consentBtn.disabled = true;
+            consentBtn.textContent = 'Обработка...';
+            
+            try {
+                // ✅ НОВОЕ: Подписываем документ Informed Consent
+                const consentSigned = await window.ConsentSignature.signDocument(
+                    'informed_consent',
+                    'documents/informed-consent-v1.0.html',
+                    state.participantId || 'temp-id', // Если ID ещё не создан
+                    state,
+                    { includeIP: false } // Можно включить: { includeIP: true }
+                );
+                
+                if (!consentSigned) {
+                    throw new Error('Failed to sign consent document');
+                }
+                
+                // Записываем событие согласия
+                if (typeof recordSessionEvent === 'function') {
+                    recordSessionEvent('consent_accepted', {
+                        consent_read: true,
+                        consent_agree: true,
+                        timestamp: new Date().toISOString(),
+                        document_signed: true
+                    });
+                }
+                
+                console.log('[Consent] ✅ Document signed at', new Date().toISOString());
+                
+                // Генерируем ID и переходим к Step 3
+                generateIdsAndProceed();
+                
+            } catch (error) {
+                console.error('[Consent] ❌ Signature error:', error);
+                alert('Ошибка при обработке согласия. Попробуйте ещё раз.');
+                consentBtn.disabled = false;
+                consentBtn.textContent = translations[state.currentLang].btn_confirm || 'Подтвердить и продолжить';
+            }
+        });
+    }
+
+
+
+    // Кнопка сбора тех. данных (шаг 3)
     const emailInput = document.getElementById('userEmail');
+    const consentStorage = document.getElementById('emailConsentStorage');
+    const consentContact = document.getElementById('emailConsentContact');
+    const step3Btn = document.getElementById('step3NextBtn');
+
     if (emailInput) {
+        // Валидация при вводе
+        emailInput.addEventListener('input', () => {
+            validateEmailField();
+            if (typeof checkEmailStepComplete === 'function') {
+                checkEmailStepComplete();
+            }
+        });
+        
+        // Валидация при потере фокуса
         emailInput.addEventListener('blur', validateEmailField);
     }
 
-    // Кнопка сбора тех. данных (шаг 3)
-    const step3Btn = document.getElementById('step3NextBtn');
+    if (consentStorage) {
+        consentStorage.addEventListener('change', () => {
+            if (typeof checkEmailStepComplete === 'function') {
+                checkEmailStepComplete();
+            }
+        });
+    }
+
+    if (consentContact) {
+        consentContact.addEventListener('change', () => {
+            if (typeof checkEmailStepComplete === 'function') {
+                checkEmailStepComplete();
+            }
+        });
+    }
+
     if (step3Btn) {
         step3Btn.addEventListener('click', collectTechDataAndProceed);
     }
 
-    const userForm = document.getElementById('userForm');
-    if (userForm) {
-        userForm.addEventListener('input', checkForm);
-        userForm.addEventListener('change', checkForm);
-    }
 
     // Кнопка отправки анкеты (шаг 4)
     const formBtn = document.getElementById('formBtn');

@@ -53,7 +53,7 @@ class PrecheckAnalyzer {
                 throw new Error('MediaPipe Vision не загружен.');
             }
             const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+            "js/vendor/mediapipe/wasm"  // ✅ Локальная папка
             );
             this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
                 baseOptions: {

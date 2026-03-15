@@ -150,6 +150,25 @@ async function runCognitiveAnalysisTick() {
             }
         }
 
+        // ✅ НОВОЕ: Передаём landmarks в модули эмоций и симметрии
+        if (precheckResult && precheckResult.landmarks) {
+            // Обновляем window.lastFaceLandmarks для модулей
+            window.lastFaceLandmarks = {
+                faceLandmarks: [precheckResult.landmarks],
+                timestamp: Date.now()
+            };
+            
+            // Передаём landmarks в EmotionAnalyzer
+            if (state.runtime.emotionAnalyzer && typeof state.runtime.emotionAnalyzer.processLandmarks === 'function') {
+                state.runtime.emotionAnalyzer.processLandmarks(precheckResult.landmarks);
+            }
+            
+            // Передаём landmarks в FaceMaskCollector
+            if (state.runtime.faceMaskCollector && typeof state.runtime.faceMaskCollector.processLandmarks === 'function') {
+                state.runtime.faceMaskCollector.processLandmarks(precheckResult.landmarks);
+            }
+        }
+
         const eyeSignal = extractEyeSignalSample(precheckResult, Date.now());
         if (eyeSignal && window.handleEyeSignalUpdate) {
             window.handleEyeSignalUpdate(eyeSignal);
@@ -202,6 +221,18 @@ function startCognitiveAnalysisLoop() {
     state.runtime._cognitiveLoopActive = true;
     scheduleCognitiveAnalysisTick(0);
     console.log('[Cognitive] Single-flight цикл анализа запущен (gaze + eye-signal + QC)');
+
+    // ✅ НОВОЕ: Запуск модулей эмоций и симметрии
+    if (state.runtime.emotionAnalyzer && cognitiveVideo) {
+        state.runtime.emotionAnalyzer.start(cognitiveVideo);
+        console.log('[CognitiveTest] ✅ EmotionAnalyzer запущен');
+    }
+
+    if (state.runtime.faceMaskCollector && cognitiveVideo) {
+        state.runtime.faceMaskCollector.start(cognitiveVideo, 'cognitive_test');
+        console.log('[CognitiveTest] ✅ FaceMaskCollector запущен');
+    }
+
 }
 
 function emitStimulusOffIfNeeded(rtMs, reason) {
@@ -224,6 +255,17 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (ex_state.task?.feedback) ex_state.task.feedback.style.display = 'none';
 
     stopCognitiveAnalysisLoop();
+    
+    // ✅ НОВОЕ: Остановка модулей эмоций и симметрии
+    if (state.runtime.emotionAnalyzer) {
+        state.runtime.emotionAnalyzer.stop();
+        console.log('[CognitiveTest] ✅ EmotionAnalyzer остановлен');
+    }
+
+    if (state.runtime.faceMaskCollector) {
+        state.runtime.faceMaskCollector.stop();
+        console.log('[CognitiveTest] ✅ FaceMaskCollector остановлен');
+    }
 
     if (reason === 'error') {
         recordSessionEvent('cognitive_task_error', {

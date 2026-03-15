@@ -1,18 +1,19 @@
 <link rel="stylesheet" href="style.css">
 
 <!-- MediaPipe Vision (Face Landmarker) -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs" type="module"></script>
+<!-- (self-hosted) -->
+<script src="js/vendor/mediapipe/vision_bundle.mjs" type="module"></script>
 <script>
-    // Загрузка MediaPipe как глобальных объектов для non-module скриптов
-    import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs')
+    import('./js/vendor/mediapipe/vision_bundle.mjs')
         .then(vision => {
             window.FilesetResolver = vision.FilesetResolver;
             window.FaceLandmarker = vision.FaceLandmarker;
             window.ImageSegmenter = vision.ImageSegmenter;
-            console.log('[MediaPipe] Vision modules loaded (FaceLandmarker + ImageSegmenter)');
+            console.log('[MediaPipe] Vision modules loaded (self-hosted, FaceLandmarker + ImageSegmenter)');
         })
         .catch(err => console.error('[MediaPipe] Load error:', err));
 </script>
+
 
 <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
 <script src="js/precheck-analyzer.js?v=2.1.2"></script>
@@ -20,9 +21,19 @@
 <script src="js/face-segmenter.js?v=1.2.2"></script>
 <!-- QC Metrics Module -->
 <script src="js/qc-metrics.js?v=3.3.0"></script>
+
+<!-- Emotion Analyzer Module -->
+<script src="js/emotions.js?v=1.0.0"></script>
+<!-- Face Mask Collector Module -->
+<script src="js/face-mask-collector.js?v=1.0.0"></script>
+
 <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
 <script src="js/gaze-tracker.js?v=2.2.0"></script>
 
+<!-- Consent Signature Module -->
+<script src="js/web-page/consent-signature.js"></script>
+
+<script type="module" src="js/web-page/app.js"></script>
 
 </head>
 <body>
@@ -55,7 +66,6 @@
 <div class="top-bar">
     <div class="header-left">EmoCog Research</div>
     <div class="header-right">
-        <div id="idDisplay" class="id-badge" onclick="copyIds()" title="Copy ID">ID: ...</div>
         
         <!-- Переключатель языка -->
         <div class="lang-switch">
@@ -88,50 +98,132 @@
     <!-- ШАГ 2: Согласие -->
     <div id="step2" class="step">
         <h2 data-i18n="consent_header">Информированное согласие</h2>
-        <div class="consent-box">
+        
+        <!-- Прокручиваемый блок с полным текстом согласия -->
+        <div class="consent-box" id="consentTextBox">
             <h4 data-i18n="consent_1_title">1. Цель исследования</h4>
-            <p data-i18n="consent_1_text">Мы проводим научное исследование когнитивных реакций. Ваше участие поможет нам понять, как люди воспринимают информацию.</p>
-            <h4 data-i18n="consent_2_title">2. Конфиденциальность</h4>
-            <p data-i18n="consent_2_text">Мы собираем обезличенные данные. Видеопоток обрабатывается локально.</p>
-            <p><a href="https://docs.google.com/document/d/1ILmtItogsXz78ozzsKLNkmWnRVm990MvSryaDPSbxzg/edit?usp=sharing" target="_blank" data-i18n="consent_link">Полный текст согласия</a></p>
+            <p data-i18n="consent_1_text">
+                Мы проводим научное исследование когнитивных и эмоциональных реакций. 
+                Ваше участие поможет нам понять, как люди воспринимают визуальную информацию 
+                и реагируют на различные стимулы.
+            </p>
+            
+            <h4 data-i18n="consent_2_title">2. Процедура исследования</h4>
+            <p data-i18n="consent_2_text">
+                Вам будет предложено выполнить несколько заданий перед веб-камерой. 
+                Система будет отслеживать движения ваших глаз для анализа внимания. 
+                Общая продолжительность участия — около 15-20 минут.
+            </p>
+            
+            <h4 data-i18n="consent_3_title">3. Конфиденциальность и безопасность данных</h4>
+            <p data-i18n="consent_3_text">
+                Все данные обезличены и защищены. Мы НЕ сохраняем видеозапись вашего лица. 
+                Обработка видеопотока происходит локально в вашем браузере. 
+                На сервер передаются только обезличенные метрики (координаты взгляда, время реакции). 
+                Ваш email будет храниться отдельно от данных исследования и использоваться 
+                только для связи с вами по результатам.
+            </p>
+            
+            <h4 data-i18n="consent_4_title">4. Добровольность участия</h4>
+            <p data-i18n="consent_4_text">
+                Ваше участие полностью добровольно. Вы можете прекратить участие в любой момент 
+                без объяснения причин. Это не повлечёт никаких негативных последствий.
+            </p>
+            
+            <h4 data-i18n="consent_5_title">5. Риски и дискомфорт</h4>
+            <p data-i18n="consent_5_text">
+                Исследование не предполагает физических или психологических рисков. 
+                Если вы почувствуете дискомфорт, вы можете остановить участие в любой момент.
+            </p>
+            
+            <h4 data-i18n="consent_6_title">6. Контактная информация</h4>
+            <p data-i18n="consent_6_text">
+                Если у вас возникнут вопросы о исследовании, вы можете связаться с нами по email: 
+                <a href="mailto:research@emocog.com">research@emocog.com</a>
+            </p>
         </div>
-        <label class="checkbox-wrapper">
-            <input type="checkbox" id="consentCheck">
-            <span data-i18n="consent_checkbox">Я прочитал(а), мне есть 18 лет, и я согласен(а).</span>
-        </label>
-        <button class="btn" id="consentBtn" data-i18n="btn_confirm" disabled>Подтвердить и продолжить</button>
+        
+        <!-- Два чекбокса согласия -->
+        <div style="margin: 20px 0;">
+            <label class="checkbox-wrapper">
+                <input type="checkbox" id="consentRead">
+                <span data-i18n="consent_checkbox_read">
+                    Я прочитал(а) полный текст согласия и понимаю условия участия
+                </span>
+            </label>
+            
+            <label class="checkbox-wrapper" style="margin-top: 12px;">
+                <input type="checkbox" id="consentAgree">
+                <span data-i18n="consent_checkbox_agree">
+                    Мне есть 18 лет, и я добровольно согласен(а) участвовать в исследовании
+                </span>
+            </label>
+        </div>
+        
+        <button class="btn" id="consentBtn" data-i18n="btn_confirm" disabled>
+            Подтвердить и продолжить
+        </button>
     </div>
 
-    <!-- ШАГ 3: Email -->
+
+    <!-- ШАГ 3: Email с согласием -->
     <div id="step3" class="step">
         <h2 data-i18n="reg_title">Регистрация участника</h2>
-        <p data-i18n="reg_desc">Пожалуйста, укажите ваш Email для связи.</p>
+        <p data-i18n="reg_desc">Для участия в исследовании необходимо указать email. Он будет связан с вашим уникальным ID участника.</p>
         
         <div class="form-group">
-            <label data-i18n="email_label">Email</label>
-            <input type="email" id="userEmail" placeholder="name@example.com" onblur="validateEmailField()">
-        </div>
-        
-        <div class="email-field-info">
-            <span id="generatedIdPreview"></span>
+            <label data-i18n="email_label">Email <span style="color: #e74c3c;">*</span></label>
+            <input 
+                type="email" 
+                id="userEmail" 
+                placeholder="name@example.com" 
+                required
+            >
+            <div id="emailError" class="field-error" style="display: none;"></div>
         </div>
 
-        <button class="btn" data-i18n="btn_next" id="step3NextBtn">Далее</button>
+        <!-- Чекбоксы согласия -->
+        <div style="margin: 20px 0;">
+            <label class="checkbox-wrapper">
+                <input type="checkbox" id="emailConsentStorage">
+                <span data-i18n="email_consent_storage">
+                    Я подтверждаю, что указанный email корректен и даю согласие на его хранение в связке с моим ID участника для целей данного исследования.
+                </span>
+            </label>
+
+            <label class="checkbox-wrapper" style="margin-top: 10px;">
+                <input type="checkbox" id="emailConsentContact">
+                <span data-i18n="email_consent_contact">
+                    Я согласен(на) получать уведомления о статусе моих сессий и результатах исследования на указанный email.
+                </span>
+            </label>
+        </div>
+
+        <button 
+            class="btn" 
+            data-i18n="btn_next" 
+            id="step3NextBtn" 
+            disabled
+        >
+            Далее
+        </button>
     </div>
 
+
     <!-- ШАГ 4: Анкета -->
-     <div id="step4" class="step">
+    <div id="step4" class="step">
         <h2 data-i18n="form_title">Анкета участника</h2>
         <form id="userForm">
+            <!-- ДЕМОГРАФИЯ -->
             <h3 data-i18n="form_section_user">О вас</h3>
             <div class="form-row">
                 <div class="form-group">
                     <label data-i18n="label_age">Возраст</label>
-                    <input type="number" id="age" min="18" max="99" required>
+                    <input type="number" id="age" min="18" max="99" required oninput="validateQuestionnaire()">
                 </div>
                 <div class="form-group">
                     <label data-i18n="label_gender">Пол</label>
-                    <select id="gender" required>
+                    <select id="gender" required onchange="validateQuestionnaire()">
                         <option value="" disabled selected data-i18n="opt_select">Выбрать...</option>
                         <option value="m" data-i18n="opt_m">Мужской</option>
                         <option value="f" data-i18n="opt_f">Женский</option>
@@ -150,7 +242,7 @@
                 <div class="form-group">
                     <label data-i18n="label_edu">Образование</label>
                     <select id="education">
-                        <option value="student" data-i18n="opt_edu_school">Среднее</option>
+                        <option value="school" data-i18n="opt_edu_school">Среднее</option>
                         <option value="student" data-i18n="opt_edu_student">Студент</option>
                         <option value="higher" data-i18n="opt_edu_higher">Высшее</option>
                         <option value="degree" data-i18n="opt_edu_degree">Ученая степень</option>
@@ -158,45 +250,57 @@
                 </div>
             </div>
 
-            <!-- ЗРЕНИЕ & ОБОРУДОВАНИЕ — сетка 2 колонки -->
-            <h3 data-i18n="form_section_tech">ЗРЕНИЕ & ОБОРУДОВАНИЕ</h3>
+            <!-- ОБОРУДОВАНИЕ И УСЛОВИЯ -->
+            <h3 data-i18n="form_section_tech">Оборудование и условия</h3>
+            
+            <!-- Зрение (БЕЗ медицинских терминов) -->
+            <div class="form-group">
+                <label data-i18n="label_vision_condition">Используете ли вы средства коррекции зрения во время исследования?</label>
+                <select id="vision">
+                    <option value="none" data-i18n="opt_vis_none">Нет, не использую</option>
+                    <option value="glasses" data-i18n="opt_vis_glass">Да, очки</option>
+                    <option value="lenses" data-i18n="opt_vis_lens">Да, контактные линзы</option>
+                </select>
+            </div>
+
+            <!-- Ведущая рука -->
             <div class="form-row">
-                <div class="form-group">
-                    <label data-i18n="label_vision">Зрение</label>
-                    <select id="vision">
-                        <option value="normal"  data-i18n="opt_vis_norm">Норма</option>
-                        <option value="glasses" data-i18n="opt_vis_glass">Очки</option>
-                        <option value="lenses"  data-i18n="opt_vis_lens">Линзы</option>
-                    </select>
-                </div>
                 <div class="form-group">
                     <label data-i18n="label_hand">Ведущая рука</label>
                     <select id="hand">
                         <option value="right" data-i18n="opt_hand_r">Правая</option>
-                        <option value="left"  data-i18n="opt_hand_l">Левая</option>
+                        <option value="left" data-i18n="opt_hand_l">Левая</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label data-i18n="label_device">Устройство ввода</label>
+                    <select id="inputDevice">
+                        <option value="mouse" data-i18n="opt_dev_mouse">Мышь</option>
+                        <option value="touchpad" data-i18n="opt_dev_touch">Тачпад</option>
                     </select>
                 </div>
             </div>
 
-            <div class="form-row">
-                <div class="form-group">
-                    <label data-i18n="label_device">Устройство ввода</label>
-                    <select id="inputDevice">
-                        <option value="mouse"    data-i18n="opt_dev_mouse">Мышь</option>
-                        <option value="touchpad" data-i18n="opt_dev_touch">Тачпад</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label data-i18n="label_keyboard">Клавиатура</label>
-                    <select id="keyboardType">
-                        <option value="builtin"  data-i18n="opt_kb_int">Встроенная</option>
-                        <option value="external" data-i18n="opt_kb_ext">Внешняя</option>
-                    </select>
+            <!-- НОВОЕ: Клавиатура (критично для RT) -->
+            <div class="form-group">
+                <label data-i18n="label_keyboard">Тип клавиатуры</label>
+                <select id="keyboardType">
+                    <option value="builtin" data-i18n="opt_kb_int">Встроенная (ноутбук)</option>
+                    <option value="external" data-i18n="opt_kb_ext">Внешняя</option>
+                </select>
+            </div>
+
+            <!-- КОНТЕЙНЕР ДЛЯ ДОПОЛНИТЕЛЬНЫХ ОПРОСНИКОВ (динамический) -->
+            <div id="additionalSurveysContainer" style="display: none;">
+                <h3 data-i18n="form_section_additional">Дополнительные вопросы</h3>
+                <div id="additionalSurveysContent">
+                    <!-- Сюда будут динамически подгружаться блоки от исследователя -->
                 </div>
             </div>
         </form>
-        <button class="btn" id="formBtn" data-i18n="btn_next">Далее</button>
+        <button class="btn" id="formBtn" data-i18n="btn_next" disabled>Далее</button>
     </div>
+
 
     <!-- ШАГ 5: настройка камеры (pre-check) -->
     <div id="step5" class="step">
@@ -361,7 +465,14 @@
     <!-- ШАГ 7: Финал -->
     <div id="step7" class="step">
         <h2 data-i18n="final_title">Сессия завершена!</h2>
-        <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
+        <p data-i18n="final_desc">Спасибо за участие. Ваши данные успешно записаны.</p>
+        
+        <!-- ✅ Нейтральное сообщение без ID -->
+        <div class="info-box" style="margin: 20px 0; padding: 16px; background: #e8f5e9; border-radius: 8px;">
+            <p data-i18n="final_privacy_note">
+                Ваши данные обезличены и защищены. Исследователь получит только анонимные результаты.
+            </p>
+        </div>
         
         <!-- Динамический блок QC статуса -->
         <div id="qcStatusBlock">
@@ -371,9 +482,20 @@
         </div>
         
         <button class="btn" id="downloadBtn" data-i18n="btn_download">Скачать JSON</button>
+        <!-- Статус отправки данных -->
+        <div id="sendStatus" class="send-status" style="
+            margin-top: 12px;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            text-align: center;
+            min-height: 40px;
+            transition: all 0.3s ease;
+        "></div>
+
         <button class="btn btn-secondary" id="restartBtn" data-i18n="btn_restart">Начать заново</button>
     </div>
 
+
 </div>
 
-<script type="module" src="js/web-page/app.js"></script>

@@ -354,44 +354,66 @@ p {
 
 /* ── Consent Box ──────────────────────────────────────────── */
 .consent-box {
-  background: rgba(255,255,255,.35);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r16);
-  padding: 16px 18px;
-  height: 190px;
-  overflow-y: auto;
-  font-size: 13px;
-  line-height: 1.65;
-  margin-bottom: 16px;
-  color: var(--text-secondary);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(92,102,189,.25) transparent;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    
+    /* Делаем прокручиваемым */
+    max-height: 400px;
+    overflow-y: auto;
+    
+    /* Стилизация скроллбара (опционально) */
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e0 #f8f9fa;
 }
 
-.consent-box::-webkit-scrollbar { width: 5px; }
+.consent-box::-webkit-scrollbar {
+    width: 8px;
+}
+
+.consent-box::-webkit-scrollbar-track {
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
 .consent-box::-webkit-scrollbar-thumb {
-  background: rgba(92,102,189,.25);
-  border-radius: 999px;
+    background: #cbd5e0;
+    border-radius: 4px;
+}
+
+.consent-box::-webkit-scrollbar-thumb:hover {
+    background: #a0aec0;
 }
 
 .consent-box h4 {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-main);
-  margin-bottom: 5px;
-  margin-top: 12px;
-  text-transform: none;
-  letter-spacing: 0;
-  border: none;
-  padding: 0;
+    color: #2d3748;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-size: 16px;
+    font-weight: 600;
 }
-.consent-box h4:first-child { margin-top: 0; }
+
+.consent-box h4:first-child {
+    margin-top: 0;
+}
+
+.consent-box p {
+    color: #4a5568;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
 .consent-box a {
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 600;
+    color: #667eea;
+    text-decoration: none;
 }
-.consent-box a:hover { text-decoration: underline; }
+
+.consent-box a:hover {
+    text-decoration: underline;
+}
+
 
 /* ── Checkbox ─────────────────────────────────────────────── */
 .checkbox-wrapper {
@@ -1211,4 +1233,83 @@ p {
 
   .action-buttons { flex-direction: column; }
   .action-buttons .btn { flex: none; width: 100%; }
+}
+
+/* ========================================
+   STEP 4: Анкета - Валидация
+   ======================================== */
+
+/* Подсветка ошибок */
+input.error,
+select.error {
+    border-color: var(--error) !important;
+    box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.2);
+}
+
+/* Сообщения об ошибках */
+.field-error {
+    color: var(--error);
+    font-size: 12px;
+    margin-top: 4px;
+    animation: fadeIn 0.3s ease;
+}
+
+/* Контейнер для дополнительных опросников */
+#additionalSurveysContainer {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#additionalSurveysContent {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Анимация появления */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Кнопка "Далее" (disabled state) */
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--secondary);
+}
+
+.btn:disabled:hover {
+    background: var(--secondary);
+    transform: none;
+}
+
+
+.send-status {
+    display: block;
+}
+.send-status:empty {
+    display: none;
+}
+.send-status.sending {
+    background: #EFF6FF;
+    color: #1D4ED8;
+    border: 1px solid #BFDBFE;
+}
+.send-status.success {
+    background: #F0FDF4;
+    color: #15803D;
+    border: 1px solid #BBF7D0;
+}
+.send-status.fallback {
+    background: #FFFBEB;
+    color: #B45309;
+    border: 1px solid #FDE68A;
 }

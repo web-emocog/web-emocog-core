@@ -14,6 +14,7 @@ import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import { startTestHub } from '../gaze-tracker/gaze-tests/index.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 
+import { handleSendWithFallback } from './data-sender.js';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -50,20 +51,45 @@ export async function startCalibration() {
     state.runtime.sessionStartTime = Date.now();
     console.log('[QC] QCMetrics инициализирован и запущен');
     
+
     // === ИНИЦИАЛИЗАЦИЯ GAZE TRACKER ===
     state.runtime.gazeTracker = new GazeTracker({
         screenWidth: window.innerWidth,
         screenHeight: window.innerHeight,
-        // Сбалансированный профиль: ниже инерция, но без заметного роста шума.
         smoothingFactor: 0.10,
         onGazeUpdate: (gazeData) => {
-            // Передаём данные взгляда в единую точку входа
             if (window.handleGazeUpdate) {
                 window.handleGazeUpdate(gazeData);
             }
         }
     });
     console.log('[GazeTracker] Инициализирован');
+
+    // ✅ НОВОЕ: Инициализация модулей эмоций и симметрии
+    try {
+        const faceLandmarker = state.runtime.localAnalyzer?.faceLandmarker;
+        
+        if (!faceLandmarker) {
+            console.warn('[App] Face Landmarker не найден, модули эмоций/симметрии не инициализированы');
+        } else {
+            // Инициализация EmotionAnalyzer
+            if (window.EmotionAnalyzer) {
+                state.runtime.emotionAnalyzer = new EmotionAnalyzer();
+                await state.runtime.emotionAnalyzer.initialize(faceLandmarker);
+                console.log('[App] ✅ EmotionAnalyzer инициализирован');
+            }
+            
+            // Инициализация FaceMaskCollector
+            if (window.FaceMaskCollector) {
+                state.runtime.faceMaskCollector = new FaceMaskCollector();
+                state.runtime.faceMaskCollector.initialize(faceLandmarker);
+                console.log('[App] ✅ FaceMaskCollector инициализирован');
+            }
+        }
+    } catch (error) {
+        console.error('[App] Ошибка инициализации модулей эмоций/симметрии:', error);
+    }
+
     
     // Скрываем pre-check интерфейс
     document.getElementById('precheckContainer').style.display = 'none';
@@ -1128,6 +1154,25 @@ export function startTrackingTest(options = {}) {
                 }
             }
 
+            // ✅ НОВОЕ: Передаём landmarks в модули эмоций и симметрии
+            if (precheckResult && precheckResult.landmarks) {
+                // Обновляем window.lastFaceLandmarks для модулей
+                window.lastFaceLandmarks = {
+                    faceLandmarks: [precheckResult.landmarks],
+                    timestamp: Date.now()
+                };
+                
+                // Передаём landmarks в EmotionAnalyzer
+                if (state.runtime.emotionAnalyzer && typeof state.runtime.emotionAnalyzer.processLandmarks === 'function') {
+                    state.runtime.emotionAnalyzer.processLandmarks(precheckResult.landmarks);
+                }
+                
+                // Передаём landmarks в FaceMaskCollector
+                if (state.runtime.faceMaskCollector && typeof state.runtime.faceMaskCollector.processLandmarks === 'function') {
+                    state.runtime.faceMaskCollector.processLandmarks(precheckResult.landmarks);
+                }
+            }
+
             // 3b) Eye-signal sample (EAR / pupil proxy) для attention-метрик
             const eyeSignal = extractEyeSignalSample(precheckResult, Date.now());
             if (eyeSignal && window.handleEyeSignalUpdate) {
@@ -1172,11 +1217,23 @@ export function startTrackingTest(options = {}) {
         console.log('[TrackingTest] Single-flight цикл анализа запущен (gaze + QC)');
     }
     
+    // ✅ НОВОЕ: Запуск модулей эмоций и симметрии
+    if (state.runtime.emotionAnalyzer) {
+        state.runtime.emotionAnalyzer.start(video);
+        console.log('[TrackingTest] ✅ EmotionAnalyzer запущен');
+    }
+
+    if (state.runtime.faceMaskCollector) {
+        state.runtime.faceMaskCollector.start(video, 'tracking_test');
+        console.log('[TrackingTest] ✅ FaceMaskCollector запущен');
+    }
+
+    
+    
     function runTrajectory() {
         if (currentTrajectory >= trajectories.length) {
             // Останавливаем анализ
             stopTrackingAnalysisLoop();
-            stopCameraFpsMonitor();
             console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
             finishTrackingTest(trackingTestOptions);
             return;
@@ -1238,7 +1295,17 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     
     // === Останавливаем CameraFPSMonitor (если ещё работает) ===
     stopCameraFpsMonitor();
-    
+    // ✅ НОВОЕ: Остановка модулей эмоций и симметрии
+    if (state.runtime.emotionAnalyzer) {
+        state.runtime.emotionAnalyzer.stop();
+        console.log('[TrackingTest] ✅ EmotionAnalyzer остановлен');
+    }
+
+    if (state.runtime.faceMaskCollector) {
+        state.runtime.faceMaskCollector.stop();
+        console.log('[TrackingTest] ✅ FaceMaskCollector остановлен');
+    }
+
     const testArea = document.getElementById('trackingTestArea');
     const progressText = document.getElementById('testProgressText');
     const customDot = document.getElementById('customGazeDot');
@@ -1350,6 +1417,17 @@ export async function finishSession() {
             const qcSummary = state.runtime.qcMetrics.getSummary();
             state.sessionData.qcSummary = qcSummary;
             console.log('[QC] Summary:', qcSummary);
+
+            // ✅ НОВОЕ: Добавление данных эмоций и симметрии
+            if (state.runtime.emotionAnalyzer) {
+                state.sessionData.emotions = state.runtime.emotionAnalyzer.exportToJSON();
+                console.log('[Session] ✅ Данные эмоций добавлены');
+            }
+            
+            if (state.runtime.faceMaskCollector) {
+                state.sessionData.faceMasks = state.runtime.faceMaskCollector.exportToJSON();
+                console.log('[Session] ✅ Данные симметрии добавлены');
+            }
             
             // Обновляем UI на основе QC результата
             updateFinalStepWithQC(qcSummary);
@@ -1384,8 +1462,45 @@ export async function finishSession() {
     document.querySelector('.top-bar').style.display = 'flex';
     
     // Переходим на финальный шаг
+    
     nextStep(7);
     recordSessionEvent('session_finish_complete');
-    
+
+    // ── Отправка данных на сервер (+ fallback-скачивание если недоступен) ──
+    // Запускаем ПОСЛЕ nextStep(7), чтобы UI не блокировался ожиданием сети
+    handleSendWithFallback(state.sessionData, {
+
+        onSending: () => {
+            // Показываем индикатор на step7
+            const statusEl = document.getElementById('sendStatus');
+            if (statusEl) {
+                statusEl.textContent = '⏳ Отправляем данные на сервер...';
+                statusEl.className = 'send-status sending';
+            }
+        },
+
+        onSuccess: (result) => {
+            const statusEl = document.getElementById('sendStatus');
+            if (statusEl) {
+                statusEl.textContent = '✅ Данные успешно отправлены';
+                statusEl.className = 'send-status success';
+            }
+            console.log(`[finishSession] Данные отправлены за ${result.attempts} попытку(и)`);
+        },
+
+        onFallback: (result) => {
+            const statusEl = document.getElementById('sendStatus');
+            if (statusEl) {
+                statusEl.textContent = '💾 Сервер недоступен — данные скачаны локально';
+                statusEl.className = 'send-status fallback';
+            }
+            console.warn(`[finishSession] Fallback после ${result.attempts} попыток: ${result.error}`);
+        },
+
+    }).then(({ sent, downloaded, attempts }) => {
+        console.log(`[finishSession] Итог: sent=${sent}, downloaded=${downloaded}, attempts=${attempts}`);
+    });
+
     console.log('[finishSession] Сессия завершена, показан step7');
+
 }

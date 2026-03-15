@@ -18,18 +18,13 @@ export function setLanguage(lang) {
         }
     });
 
-    // Обновляем ID если сгенерирован
-    if (state.sessionData.ids.participant) {
-        document.getElementById('generatedIdPreview').innerText = 
-            `${translations[lang].id_participant} ${state.sessionData.ids.participant}`;
-    } else {
-            document.getElementById('idDisplay').innerText = translations[lang].id_not_generated;
-    }
+    // ✅ ID не показывается участнику
 
     if (state.flags.isPrecheckRunning && state.runtime.precheckData) {
         checkAllIndicators(); 
     }
 }
+
 
 window.setLanguage = setLanguage;
 
@@ -48,35 +43,64 @@ export function nextStep(stepNumber) {
     if (nextEl) nextEl.classList.add('active');
 }
 
+/**
+ * Проверяет, отмечены ли оба чекбокса согласия.
+ * Активирует кнопку "Далее" только если оба отмечены.
+ */
 export function toggleConsent() {
-    const chk = document.getElementById('consentCheck');
-    document.getElementById('consentBtn').disabled = !chk.checked;
+    const consentRead = document.getElementById('consentRead');
+    const consentAgree = document.getElementById('consentAgree');
+    const consentBtn = document.getElementById('consentBtn');
+    
+    if (!consentRead || !consentAgree || !consentBtn) return;
+    
+    // Кнопка активна только если ОБА чекбокса отмечены
+    const bothChecked = consentRead.checked && consentAgree.checked;
+    consentBtn.disabled = !bothChecked;
+}
+
+// Делаем функцию доступной глобально
+window.toggleConsent = toggleConsent;
+
+
+// Генерация UUID v4 (криптографически стойкий)
+function generateUniqueId() {
+    if (crypto.randomUUID) {
+        return crypto.randomUUID();
+    } else {
+        // Fallback для старых браузеров
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
 }
 
 export function generateIdsAndProceed() {
-    const sessionId = 'S-' + Math.random().toString(36).substr(2, 6).toUpperCase();
-    const participantId = 'P-' + Math.random().toString(36).substr(2, 5).toUpperCase();
+    // Генерируем UUID для session и participant
+    const sessionId = generateUniqueId();
+    const participantId = generateUniqueId();
     
     state.sessionData.ids.session = sessionId;
     state.sessionData.ids.participant = participantId;
     state.sessionData.user.interfaceLanguage = state.currentLang;
 
-    const idBadge = document.getElementById('idDisplay');
-    idBadge.style.display = 'block';
-    idBadge.innerText = `ID: ${participantId}`;
-    
-    document.getElementById('generatedIdPreview').innerText = 
-        `${translations[state.currentLang].id_participant} ${participantId}`;
+    // ✅ ID записывается только в state, НЕ показывается участнику
+    console.log('[IDs Generated]', { 
+        session: sessionId.substring(0, 8) + '...', 
+        participant: participantId.substring(0, 8) + '...' 
+    });
+
+    // ✅ НОВОЕ: Обновляем participantId в подписи
+    if (state.sessionData.consent?.informed_consent) {
+        state.sessionData.consent.informed_consent.participantId = state.participantId;
+        console.log('[Consent] ✅ Updated signature with real participant ID');
+    }
 
     nextStep(3);
 }
 
-export function copyIds() {
-    const text = `Session: ${state.sessionData.ids.session}, Participant: ${state.sessionData.ids.participant}`;
-    navigator.clipboard.writeText(text).then(() => 
-        alert(translations[state.currentLang].file_copied)
-    );
-}
 
 // Валидация email
 export function validateEmailField() {
@@ -129,8 +153,13 @@ function validateEmail(email) {
     return { valid: true };
 }
 
-// Валидация анкеты
+/**
+ * Валидация и сохранение данных анкеты (Step 4)
+ * Возвращает true если форма валидна, false если нет
+ * НЕ переходит к следующему шагу (это делает app.js)
+ */
 export function checkForm() {
+    // 1. Проверяем обязательные поля
     const required = ['age', 'gender', 'inputDevice', 'keyboardType', 'vision'];
     let isValid = true;
     
@@ -141,16 +170,18 @@ export function checkForm() {
             if (el) {
                 el.setAttribute('aria-invalid', 'true');
                 el.classList.add('error');
+                showFieldError(el, translations[state.currentLang][`${id}_required`] || `Поле обязательно`);
             }
-            } else {
-                if (el) {
-                    el.removeAttribute('aria-invalid');
-                    el.classList.remove('error');
-                }
+        } else {
+            if (el) {
+                el.removeAttribute('aria-invalid');
+                el.classList.remove('error');
+                hideFieldError(el);
             }
+        }
     });
     
-    // Валидация возраста (диапазон 18-99)
+    // 2. Валидация возраста (диапазон 18-99)
     const ageInput = document.getElementById('age');
     if (ageInput && ageInput.value) {
         const age = parseInt(ageInput.value, 10);
@@ -196,63 +227,103 @@ export function checkForm() {
         }
     }
 
+    // 3. Обновляем состояние кнопки
     const formBtn = document.getElementById('formBtn');
     if (formBtn) {
         formBtn.disabled = !isValid;
     }
 
-    // Сохраняем данные
-    if (isValid) {
-        state.sessionData.user = {
-            ...state.sessionData.user,
-            age: document.getElementById('age').value,
-            gender: document.getElementById('gender').value,
-            education: document.getElementById('education').value,
-            language: document.getElementById('language').value,
-            vision: document.getElementById('vision').value,
-            hand: document.getElementById('hand').value,
-            inputDevice: document.getElementById('inputDevice').value,
-            keyboardType: document.getElementById('keyboardType').value
-        };
+    // 4. Если форма невалидна — выходим
+    if (!isValid) {
+        console.warn('[checkForm] Форма невалидна');
+        return false;
     }
 
-    return isValid;
+    // 5. ✅ Сохраняем данные в state.sessionData.user
+    state.sessionData.user = {
+        ...state.sessionData.user,
+        age: parseInt(document.getElementById('age').value, 10),
+        gender: document.getElementById('gender').value,
+        education: document.getElementById('education')?.value || 'not_specified',
+        language: document.getElementById('language')?.value || 'not_specified',
+        vision: document.getElementById('vision').value,
+        hand: document.getElementById('hand')?.value || 'not_specified',
+        inputDevice: document.getElementById('inputDevice').value,
+        keyboardType: document.getElementById('keyboardType').value
+    };
+
+    // 6. ✅ Записываем событие завершения анкеты
+    if (typeof recordSessionEvent === 'function') {
+        recordSessionEvent('questionnaire_completed', {
+            participant_id: state.sessionData.ids.participant,
+            age: state.sessionData.user.age,
+            gender: state.sessionData.user.gender,
+            inputDevice: state.sessionData.user.inputDevice,
+            keyboardType: state.sessionData.user.keyboardType
+        });
+    }
+
+    console.log('[checkForm] Данные анкеты сохранены:', state.sessionData.user);
+
+    // 7. ✅ Возвращаем true (переход делает app.js)
+    return true;
 }
+
+
 
 export async function collectTechDataAndProceed() {
     const emailInput = document.getElementById('userEmail');
+    const consentStorage = document.getElementById('emailConsentStorage');
+    const consentContact = document.getElementById('emailConsentContact');
     const email = emailInput.value.trim();
     
     // Валидация email
     const emailValidation = validateEmail(email);
     if (!emailValidation.valid) {
-        // Показываем ошибку
         emailInput.setAttribute('aria-invalid', 'true');
         emailInput.classList.add('error');
-        
-        // Показываем сообщение об ошибке
-        let errorMsg = document.getElementById('emailError');
-        if (!errorMsg) {
-            errorMsg = document.createElement('div');
-            errorMsg.id = 'emailError';
-            errorMsg.className = 'error-message';
-            errorMsg.style.cssText = 'color: var(--error); font-size: 12px; margin-top: 5px;';
-            emailInput.parentElement.appendChild(errorMsg);
-        }
-        errorMsg.textContent = emailValidation.error;
-        
-        // Блокируем переход
+        showFieldError(emailInput, emailValidation.error);
+        return;
+    }
+    
+    // Проверка чекбоксов (оба обязательны)
+    if (!consentStorage.checked || !consentContact.checked) {
+        alert(translations[state.currentLang].consent_required || 'Необходимо отметить оба согласия');
         return;
     }
     
     // Убираем ошибку если валидно
     emailInput.removeAttribute('aria-invalid');
     emailInput.classList.remove('error');
-    const errorMsg = document.getElementById('emailError');
-    if (errorMsg) errorMsg.remove();
+    hideFieldError(emailInput);
     
-    if (email) state.sessionData.user.email = email; 
+    // Сохраняем email и согласия
+    state.sessionData.user.email = email;
+    state.sessionData.user.emailConsentStorage = true;
+    state.sessionData.user.emailConsentContact = consentContact.checked;
+    state.sessionData.user.emailConsentTimestamp = new Date().toISOString();
 
+    // Хешируем email для логов (не храним plaintext в событиях)
+    const emailHash = await hashEmail(email);
+    
+    // Записываем событие
+    if (typeof recordSessionEvent === 'function') {
+        recordSessionEvent('email_submitted', {
+            participant_id: state.sessionData.ids.participant,
+            email_hash: emailHash,
+            consent_storage: true,
+            consent_contact: consentContact.checked
+        });
+    }
+
+    console.log('[Email Step Complete]', {
+        participant_id: state.sessionData.ids.participant,
+        email_hash: emailHash,
+        consent_storage: true,
+        consent_contact: consentContact.checked
+    });
+
+    // Собираем технические данные
     state.sessionData.tech.screen = {
         width: window.screen.width,
         height: window.screen.height,
@@ -269,13 +340,28 @@ export async function collectTechDataAndProceed() {
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     };
 
-    // Измеряем FPS рендеринга (для справки)
+    // Измеряем FPS рендеринга
     measureRenderFPS().then(renderFps => {
         state.sessionData.tech.measuredFPS = renderFps;
         state.sessionData.tech.renderFPS = renderFps;
-        nextStep(4);
+        nextStep(4); // Переход на анкету
     });
 }
+
+// Хеширование email для логов (SHA-256)
+async function hashEmail(email) {
+    try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(email.toLowerCase().trim());
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (error) {
+        console.error('[Hash Error]', error);
+        return 'hash_unavailable';
+    }
+}
+
 
 export function downloadData() {
     const fileName = `session_${state.sessionData.ids.session}.json`;
@@ -319,14 +405,18 @@ export function updateFinalStepWithQC(qcSummary) {
     const faceOkPct = qcSummary.faceOkPct || 0;
     const durationMs = qcSummary.durationMs || 0;
     
+    // ✅ Форматируем единицы измерения напрямую (без translations)
+    const durationText = state.currentLang === 'ru' ? 'с' : 's';
+    const percentText = '%';
+    
     if (passed) {
         qcStatusEl.innerHTML = `
             <div class="qc-status-passed">
                 <strong>${translations[state.currentLang].qc_passed_full}</strong>
                 <div class="qc-status-details">
-                    ${translations[state.currentLang].qc_duration}: ${Math.round(durationMs / 1000)}${translations[state.currentLang].seconds} | 
-                    ${translations[state.currentLang].qc_valid}: ${validGazePct.toFixed(1)}${translations[state.currentLang].percent} | 
-                    ${translations[state.currentLang].qc_face_ok}: ${faceOkPct.toFixed(1)}${translations[state.currentLang].percent}
+                    ${translations[state.currentLang].qc_duration}: ${Math.round(durationMs / 1000)}${durationText} | 
+                    ${translations[state.currentLang].qc_valid}: ${validGazePct.toFixed(1)}${percentText} | 
+                    ${translations[state.currentLang].qc_face_ok}: ${faceOkPct.toFixed(1)}${percentText}
                 </div>
             </div>
         `;
@@ -334,16 +424,16 @@ export function updateFinalStepWithQC(qcSummary) {
         // Собираем список проблем из объекта checks
         const issues = [];
         if (qcSummary.checks) {
-            if (!qcSummary.checks.duration) issues.push(translations[state.currentLang].issue_short_duration);
-            if (!qcSummary.checks.faceVisible) issues.push(translations[state.currentLang].issue_low_face_visible);
-            if (!qcSummary.checks.faceOk) issues.push(translations[state.currentLang].issue_low_face_ok_pct);
-            if (!qcSummary.checks.poseOk) issues.push(translations[state.currentLang].issue_low_pose_ok_pct);
-            if (!qcSummary.checks.illuminationOk) issues.push(translations[state.currentLang].issue_low_illumination_ok_pct);
-            if (!qcSummary.checks.eyesOpen) issues.push(translations[state.currentLang].issue_low_eyes_open_pct);
-            if (!qcSummary.checks.occlusion) issues.push(translations[state.currentLang].issue_high_occlusion_pct);
-            if (!qcSummary.checks.gazeValid) issues.push(translations[state.currentLang].issue_low_gaze_valid_pct);
-            if (!qcSummary.checks.gazeOnScreen) issues.push(translations[state.currentLang].issue_high_offscreen);
-            if (!qcSummary.checks.lowFps) issues.push(translations[state.currentLang].issue_low_fps_time);
+            if (!qcSummary.checks.duration) issues.push('short_duration');
+            if (!qcSummary.checks.faceVisible) issues.push('low_face_visible');
+            if (!qcSummary.checks.faceOk) issues.push('low_face_ok_pct');
+            if (!qcSummary.checks.poseOk) issues.push('low_pose_ok_pct');
+            if (!qcSummary.checks.illuminationOk) issues.push('low_illumination_ok_pct');
+            if (!qcSummary.checks.eyesOpen) issues.push('low_eyes_open_pct');
+            if (!qcSummary.checks.occlusion) issues.push('high_occlusion_pct');
+            if (!qcSummary.checks.gazeValid) issues.push('low_gaze_valid_pct');
+            if (!qcSummary.checks.gazeOnScreen) issues.push('high_offscreen');
+            if (!qcSummary.checks.lowFps) issues.push('low_fps_time');
         }
         
         const issueTexts = {
@@ -368,14 +458,15 @@ export function updateFinalStepWithQC(qcSummary) {
                     ${translations[state.currentLang].qc_issues}: ${issuesList || 'N/A'}
                 </div>
                 <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">
-                    ${translations[state.currentLang].qc_duration}: ${Math.round(durationMs / 1000)}${translations[state.currentLang].seconds} | 
-                    ${translations[state.currentLang].qc_valid}: ${validGazePct.toFixed(1)}${translations[state.currentLang].percent} | 
-                    ${translations[state.currentLang].qc_face_ok}: ${faceOkPct.toFixed(1)}${translations[state.currentLang].percent}
+                    ${translations[state.currentLang].qc_duration}: ${Math.round(durationMs / 1000)}${durationText} | 
+                    ${translations[state.currentLang].qc_valid}: ${validGazePct.toFixed(1)}${percentText} | 
+                    ${translations[state.currentLang].qc_face_ok}: ${faceOkPct.toFixed(1)}${percentText}
                 </div>
             </div>
         `;
     }
 }
+
 
 export function stopPreCheckOnLeave() {
     if (state.flags.isPrecheckRunning) {
@@ -399,3 +490,95 @@ export function stopPreCheckOnLeave() {
     }
     state.flags.isPrecheckRunning = false;
 }
+
+// ========================================
+// STEP 3: Проверка заполненности формы email
+// ========================================
+
+/**
+ * Проверяет, заполнены ли все поля Step 3 (email + два чекбокса).
+ * Если всё заполнено корректно — активирует кнопку "Далее".
+ * Если что-то не заполнено — кнопка остаётся disabled.
+ */
+function checkEmailStepComplete() {
+    const emailInput = document.getElementById('userEmail');
+    const consentStorage = document.getElementById('emailConsentStorage');
+    const consentContact = document.getElementById('emailConsentContact');
+    const nextBtn = document.getElementById('step3NextBtn');
+    
+    // Если элементы не найдены (например, ещё не загрузились) — выходим
+    if (!emailInput || !consentStorage || !consentContact || !nextBtn) {
+        return;
+    }
+    
+    // Проверяем, что email валиден
+    const emailValid = emailInput.value.trim() && validateEmail(emailInput.value.trim()).valid;
+    
+    // Проверяем, что оба чекбокса отмечены
+    const storageChecked = consentStorage.checked;
+    const contactChecked = consentContact.checked;
+    
+    // Кнопка активна только если ВСЕ условия выполнены
+    nextBtn.disabled = !(emailValid && storageChecked && contactChecked);
+}
+
+// Делаем функцию доступной глобально (для вызова из app.js)
+window.checkEmailStepComplete = checkEmailStepComplete;
+
+
+// ========================================
+// STEP 4: Валидация анкеты
+// ========================================
+
+/**
+ * Проверяет, заполнены ли все обязательные поля Step 4.
+ * Обязательные поля: age (18-99), gender (не пустой).
+ * Остальные поля имеют значения по умолчанию.
+ * Активирует кнопку "Далее" только если всё корректно.
+ */
+function validateQuestionnaire() {
+    const ageInput = document.getElementById('age');
+    const genderSelect = document.getElementById('gender');
+    const formBtn = document.getElementById('formBtn');
+    
+    if (!ageInput || !genderSelect || !formBtn) return;
+    
+    // Проверяем возраст (18-99)
+    const ageValid = ageInput.value && 
+                     parseInt(ageInput.value) >= 18 && 
+                     parseInt(ageInput.value) <= 99;
+    
+    // Проверяем пол (не пустой)
+    const genderValid = genderSelect.value !== '';
+    
+    // Подсветка ошибок
+    if (ageInput.value && !ageValid) {
+        ageInput.style.borderColor = '#e74c3c';
+    } else {
+        ageInput.style.borderColor = '';
+    }
+    
+    if (genderSelect.value === '' && genderSelect.classList.contains('touched')) {
+        genderSelect.style.borderColor = '#e74c3c';
+    } else {
+        genderSelect.style.borderColor = '';
+    }
+    
+    // Кнопка активна только если ВСЕ обязательные поля заполнены
+    formBtn.disabled = !(ageValid && genderValid);
+}
+
+/**
+ * Отмечаем поле как "touched" (пользователь взаимодействовал с ним)
+ */
+function markFieldTouched(fieldId) {
+    const field = document.getElementById(fieldId);
+    if (field) {
+        field.classList.add('touched');
+        validateQuestionnaire();
+    }
+}
+
+// Делаем функции доступными глобально
+window.validateQuestionnaire = validateQuestionnaire;
+window.markFieldTouched = markFieldTouched;

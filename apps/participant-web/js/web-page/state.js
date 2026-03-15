@@ -72,6 +72,8 @@ export const state = {
         currentGaze: { x: null, y: null }, // Текущие координаты взгляда
         lastPoseData: null,    // Последние данные позы из анализа (для QC gaze inference)
         lastEyeSignal: null,   // Последний eye-signal sample (EAR/iris proxy)
+        emotionAnalyzer: null,      // EmotionAnalyzer instance
+        faceMaskCollector: null,    // FaceMaskCollector instance
         currentPhase: 'init',
         taskContext: {
             blockId: null,
@@ -181,3 +183,9 @@ export const ex_state = {
         feedback: document.getElementById('cogFeedback')
     }
 };
+
+// ✅ ОТЛАДКА: Экспорт state в глобальную область
+if (typeof window !== 'undefined') {
+    window.DEBUG_STATE = state;
+    console.log('[DEBUG] 🔍 state доступен через window.DEBUG_STATE');
+}

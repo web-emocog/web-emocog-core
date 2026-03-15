@@ -1,0 +1,1086 @@
+.
+├── LICENSE
+├── README.md
+├── apps
+│   ├── api
+│   ├── autotests
+│   │   ├── README.md
+│   │   ├── node_modules
+│   │   │   ├── @playwright
+│   │   │   │   └── test
+│   │   │   │       ├── LICENSE
+│   │   │   │       ├── NOTICE
+│   │   │   │       ├── README.md
+│   │   │   │       ├── cli.js
+│   │   │   │       ├── index.d.ts
+│   │   │   │       ├── index.js
+│   │   │   │       ├── index.mjs
+│   │   │   │       ├── package.json
+│   │   │   │       ├── reporter.d.ts
+│   │   │   │       ├── reporter.js
+│   │   │   │       └── reporter.mjs
+│   │   │   ├── @types
+│   │   │   │   └── node
+│   │   │   │       ├── LICENSE
+│   │   │   │       ├── README.md
+│   │   │   │       ├── assert
+│   │   │   │       │   └── strict.d.ts
+│   │   │   │       ├── assert.d.ts
+│   │   │   │       ├── async_hooks.d.ts
+│   │   │   │       ├── buffer.buffer.d.ts
+│   │   │   │       ├── buffer.d.ts
+│   │   │   │       ├── child_process.d.ts
+│   │   │   │       ├── cluster.d.ts
+│   │   │   │       ├── compatibility
+│   │   │   │       │   ├── disposable.d.ts
+│   │   │   │       │   ├── index.d.ts
+│   │   │   │       │   ├── indexable.d.ts
+│   │   │   │       │   └── iterators.d.ts
+│   │   │   │       ├── console.d.ts
+│   │   │   │       ├── constants.d.ts
+│   │   │   │       ├── crypto.d.ts
+│   │   │   │       ├── dgram.d.ts
+│   │   │   │       ├── diagnostics_channel.d.ts
+│   │   │   │       ├── dns
+│   │   │   │       │   └── promises.d.ts
+│   │   │   │       ├── dns.d.ts
+│   │   │   │       ├── domain.d.ts
+│   │   │   │       ├── events.d.ts
+│   │   │   │       ├── fs
+│   │   │   │       │   └── promises.d.ts
+│   │   │   │       ├── fs.d.ts
+│   │   │   │       ├── globals.d.ts
+│   │   │   │       ├── globals.typedarray.d.ts
+│   │   │   │       ├── http.d.ts
+│   │   │   │       ├── http2.d.ts
+│   │   │   │       ├── https.d.ts
+│   │   │   │       ├── index.d.ts
+│   │   │   │       ├── inspector.generated.d.ts
+│   │   │   │       ├── module.d.ts
+│   │   │   │       ├── net.d.ts
+│   │   │   │       ├── os.d.ts
+│   │   │   │       ├── package.json
+│   │   │   │       ├── path.d.ts
+│   │   │   │       ├── perf_hooks.d.ts
+│   │   │   │       ├── process.d.ts
+│   │   │   │       ├── punycode.d.ts
+│   │   │   │       ├── querystring.d.ts
+│   │   │   │       ├── readline
+│   │   │   │       │   └── promises.d.ts
+│   │   │   │       ├── readline.d.ts
+│   │   │   │       ├── repl.d.ts
+│   │   │   │       ├── sea.d.ts
+│   │   │   │       ├── stream
+│   │   │   │       │   ├── consumers.d.ts
+│   │   │   │       │   ├── promises.d.ts
+│   │   │   │       │   └── web.d.ts
+│   │   │   │       ├── stream.d.ts
+│   │   │   │       ├── string_decoder.d.ts
+│   │   │   │       ├── test.d.ts
+│   │   │   │       ├── timers
+│   │   │   │       │   └── promises.d.ts
+│   │   │   │       ├── timers.d.ts
+│   │   │   │       ├── tls.d.ts
+│   │   │   │       ├── trace_events.d.ts
+│   │   │   │       ├── ts5.6
+│   │   │   │       │   ├── buffer.buffer.d.ts
+│   │   │   │       │   ├── globals.typedarray.d.ts
+│   │   │   │       │   └── index.d.ts
+│   │   │   │       ├── tty.d.ts
+│   │   │   │       ├── url.d.ts
+│   │   │   │       ├── util.d.ts
+│   │   │   │       ├── v8.d.ts
+│   │   │   │       ├── vm.d.ts
+│   │   │   │       ├── wasi.d.ts
+│   │   │   │       ├── web-globals
+│   │   │   │       │   ├── abortcontroller.d.ts
+│   │   │   │       │   ├── domexception.d.ts
+│   │   │   │       │   ├── events.d.ts
+│   │   │   │       │   └── fetch.d.ts
+│   │   │   │       ├── worker_threads.d.ts
+│   │   │   │       └── zlib.d.ts
+│   │   │   ├── argparse
+│   │   │   │   ├── CHANGELOG.md
+│   │   │   │   ├── LICENSE
+│   │   │   │   ├── README.md
+│   │   │   │   ├── argparse.js
+│   │   │   │   ├── lib
+│   │   │   │   │   ├── sub.js
+│   │   │   │   │   └── textwrap.js
+│   │   │   │   └── package.json
+│   │   │   ├── js-yaml
+│   │   │   │   ├── LICENSE
+│   │   │   │   ├── README.md
+│   │   │   │   ├── bin
+│   │   │   │   │   └── js-yaml.js
+│   │   │   │   ├── dist
+│   │   │   │   │   ├── js-yaml.js
+│   │   │   │   │   ├── js-yaml.min.js
+│   │   │   │   │   └── js-yaml.mjs
+│   │   │   │   ├── index.js
+│   │   │   │   ├── lib
+│   │   │   │   │   ├── common.js
+│   │   │   │   │   ├── dumper.js
+│   │   │   │   │   ├── exception.js
+│   │   │   │   │   ├── loader.js
+│   │   │   │   │   ├── schema
+│   │   │   │   │   │   ├── core.js
+│   │   │   │   │   │   ├── default.js
+│   │   │   │   │   │   ├── failsafe.js
+│   │   │   │   │   │   └── json.js
+│   │   │   │   │   ├── schema.js
+│   │   │   │   │   ├── snippet.js
+│   │   │   │   │   ├── type
+│   │   │   │   │   │   ├── binary.js
+│   │   │   │   │   │   ├── bool.js
+│   │   │   │   │   │   ├── float.js
+│   │   │   │   │   │   ├── int.js
+│   │   │   │   │   │   ├── map.js
+│   │   │   │   │   │   ├── merge.js
+│   │   │   │   │   │   ├── null.js
+│   │   │   │   │   │   ├── omap.js
+│   │   │   │   │   │   ├── pairs.js
+│   │   │   │   │   │   ├── seq.js
+│   │   │   │   │   │   ├── set.js
+│   │   │   │   │   │   ├── str.js
+│   │   │   │   │   │   └── timestamp.js
+│   │   │   │   │   └── type.js
+│   │   │   │   └── package.json
+│   │   │   ├── playwright
+│   │   │   │   ├── LICENSE
+│   │   │   │   ├── NOTICE
+│   │   │   │   ├── README.md
+│   │   │   │   ├── ThirdPartyNotices.txt
+│   │   │   │   ├── cli.js
+│   │   │   │   ├── index.d.ts
+│   │   │   │   ├── index.js
+│   │   │   │   ├── index.mjs
+│   │   │   │   ├── jsx-runtime.js
+│   │   │   │   ├── jsx-runtime.mjs
+│   │   │   │   ├── lib
+│   │   │   │   │   ├── agents
+│   │   │   │   │   │   ├── copilot-setup-steps.yml
+│   │   │   │   │   │   ├── generateAgents.js
+│   │   │   │   │   │   ├── playwright-test-coverage.prompt.md
+│   │   │   │   │   │   ├── playwright-test-generate.prompt.md
+│   │   │   │   │   │   ├── playwright-test-generator.agent.md
+│   │   │   │   │   │   ├── playwright-test-heal.prompt.md
+│   │   │   │   │   │   ├── playwright-test-healer.agent.md
+│   │   │   │   │   │   ├── playwright-test-plan.prompt.md
+│   │   │   │   │   │   └── playwright-test-planner.agent.md
+│   │   │   │   │   ├── common
+│   │   │   │   │   │   ├── config.js
+│   │   │   │   │   │   ├── configLoader.js
+│   │   │   │   │   │   ├── esmLoaderHost.js
+│   │   │   │   │   │   ├── expectBundle.js
+│   │   │   │   │   │   ├── expectBundleImpl.js
+│   │   │   │   │   │   ├── fixtures.js
+│   │   │   │   │   │   ├── globals.js
+│   │   │   │   │   │   ├── ipc.js
+│   │   │   │   │   │   ├── poolBuilder.js
+│   │   │   │   │   │   ├── process.js
+│   │   │   │   │   │   ├── suiteUtils.js
+│   │   │   │   │   │   ├── test.js
+│   │   │   │   │   │   ├── testLoader.js
+│   │   │   │   │   │   ├── testType.js
+│   │   │   │   │   │   └── validators.js
+│   │   │   │   │   ├── fsWatcher.js
+│   │   │   │   │   ├── index.js
+│   │   │   │   │   ├── internalsForTest.js
+│   │   │   │   │   ├── isomorphic
+│   │   │   │   │   │   ├── events.js
+│   │   │   │   │   │   ├── folders.js
+│   │   │   │   │   │   ├── stringInternPool.js
+│   │   │   │   │   │   ├── teleReceiver.js
+│   │   │   │   │   │   ├── teleSuiteUpdater.js
+│   │   │   │   │   │   ├── testServerConnection.js
+│   │   │   │   │   │   ├── testServerInterface.js
+│   │   │   │   │   │   ├── testTree.js
+│   │   │   │   │   │   └── types.d.js
+│   │   │   │   │   ├── loader
+│   │   │   │   │   │   └── loaderMain.js
+│   │   │   │   │   ├── matchers
+│   │   │   │   │   │   ├── expect.js
+│   │   │   │   │   │   ├── matcherHint.js
+│   │   │   │   │   │   ├── matchers.js
+│   │   │   │   │   │   ├── toBeTruthy.js
+│   │   │   │   │   │   ├── toEqual.js
+│   │   │   │   │   │   ├── toHaveURL.js
+│   │   │   │   │   │   ├── toMatchAriaSnapshot.js
+│   │   │   │   │   │   ├── toMatchSnapshot.js
+│   │   │   │   │   │   └── toMatchText.js
+│   │   │   │   │   ├── mcp
+│   │   │   │   │   │   ├── browser
+│   │   │   │   │   │   │   ├── actions.d.js
+│   │   │   │   │   │   │   ├── browserContextFactory.js
+│   │   │   │   │   │   │   ├── browserServerBackend.js
+│   │   │   │   │   │   │   ├── codegen.js
+│   │   │   │   │   │   │   ├── config.js
+│   │   │   │   │   │   │   ├── context.js
+│   │   │   │   │   │   │   ├── response.js
+│   │   │   │   │   │   │   ├── sessionLog.js
+│   │   │   │   │   │   │   ├── tab.js
+│   │   │   │   │   │   │   ├── tools
+│   │   │   │   │   │   │   │   ├── common.js
+│   │   │   │   │   │   │   │   ├── console.js
+│   │   │   │   │   │   │   │   ├── dialogs.js
+│   │   │   │   │   │   │   │   ├── evaluate.js
+│   │   │   │   │   │   │   │   ├── files.js
+│   │   │   │   │   │   │   │   ├── form.js
+│   │   │   │   │   │   │   │   ├── install.js
+│   │   │   │   │   │   │   │   ├── keyboard.js
+│   │   │   │   │   │   │   │   ├── mouse.js
+│   │   │   │   │   │   │   │   ├── navigate.js
+│   │   │   │   │   │   │   │   ├── network.js
+│   │   │   │   │   │   │   │   ├── pdf.js
+│   │   │   │   │   │   │   │   ├── runCode.js
+│   │   │   │   │   │   │   │   ├── screenshot.js
+│   │   │   │   │   │   │   │   ├── snapshot.js
+│   │   │   │   │   │   │   │   ├── tabs.js
+│   │   │   │   │   │   │   │   ├── tool.js
+│   │   │   │   │   │   │   │   ├── tracing.js
+│   │   │   │   │   │   │   │   ├── utils.js
+│   │   │   │   │   │   │   │   ├── verify.js
+│   │   │   │   │   │   │   │   └── wait.js
+│   │   │   │   │   │   │   ├── tools.js
+│   │   │   │   │   │   │   └── watchdog.js
+│   │   │   │   │   │   ├── config.d.js
+│   │   │   │   │   │   ├── extension
+│   │   │   │   │   │   │   ├── cdpRelay.js
+│   │   │   │   │   │   │   ├── extensionContextFactory.js
+│   │   │   │   │   │   │   └── protocol.js
+│   │   │   │   │   │   ├── index.js
+│   │   │   │   │   │   ├── log.js
+│   │   │   │   │   │   ├── program.js
+│   │   │   │   │   │   ├── sdk
+│   │   │   │   │   │   │   ├── bundle.js
+│   │   │   │   │   │   │   ├── exports.js
+│   │   │   │   │   │   │   ├── http.js
+│   │   │   │   │   │   │   ├── inProcessTransport.js
+│   │   │   │   │   │   │   ├── proxyBackend.js
+│   │   │   │   │   │   │   ├── server.js
+│   │   │   │   │   │   │   └── tool.js
+│   │   │   │   │   │   └── test
+│   │   │   │   │   │       ├── browserBackend.js
+│   │   │   │   │   │       ├── generatorTools.js
+│   │   │   │   │   │       ├── plannerTools.js
+│   │   │   │   │   │       ├── seed.js
+│   │   │   │   │   │       ├── streams.js
+│   │   │   │   │   │       ├── testBackend.js
+│   │   │   │   │   │       ├── testContext.js
+│   │   │   │   │   │       ├── testTool.js
+│   │   │   │   │   │       └── testTools.js
+│   │   │   │   │   ├── mcpBundleImpl.js
+│   │   │   │   │   ├── plugins
+│   │   │   │   │   │   ├── gitCommitInfoPlugin.js
+│   │   │   │   │   │   ├── index.js
+│   │   │   │   │   │   └── webServerPlugin.js
+│   │   │   │   │   ├── program.js
+│   │   │   │   │   ├── reporters
+│   │   │   │   │   │   ├── base.js
+│   │   │   │   │   │   ├── blob.js
+│   │   │   │   │   │   ├── dot.js
+│   │   │   │   │   │   ├── empty.js
+│   │   │   │   │   │   ├── github.js
+│   │   │   │   │   │   ├── html.js
+│   │   │   │   │   │   ├── internalReporter.js
+│   │   │   │   │   │   ├── json.js
+│   │   │   │   │   │   ├── junit.js
+│   │   │   │   │   │   ├── line.js
+│   │   │   │   │   │   ├── list.js
+│   │   │   │   │   │   ├── listModeReporter.js
+│   │   │   │   │   │   ├── markdown.js
+│   │   │   │   │   │   ├── merge.js
+│   │   │   │   │   │   ├── multiplexer.js
+│   │   │   │   │   │   ├── reporterV2.js
+│   │   │   │   │   │   ├── teleEmitter.js
+│   │   │   │   │   │   └── versions
+│   │   │   │   │   │       └── blobV1.js
+│   │   │   │   │   ├── runner
+│   │   │   │   │   │   ├── dispatcher.js
+│   │   │   │   │   │   ├── failureTracker.js
+│   │   │   │   │   │   ├── lastRun.js
+│   │   │   │   │   │   ├── loadUtils.js
+│   │   │   │   │   │   ├── loaderHost.js
+│   │   │   │   │   │   ├── processHost.js
+│   │   │   │   │   │   ├── projectUtils.js
+│   │   │   │   │   │   ├── rebase.js
+│   │   │   │   │   │   ├── reporters.js
+│   │   │   │   │   │   ├── sigIntWatcher.js
+│   │   │   │   │   │   ├── taskRunner.js
+│   │   │   │   │   │   ├── tasks.js
+│   │   │   │   │   │   ├── testGroups.js
+│   │   │   │   │   │   ├── testRunner.js
+│   │   │   │   │   │   ├── testServer.js
+│   │   │   │   │   │   ├── uiModeReporter.js
+│   │   │   │   │   │   ├── vcs.js
+│   │   │   │   │   │   ├── watchMode.js
+│   │   │   │   │   │   └── workerHost.js
+│   │   │   │   │   ├── third_party
+│   │   │   │   │   │   ├── pirates.js
+│   │   │   │   │   │   └── tsconfig-loader.js
+│   │   │   │   │   ├── transform
+│   │   │   │   │   │   ├── babelBundle.js
+│   │   │   │   │   │   ├── babelBundleImpl.js
+│   │   │   │   │   │   ├── compilationCache.js
+│   │   │   │   │   │   ├── esmLoader.js
+│   │   │   │   │   │   ├── portTransport.js
+│   │   │   │   │   │   └── transform.js
+│   │   │   │   │   ├── util.js
+│   │   │   │   │   ├── utilsBundle.js
+│   │   │   │   │   ├── utilsBundleImpl.js
+│   │   │   │   │   └── worker
+│   │   │   │   │       ├── fixtureRunner.js
+│   │   │   │   │       ├── testInfo.js
+│   │   │   │   │       ├── testTracing.js
+│   │   │   │   │       ├── timeoutManager.js
+│   │   │   │   │       ├── util.js
+│   │   │   │   │       └── workerMain.js
+│   │   │   │   ├── package.json
+│   │   │   │   ├── test.d.ts
+│   │   │   │   ├── test.js
+│   │   │   │   ├── test.mjs
+│   │   │   │   └── types
+│   │   │   │       ├── test.d.ts
+│   │   │   │       └── testReporter.d.ts
+│   │   │   ├── playwright-core
+│   │   │   │   ├── LICENSE
+│   │   │   │   ├── NOTICE
+│   │   │   │   ├── README.md
+│   │   │   │   ├── ThirdPartyNotices.txt
+│   │   │   │   ├── bin
+│   │   │   │   │   ├── install_media_pack.ps1
+│   │   │   │   │   ├── install_webkit_wsl.ps1
+│   │   │   │   │   ├── reinstall_chrome_beta_linux.sh
+│   │   │   │   │   ├── reinstall_chrome_beta_mac.sh
+│   │   │   │   │   ├── reinstall_chrome_beta_win.ps1
+│   │   │   │   │   ├── reinstall_chrome_stable_linux.sh
+│   │   │   │   │   ├── reinstall_chrome_stable_mac.sh
+│   │   │   │   │   ├── reinstall_chrome_stable_win.ps1
+│   │   │   │   │   ├── reinstall_msedge_beta_linux.sh
+│   │   │   │   │   ├── reinstall_msedge_beta_mac.sh
+│   │   │   │   │   ├── reinstall_msedge_beta_win.ps1
+│   │   │   │   │   ├── reinstall_msedge_dev_linux.sh
+│   │   │   │   │   ├── reinstall_msedge_dev_mac.sh
+│   │   │   │   │   ├── reinstall_msedge_dev_win.ps1
+│   │   │   │   │   ├── reinstall_msedge_stable_linux.sh
+│   │   │   │   │   ├── reinstall_msedge_stable_mac.sh
+│   │   │   │   │   └── reinstall_msedge_stable_win.ps1
+│   │   │   │   ├── browsers.json
+│   │   │   │   ├── cli.js
+│   │   │   │   ├── index.d.ts
+│   │   │   │   ├── index.js
+│   │   │   │   ├── index.mjs
+│   │   │   │   ├── lib
+│   │   │   │   │   ├── androidServerImpl.js
+│   │   │   │   │   ├── browserServerImpl.js
+│   │   │   │   │   ├── cli
+│   │   │   │   │   │   ├── driver.js
+│   │   │   │   │   │   ├── program.js
+│   │   │   │   │   │   └── programWithTestStub.js
+│   │   │   │   │   ├── client
+│   │   │   │   │   │   ├── android.js
+│   │   │   │   │   │   ├── api.js
+│   │   │   │   │   │   ├── artifact.js
+│   │   │   │   │   │   ├── browser.js
+│   │   │   │   │   │   ├── browserContext.js
+│   │   │   │   │   │   ├── browserType.js
+│   │   │   │   │   │   ├── cdpSession.js
+│   │   │   │   │   │   ├── channelOwner.js
+│   │   │   │   │   │   ├── clientHelper.js
+│   │   │   │   │   │   ├── clientInstrumentation.js
+│   │   │   │   │   │   ├── clientStackTrace.js
+│   │   │   │   │   │   ├── clock.js
+│   │   │   │   │   │   ├── connection.js
+│   │   │   │   │   │   ├── consoleMessage.js
+│   │   │   │   │   │   ├── coverage.js
+│   │   │   │   │   │   ├── dialog.js
+│   │   │   │   │   │   ├── download.js
+│   │   │   │   │   │   ├── electron.js
+│   │   │   │   │   │   ├── elementHandle.js
+│   │   │   │   │   │   ├── errors.js
+│   │   │   │   │   │   ├── eventEmitter.js
+│   │   │   │   │   │   ├── events.js
+│   │   │   │   │   │   ├── fetch.js
+│   │   │   │   │   │   ├── fileChooser.js
+│   │   │   │   │   │   ├── fileUtils.js
+│   │   │   │   │   │   ├── frame.js
+│   │   │   │   │   │   ├── harRouter.js
+│   │   │   │   │   │   ├── input.js
+│   │   │   │   │   │   ├── jsHandle.js
+│   │   │   │   │   │   ├── jsonPipe.js
+│   │   │   │   │   │   ├── localUtils.js
+│   │   │   │   │   │   ├── locator.js
+│   │   │   │   │   │   ├── network.js
+│   │   │   │   │   │   ├── page.js
+│   │   │   │   │   │   ├── platform.js
+│   │   │   │   │   │   ├── playwright.js
+│   │   │   │   │   │   ├── selectors.js
+│   │   │   │   │   │   ├── stream.js
+│   │   │   │   │   │   ├── timeoutSettings.js
+│   │   │   │   │   │   ├── tracing.js
+│   │   │   │   │   │   ├── types.js
+│   │   │   │   │   │   ├── video.js
+│   │   │   │   │   │   ├── waiter.js
+│   │   │   │   │   │   ├── webError.js
+│   │   │   │   │   │   ├── webSocket.js
+│   │   │   │   │   │   ├── worker.js
+│   │   │   │   │   │   └── writableStream.js
+│   │   │   │   │   ├── generated
+│   │   │   │   │   │   ├── bindingsControllerSource.js
+│   │   │   │   │   │   ├── clockSource.js
+│   │   │   │   │   │   ├── injectedScriptSource.js
+│   │   │   │   │   │   ├── pollingRecorderSource.js
+│   │   │   │   │   │   ├── storageScriptSource.js
+│   │   │   │   │   │   ├── utilityScriptSource.js
+│   │   │   │   │   │   └── webSocketMockSource.js
+│   │   │   │   │   ├── inProcessFactory.js
+│   │   │   │   │   ├── inprocess.js
+│   │   │   │   │   ├── outofprocess.js
+│   │   │   │   │   ├── protocol
+│   │   │   │   │   │   ├── serializers.js
+│   │   │   │   │   │   ├── validator.js
+│   │   │   │   │   │   └── validatorPrimitives.js
+│   │   │   │   │   ├── remote
+│   │   │   │   │   │   ├── playwrightConnection.js
+│   │   │   │   │   │   └── playwrightServer.js
+│   │   │   │   │   ├── server
+│   │   │   │   │   │   ├── android
+│   │   │   │   │   │   │   ├── android.js
+│   │   │   │   │   │   │   └── backendAdb.js
+│   │   │   │   │   │   ├── artifact.js
+│   │   │   │   │   │   ├── bidi
+│   │   │   │   │   │   │   ├── bidiBrowser.js
+│   │   │   │   │   │   │   ├── bidiChromium.js
+│   │   │   │   │   │   │   ├── bidiConnection.js
+│   │   │   │   │   │   │   ├── bidiExecutionContext.js
+│   │   │   │   │   │   │   ├── bidiFirefox.js
+│   │   │   │   │   │   │   ├── bidiInput.js
+│   │   │   │   │   │   │   ├── bidiNetworkManager.js
+│   │   │   │   │   │   │   ├── bidiOverCdp.js
+│   │   │   │   │   │   │   ├── bidiPage.js
+│   │   │   │   │   │   │   ├── bidiPdf.js
+│   │   │   │   │   │   │   └── third_party
+│   │   │   │   │   │   │       ├── bidiCommands.d.js
+│   │   │   │   │   │   │       ├── bidiDeserializer.js
+│   │   │   │   │   │   │       ├── bidiKeyboard.js
+│   │   │   │   │   │   │       ├── bidiProtocol.js
+│   │   │   │   │   │   │       ├── bidiProtocolCore.js
+│   │   │   │   │   │   │       ├── bidiProtocolPermissions.js
+│   │   │   │   │   │   │       ├── bidiSerializer.js
+│   │   │   │   │   │   │       └── firefoxPrefs.js
+│   │   │   │   │   │   ├── browser.js
+│   │   │   │   │   │   ├── browserContext.js
+│   │   │   │   │   │   ├── browserType.js
+│   │   │   │   │   │   ├── callLog.js
+│   │   │   │   │   │   ├── chromium
+│   │   │   │   │   │   │   ├── appIcon.png
+│   │   │   │   │   │   │   ├── chromium.js
+│   │   │   │   │   │   │   ├── chromiumSwitches.js
+│   │   │   │   │   │   │   ├── crBrowser.js
+│   │   │   │   │   │   │   ├── crConnection.js
+│   │   │   │   │   │   │   ├── crCoverage.js
+│   │   │   │   │   │   │   ├── crDevTools.js
+│   │   │   │   │   │   │   ├── crDragDrop.js
+│   │   │   │   │   │   │   ├── crExecutionContext.js
+│   │   │   │   │   │   │   ├── crInput.js
+│   │   │   │   │   │   │   ├── crNetworkManager.js
+│   │   │   │   │   │   │   ├── crPage.js
+│   │   │   │   │   │   │   ├── crPdf.js
+│   │   │   │   │   │   │   ├── crProtocolHelper.js
+│   │   │   │   │   │   │   ├── crServiceWorker.js
+│   │   │   │   │   │   │   ├── defaultFontFamilies.js
+│   │   │   │   │   │   │   ├── protocol.d.js
+│   │   │   │   │   │   │   └── videoRecorder.js
+│   │   │   │   │   │   ├── clock.js
+│   │   │   │   │   │   ├── codegen
+│   │   │   │   │   │   │   ├── csharp.js
+│   │   │   │   │   │   │   ├── java.js
+│   │   │   │   │   │   │   ├── javascript.js
+│   │   │   │   │   │   │   ├── jsonl.js
+│   │   │   │   │   │   │   ├── language.js
+│   │   │   │   │   │   │   ├── languages.js
+│   │   │   │   │   │   │   ├── python.js
+│   │   │   │   │   │   │   └── types.js
+│   │   │   │   │   │   ├── console.js
+│   │   │   │   │   │   ├── cookieStore.js
+│   │   │   │   │   │   ├── debugController.js
+│   │   │   │   │   │   ├── debugger.js
+│   │   │   │   │   │   ├── deviceDescriptors.js
+│   │   │   │   │   │   ├── deviceDescriptorsSource.json
+│   │   │   │   │   │   ├── dialog.js
+│   │   │   │   │   │   ├── dispatchers
+│   │   │   │   │   │   │   ├── androidDispatcher.js
+│   │   │   │   │   │   │   ├── artifactDispatcher.js
+│   │   │   │   │   │   │   ├── browserContextDispatcher.js
+│   │   │   │   │   │   │   ├── browserDispatcher.js
+│   │   │   │   │   │   │   ├── browserTypeDispatcher.js
+│   │   │   │   │   │   │   ├── cdpSessionDispatcher.js
+│   │   │   │   │   │   │   ├── debugControllerDispatcher.js
+│   │   │   │   │   │   │   ├── dialogDispatcher.js
+│   │   │   │   │   │   │   ├── dispatcher.js
+│   │   │   │   │   │   │   ├── electronDispatcher.js
+│   │   │   │   │   │   │   ├── elementHandlerDispatcher.js
+│   │   │   │   │   │   │   ├── frameDispatcher.js
+│   │   │   │   │   │   │   ├── jsHandleDispatcher.js
+│   │   │   │   │   │   │   ├── jsonPipeDispatcher.js
+│   │   │   │   │   │   │   ├── localUtilsDispatcher.js
+│   │   │   │   │   │   │   ├── networkDispatchers.js
+│   │   │   │   │   │   │   ├── pageDispatcher.js
+│   │   │   │   │   │   │   ├── playwrightDispatcher.js
+│   │   │   │   │   │   │   ├── streamDispatcher.js
+│   │   │   │   │   │   │   ├── tracingDispatcher.js
+│   │   │   │   │   │   │   ├── webSocketRouteDispatcher.js
+│   │   │   │   │   │   │   └── writableStreamDispatcher.js
+│   │   │   │   │   │   ├── dom.js
+│   │   │   │   │   │   ├── download.js
+│   │   │   │   │   │   ├── electron
+│   │   │   │   │   │   │   ├── electron.js
+│   │   │   │   │   │   │   └── loader.js
+│   │   │   │   │   │   ├── errors.js
+│   │   │   │   │   │   ├── fetch.js
+│   │   │   │   │   │   ├── fileChooser.js
+│   │   │   │   │   │   ├── fileUploadUtils.js
+│   │   │   │   │   │   ├── firefox
+│   │   │   │   │   │   │   ├── ffBrowser.js
+│   │   │   │   │   │   │   ├── ffConnection.js
+│   │   │   │   │   │   │   ├── ffExecutionContext.js
+│   │   │   │   │   │   │   ├── ffInput.js
+│   │   │   │   │   │   │   ├── ffNetworkManager.js
+│   │   │   │   │   │   │   ├── ffPage.js
+│   │   │   │   │   │   │   ├── firefox.js
+│   │   │   │   │   │   │   └── protocol.d.js
+│   │   │   │   │   │   ├── formData.js
+│   │   │   │   │   │   ├── frameSelectors.js
+│   │   │   │   │   │   ├── frames.js
+│   │   │   │   │   │   ├── har
+│   │   │   │   │   │   │   ├── harRecorder.js
+│   │   │   │   │   │   │   └── harTracer.js
+│   │   │   │   │   │   ├── harBackend.js
+│   │   │   │   │   │   ├── helper.js
+│   │   │   │   │   │   ├── index.js
+│   │   │   │   │   │   ├── input.js
+│   │   │   │   │   │   ├── instrumentation.js
+│   │   │   │   │   │   ├── javascript.js
+│   │   │   │   │   │   ├── launchApp.js
+│   │   │   │   │   │   ├── localUtils.js
+│   │   │   │   │   │   ├── macEditingCommands.js
+│   │   │   │   │   │   ├── network.js
+│   │   │   │   │   │   ├── page.js
+│   │   │   │   │   │   ├── pipeTransport.js
+│   │   │   │   │   │   ├── playwright.js
+│   │   │   │   │   │   ├── progress.js
+│   │   │   │   │   │   ├── protocolError.js
+│   │   │   │   │   │   ├── recorder
+│   │   │   │   │   │   │   ├── chat.js
+│   │   │   │   │   │   │   ├── recorderApp.js
+│   │   │   │   │   │   │   ├── recorderRunner.js
+│   │   │   │   │   │   │   ├── recorderSignalProcessor.js
+│   │   │   │   │   │   │   ├── recorderUtils.js
+│   │   │   │   │   │   │   └── throttledFile.js
+│   │   │   │   │   │   ├── recorder.js
+│   │   │   │   │   │   ├── registry
+│   │   │   │   │   │   │   ├── browserFetcher.js
+│   │   │   │   │   │   │   ├── dependencies.js
+│   │   │   │   │   │   │   ├── index.js
+│   │   │   │   │   │   │   ├── nativeDeps.js
+│   │   │   │   │   │   │   └── oopDownloadBrowserMain.js
+│   │   │   │   │   │   ├── screenshotter.js
+│   │   │   │   │   │   ├── selectors.js
+│   │   │   │   │   │   ├── socksClientCertificatesInterceptor.js
+│   │   │   │   │   │   ├── socksInterceptor.js
+│   │   │   │   │   │   ├── trace
+│   │   │   │   │   │   │   ├── recorder
+│   │   │   │   │   │   │   │   ├── snapshotter.js
+│   │   │   │   │   │   │   │   ├── snapshotterInjected.js
+│   │   │   │   │   │   │   │   └── tracing.js
+│   │   │   │   │   │   │   ├── test
+│   │   │   │   │   │   │   │   └── inMemorySnapshotter.js
+│   │   │   │   │   │   │   └── viewer
+│   │   │   │   │   │   │       └── traceViewer.js
+│   │   │   │   │   │   ├── transport.js
+│   │   │   │   │   │   ├── types.js
+│   │   │   │   │   │   ├── usKeyboardLayout.js
+│   │   │   │   │   │   ├── utils
+│   │   │   │   │   │   │   ├── ascii.js
+│   │   │   │   │   │   │   ├── comparators.js
+│   │   │   │   │   │   │   ├── crypto.js
+│   │   │   │   │   │   │   ├── debug.js
+│   │   │   │   │   │   │   ├── debugLogger.js
+│   │   │   │   │   │   │   ├── env.js
+│   │   │   │   │   │   │   ├── eventsHelper.js
+│   │   │   │   │   │   │   ├── expectUtils.js
+│   │   │   │   │   │   │   ├── fileUtils.js
+│   │   │   │   │   │   │   ├── happyEyeballs.js
+│   │   │   │   │   │   │   ├── hostPlatform.js
+│   │   │   │   │   │   │   ├── httpServer.js
+│   │   │   │   │   │   │   ├── imageUtils.js
+│   │   │   │   │   │   │   ├── image_tools
+│   │   │   │   │   │   │   │   ├── colorUtils.js
+│   │   │   │   │   │   │   │   ├── compare.js
+│   │   │   │   │   │   │   │   ├── imageChannel.js
+│   │   │   │   │   │   │   │   └── stats.js
+│   │   │   │   │   │   │   ├── linuxUtils.js
+│   │   │   │   │   │   │   ├── network.js
+│   │   │   │   │   │   │   ├── nodePlatform.js
+│   │   │   │   │   │   │   ├── pipeTransport.js
+│   │   │   │   │   │   │   ├── processLauncher.js
+│   │   │   │   │   │   │   ├── profiler.js
+│   │   │   │   │   │   │   ├── socksProxy.js
+│   │   │   │   │   │   │   ├── spawnAsync.js
+│   │   │   │   │   │   │   ├── task.js
+│   │   │   │   │   │   │   ├── userAgent.js
+│   │   │   │   │   │   │   ├── wsServer.js
+│   │   │   │   │   │   │   ├── zipFile.js
+│   │   │   │   │   │   │   └── zones.js
+│   │   │   │   │   │   └── webkit
+│   │   │   │   │   │       ├── protocol.d.js
+│   │   │   │   │   │       ├── webkit.js
+│   │   │   │   │   │       ├── wkBrowser.js
+│   │   │   │   │   │       ├── wkConnection.js
+│   │   │   │   │   │       ├── wkExecutionContext.js
+│   │   │   │   │   │       ├── wkInput.js
+│   │   │   │   │   │       ├── wkInterceptableRequest.js
+│   │   │   │   │   │       ├── wkPage.js
+│   │   │   │   │   │       ├── wkProvisionalPage.js
+│   │   │   │   │   │       └── wkWorkers.js
+│   │   │   │   │   ├── third_party
+│   │   │   │   │   │   └── pixelmatch.js
+│   │   │   │   │   ├── utils
+│   │   │   │   │   │   └── isomorphic
+│   │   │   │   │   │       ├── ariaSnapshot.js
+│   │   │   │   │   │       ├── assert.js
+│   │   │   │   │   │       ├── colors.js
+│   │   │   │   │   │       ├── cssParser.js
+│   │   │   │   │   │       ├── cssTokenizer.js
+│   │   │   │   │   │       ├── headers.js
+│   │   │   │   │   │       ├── locatorGenerators.js
+│   │   │   │   │   │       ├── locatorParser.js
+│   │   │   │   │   │       ├── locatorUtils.js
+│   │   │   │   │   │       ├── manualPromise.js
+│   │   │   │   │   │       ├── mimeType.js
+│   │   │   │   │   │       ├── multimap.js
+│   │   │   │   │   │       ├── protocolFormatter.js
+│   │   │   │   │   │       ├── protocolMetainfo.js
+│   │   │   │   │   │       ├── rtti.js
+│   │   │   │   │   │       ├── selectorParser.js
+│   │   │   │   │   │       ├── semaphore.js
+│   │   │   │   │   │       ├── stackTrace.js
+│   │   │   │   │   │       ├── stringUtils.js
+│   │   │   │   │   │       ├── time.js
+│   │   │   │   │   │       ├── timeoutRunner.js
+│   │   │   │   │   │       ├── traceUtils.js
+│   │   │   │   │   │       ├── types.js
+│   │   │   │   │   │       ├── urlMatch.js
+│   │   │   │   │   │       └── utilityScriptSerializers.js
+│   │   │   │   │   ├── utils.js
+│   │   │   │   │   ├── utilsBundle.js
+│   │   │   │   │   ├── utilsBundleImpl
+│   │   │   │   │   │   ├── index.js
+│   │   │   │   │   │   └── xdg-open
+│   │   │   │   │   ├── vite
+│   │   │   │   │   │   ├── htmlReport
+│   │   │   │   │   │   │   └── index.html
+│   │   │   │   │   │   ├── recorder
+│   │   │   │   │   │   │   ├── assets
+│   │   │   │   │   │   │   │   ├── codeMirrorModule-BoWUGj0J.js
+│   │   │   │   │   │   │   │   ├── codeMirrorModule-C3UTv-Ge.css
+│   │   │   │   │   │   │   │   ├── codicon-DCmgc-ay.ttf
+│   │   │   │   │   │   │   │   ├── index-DJqDAOZp.js
+│   │   │   │   │   │   │   │   └── index-Ri0uHF7I.css
+│   │   │   │   │   │   │   ├── index.html
+│   │   │   │   │   │   │   └── playwright-logo.svg
+│   │   │   │   │   │   └── traceViewer
+│   │   │   │   │   │       ├── assets
+│   │   │   │   │   │       │   ├── codeMirrorModule-Bucv2d7q.js
+│   │   │   │   │   │       │   ├── defaultSettingsView-BEpdCv1S.js
+│   │   │   │   │   │       │   └── xtermModule-CsJ4vdCR.js
+│   │   │   │   │   │       ├── codeMirrorModule.C3UTv-Ge.css
+│   │   │   │   │   │       ├── codicon.DCmgc-ay.ttf
+│   │   │   │   │   │       ├── defaultSettingsView.ConWv5KN.css
+│   │   │   │   │   │       ├── index.BxQ34UMZ.js
+│   │   │   │   │   │       ├── index.C4Y3Aw8n.css
+│   │   │   │   │   │       ├── index.html
+│   │   │   │   │   │       ├── manifest.webmanifest
+│   │   │   │   │   │       ├── playwright-logo.svg
+│   │   │   │   │   │       ├── snapshot.html
+│   │   │   │   │   │       ├── sw.bundle.js
+│   │   │   │   │   │       ├── uiMode.BWTwXl41.js
+│   │   │   │   │   │       ├── uiMode.Btcz36p_.css
+│   │   │   │   │   │       ├── uiMode.html
+│   │   │   │   │   │       └── xtermModule.DYP7pi_n.css
+│   │   │   │   │   ├── zipBundle.js
+│   │   │   │   │   └── zipBundleImpl.js
+│   │   │   │   ├── package.json
+│   │   │   │   └── types
+│   │   │   │       ├── protocol.d.ts
+│   │   │   │       ├── structs.d.ts
+│   │   │   │       └── types.d.ts
+│   │   │   └── undici-types
+│   │   │       ├── LICENSE
+│   │   │       ├── README.md
+│   │   │       ├── agent.d.ts
+│   │   │       ├── api.d.ts
+│   │   │       ├── balanced-pool.d.ts
+│   │   │       ├── cache.d.ts
+│   │   │       ├── client.d.ts
+│   │   │       ├── connector.d.ts
+│   │   │       ├── content-type.d.ts
+│   │   │       ├── cookies.d.ts
+│   │   │       ├── diagnostics-channel.d.ts
+│   │   │       ├── dispatcher.d.ts
+│   │   │       ├── env-http-proxy-agent.d.ts
+│   │   │       ├── errors.d.ts
+│   │   │       ├── eventsource.d.ts
+│   │   │       ├── fetch.d.ts
+│   │   │       ├── file.d.ts
+│   │   │       ├── filereader.d.ts
+│   │   │       ├── formdata.d.ts
+│   │   │       ├── global-dispatcher.d.ts
+│   │   │       ├── global-origin.d.ts
+│   │   │       ├── handlers.d.ts
+│   │   │       ├── header.d.ts
+│   │   │       ├── index.d.ts
+│   │   │       ├── interceptors.d.ts
+│   │   │       ├── mock-agent.d.ts
+│   │   │       ├── mock-client.d.ts
+│   │   │       ├── mock-errors.d.ts
+│   │   │       ├── mock-interceptor.d.ts
+│   │   │       ├── mock-pool.d.ts
+│   │   │       ├── package.json
+│   │   │       ├── patch.d.ts
+│   │   │       ├── pool-stats.d.ts
+│   │   │       ├── pool.d.ts
+│   │   │       ├── proxy-agent.d.ts
+│   │   │       ├── readable.d.ts
+│   │   │       ├── retry-agent.d.ts
+│   │   │       ├── retry-handler.d.ts
+│   │   │       ├── util.d.ts
+│   │   │       ├── webidl.d.ts
+│   │   │       └── websocket.d.ts
+│   │   ├── package-lock.json
+│   │   ├── package.json
+│   │   ├── playwright-report
+│   │   │   ├── data
+│   │   │   │   ├── 00ba79286724978cd9f5158c73b312835df1f60b.zip
+│   │   │   │   ├── 0de0c43fbce80a3c0371f10a3e63477589881844.zip
+│   │   │   │   ├── 10f5c81c36964fe549818cf5573ed4d9c1c0eed6.zip
+│   │   │   │   ├── 1a917f4742272f92263944b37ce4035b5ab0fdb2.zip
+│   │   │   │   ├── 1c101fcb9efaba772095659d60708b0979e3ed7a.zip
+│   │   │   │   ├── 1f699eaeb45419f35c633407475e49a8c932e967.zip
+│   │   │   │   ├── 23ca12542719de615cd049b785297326e1fe1382.zip
+│   │   │   │   ├── 24295253ee1d6a6106c446997e4a9fa8fecda140.zip
+│   │   │   │   ├── 2ae9bb427ffe2601ae8e9dd30d1886bd5a6d8860.zip
+│   │   │   │   ├── 327d3a4eef28c36962369f7b2388997c6c041e84.zip
+│   │   │   │   ├── 3655f7df1affcb67e03162485706a0b447756972.zip
+│   │   │   │   ├── 3a2585c67f8ee3179a877d2c3c1f4de2f4f8b1b6.zip
+│   │   │   │   ├── 40cea5a5a24237a4a381d932203c012e239bf79d.zip
+│   │   │   │   ├── 4bed36201543fe302b524e0b82ff094a8127d73d.zip
+│   │   │   │   ├── 4e1ebba9750619b2eeab89f95370cc6b8e5769f4.zip
+│   │   │   │   ├── 51548f6d863ff4ba45eec29817d7adcaf18b7b3e.zip
+│   │   │   │   ├── 62eb6ab101e2055d3a17c1b8f98076ee90ce0ff7.zip
+│   │   │   │   ├── 67acb63be36c315d8c397dd4c39742b6e5520280.zip
+│   │   │   │   ├── 6d10be9748218eefda553063421f360dce029488.zip
+│   │   │   │   ├── 6fa9b995b581f1ecbf91a7eabf7114207ce30e25.zip
+│   │   │   │   ├── 804e4f405b143379a31949364de1cd260e959b8f.zip
+│   │   │   │   ├── 8c149c40b3525fca0ca300c125ec9d19e1eb10ae.zip
+│   │   │   │   ├── 8d1dfa4cd3e5e93d04c8d90b632b07e458d23afa.zip
+│   │   │   │   ├── 936d979c9090635310dc1e1fd538518bac887986.zip
+│   │   │   │   ├── 97c64c967e14ba7edc2640c105bbf16b6da0f939.zip
+│   │   │   │   ├── a35558e1633610444c7d232a03d956f73c6db5d1.zip
+│   │   │   │   ├── aa8cccbd949f254af103ff9c9223071c413008fe.zip
+│   │   │   │   ├── acb6c7707d79a4d839570a7817bbf1a6eed312f7.zip
+│   │   │   │   ├── bb3a1704855113c3067148cfda130c806a56e717.zip
+│   │   │   │   ├── bba3610cc12f05df984a82539a464fdcf9738cda.zip
+│   │   │   │   ├── bd9f44c2a1c5c76be8d64329ec4586dc60625acb.zip
+│   │   │   │   ├── c1d75d565cf1eb2b204465eec3e19c0fb03233e2.zip
+│   │   │   │   ├── ca1bc0abc76bf07109d24280d05284b0f135790e.zip
+│   │   │   │   ├── cc136d0a1c74ccf5e3fe45281ee9d8873f77f5eb.zip
+│   │   │   │   ├── cf8daea767423251741d5e9f0996f65f81ddafea.zip
+│   │   │   │   ├── d2123368fc3e4786b28db2a696bb9fbc0395c06d.zip
+│   │   │   │   ├── d255e6b5c9c8cf7e654adf93768887f1fa8279cf.zip
+│   │   │   │   ├── d7ae22c08b4ad2e0736fb38e899e240e26923856.zip
+│   │   │   │   ├── d84ba1f2f4a3496240e5f642630d03ea9f446a9b.zip
+│   │   │   │   ├── e1cff04e603852a138e7a4b1ba45583c1f9a5d69.zip
+│   │   │   │   ├── e41242f5db7f0c3e1f1fd27d0bc659df89becc59.zip
+│   │   │   │   ├── f0a0065ac982727dbcef9fe67ec18c922c4c836a.zip
+│   │   │   │   ├── f98462a0efaa5b8b48b5374c62f59a54b9296a5e.zip
+│   │   │   │   └── fcada622ff66f023abe6ec46ae6e3da2dbafa354.zip
+│   │   │   ├── index.html
+│   │   │   └── trace
+│   │   │       ├── assets
+│   │   │       │   ├── codeMirrorModule-Bucv2d7q.js
+│   │   │       │   └── defaultSettingsView-BEpdCv1S.js
+│   │   │       ├── codeMirrorModule.C3UTv-Ge.css
+│   │   │       ├── codicon.DCmgc-ay.ttf
+│   │   │       ├── defaultSettingsView.ConWv5KN.css
+│   │   │       ├── index.BxQ34UMZ.js
+│   │   │       ├── index.C4Y3Aw8n.css
+│   │   │       ├── index.html
+│   │   │       ├── manifest.webmanifest
+│   │   │       ├── playwright-logo.svg
+│   │   │       ├── snapshot.html
+│   │   │       ├── sw.bundle.js
+│   │   │       ├── uiMode.BWTwXl41.js
+│   │   │       ├── uiMode.Btcz36p_.css
+│   │   │       ├── uiMode.html
+│   │   │       └── xtermModule.DYP7pi_n.css
+│   │   ├── playwright.config.ts
+│   │   ├── test-results
+│   │   │   ├── forbidden-Email-SQL-injection-попытка-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-emoji-в-email-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-без-домена-user--chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-без-зоны-user-example--chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-без-символа-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-валидный-формат-принимается-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-ввод-удаление-ввод-на-скорости-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-пустое-поле-не-пропускает-дальше-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-с-двойными-точками-a-b-example-com--chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-с-пробелами-user-example-com--chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-слишком-длинный-1000-символов--chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Email-только-спецсимволы-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-XSS-попытка-в-поле-возраста-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-emoji-в-поле-возраста-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-быстрые-повторные-клики-на-кнопку-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-больше-99-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-дробное-число-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-меньше-18-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-ноль-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-отрицательный-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-пустой-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-с-буквами-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-возраст-с-спецсимволами-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-зрение-не-выбрано-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-клавиатура-не-выбрана-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-пол-не-выбран-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-спецсимволы-в-поле-возраста-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Анкета-устройство-ввода-не-выбрано-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Согласие-кнопка-disabled-без-галочки-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Согласие-кнопка-enabled-после-установки-галочки-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Согласие-нельзя-продолжить-без-согласия-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Шаг-3-нельзя-перейти-с-пустым-email-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── forbidden-Шаг-4-нельзя-перейти-с-неполной-анкетой-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Consent-Gating-a4ae5-г-3-после-согласия-работает-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Consent-Gating-bd329-ласия-disabled-по-умолчанию-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Consent-Gating-c039b-led-после-установки-галочки-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Email-шаг-Email-поле-присутствует-на-шаге-3-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Анкета-шаг-Все-7eb3b-поля-присутствуют-на-шаге-4-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Анкета-шаг-Кно-10d41-isabled-при-неполной-анкете-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Анкета-шаг-Кно-43d27-bled-при-заполненной-анкете-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Базовая-навига-5007a--с-шага-1-на-шаг-2-работает-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Базовая-навига-5d4fd--открывается-и-виден-STEP-1-chromium
+│   │   │   │   └── trace.zip
+│   │   │   ├── smoke-Smoke-Базовая-навига-c4c3e-шаги-существуют-на-странице-chromium
+│   │   │   │   └── trace.zip
+│   │   │   └── smoke-Smoke-Базовая-навига-cbf0f-лючатель-языка-присутствует-chromium
+│   │   │       └── trace.zip
+│   │   ├── tests
+│   │   │   ├── cases
+│   │   │   │   └── forbidden.yml
+│   │   │   ├── forbidden.spec.ts
+│   │   │   ├── helpers
+│   │   │   │   ├── caseRunner.ts
+│   │   │   │   └── testUtils.ts
+│   │   │   └── smoke.spec.ts
+│   │   └── tsconfig.json
+│   ├── participant-web
+│   │   ├── docs
+│   │   │   ├── consent-gdpr.html
+│   │   │   └── participant-info.html
+│   │   ├── experiment.json
+│   │   ├── js
+│   │   │   ├── face-segmenter
+│   │   │   │   ├── FaceSegmenter.js
+│   │   │   │   ├── README.md
+│   │   │   │   ├── constants.js
+│   │   │   │   ├── index.js
+│   │   │   │   ├── mask-analyzer.js
+│   │   │   │   ├── region-analyzer.js
+│   │   │   │   ├── symmetry-checker.js
+│   │   │   │   ├── thresholds.js
+│   │   │   │   └── visualization.js
+│   │   │   ├── face-segmenter.js
+│   │   │   ├── gaze-tracker
+│   │   │   │   ├── GazeTracker.js
+│   │   │   │   ├── README.md
+│   │   │   │   ├── attention-metrics.js
+│   │   │   │   ├── constants.js
+│   │   │   │   ├── features.js
+│   │   │   │   ├── gaze-tests
+│   │   │   │   │   ├── README.md
+│   │   │   │   │   ├── VPC_ATTRIBUTION.md
+│   │   │   │   │   ├── common
+│   │   │   │   │   │   └── analysis-loop.js
+│   │   │   │   │   ├── constants.js
+│   │   │   │   │   ├── index.js
+│   │   │   │   │   ├── session-schema.js
+│   │   │   │   │   ├── visuospatial
+│   │   │   │   │   │   ├── metrics.js
+│   │   │   │   │   │   ├── prompts.js
+│   │   │   │   │   │   └── runner.js
+│   │   │   │   │   └── vpc
+│   │   │   │   │       ├── fallback.js
+│   │   │   │   │       ├── manifest-felidae.js
+│   │   │   │   │       ├── metrics.js
+│   │   │   │   │       └── runner.js
+│   │   │   │   ├── index.js
+│   │   │   │   └── ridge.js
+│   │   │   ├── gaze-tracker.js
+│   │   │   ├── precheck-analyzer
+│   │   │   │   ├── PrecheckAnalyzer.js
+│   │   │   │   ├── README.md
+│   │   │   │   ├── constants.js
+│   │   │   │   ├── eyes-analyzer.js
+│   │   │   │   ├── face-parser.js
+│   │   │   │   ├── illumination.js
+│   │   │   │   ├── index.js
+│   │   │   │   ├── mouth-analyzer.js
+│   │   │   │   ├── pose-analyzer.js
+│   │   │   │   ├── recommendations.js
+│   │   │   │   └── thresholds.js
+│   │   │   ├── precheck-analyzer.js
+│   │   │   ├── qc-metrics
+│   │   │   │   ├── QCMetrics.js
+│   │   │   │   ├── README.md
+│   │   │   │   ├── constants.js
+│   │   │   │   ├── fps-monitor.js
+│   │   │   │   ├── frame-analysis.js
+│   │   │   │   ├── gaze-tracking.js
+│   │   │   │   ├── helpers.js
+│   │   │   │   ├── index.js
+│   │   │   │   ├── metrics-calculator.js
+│   │   │   │   └── validation.js
+│   │   │   ├── qc-metrics.js
+│   │   │   ├── security
+│   │   │   └── web-page
+│   │   │       ├── README.md
+│   │   │       ├── app.js
+│   │   │       ├── camera.js
+│   │   │       ├── experimental_task.js
+│   │   │       ├── eye-signal.js
+│   │   │       ├── heatmap.js
+│   │   │       ├── precheck.js
+│   │   │       ├── state.js
+│   │   │       ├── tests.js
+│   │   │       └── ui.js
+│   │   ├── mvp_with_precheck_1.html
+│   │   ├── style.css
+│   │   ├── test-qc-metrics.html
+│   │   ├── tools
+│   │   │   ├── session-report.html
+│   │   │   ├── session-report.js
+│   │   │   └── test-attention-metrics.mjs
+│   │   └── translations.js
+│   └── researcher-web
+├── db
+│   ├── migrations
+│   └── seed
+├── docker
+├── docs
+│   ├── api
+│   └── architecture.md
+├── ml
+│   ├── runtime
+│   │   ├── adapters
+│   │   ├── models
+│   │   ├── pipelines
+│   │   ├── postprocess
+│   │   └── preprocess
+│   ├── tests
+│   └── training
+│       ├── export
+│       ├── notebooks
+│       └── scripts
+├── packages
+│   ├── shared
+│   └── ui
+├── rppg_alg_qc_test_web_alg_test_v10
+│   ├── README.md
+│   └── rppg_alg
+│       ├── README.md
+│       ├── RppgEngine.js
+│       ├── algorithms
+│       │   ├── chrom.js
+│       │   └── pos.js
+│       ├── config.js
+│       ├── index.js
+│       ├── integration
+│       │   └── io_stubs.js
+│       ├── roi
+│       │   ├── roiFromLandmarks_v4.js
+│       │   └── skinSampling_v4.js
+│       ├── session
+│       │   └── SessionReporter.js
+│       ├── signal
+│       │   ├── Biquad.js
+│       │   ├── fft.js
+│       │   ├── respiration.js
+│       │   ├── spectrum.js
+│       │   └── sqi_nsqi.js
+│       └── utils.js
+├── rt_component-
+│   ├── README.md
+│   ├── README_METRICS.md
+│   ├── examples
+│   │   └── config_default.json
+│   ├── requirements.txt
+│   ├── scripts
+│   │   ├── analyze_log.py
+│   │   └── run_tk_experiment.py
+│   └── src
+│       └── rt_mvp
+│           ├── __init__.py
+│           ├── analyzer.py
+│           ├── config.py
+│           ├── event_log.py
+│           ├── event_schema.py
+│           ├── report_html.py
+│           ├── sinks.py
+│           ├── state_flags.py
+│           └── stats.py
+├── scripts
+│   └── dev
+└── structure.txt
+
+188 directories, 896 files
