@@ -18,7 +18,7 @@ import { createThresholds, VIDEO_ELEMENT_IDS } from './constants.js';
 import { VideoFpsMonitor } from './fps-monitor.js';
 import { createGazeState, setGazeScreenState, addGazePoint, accumulateGazeTime } from './gaze-tracking.js';
 import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js';
-import { createValidationState, setValidationData } from './validation.js';
+import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
 import { getCurrentMetrics, getSummary } from './metrics-calculator.js';
 
 class QCMetrics {
@@ -30,6 +30,7 @@ class QCMetrics {
         this._counters = createInstrumentCounters();
         this._gazeState = createGazeState();
         this._validationState = createValidationState();
+        this._trackingDeviationState = createTrackingDeviationState();
         this._fpsMonitor = new VideoFpsMonitor();
         
         this._startTime = 0;
@@ -54,6 +55,7 @@ class QCMetrics {
         this._counters = createInstrumentCounters();
         this._gazeState = createGazeState();
         this._validationState = createValidationState();
+        this._trackingDeviationState = createTrackingDeviationState();
         
         const useRealFps = options.useRealCameraFps ?? this._useRealCameraFps;
         
@@ -159,6 +161,15 @@ class QCMetrics {
     }
 
     /**
+     * Установка данных tracking deviation (отклонение gaze от фигуры во время tracking test)
+     * 
+     * @param {Array} trackingSamples - массив { shapeX, shapeY, gazeX, gazeY }
+     */
+    setTrackingDeviationData(trackingSamples) {
+        this._trackingDeviationState = setTrackingDeviationData(this._trackingDeviationState, trackingSamples);
+    }
+
+    /**
      * Получение текущих метрик
      * 
      * @returns {Object} текущие метрики
@@ -183,6 +194,7 @@ class QCMetrics {
             this._counters,
             this._gazeState,
             this._validationState,
+            this._trackingDeviationState,
             this._fpsMonitor,
             this._startTime,
             this.thresholds
@@ -196,6 +208,7 @@ class QCMetrics {
         this._counters = createInstrumentCounters();
         this._gazeState = createGazeState();
         this._validationState = createValidationState();
+        this._trackingDeviationState = createTrackingDeviationState();
         this._fpsMonitor.reset();
         this._startTime = 0;
         this._lastFrameTime = 0;

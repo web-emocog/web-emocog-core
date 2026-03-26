@@ -1,8 +1,17 @@
 /**
- * QC Metrics Module v3.4 - Browser Wrapper
+ * QC Metrics Module v3.5 - Browser Wrapper
  * 
  * Этот файл служит обёрткой для обратной совместимости.
  * Основной код находится в папке ./qc-metrics/
+ * 
+ * ИЗМЕНЕНИЯ v3.5:
+ * - ИСПРАВЛЕН баг: dropoutInv дублировал gazeValid (математически идентичны).
+ *   Заменён на gazeAccuracy — плавный штраф по данным валидации.
+ * - Hard penalties теперь используют PENALTY_FACTORS (разные по важности метрик).
+ *   Поза головы — самый жёсткий штраф (критично для rPPG).
+ * - Добавлены hard penalties: illumination, poseOk, gazeAccuracy.
+ * - Validation accuracy/precision теперь ВЛИЯЮТ на числовой qcScore.
+ * - Повышен порог освещения: illumination_ok_pct_min 90 → 92.
  * 
  * ИЗМЕНЕНИЯ v3.4:
  * - Renamed currentFps → analysisFps in report output for clarity
@@ -21,7 +30,7 @@
  * - setCameraFps() для передачи реального FPS камеры
  * - lowFps проверка теперь использует cameraFps
  * 
- * @version 3.4.0
+ * @version 3.5.0
  */
 
 /**
@@ -40,7 +49,7 @@ class QCMetrics {
             face_visible_pct_min: 85,
             face_ok_pct_min: 85,
             pose_ok_pct_min: 85,
-            illumination_ok_pct_min: 90,
+            illumination_ok_pct_min: 92, // v3.5: повышен с 90 → 92 для лучшего качества данных
             eyes_open_pct_min: 85,
             occlusion_pct_max: 20,
             gaze_valid_pct_min: 80,
@@ -62,6 +71,8 @@ class QCMetrics {
             pose_pitch_on_max: 18,
             pose_yaw_off_min: 35,
             pose_pitch_off_min: 30,
+            tracking_on_target_base_radius_pct: 0.15,
+            tracking_on_target_min_pct: 50,
             maxConsecutiveDropoutMs: 1200,
             ...options
         };
@@ -69,6 +80,7 @@ class QCMetrics {
         this._counters = this._createCounters();
         this._gazeState = { valid: false, onScreen: null, validTimeMs: 0, onScreenTimeMs: 0, hasData: false };
         this._validationState = { points: [], errors: [], isComplete: false };
+        this._trackingDeviationState = { errors: [], sampleCount: 0, validSampleCount: 0, isComplete: false };
         this._fpsHistory = [];        // История FPS анализа
         this._cameraFpsHistory = [];  // История FPS камеры
         this._currentFps = 0;         // Текущий FPS анализа (processFrame calls)
@@ -101,6 +113,8 @@ class QCMetrics {
         this._isRunning = true;
         this._counters = this._createCounters();
         this._gazeState = { valid: false, onScreen: null, validTimeMs: 0, onScreenTimeMs: 0, hasData: false };
+        this._validationState = { points: [], errors: [], isComplete: false };
+        this._trackingDeviationState = { errors: [], sampleCount: 0, validSampleCount: 0, isComplete: false };
         this._fpsHistory = [];
         this._cameraFpsHistory = [];
         this._warmupComplete = false;
@@ -356,23 +370,42 @@ class QCMetrics {
 
     _computeQcScore(p) {
         const th = this.thresholds;
-        // LEGACY-compatible weights (sum = 1.0)
-        const w = {
-            faceVis: 0.14,
-            faceOk: 0.16,
-            poseOk: 0.08,
-            lightOk: 0.06,
-            eyesOpen: 0.06,
-            occlInv: 0.10,
-            gazeValid: 0.14,
-            gazeOn: 0.16,
-            dropoutInv: 0.04,
-            fpsOk: 0.06,
-        };
-        
         const clamp01 = v => Math.max(0, Math.min(1, v));
         const nPct = x => clamp01(x / 100);
         const nInvPct = x => clamp01(1 - x / 100);
+
+        // v3.5: Пересмотрены веса (sum = 1.0)
+        // - Убран dropoutInv (баг: дублировал gazeValid)
+        // - Добавлен gazeAccuracy (validation accuracy → smooth penalty)
+        // - Повышен вес poseOk (критично для rPPG + gaze)
+        // - Повышен вес lightOk (фундамент для CV)
+        const w = {
+            faceVis: 0.12,
+            faceOk: 0.14,
+            poseOk: 0.14,       // повышен с 0.08 (rPPG critical)
+            lightOk: 0.10,      // повышен с 0.06
+            eyesOpen: 0.06,
+            occlInv: 0.08,
+            gazeValid: 0.12,
+            gazeOn: 0.12,
+            gazeAccuracy: 0.06, // NEW — заменяет dropoutInv
+            fpsOk: 0.06,
+        };
+
+        // Коэффициенты hard penalty по важности метрик
+        // Формула: score *= (1 - factor). Чем выше factor, тем жёстче штраф.
+        const pf = {
+            duration:       0.65,
+            faceVisible:    0.40,
+            faceOk:         0.40,
+            poseOk:         0.45, // САМЫЙ жёсткий (rPPG critical)
+            illumination:   0.35, // NEW
+            occlusion:      0.30,
+            gazeValid:      0.30,
+            gazeOnScreen:   0.30,
+            gazeAccuracy:   0.25, // NEW
+            lowFps:         0.40,
+        };
         
         // Normalize metrics
         const faceVis = nPct(p.faceVisiblePct);
@@ -383,12 +416,19 @@ class QCMetrics {
         const occlInv = nInvPct(p.occlusionPct);
         const gazeValid = nPct(p.gazeValidPct);
         const gazeOn = nPct(p.gazeOnScreenPct);
-        const dropoutInv = nInvPct(100 - p.gazeValidPct); // dropout = 100 - valid
-        
-        // FPS score (approximation - legacy uses time-based)
         const fpsOk = nInvPct(p.lowFpsPct || 0);
         
-        // Weighted average
+        // === gazeAccuracy: плавный штраф по данным валидации ===
+        // Если данных валидации нет — нейтральный (1.0).
+        // Плавная шкала: от 0% ошибки (score=1) до 2× порога (score=0)
+        let gazeAccuracy = 1.0;
+        const v = this._getValidationMetrics();
+        if (v.accuracyPct !== null) {
+            const accThresh = th.gaze_accuracy_pct_max;
+            gazeAccuracy = clamp01(1 - (v.accuracyPct / (accThresh * 2)));
+        }
+        
+        // Weighted average (sum = 1.0)
         let score =
             faceVis * w.faceVis +
             faceOk * w.faceOk +
@@ -398,20 +438,26 @@ class QCMetrics {
             occlInv * w.occlInv +
             gazeValid * w.gazeValid +
             gazeOn * w.gazeOn +
-            dropoutInv * w.dropoutInv +
+            gazeAccuracy * w.gazeAccuracy +
             fpsOk * w.fpsOk;
         
-        // LEGACY hard penalties to avoid "high score but invalid" artifacts
+        // === Hard penalties (importance-based) ===
         const durationMs = Date.now() - this._startTime;
-        if (durationMs < th.minDurationMs) score *= 0.35;
-        if (p.faceVisiblePct < th.face_visible_pct_min) score *= 0.6;
-        if (p.faceOkPct < th.face_ok_pct_min) score *= 0.6;
-        if (p.occlusionPct > th.occlusion_pct_max) score *= 0.7;
-        if (p.gazeValidPct < th.gaze_valid_pct_min) score *= 0.7;
-        if (p.gazeOnScreenPct < th.gaze_on_screen_pct_min) score *= 0.7;
-        if (this._counters.totalLowFpsMs > th.maxLowFpsTimeMs) score *= 0.6;
+        if (durationMs < th.minDurationMs) score *= (1 - pf.duration);
+        if (p.faceVisiblePct < th.face_visible_pct_min) score *= (1 - pf.faceVisible);
+        if (p.faceOkPct < th.face_ok_pct_min) score *= (1 - pf.faceOk);
+        if (p.poseOkPct < th.pose_ok_pct_min) score *= (1 - pf.poseOk);           // NEW
+        if (p.illuminationOkPct < th.illumination_ok_pct_min) score *= (1 - pf.illumination); // NEW
+        if (p.occlusionPct > th.occlusion_pct_max) score *= (1 - pf.occlusion);
+        if (p.gazeValidPct < th.gaze_valid_pct_min) score *= (1 - pf.gazeValid);
+        if (p.gazeOnScreenPct < th.gaze_on_screen_pct_min) score *= (1 - pf.gazeOnScreen);
+        // Gaze accuracy hard penalty (если данные валидации есть и превышают порог)
+        if (v.accuracyPct !== null && v.accuracyPct > th.gaze_accuracy_pct_max) {
+            score *= (1 - pf.gazeAccuracy);                                         // NEW
+        }
+        if (this._counters.totalLowFpsMs > th.maxLowFpsTimeMs) score *= (1 - pf.lowFps);
         
-        // Return as 0-1 (legacy) with 3 decimal places
+        // Return as 0-1 with 3 decimal places
         return Math.round(clamp01(score) * 1000) / 1000;
     }
 
@@ -419,6 +465,10 @@ class QCMetrics {
         const m = this.getCurrentMetrics();
         const th = this.thresholds;
         const v = this._getValidationMetrics();
+        const td = this._getTrackingDeviationMetrics({
+            validationAccuracyPx: v.accuracyPx,
+            baseRadiusPct: th.tracking_on_target_base_radius_pct
+        });
         const checks = {
             duration: m.durationMs >= th.minDurationMs,
             faceVisible: m.faceVisiblePct >= th.face_visible_pct_min,
@@ -436,8 +486,12 @@ class QCMetrics {
             checks.gazeAccuracy = v.accuracyPct <= th.gaze_accuracy_pct_max;
             checks.gazePrecision = v.precisionPct <= th.gaze_precision_pct_max;
         }
+        // Tracking deviation: человек смотрел на фигуру ≥ tracking_on_target_min_pct% времени
+        if (td.onTargetPct !== null) {
+            checks.trackingOnTarget = td.onTargetPct >= th.tracking_on_target_min_pct;
+        }
         const passed = Object.values(checks).filter(x => x === true).length;
-        return { ...m, validation: v, checks, passedChecks: passed, totalChecks: Object.keys(checks).length, overallPass: passed === Object.keys(checks).length, counters: { ...this._counters }, fpsHistory: [...this._fpsHistory], maxConsecutiveLowFpsMs: this._counters.maxConsecutiveLowFpsMs, totalLowFpsMs: this._counters.totalLowFpsMs };
+        return { ...m, validation: v, trackingDeviation: td, checks, passedChecks: passed, totalChecks: Object.keys(checks).length, overallPass: passed === Object.keys(checks).length, counters: { ...this._counters }, fpsHistory: [...this._fpsHistory], maxConsecutiveLowFpsMs: this._counters.maxConsecutiveLowFpsMs, totalLowFpsMs: this._counters.totalLowFpsMs };
     }
 
     _getValidationMetrics() {
@@ -458,10 +512,78 @@ class QCMetrics {
         };
     }
 
+    /**
+     * Принимает данные tracking test для расчёта отклонения gaze от позиции фигуры.
+     * Вызывается из tests.js после завершения tracking test.
+     * 
+     * @param {Array<{shapeX: number, shapeY: number, gazeX: number, gazeY: number}>} samples
+     */
+    setTrackingDeviationData(samples) {
+        if (!Array.isArray(samples) || samples.length === 0) {
+            console.warn('[QCMetrics] setTrackingDeviationData: нет данных');
+            return;
+        }
+
+        const errors = [];
+        for (const s of samples) {
+            if (s.gazeX != null && s.gazeY != null && s.shapeX != null && s.shapeY != null &&
+                Number.isFinite(s.gazeX) && Number.isFinite(s.gazeY) &&
+                Number.isFinite(s.shapeX) && Number.isFinite(s.shapeY)) {
+                const dx = s.gazeX - s.shapeX;
+                const dy = s.gazeY - s.shapeY;
+                errors.push(Math.sqrt(dx * dx + dy * dy));
+            }
+        }
+
+        if (errors.length < 5) {
+            console.warn('[QCMetrics] setTrackingDeviationData: недостаточно валидных точек:', errors.length);
+            return;
+        }
+
+        this._trackingDeviationState = {
+            errors: errors,
+            sampleCount: samples.length,
+            validSampleCount: errors.length,
+            isComplete: true
+        };
+
+        console.log(`[QCMetrics] Tracking deviation data set: ${errors.length} valid samples of ${samples.length}`);
+    }
+
+    _getTrackingDeviationMetrics(options = {}) {
+        const st = this._trackingDeviationState;
+        if (!st.isComplete || st.errors.length === 0) {
+            return { deviationPx: null, deviationPct: null, precisionPx: null, precisionPct: null, onTargetPct: null, sampleCount: 0, validSampleCount: 0 };
+        }
+        const e = st.errors;
+        const avg = e.reduce((a, b) => a + b, 0) / e.length;
+        const sqDiffs = e.map(v => Math.pow(v - avg, 2));
+        const std = Math.sqrt(sqDiffs.reduce((a, b) => a + b, 0) / e.length);
+        const diag = Math.sqrt(Math.pow(window.innerWidth || 1920, 2) + Math.pow(window.innerHeight || 1080, 2));
+        // Адаптивный радиус: базовый + accuracy калибровки (физически неустранимая ошибка)
+        const baseRadiusPx = diag * (options.baseRadiusPct ?? 0.15);
+        const accuracyPx = (options.validationAccuracyPx != null && Number.isFinite(options.validationAccuracyPx))
+            ? options.validationAccuracyPx
+            : 0;
+        const onTargetRadiusPx = baseRadiusPx + accuracyPx;
+        const onTargetCount = e.filter(err => err <= onTargetRadiusPx).length;
+        const onTargetPct = (onTargetCount / e.length) * 100;
+        return {
+            deviationPx: Math.round(avg * 10) / 10,
+            deviationPct: Math.round((avg / diag) * 1000) / 10,
+            precisionPx: Math.round(std * 10) / 10,
+            precisionPct: Math.round((std / diag) * 1000) / 10,
+            onTargetPct: Math.round(onTargetPct * 10) / 10,
+            sampleCount: st.sampleCount,
+            validSampleCount: st.validSampleCount
+        };
+    }
+
     reset() {
         this._counters = this._createCounters();
         this._gazeState = { valid: false, onScreen: null, validTimeMs: 0, onScreenTimeMs: 0, hasData: false };
         this._validationState = { points: [], errors: [], isComplete: false };
+        this._trackingDeviationState = { errors: [], sampleCount: 0, validSampleCount: 0, isComplete: false };
         this._fpsHistory = [];
         this._cameraFpsHistory = [];
         this._currentFps = 0;

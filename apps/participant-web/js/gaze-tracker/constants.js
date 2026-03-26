@@ -40,6 +40,7 @@ export const FEATURE_SIZE = 17;
 // Конфигурация по умолчанию
 export const DEFAULTS = {
     ridgeLambda: 0.001,
-    smoothingFactor: 0.10,
+    smoothingFactor: 0.25,
+    landmarkSmoothingAlpha: 0.3,
     minCalibrationPoints: 4
 };
