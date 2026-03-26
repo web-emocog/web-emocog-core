@@ -54,8 +54,8 @@ export async function startCalibration() {
     state.runtime.gazeTracker = new GazeTracker({
         screenWidth: window.innerWidth,
         screenHeight: window.innerHeight,
-        // Сбалансированный профиль: ниже инерция, но без заметного роста шума.
-        smoothingFactor: 0.10,
+        // Сбалансированный профиль: 0.25 = 25% old + 75% new, lag < 2 кадров при 30fps
+        smoothingFactor: 0.25,
         onGazeUpdate: (gazeData) => {
             // Передаём данные взгляда в единую точку входа
             if (window.handleGazeUpdate) {
@@ -990,14 +990,11 @@ function shouldApplyValidationCorrection(rawMetrics, correctedMetrics) {
     const corrPrec = correctedMetrics?.precisionPx;
     if (![rawAcc, rawPrec, corrAcc, corrPrec].every(Number.isFinite)) return false;
 
-    const improvedAccuracyPx = rawAcc - corrAcc;
-    const improvedPrecisionPx = rawPrec - corrPrec;
     const improvedAccuracyPct = rawMetrics.accuracyPct - correctedMetrics.accuracyPct;
     const improvedPrecisionPct = rawMetrics.precisionPct - correctedMetrics.precisionPct;
 
-    const significant = improvedAccuracyPx >= 12 ||
-        improvedPrecisionPx >= 12 ||
-        improvedAccuracyPct >= 0.6 ||
+    // Все пороги в % диагонали — стабильно на любом разрешении
+    const significant = improvedAccuracyPct >= 0.6 ||
         improvedPrecisionPct >= 0.6;
 
     const noSeriousRegression = correctedMetrics.accuracyPct <= rawMetrics.accuracyPct + 0.2 &&
@@ -1238,6 +1235,11 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     
     // === Останавливаем CameraFPSMonitor (если ещё работает) ===
     stopCameraFpsMonitor();
+
+    // === Передаём данные tracking test в QCMetrics для расчёта deviation ===
+    if (state.runtime.qcMetrics && state.sessionData.trackingTest.length > 0) {
+        state.runtime.qcMetrics.setTrackingDeviationData(state.sessionData.trackingTest);
+    }
     
     const testArea = document.getElementById('trackingTestArea');
     const progressText = document.getElementById('testProgressText');

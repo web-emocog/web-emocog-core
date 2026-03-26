@@ -49,7 +49,7 @@ export const DEFAULT_THRESHOLDS = {
     face_visible_pct_min: 85,
     face_ok_pct_min: 85,
     pose_ok_pct_min: 85,
-    illumination_ok_pct_min: 90,
+    illumination_ok_pct_min: 92, // v3.5: повышен с 90 → 92 для лучшего качества данных
     eyes_open_pct_min: 85,
     occlusion_pct_max: 20,
 
@@ -79,6 +79,10 @@ export const DEFAULT_THRESHOLDS = {
     pose_yaw_off_min: 35,
     pose_pitch_off_min: 30,
 
+    // tracking deviation (tracking test on-target check)
+    tracking_on_target_base_radius_pct: 0.15, // базовый радиус как доля диагонали экрана
+    tracking_on_target_min_pct: 50,           // мин. % сэмплов on-target (было 60, снижено: ~5-10% теряется на моргания/саккады)
+
     // dropout segments
     maxConsecutiveDropoutMs: 1200
 };
@@ -97,19 +101,48 @@ export const VIDEO_ELEMENT_IDS = [
 
 /**
  * Весовые коэффициенты для QC Score
- * LEGACY-compatible weights (sum = 1.0)
+ * 
+ * v3.5: Пересмотрены веса с учётом важности метрик.
+ * - Убран dropoutInv (баг: дублировал gazeValid)
+ * - Добавлен gazeAccuracy (validation accuracy → smooth penalty)
+ * - Повышен вес poseOk (критично для rPPG и gaze качества)
+ * - Повышен вес lightOk (фундамент для всех CV-алгоритмов)
+ * 
+ * Сумма весов = 1.0
  */
 export const QC_WEIGHTS = {
-    faceVis: 0.14,
-    faceOk: 0.16,
-    poseOk: 0.08,
-    lightOk: 0.06,
-    eyesOpen: 0.06,
-    occlInv: 0.10,
-    gazeValid: 0.14,
-    gazeOn: 0.16,
-    dropoutInv: 0.04,
-    fpsOk: 0.06,
+    faceVis: 0.12,      // лицо видно (базовый сигнал)
+    faceOk: 0.14,       // лицо ОК (размер, позиция, без окклюзии)
+    poseOk: 0.14,       // поза головы стабильна (КРИТИЧНО для rPPG + gaze)
+    lightOk: 0.10,      // освещение (фундамент для CV, повышен с 0.06)
+    eyesOpen: 0.06,     // глаза открыты
+    occlInv: 0.08,      // нет окклюзии
+    gazeValid: 0.12,    // валидный взгляд
+    gazeOn: 0.12,       // взгляд на экране
+    gazeAccuracy: 0.06, // точность gaze (из валидации, NEW — заменяет dropoutInv)
+    fpsOk: 0.06,        // стабильный FPS
+};
+
+/**
+ * Коэффициенты hard penalty по важности метрик
+ * 
+ * Чем выше penalty_factor, тем сильнее штраф при нарушении порога.
+ * Формула: score *= (1 - penalty_factor) при нарушении.
+ * 
+ * Аналогия с PID: это P-компонент (пропорциональный штраф).
+ * Подбирается итеративно по реальным сессиям.
+ */
+export const PENALTY_FACTORS = {
+    duration:       0.65, // слишком короткая сессия → почти обнуляем
+    faceVisible:    0.40, // лицо не видно → серьёзный штраф
+    faceOk:         0.40, // лицо не ОК → серьёзный штраф
+    poseOk:         0.45, // поза нестабильна → САМЫЙ большой штраф (критично для rPPG)
+    illumination:   0.35, // плохое освещение → значительный штраф (NEW)
+    occlusion:      0.30, // окклюзия → умеренный штраф
+    gazeValid:      0.30, // невалидный gaze → умеренный штраф
+    gazeOnScreen:   0.30, // gaze off-screen → умеренный штраф
+    gazeAccuracy:   0.25, // плохая точность gaze → умеренный штраф (NEW)
+    lowFps:         0.40, // низкий FPS → серьёзный штраф
 };
 
 /**

@@ -18,7 +18,7 @@
  */
 
 import { LANDMARKS, MIN_LANDMARKS, DEFAULTS } from './constants.js';
-import { extractFeatures, estimateConfidence } from './features.js';
+import { extractFeatures, estimateConfidence, createLandmarkSmoother } from './features.js';
 import { ridgeRegression, dotProduct } from './ridge.js';
 
 export default class GazeTracker {
@@ -41,6 +41,9 @@ export default class GazeTracker {
 
         this._screenW = options.screenWidth || (typeof window !== 'undefined' ? window.innerWidth : 1920);
         this._screenH = options.screenHeight || (typeof window !== 'undefined' ? window.innerHeight : 1080);
+
+        // Temporal smoothing landmarks (снижает jitter MediaPipe, используется только в predict)
+        this._landmarkSmoother = createLandmarkSmoother(options.landmarkSmoothingAlpha ?? DEFAULTS.landmarkSmoothingAlpha);
 
         this.LANDMARKS = LANDMARKS;
 
@@ -176,6 +179,7 @@ export default class GazeTracker {
             this._stats.lastCalibrationTime = Date.now();
             this._lastPrediction = null;
             this._postCalibrationCorrection = null;
+            this._landmarkSmoother.reset();
 
             // Диагностика: считаем остатки на обучающей выборке
             let trainErrorX = 0, trainErrorY = 0;
@@ -228,7 +232,9 @@ export default class GazeTracker {
             return null;
         }
         const t0 = performance.now();
-        const rawFeatures = extractFeatures(landmarks);
+        // Сглаживаем landmarks для снижения jitter (только при prediction, НЕ при калибровке)
+        const smoothedLandmarks = this._landmarkSmoother.smooth(landmarks);
+        const rawFeatures = extractFeatures(smoothedLandmarks);
         if (!rawFeatures) return null;
 
         // Применяем ту же стандартизацию, что и при калибровке
@@ -247,11 +253,27 @@ export default class GazeTracker {
         rawX = Math.max(-50, Math.min(this._screenW + 50, rawX));
         rawY = Math.max(-50, Math.min(this._screenH + 50, rawY));
 
-        let x, y;
+        // Адаптивный smoothing: больше сглаживания при фиксации, меньше при саккадах
+        let effectiveSmoothing = this._smoothingFactor;
         if (this._lastPrediction && this._smoothingFactor > 0) {
-            const s = this._smoothingFactor;
-            x = s * this._lastPrediction.x + (1 - s) * rawX;
-            y = s * this._lastPrediction.y + (1 - s) * rawY;
+            const dx = rawX - this._lastPrediction.rawX;
+            const dy = rawY - this._lastPrediction.rawY;
+            const velocity = Math.sqrt(dx * dx + dy * dy);
+            const saccadeThreshold = Math.min(this._screenW, this._screenH) * 0.05;
+
+            if (velocity > saccadeThreshold) {
+                // Саккада: уменьшаем smoothing для быстрого отклика
+                effectiveSmoothing = Math.max(0.05, this._smoothingFactor * 0.3);
+            } else if (velocity < saccadeThreshold * 0.1) {
+                // Фиксация: увеличиваем smoothing для стабильности
+                effectiveSmoothing = Math.min(0.5, this._smoothingFactor * 1.5);
+            }
+        }
+
+        let x, y;
+        if (this._lastPrediction && effectiveSmoothing > 0) {
+            x = effectiveSmoothing * this._lastPrediction.x + (1 - effectiveSmoothing) * rawX;
+            y = effectiveSmoothing * this._lastPrediction.y + (1 - effectiveSmoothing) * rawY;
         } else {
             x = rawX;
             y = rawY;
@@ -376,6 +398,7 @@ export default class GazeTracker {
         this._featureStd = null;
         this._lastPrediction = null;
         this._postCalibrationCorrection = null;
+        this._landmarkSmoother.reset();
         this._stats = {
             totalPredictions: 0,
             calibrationPoints: 0,
