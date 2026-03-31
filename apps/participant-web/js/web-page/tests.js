@@ -1417,17 +1417,6 @@ export async function finishSession() {
             const qcSummary = state.runtime.qcMetrics.getSummary();
             state.sessionData.qcSummary = qcSummary;
             console.log('[QC] Summary:', qcSummary);
-
-            // ✅ НОВОЕ: Добавление данных эмоций и симметрии
-            if (state.runtime.emotionAnalyzer) {
-                state.sessionData.emotions = state.runtime.emotionAnalyzer.exportToJSON();
-                console.log('[Session] ✅ Данные эмоций добавлены');
-            }
-            
-            if (state.runtime.faceMaskCollector) {
-                state.sessionData.faceMasks = state.runtime.faceMaskCollector.exportToJSON();
-                console.log('[Session] ✅ Данные симметрии добавлены');
-            }
             
             // Обновляем UI на основе QC результата
             updateFinalStepWithQC(qcSummary);
@@ -1437,6 +1426,17 @@ export async function finishSession() {
             console.log('[QC] QCMetrics остановлен');
         } catch (e) {
             console.warn('[finishSession] Ошибка QC metrics:', e);
+        }
+        
+        // ✅ Код перемещён за пределы try-catch — данные сохранятся всегда!
+        if (state.runtime.emotionAnalyzer) {
+            state.sessionData.emotions = state.runtime.emotionAnalyzer.exportToJSON();
+            console.log('[Session] ✅ Данные эмоций добавлены');
+        }
+
+        if (state.runtime.faceMaskCollector) {
+            state.sessionData.faceMasks = state.runtime.faceMaskCollector.exportToJSON();
+            console.log('[Session] ✅ Данные симметрии добавлены');
         }
     }
     

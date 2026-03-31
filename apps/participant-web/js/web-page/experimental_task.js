@@ -104,11 +104,17 @@ function stopCognitiveAnalysisLoop() {
     cognitiveVideo = null;
 }
 
+// Добавим вызов processLandmarks для EmotionAnalyzer в функцию обработки когнитивного анализа
+
 function scheduleCognitiveAnalysisTick(delayMs = 0) {
     if (!state.runtime._cognitiveLoopActive) return;
-    state.runtime.cognitiveAnalysisInterval = setTimeout(runCognitiveAnalysisTick, delayMs);
+    
+    state.runtime.cognitiveAnalysisInterval = setTimeout(() => {
+        runCognitiveAnalysisTick();
+    }, delayMs);
 }
 
+// Оставьте только одну версию функции runCognitiveAnalysisTick
 async function runCognitiveAnalysisTick() {
     if (!state.runtime._cognitiveLoopActive) return;
     if (!cognitiveVideo || !state.runtime.localAnalyzer) {
@@ -150,8 +156,24 @@ async function runCognitiveAnalysisTick() {
             }
         }
 
-        // ✅ НОВОЕ: Передаём landmarks в модули эмоций и симметрии
-        if (precheckResult && precheckResult.landmarks) {
+        // ✅ ИСПРАВЛЕНО: Передаём landmarks в модули эмоций и симметрии
+        // Проверяем наличие faceLandmarks в структуре данных
+        if (precheckResult && precheckResult.faceLandmarks && precheckResult.faceLandmarks.length > 0) {
+            const landmarks = precheckResult.faceLandmarks[0];
+            
+            // Передаём landmarks в EmotionAnalyzer
+            if (state.runtime.emotionAnalyzer && typeof state.runtime.emotionAnalyzer.processLandmarks === 'function') {
+                state.runtime.emotionAnalyzer.processLandmarks(landmarks);
+                console.log('[EmotionAnalyzer] Обработаны landmarks для анализа эмоций');
+            }
+            
+            // Передаём landmarks в FaceMaskCollector
+            if (state.runtime.faceMaskCollector && typeof state.runtime.faceMaskCollector.processLandmarks === 'function') {
+                state.runtime.faceMaskCollector.processLandmarks(landmarks);
+            }
+        } 
+        // Альтернативная структура данных (для совместимости)
+        else if (precheckResult && precheckResult.landmarks) {
             // Обновляем window.lastFaceLandmarks для модулей
             window.lastFaceLandmarks = {
                 faceLandmarks: [precheckResult.landmarks],
@@ -161,6 +183,7 @@ async function runCognitiveAnalysisTick() {
             // Передаём landmarks в EmotionAnalyzer
             if (state.runtime.emotionAnalyzer && typeof state.runtime.emotionAnalyzer.processLandmarks === 'function') {
                 state.runtime.emotionAnalyzer.processLandmarks(precheckResult.landmarks);
+                console.log('[EmotionAnalyzer] Обработаны landmarks для анализа эмоций (альтернативная структура)');
             }
             
             // Передаём landmarks в FaceMaskCollector
@@ -226,13 +249,26 @@ function startCognitiveAnalysisLoop() {
     if (state.runtime.emotionAnalyzer && cognitiveVideo) {
         state.runtime.emotionAnalyzer.start(cognitiveVideo);
         console.log('[CognitiveTest] ✅ EmotionAnalyzer запущен');
+        
+        // Добавляем проверку метода processLandmarks
+        if (typeof state.runtime.emotionAnalyzer.processLandmarks !== 'function') {
+            console.error('[CognitiveTest] ⚠️ EmotionAnalyzer не имеет метода processLandmarks! Версия модуля может быть устаревшей.');
+        }
+    } else {
+        console.warn('[CognitiveTest] ⚠️ EmotionAnalyzer не инициализирован!');
     }
 
     if (state.runtime.faceMaskCollector && cognitiveVideo) {
         state.runtime.faceMaskCollector.start(cognitiveVideo, 'cognitive_test');
         console.log('[CognitiveTest] ✅ FaceMaskCollector запущен');
+        
+        // Добавляем проверку метода processLandmarks
+        if (typeof state.runtime.faceMaskCollector.processLandmarks !== 'function') {
+            console.error('[CognitiveTest] ⚠️ FaceMaskCollector не имеет метода processLandmarks! Версия модуля может быть устаревшей.');
+        }
+    } else {
+        console.warn('[CognitiveTest] ⚠️ FaceMaskCollector не инициализирован!');
     }
-
 }
 
 function emitStimulusOffIfNeeded(rtMs, reason) {
@@ -612,3 +648,6 @@ function cleanupTrial() {
         trialTimeout = null;
     }
 }
+
+
+
