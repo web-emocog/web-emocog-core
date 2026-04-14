@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Report</title>
+    <style>
+        :root {
+            --bg: #f5f6f8;
+            --panel: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --accent: #0f766e;
+            --border: #e5e7eb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--text);
+            background: linear-gradient(135deg, #f5f6f8 0%, #eef2ff 100%);
+        }
+
+        .page {
+            max-width: 1260px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        h1 {
+            margin: 0 0 12px;
+            font-size: 28px;
+        }
+
+        h2 {
+            margin: 0 0 12px;
+            font-size: 20px;
+        }
+
+        h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 10px;
+        }
+
+        .summary-item {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            background: #fafafa;
+        }
+
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 12px;
+        }
+
+        .heatmap-card {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            background: #fff;
+        }
+
+        canvas.heatmap {
+            width: 100%;
+            height: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            image-rendering: pixelated;
+            background: #f9fafb;
+        }
+
+        .chart-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 12px;
+        }
+
+        .chart-box {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+        }
+
+        canvas.chart {
+            width: 100%;
+            height: 240px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #fff;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--border);
+            padding: 6px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f3f4f6;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            color: #fff;
+            background: var(--accent);
+        }
+
+        @media (max-width: 900px) {
+            .chart-row {
+                grid-template-columns: 1fr;
+            }
+
+            .page {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <h1>Session Report</h1>
+        <div class="panel toolbar">
+            <input id="fileInput" type="file" accept=".json,application/json">
+            <span id="status" class="muted">Загрузите session JSON</span>
+        </div>
+
+        <section class="panel">
+            <h2>Summary</h2>
+            <div id="summary" class="summary-grid"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Heatmaps</h2>
+            <h3>Per Stimulus</h3>
+            <div id="heatmapStimulus" class="heatmap-grid"></div>
+            <h3 style="margin-top: 14px;">Per Block</h3>
+            <div id="heatmapBlock" class="heatmap-grid"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Attention Metrics</h2>
+            <div class="chart-row">
+                <div class="chart-box">
+                    <h3>PERCLOS (30s / 60s)</h3>
+                    <canvas id="perclosChart" class="chart" width="900" height="300"></canvas>
+                </div>
+                <div class="chart-box">
+                    <h3>Global Metrics</h3>
+                    <canvas id="globalMetricsChart" class="chart" width="420" height="300"></canvas>
+                </div>
+            </div>
+            <div id="attentionText" class="summary-grid" style="margin-top: 10px;"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Events Timeline</h2>
+            <div id="timeline"></div>
+        </section>
+    </main>
+
+    <script type="module" src="./session-report.js"></script>
+</body>
+</html>

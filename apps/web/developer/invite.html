@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ссылки-приглашения — EmoCog</title>
+  <style>
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --card: #16213e;
+      --accent: #5C66BD;
+      --text: #e8e8f0;
+      --muted: #94a3b8;
+      --border: rgba(92, 102, 189, 0.25);
+      --good: #10B981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .top h1 { font-size: 1.5rem; font-weight: 700; }
+    .top a { color: var(--muted); text-decoration: none; font-size: 14px; }
+    .top a:hover { color: var(--accent); }
+    .card {
+      max-width: 560px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+    }
+    .card h2 { font-size: 1rem; margin-bottom: 8px; }
+    .card p { color: var(--muted); font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+    input[type="text"] {
+      width: 100%;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(0,0,0,.2);
+      color: var(--text);
+      font-size: 14px;
+      font-family: ui-monospace, monospace;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+    button {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary { background: var(--accent); color: #fff; }
+    button.primary:hover { opacity: .92; }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .copy-feedback { font-size: 13px; color: var(--good); margin-left: 8px; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+    th, td { text-align: left; border-bottom: 1px solid var(--border); padding: 8px 6px; vertical-align: middle; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  </style>
+</head>
+<body>
+  <script src="../auth-guard.js"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
+  <div class="top">
+    <h1>🔗 Ссылки-приглашения</h1>
+    <a href="../developer.html">← К тестам разработчика</a>
+  </div>
+  <div class="card">
+    <h2>Создать ссылку для участника</h2>
+    <p>Ссылка создаётся через <code>POST /invitations</code> и ведёт в <code>run_new.html?code=…</code>. Нужен существующий <strong>protocol id</strong> в базе (тот же, что в списке протоколов). Если сайт под префиксом <code>/main/</code>, в поле API укажите, например, <code>https://ваш-домен/main/api</code>.</p>
+    <label>API Base</label>
+    <input type="text" id="apiBaseInput" placeholder="https://wecog.ru/main/api или https://wecog.ru/api" autocomplete="off">
+    <label>Protocol ID</label>
+    <input type="text" id="protocolIdInput" placeholder="Например: 1" autocomplete="off">
+    <label>Лимит запусков (опционально)</label>
+    <input type="text" id="maxRunsInput" placeholder="Например: 10" autocomplete="off">
+    <label>Срок действия (опционально, ISO datetime)</label>
+    <input type="text" id="expiresAtInput" placeholder="Например: 2026-12-31T23:59:59Z" autocomplete="off">
+    <div class="row">
+      <button type="button" class="primary" id="btnGenerate">Создать ссылку</button>
+      <button type="button" class="secondary" id="btnCopy" disabled>Копировать</button>
+      <span id="copyFeedback" class="copy-feedback" style="display:none;">Скопировано</span>
+    </div>
+    <label>Ссылка участника</label>
+    <input type="text" id="linkOutput" readonly placeholder="Нажмите «Создать ссылку»">
+    <p class="muted">Отправьте эту ссылку участнику. По ней откроется выполнение протокола по коду приглашения.</p>
+
+    <div style="margin-top:16px;">
+      <label>Существующие приглашения</label>
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="secondary" id="btnReloadInvites">Обновить список</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Code</th><th>Protocol</th><th>Runs</th><th>Limit</th><th>Expires</th></tr>
+        </thead>
+        <tbody id="invitesBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var apiBaseInput = document.getElementById('apiBaseInput');
+      var protocolIdInput = document.getElementById('protocolIdInput');
+      var maxRunsInput = document.getElementById('maxRunsInput');
+      var expiresAtInput = document.getElementById('expiresAtInput');
+      var linkOutput = document.getElementById('linkOutput');
+      var btnGenerate = document.getElementById('btnGenerate');
+      var btnCopy = document.getElementById('btnCopy');
+      var btnReloadInvites = document.getElementById('btnReloadInvites');
+      var copyFeedback = document.getElementById('copyFeedback');
+      var invitesBody = document.getElementById('invitesBody');
+      var protocolsCache = [];
+
+      function getApiBase() {
+        var fromField = (apiBaseInput && apiBaseInput.value || '').trim();
+        if (fromField) return fromField.replace(/\/$/, '');
+        var fromStorage = (localStorage.getItem('emocog_api_base') || '').trim();
+        if (fromStorage) return fromStorage.replace(/\/$/, '');
+        var path = window.location.pathname || '';
+        if (path.indexOf('/main/') === 0) {
+          return (window.location.origin + '/main/api').replace(/\/$/, '');
+        }
+        return (window.location.origin + '/api').replace(/\/$/, '');
+      }
+
+      function getParticipantRunBasePath() {
+        var pathname = window.location.pathname || '';
+        var base = pathname.replace(/\/web\/developer\/[^/]*$/, '/participant-web/');
+        if (base === pathname) base = pathname.replace(/\/developer\/[^/]*$/, '') + '/participant-web/';
+        return (window.location.origin || '') + base;
+      }
+
+      function buildLink(code) {
+        var base = getParticipantRunBasePath();
+        return base + 'run_new.html?code=' + encodeURIComponent(code);
+      }
+
+      function buildDeveloperTestLink() {
+        var base = getParticipantRunBasePath();
+        return base + 'mvp_with_precheck_1-updated.html?developer_module=hub';
+      }
+
+      function renderInvites(rows) {
+        if (!Array.isArray(rows) || !rows.length) {
+          invitesBody.innerHTML = '<tr><td colspan="6">Нет данных</td></tr>';
+          return;
+        }
+        invitesBody.innerHTML = rows.map(function (x) {
+          var expires = x.expires_at ? new Date(x.expires_at).toLocaleString() : '—';
+          return '<tr>' +
+            '<td>' + (x.id || '—') + '</td>' +
+            '<td style="font-family:ui-monospace,monospace;">' + (x.code || '—') + '</td>' +
+            '<td>' + (x.protocol_id || '—') + '</td>' +
+            '<td>' + (x.runs_used != null ? x.runs_used : '—') + '</td>' +
+            '<td>' + (x.max_runs != null ? x.max_runs : '—') + '</td>' +
+            '<td>' + expires + '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      function loadInvites() {
+        var apiBase = getApiBase();
+        var token = localStorage.getItem('emocog_api_token');
+        if (!token) {
+          renderInvites([]);
+          return;
+        }
+        fetch(apiBase + '/invitations', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+            return r.json();
+          })
+          .then(renderInvites)
+          .catch(function () {
+            renderInvites([]);
+          });
+      }
+
+      function loadProtocols() {
+        var apiBase = getApiBase();
+        var token = localStorage.getItem('emocog_api_token');
+        if (!token) return Promise.resolve([]);
+        return fetch(apiBase + '/protocols', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+            return r.json();
+          })
+          .then(function (rows) {
+            protocolsCache = Array.isArray(rows) ? rows : [];
+            if (!protocolIdInput.value && protocolsCache[0] && protocolsCache[0].id) {
+              protocolIdInput.value = String(protocolsCache[0].id);
+            }
+            return protocolsCache;
+          })
+          .catch(function () {
+            protocolsCache = [];
+            return [];
+          });
+      }
+
+      if (apiBaseInput) apiBaseInput.value = getApiBase();
+
+      btnGenerate.addEventListener('click', function () {
+        var apiBase = getApiBase();
+        var token = localStorage.getItem('emocog_api_token');
+        var protocolId = parseInt((protocolIdInput.value || '').trim(), 10);
+        var maxRunsRaw = (maxRunsInput.value || '').trim();
+        var expiresAtRaw = (expiresAtInput.value || '').trim();
+
+        if (!token) {
+          copyFeedback.style.display = 'inline';
+          copyFeedback.textContent = 'Сначала выполните вход на странице developer/login.html';
+          return;
+        }
+        if (!Number.isFinite(protocolId) || protocolId <= 0) {
+          linkOutput.value = buildDeveloperTestLink();
+          btnCopy.disabled = false;
+          copyFeedback.style.display = 'inline';
+          copyFeedback.textContent = 'Protocol ID не задан: создана dev-ссылка (precheck/hub).';
+          return;
+        }
+
+        var payload = { protocol_id: protocolId };
+        if (maxRunsRaw) {
+          var maxRuns = parseInt(maxRunsRaw, 10);
+          if (Number.isFinite(maxRuns) && maxRuns > 0) payload.max_runs = maxRuns;
+        }
+        if (expiresAtRaw) payload.expires_at = expiresAtRaw;
+
+        btnGenerate.disabled = true;
+        copyFeedback.style.display = 'none';
+        fetch(apiBase + '/invitations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify(payload)
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return {}; }).then(function (j) {
+                throw new Error(j.error || (r.status + ' ' + r.statusText));
+              });
+            }
+            return r.json();
+          })
+          .then(function (inv) {
+            linkOutput.value = buildLink(inv.code);
+            btnCopy.disabled = false;
+            copyFeedback.style.display = 'inline';
+            copyFeedback.textContent = 'Ссылка создана';
+          })
+          .catch(function (e) {
+            var message = String(e && e.message ? e.message : e);
+            var isProtoMissing =
+              message.indexOf('Protocol not found or access denied') >= 0 ||
+              message.indexOf('Protocol not found') >= 0;
+            if (isProtoMissing) {
+              linkOutput.value = buildDeveloperTestLink();
+              btnCopy.disabled = false;
+              copyFeedback.style.display = 'inline';
+              copyFeedback.style.color = 'var(--muted)';
+              copyFeedback.textContent =
+                'Протокол с таким ID не найден в базе или нет доступа. Проверьте Protocol ID (из списка GET /protocols) и API Base (например …/main/api). В поле ссылки — запасная dev-ссылка для теста без приглашения.';
+              return;
+            }
+            copyFeedback.style.color = 'var(--good)';
+            copyFeedback.style.display = 'inline';
+            copyFeedback.textContent = 'Ошибка: ' + message;
+          })
+          .finally(function () {
+            btnGenerate.disabled = false;
+            loadInvites();
+          });
+      });
+
+      btnCopy.addEventListener('click', function () {
+        if (!linkOutput.value) return;
+        linkOutput.select();
+        linkOutput.setSelectionRange(0, 99999);
+        try {
+          navigator.clipboard.writeText(linkOutput.value);
+          copyFeedback.style.display = 'inline';
+          copyFeedback.textContent = 'Скопировано';
+          setTimeout(function () { copyFeedback.style.display = 'none'; }, 2000);
+        } catch (e) {
+          copyFeedback.textContent = 'Скопируйте ссылку вручную';
+          copyFeedback.style.display = 'inline';
+        }
+      });
+      btnReloadInvites.addEventListener('click', loadInvites);
+      loadProtocols();
+      loadInvites();
+    })();
+  </script>
+</body>
+</html>

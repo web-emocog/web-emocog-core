@@ -1,0 +1,59 @@
+{
+  "task_bounds": {
+    "simple": {
+      "min_rt_ms": 100,
+      "max_rt_ms": 2000,
+      "timeout_ms": 2000
+    },
+    "choice": {
+      "min_rt_ms": 150,
+      "max_rt_ms": 2500,
+      "timeout_ms": 2000
+    },
+    "go_nogo": {
+      "min_rt_ms": 100,
+      "max_rt_ms": 1500,
+      "timeout_ms": 1500
+    },
+    "stroop": {
+      "min_rt_ms": 200,
+      "max_rt_ms": 3000,
+      "timeout_ms": 3000
+    },
+    "pvt": {
+      "min_rt_ms": 100,
+      "max_rt_ms": 5000,
+      "timeout_ms": 5000
+    },
+    "cpt": {
+      "min_rt_ms": 100,
+      "max_rt_ms": 2000,
+      "timeout_ms": 2000
+    }
+  },
+  "analysis": {
+    "premature_window_ms": 200
+  },
+  "dprime": {
+    "use_loglinear_correction": true
+  },
+  "flags_thresholds": {
+    "attention_cv_threshold": 0.3,
+    "attention_omission_threshold": 0.1,
+    "attention_lapse_threshold": 0.1,
+    "lapse_ms": 500,
+    "aggressive_fast_mean_ms": 320,
+    "aggressive_error_rate_threshold": 0.2,
+    "aggressive_commission_threshold": 0.2,
+    "aggressive_wrong_threshold": 0.2,
+    "aggressive_anticipation_threshold": 0.05,
+    "many_anticipations_threshold": 0.1,
+    "pes_min_delta_ms": 20,
+    "pes_min_ratio": 0.1,
+    "fatigue_slope_ms_per_trial": 1.0,
+    "fatigue_delta_ms": 30,
+    "conservative_slow_mean_ms": 600,
+    "conservative_error_rate_max": 0.1,
+    "conservative_omission_min": 0.1
+  }
+}

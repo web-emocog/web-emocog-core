@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmoCog — Платформа оценки внимания и эмоций</title>
+  <style>
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --card: #16213e;
+      --accent: #5C66BD;
+      --accent2: #77A9E8;
+      --text: #e8e8f0;
+      --muted: #94a3b8;
+      --success: #10B981;
+      --border: rgba(92, 102, 189, 0.25);
+    }
+    :root[data-theme="light"] {
+      --bg: #f6f8fc;
+      --surface: #ffffff;
+      --card: #ffffff;
+      --accent: #5C66BD;
+      --accent2: #77A9E8;
+      --text: #0f172a;
+      --muted: #64748b;
+      --success: #10B981;
+      --border: rgba(92, 102, 189, 0.22);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    body {
+      background: radial-gradient(1400px 900px at 20% 0%, rgba(92, 102, 189, .22), transparent 55%),
+                  radial-gradient(1000px 700px at 90% 20%, rgba(119, 169, 232, .15), transparent 50%),
+                  var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 920px;
+      width: 100%;
+      text-align: center;
+    }
+    .logo {
+      width: 72px;
+      height: 72px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      margin: 0 auto 24px;
+      box-shadow: 0 12px 40px rgba(92, 102, 189, .35);
+    }
+    h1 {
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 1.05rem;
+      margin-bottom: 48px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+      justify-content: center;
+    }
+    .card {
+      display: block;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-decoration: none;
+      color: inherit;
+      text-align: center;
+      transition: transform .15s ease, box-shadow .2s ease, border-color .15s ease;
+      box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 16px 48px rgba(92, 102, 189, .15);
+      border-color: rgba(92, 102, 189, .45);
+    }
+    .card:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .card-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    .card.researcher .card-icon { background: rgba(92, 102, 189, .25); }
+    .card.respondent .card-icon { background: rgba(16, 185, 129, .2); }
+    .card.developer .card-icon { background: rgba(245, 158, 11, .2); }
+    .card h2 { font-size: 1.15rem; margin-bottom: 6px; }
+    .card p { color: var(--muted); font-size: 0.9rem; line-height: 1.4; }
+    .footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
+    .theme-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme">🌓</button>
+  <div class="wrap">
+    <div class="logo" aria-hidden="true"></div>
+    <h1>EmoCog</h1>
+    <p class="sub">Платформа оценки внимания и эмоций</p>
+    <nav class="cards" aria-label="Выбор роли">
+      <a href="researcher.html" class="card researcher" id="cardResearcher">
+        <div class="card-icon">🔬</div>
+        <h2>Исследователь</h2>
+        <p>Дашборды, сессии, протоколы и аналитика</p>
+      </a>
+      <a href="../participant-web/invite.html" class="card respondent" id="cardParticipant">
+        <div class="card-icon">👤</div>
+        <h2>Участник</h2>
+        <p>Участие в исследовании по ссылке-приглашению</p>
+      </a>
+      <a href="developer/login.html" class="card developer" id="cardDeveloper">
+        <div class="card-icon">🛠</div>
+        <h2>Разработчик</h2>
+        <p>Тестирование модулей: precheck, BPM, gaze, QC</p>
+      </a>
+    </nav>
+    <p class="footer" id="landingFooter">Вставьте ссылку-приглашение на странице участника. Для исследователя и разработчика нужен вход.</p>
+  </div>
+  <script>
+    (function () {
+      function apiBaseUrl() {
+        try {
+          var s = localStorage.getItem('emocog_api_base');
+          if (s && s.trim()) return s.trim().replace(/\/$/, '');
+        } catch (_) {}
+        return (window.location.origin + '/api').replace(/\/$/, '');
+      }
+      function applyLandingAccess(ctx) {
+        var cardRes = document.getElementById('cardResearcher');
+        var cardDev = document.getElementById('cardDeveloper');
+        var cardPart = document.getElementById('cardParticipant');
+        var foot = document.getElementById('landingFooter');
+        if (ctx.guest) {
+          if (cardRes) { cardRes.style.display = 'none'; }
+          if (cardDev) { cardDev.style.display = 'none'; }
+          if (cardPart) { cardPart.style.display = ''; }
+          if (foot) {
+            foot.textContent = 'Гостю доступен только раздел «Участник»: вставьте ссылку-приглашение.';
+          }
+          return;
+        }
+        // Нет токена (инкогнито, новый браузер): показываем все роли — вход на целевой странице.
+        if (ctx.anonymousPortal) {
+          if (cardRes) { cardRes.style.display = ''; }
+          if (cardDev) { cardDev.style.display = ''; }
+          if (cardPart) { cardPart.style.display = ''; }
+          if (foot) {
+            foot.textContent =
+              'Вход не выполнен: «Исследователь» и «Разработчик» откроют страницу входа. Участнику нужна ссылка-приглашение.';
+          }
+          return;
+        }
+        var role = ctx.user && ctx.user.role;
+        var researchRoles = { researcher: 1, PI: 1, analyst: 1, assistant: 1, admin: 1, developer: 1 };
+        var devPortalRoles = { developer: 1, admin: 1 };
+        if (cardPart) { cardPart.style.display = ''; }
+        if (cardRes) { cardRes.style.display = researchRoles[role] ? '' : 'none'; }
+        if (cardDev) { cardDev.style.display = devPortalRoles[role] ? '' : 'none'; }
+        if (foot) {
+          foot.textContent =
+            'Исследователь: дашборд и запуск участника по приглашению. Разработчик и администратор — полный доступ к тестовым модулям.';
+        }
+      }
+      function landingGuestOnlyMode() {
+        try {
+          if (sessionStorage.getItem('emocog_landing_guest_only') === '1') return true;
+        } catch (_) {}
+        try {
+          if (new URLSearchParams(window.location.search || '').get('guest') === '1') {
+            sessionStorage.setItem('emocog_landing_guest_only', '1');
+            return true;
+          }
+        } catch (_) {}
+        return false;
+      }
+      function bootstrapLanding() {
+        var token = '';
+        try {
+          token = localStorage.getItem('emocog_api_token') || '';
+        } catch (_) {}
+        if (!token) {
+          if (landingGuestOnlyMode()) {
+            applyLandingAccess({ guest: true });
+            return;
+          }
+          applyLandingAccess({ anonymousPortal: true });
+          return;
+        }
+        fetch(apiBaseUrl() + '/auth/me', { headers: { Authorization: 'Bearer ' + token } })
+          .then(function (r) {
+            if (!r.ok) throw new Error('me');
+            return r.json();
+          })
+          .then(function (user) {
+            try {
+              localStorage.setItem('emocog_api_user', JSON.stringify(user));
+            } catch (_) {}
+            applyLandingAccess({ guest: false, user: user });
+          })
+          .catch(function () {
+            applyLandingAccess({ anonymousPortal: true });
+          });
+      }
+      bootstrapLanding();
+
+      (function bindLogoHome() {
+        var logo = document.querySelector('.logo');
+        if (!logo || logo.dataset.homeBound) return;
+        logo.dataset.homeBound = '1';
+        logo.style.cursor = 'pointer';
+        logo.setAttribute('role', 'link');
+        logo.setAttribute('tabindex', '0');
+        logo.setAttribute('title', 'На главную');
+        function go() {
+          window.location.href = 'index.html';
+        }
+        logo.addEventListener('click', go);
+        logo.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            go();
+          }
+        });
+      })();
+
+      var KEY = 'emocog_theme';
+      function resolveInitialTheme() {
+        var saved = localStorage.getItem(KEY);
+        if (saved === 'light' || saved === 'dark') return saved;
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem(KEY, theme);
+      }
+      var theme = resolveInitialTheme();
+      applyTheme(theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.addEventListener('click', function () {
+        theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
+        applyTheme(theme);
+      });
+    })();
+  </script>
+</body>
+</html>

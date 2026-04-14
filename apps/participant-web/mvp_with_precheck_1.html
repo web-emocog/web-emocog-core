@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmoCog Research (Multilingual)</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <!-- MediaPipe Vision (Face Landmarker) -->
+    <script src="js/vendor/mediapipe/vision_bundle.mjs" type="module"></script>
+    <script>
+        // Загрузка MediaPipe как глобальных объектов для non-module скриптов
+        import('js/vendor/mediapipe/vision_bundle.mjs')
+            .then(vision => {
+                window.FilesetResolver = vision.FilesetResolver;
+                window.FaceLandmarker = vision.FaceLandmarker;
+                window.ImageSegmenter = vision.ImageSegmenter;
+                console.log('[MediaPipe] Vision modules loaded (self-hosted)');
+            })
+            .catch(() => import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'))
+            .then(vision => {
+                if (!vision) return;
+                window.FilesetResolver = vision.FilesetResolver;
+                window.FaceLandmarker = vision.FaceLandmarker;
+                window.ImageSegmenter = vision.ImageSegmenter;
+                console.log('[MediaPipe] Vision modules loaded (cdn fallback)');
+            })
+            .catch(err => console.error('[MediaPipe] Load error:', err));
+    </script>
+    
+    <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
+    <script src="js/precheck-analyzer.js?v=2.1.2"></script>
+    <!-- Face Segmenter Module (проверка видимости частей лица) -->
+    <script src="js/face-segmenter.js?v=1.2.2"></script>
+    <!-- QC Metrics Module -->
+    <script src="js/qc-metrics.js?v=3.3.0"></script>
+    <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
+    <script src="js/gaze-tracker.js?v=2.2.0"></script>
+    <script src="js/face-mask-collector.js?v=1.0.0"></script>
+    <script src="js/web-page/consent-signature.js"></script>
+    
+    
+</head>
+<body>
+    <!-- Fullscreen калибровка -->
+    <div id="fullscreenCalibration" class="fullscreen-calibration">
+        <div class="calib-instruction">
+            <span id="calibInstructionText">👆 Кликайте на красную точку, смотря на неё</span>
+            <div class="calib-progress">
+                <span id="calibProgressText">Точка 1 из 25</span>
+            </div>
+        </div>
+        <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
+    </div>
+
+    <!-- Область теста слежения за фигурами (fullscreen) -->
+    <div id="trackingTestArea" class="tracking-test-area">
+        <div class="test-progress">
+            <span id="testProgressText">Следите глазами за фигурой</span>
+            <div class="test-progress-bar">
+                <div class="test-progress-fill" id="testProgressFill" style="width: 0%"></div>
+            </div>
+        </div>
+        <div id="testShape" class="test-shape circle"></div>
+    </div>
+
+    <!-- Наша точка для отображения реального взгляда -->
+    <div id="customGazeDot"></div>
+
+    <!-- Шапка -->
+    <div class="top-bar">
+        <div class="header-left">EmoCog Research</div>
+        <div class="header-right">
+            <div id="idDisplay" class="id-badge" onclick="copyIds()" title="Copy ID">ID: ...</div>
+            
+            <!-- Переключатель языка -->
+            <div class="lang-switch">
+                <div class="lang-btn active" id="langRu" onclick="setLanguage('ru')">RU</div>
+                <div style="color:#E5E7EB">|</div>
+                <div class="lang-btn" id="langEn" onclick="setLanguage('en')">EN</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        
+        <!-- ШАГ 1: Лэндинг -->
+        <div id="step1" class="step active">
+            <h1 data-i18n="welcome_title">Добро пожаловать</h1>
+            <p class="text-center" data-i18n="welcome_subtitle">Платформа оценки внимания и эмоций</p>
+            
+            <div class="warning-container">
+                <strong class="warning-title" data-i18n="warning_title">⚠️ Важно:</strong>
+                <ul class="warning-list">
+                    <li data-i18n="warning_1">Вам понадобится веб-камера</li>
+                    <li data-i18n="warning_2">Данные о взгляде обрабатываются на вашем устройстве</li>
+                    <li data-i18n="warning_3">Мы не сохраняем видео вашего лица</li>
+                </ul>
+            </div>
+
+            <button class="btn" id="btnStartIntro" data-i18n="btn_start">Начать исследование</button>
+        </div>
+
+        <!-- ШАГ 2: Согласие -->
+        <div id="step2" class="step">
+            <h2 data-i18n="consent_header">Информированное согласие</h2>
+            <div class="consent-box">
+                <h4 data-i18n="consent_1_title">1. Цель исследования</h4>
+                <p data-i18n="consent_1_text">Мы проводим научное исследование когнитивных реакций. Ваше участие поможет нам понять, как люди воспринимают информацию.</p>
+                <h4 data-i18n="consent_2_title">2. Конфиденциальность</h4>
+                <p data-i18n="consent_2_text">Мы собираем обезличенные данные. Видеопоток обрабатывается локально.</p>
+                <p><a href="documents/informed-consent-v1.0.html" target="_blank" data-i18n="consent_link">Полный текст согласия</a></p>
+                <p><a href="documents/privacy-policy-v1.0.html" target="_blank">Политика конфиденциальности</a></p>
+            </div>
+            <label class="checkbox-wrapper">
+                <input type="checkbox" id="consentCheck">
+                <span data-i18n="consent_checkbox">Я прочитал(а), мне есть 18 лет, и я согласен(а).</span>
+            </label>
+            <button class="btn" id="consentBtn" data-i18n="btn_confirm" disabled>Подтвердить и продолжить</button>
+        </div>
+
+        <!-- ШАГ 3: Email -->
+        <div id="step3" class="step">
+            <h2 data-i18n="reg_title">Регистрация участника</h2>
+            <p data-i18n="reg_desc">Пожалуйста, укажите ваш Email для связи.</p>
+            
+            <div class="form-group">
+                <label data-i18n="email_label">Email</label>
+                <input type="email" id="userEmail" placeholder="name@example.com" onblur="validateEmailField()">
+            </div>
+            
+            <div class="email-field-info">
+                <span id="generatedIdPreview"></span>
+            </div>
+
+            <button class="btn" data-i18n="btn_next" id="step3NextBtn">Далее</button>
+        </div>
+
+        <!-- ШАГ 4: Анкета -->
+         <div id="step4" class="step">
+            <h2 data-i18n="form_title">Анкета участника</h2>
+            <form id="userForm">
+                <h3 data-i18n="form_section_user">👤 О вас</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_age">Возраст</label>
+                        <input type="number" id="age" min="18" max="99" required>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_gender">Пол</label>
+                        <select id="gender" required>
+                            <option value="" disabled selected data-i18n="opt_select">Выбрать...</option>
+                            <option value="m" data-i18n="opt_m">Мужской</option>
+                            <option value="f" data-i18n="opt_f">Женский</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_lang">Родной язык</label>
+                        <select id="language">
+                            <option value="ru" data-i18n="opt_ru">Русский</option>
+                            <option value="en" data-i18n="opt_en">English</option>
+                            <option value="other" data-i18n="opt_other">Другой</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_edu">Образование</label>
+                        <select id="education">
+                            <option value="student" data-i18n="opt_edu_school">Среднее</option>
+                            <option value="student" data-i18n="opt_edu_student">Студент</option>
+                            <option value="higher" data-i18n="opt_edu_higher">Высшее</option>
+                            <option value="degree" data-i18n="opt_edu_degree">Ученая степень</option>
+                        </select>
+                    </div>
+                </div>
+
+                <h3 data-i18n="form_section_tech">👁️ Зрение и Оборудование</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_vision">Зрение</label>
+                        <select id="vision">
+                            <option value="normal" data-i18n="opt_vis_norm">Норма</option>
+                            <option value="glasses" data-i18n="opt_vis_glass">Очки</option>
+                            <option value="lenses" data-i18n="opt_vis_lens">Линзы</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_pathology">Патологии</label>
+                        <select id="visionIssues">
+                            <option value="none" data-i18n="opt_path_none">Нет</option>
+                            <option value="hemianopsia" data-i18n="opt_path_hemi">Гемианопсия</option>
+                            <option value="scotoma" data-i18n="opt_path_scot">Скотома</option>
+                            <option value="colorblind" data-i18n="opt_path_color">Дальтонизм</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_hand">Ведущая рука</label>
+                        <select id="hand">
+                            <option value="right" data-i18n="opt_hand_r">Правая</option>
+                            <option value="left" data-i18n="opt_hand_l">Левая</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_device">Устройство ввода</label>
+                        <select id="inputDevice">
+                            <option value="mouse" data-i18n="opt_dev_mouse">Мышь</option>
+                            <option value="touchpad" data-i18n="opt_dev_touch">Тачпад</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_keyboard">Клавиатура</label>
+                         <select id="keyboardType">
+                            <option value="internal" data-i18n="opt_kb_int">Встроенная</option>
+                            <option value="external" data-i18n="opt_kb_ext">Внешняя</option>
+                        </select>
+                    </div>
+                </div>
+            </form>
+            <button class="btn" id="formBtn" data-i18n="btn_next" disabled>Далее</button>
+        </div>
+
+        <!-- ШАГ 5: настройка камеры (pre-check) -->
+        <div id="step5" class="step">
+            <h2 data-i18n="calib_title">Настройка камеры</h2>
+            <p data-i18n="calib_desc">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
+            
+            <div id="precheckContainer" class="precheck-container">
+                <!-- Превью камеры -->
+                <div id="cameraPreview" class="camera-preview">
+                    <video id="precheckVideo" autoplay playsinline muted></video>
+                    <canvas id="overlayCanvas"></canvas>
+                    <div class="face-guide"></div>
+                    <div class="guide-text" data-i18n="guide_text">Расположите лицо внутри рамки</div>
+                </div>
+                
+                <!-- Индикаторы -->
+                <div class="indicators">
+                    <div class="indicator" id="LightIndicator">
+                        <div class="icon">💡</div>
+                        <div class="label" data-i18n="label_light">Освещение</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="LightProgress"></div>
+                        </div>
+                        <div class="status" id="LightStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                    
+                    <div class="indicator" id="FaceIndicator">
+                        <div class="icon">👤</div>
+                        <div class="label" data-i18n="label_face">Лицо</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="FaceProgress"></div>
+                        </div>
+                        <div class="status" id="FaceStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                    
+                    <div class="indicator" id="PoseIndicator">
+                        <div class="icon">🎯</div>
+                        <div class="label" data-i18n="label_pose">Поза головы</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="PoseProgress"></div>
+                        </div>
+                        <div class="status" id="PoseStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                    
+                    <div class="indicator" id="VisibilityIndicator">
+                        <div class="icon">👁️</div>
+                        <div class="label" data-i18n="label_visibility">Видимость лица</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="VisibilityProgress"></div>
+                        </div>
+                        <div class="status" id="VisibilityStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                </div>
+                
+                <!-- Статус -->
+                <div class="precheck-status">
+                    <p class="status-message" id="statusMessage" data-i18n="precheck_initial">
+                        Нажмите "Начать проверку" чтобы включить камеру
+                    </p>
+                </div>
+            </div>
+            
+            
+            <!-- Кнопки действий -->
+            <div class="action-buttons">
+                <button class="btn" id="startPrecheckBtn" data-i18n="btn_start_precheck">
+                    🎥 Начать проверку
+                </button>
+                <button class="btn" id="startCalibBtn" data-i18n="btn_start_calib" class="hidden">
+                    ✅ Начать калибровку
+                </button>
+            </div>
+        </div>
+
+        <!-- ШАГ 6: Финал -->
+        <div id="step6" class="step">
+            <div id="testHubContainer" class="test-hub-container" style="display: none;">
+                <h2 data-i18n="test_hub_title">Выбор теста</h2>
+                <p id="testHubSubtitle" class="text-center" data-i18n="test_hub_subtitle">
+                    Выберите тест для запуска. После завершения можно запустить следующий.
+                </p>
+
+                <div class="test-hub-grid">
+                    <button class="test-card-btn" id="hubRunRtBtn" data-i18n="test_card_rt_title">RT test (Go/NoGo)</button>
+                    <button class="test-card-btn" id="hubRunTrackingBtn" data-i18n="test_card_tracking_title">Tracking test</button>
+                    <button class="test-card-btn" id="hubRunVpcBtn" data-i18n="test_card_vpc_title">VPC (Felidae)</button>
+                    <button class="test-card-btn" id="hubRunVisuospatialBtn" data-i18n="test_card_visuospatial_title">Visuospatial drawing</button>
+                </div>
+
+                <div id="testHubLastResult" class="test-hub-last-result"></div>
+
+                <div class="test-hub-actions">
+                    <button class="btn btn-secondary" id="hubFinishSessionBtn" data-i18n="test_hub_finish">Завершить сессию</button>
+                </div>
+            </div>
+
+            <div id="gazeTestsContainer" class="gaze-tests-container" style="display: none;">
+                <div id="vpcTestScreen" class="gaze-test-screen vpc-screen" style="display: none;">
+                    <h2 data-i18n="test_card_vpc_title">VPC (Felidae)</h2>
+                    <p class="text-center" data-i18n="vpc_instruction">
+                        Смотрите на изображения естественно. Нажимать ничего не нужно.
+                    </p>
+                    <div id="vpcProgressText" class="test-meta"></div>
+                    <div id="vpcPhaseText" class="test-meta"></div>
+
+                    <div id="vpcFixationMark" class="vpc-fixation">+</div>
+                    <img id="vpcCenterImage" class="vpc-center-image" alt="" style="display: none;">
+
+                    <div class="vpc-pair-row">
+                        <img id="vpcLeftImage" class="vpc-side-image" alt="" style="display: none;">
+                        <img id="vpcRightImage" class="vpc-side-image" alt="" style="display: none;">
+                    </div>
+                </div>
+
+                <div id="visuospatialTestScreen" class="gaze-test-screen visuospatial-screen" style="display: none;">
+                    <h2 data-i18n="test_card_visuospatial_title">Visuospatial drawing</h2>
+                    <h3 id="visuospatialPromptTitle"></h3>
+                    <p id="visuospatialPromptText" class="text-center"></p>
+                    <p id="visuospatialStatusText" class="test-meta"></p>
+
+                    <div class="visuospatial-controls">
+                        <button class="btn" id="visuospatialStartBtn" data-i18n="visuospatial_btn_start">Начать рисование</button>
+                        <button class="btn btn-secondary" id="visuospatialFinishBtn" data-i18n="visuospatial_btn_finish">Завершить</button>
+                    </div>
+
+                    <div class="visuospatial-canvas-wrap">
+                        <canvas id="visuospatialCanvas"></canvas>
+                        <div id="visuospatialGazeDot"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="cognitiveContainer" class="cognitive-container">
+                
+                <div id="cognitiveInstruction" class="card p-4">
+                    <h2 id="cogTitle" class="mb-4">Инструкция</h2>
+                    <div id="cogText" class="text-secondary mb-4" style="text-align: center; white-space: pre-wrap;">
+                        </div>
+
+                    <div id="cogCheckContainer" class="consent-block mb-4" style="display: none;">
+                        <label class="checkbox-wrapper">
+                            <input type="checkbox" id="cogCheck">
+                            <span id="cogCheckText">Я внимательно прочитал(а) правила и мне всё понятно</span>
+                        </label>
+                    </div>
+
+                    <div class="text-center">
+                        <button class="btn" id="cogStartBtn">Далее</button>
+                    </div>
+                </div>
+
+                <div id="cognitiveStimulusArea" class="cognitive-stimulus-area" style="display: none;">
+                    <div id="cogShape" class="cog-shape"></div>
+                    <img id="cogImage" class="cog-image" style="display: none;">
+                    <div id="cogFixation" class="cog-fixation">+</div>
+                    <div id="cogFeedback" class="cog-feedback" style="display: none;"></div>
+                </div>
+                
+            </div>
+        </div>
+
+        <!-- ШАГ 7: Финал -->
+        <div id="step7" class="step">
+            <h2 data-i18n="final_title">Сессия завершена!</h2>
+            <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
+            
+            <!-- Динамический блок QC статуса -->
+            <div id="qcStatusBlock">
+                <div class="qc-status-passed">
+                    <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
+                </div>
+            </div>
+            <button class="btn" id="downloadBtn" data-i18n="btn_download">📥 Скачать JSON</button>
+            <button class="btn btn-secondary" id="restartBtn" data-i18n="btn_restart">Начать заново</button>
+        </div>
+
+    </div>
+
+    <script type="module" src="js/web-page/app.js"></script>
+    
+</body>
+</html>
