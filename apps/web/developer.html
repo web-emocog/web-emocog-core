@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Разработчик — тестирование модулей EmoCog</title>
+  <style>
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --card: #16213e;
+      --accent: #5C66BD;
+      --text: #e8e8f0;
+      --muted: #94a3b8;
+      --border: rgba(92, 102, 189, 0.25);
+      --good: #10B981;
+      --warn: #F59E0B;
+    }
+    :root[data-theme="light"] {
+      --bg: #f6f8fc;
+      --surface: #ffffff;
+      --card: #ffffff;
+      --accent: #5C66BD;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: rgba(92, 102, 189, 0.22);
+      --good: #10B981;
+      --warn: #F59E0B;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    body { padding: 24px; }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
+    .top h1 { font-size: 1.5rem; font-weight: 700; }
+    .top a { color: var(--muted); text-decoration: none; font-size: 14px; }
+    .top a:hover { color: var(--accent); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      max-width: 1200px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .card:hover { border-color: rgba(92, 102, 189, .5); box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+    .card h2 { font-size: 1rem; margin-bottom: 6px; }
+    .card p { color: var(--muted); font-size: 13px; line-height: 1.4; margin-bottom: 12px; }
+    .card a {
+      display: inline-block;
+      padding: 8px 14px;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .card a:hover { opacity: .92; }
+    .card a.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .card a.secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .tag { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .card code { font-size: 11px; background: rgba(0,0,0,.25); padding: 2px 6px; border-radius: 4px; }
+    .theme-toggle {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 17px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <script src="auth-guard.js"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('developer/login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'developer/login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: 'researcher.html'
+      });
+    })();
+  </script>
+  <div class="top">
+    <h1>🛠 Тестирование модулей</h1>
+    <span style="display:flex;align-items:center;gap:12px;">
+      <span id="authMeta" style="font-size:13px;color:#94a3b8;"></span>
+      <a href="developer/login.html" id="logoutLink" style="font-size:13px;color:#94a3b8;">Выйти</a>
+      <button type="button" id="changePasswordBtn" class="theme-toggle" aria-label="Change password">🔐</button>
+      <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle theme">🌓</button>
+      <a href="index.html">← На главную</a>
+    </span>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <div class="tag">Pre-check</div>
+      <h2>Precheck (камера, лицо, освещение)</h2>
+      <p>Проверка готовности: освещение, лицо в кадре, поза. Калибровка и кнопка «Начать калибровку» после прохождения.</p>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=precheck&v=20260324" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Precheck</a>
+    </div>
+    <div class="card">
+      <div class="tag">BPM / rPPG</div>
+      <h2>BPM (пульс по видео)</h2>
+      <p>Оценка ЧСС по видео лица (rPPG). Требует камеру и стабильное лицо в кадре.</p>
+      <a href="./developer/bpm-test.html?v=20260324">Открыть тест BPM</a>
+    </div>
+    <div class="card">
+      <div class="tag">Emotion Module</div>
+      <h2>Emotion Test (valence/arousal)</h2>
+      <p>Тестирование эмоционального модуля из participant flow: live-метрики valence/arousal, динамика на таймлайне.</p>
+      <a href="developer/emotion-test.html?v=20260324">Открыть Emotion Test</a>
+    </div>
+    <div class="card">
+      <div class="tag">Reaction Time</div>
+      <h2>Reaction Time (Go/NoGo)</h2>
+      <p>Кликер: считывание нажатий (Space/клик), лог в формате rt_component. Go/NoGo без MVP — только проверка аналитики и считывания. Скачать JSONL и прогнать через <code>rt_component-/scripts/analyze_log.py</code>.</p>
+      <a href="developer/rt-test.html?v=20260324">Открыть RT-тест (кликер)</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260324" class="secondary" style="margin-left:8px;" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Полный модульный Hub</a>
+    </div>
+    <div class="card">
+      <div class="tag">Gaze / Tracking</div>
+      <h2>Gaze-on-target и Tracking</h2>
+      <p>Калибровка взгляда и тест слежения: откроется сразу тестовый hub (без лэндинга респондента).</p>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260324" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Tracking/Hub</a>
+    </div>
+    <div class="card">
+      <div class="tag">QC Metrics</div>
+      <h2>QC Metrics (качество сигнала)</h2>
+      <p>Модуль качества: точки взгляда, валидность, offscreen. Автотесты без камеры.</p>
+      <a href="../participant-web/test-qc-metrics.html">Открыть тест QC</a>
+    </div>
+    <div class="card">
+      <div class="tag">Приглашения</div>
+      <h2>Ссылки-приглашения для участников</h2>
+      <p>Создание ссылок на пречек (камера, калибровка, тесты). Участник переходит по ссылке и проходит проверку условий и калибровку.</p>
+      <a href="developer/invite.html?v=20260324">Создать ссылку-приглашение</a>
+    </div>
+    <div class="card">
+      <div class="tag">Experiment Accounting</div>
+      <h2>Учет экспериментов</h2>
+      <p>Сводка по экспериментам и последние сессии: статус, QC, приглашения, completed/in_progress.</p>
+      <a href="developer/experiments.html">Открыть учет экспериментов</a>
+    </div>
+    <div class="card">
+      <div class="tag">Протокол</div>
+      <h2>Участник по приглашению</h2>
+      <p>Выполнение протокола по коду приглашения (instruction, consent, questionnaire, calibration, stimuli и т.д.).</p>
+      <a href="../participant-web/run_new.html">run_new.html</a>
+      <a href="../participant-web/run_new.html?code=test" class="secondary" style="margin-left:8px;">С кодом ?code=test</a>
+    </div>
+    <div class="card">
+      <div class="tag">Отчёт</div>
+      <h2>Session Report</h2>
+      <p>Загрузка JSON сессии и просмотр сводки, тепловых карт, PERCLOS, таймлайна событий.</p>
+      <a href="../participant-web/tools/session-report.html">Открыть Session Report</a>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var KEY = 'emocog_theme';
+      function resolveInitialTheme() {
+        var saved = localStorage.getItem(KEY);
+        if (saved === 'light' || saved === 'dark') return saved;
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem(KEY, theme);
+      }
+      var theme = resolveInitialTheme();
+      applyTheme(theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.addEventListener('click', function () {
+        theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
+        applyTheme(theme);
+      });
+    })();
+
+    (function () {
+      try {
+        var userRaw = localStorage.getItem('emocog_api_user');
+        if (!userRaw) return;
+        var user = JSON.parse(userRaw);
+        var authMeta = document.getElementById('authMeta');
+        if (authMeta && user && user.email) {
+          authMeta.textContent = user.email + (user.role ? ' • ' + user.role : '');
+        }
+      } catch (_) {}
+    })();
+
+    document.getElementById('logoutLink').addEventListener('click', function (e) {
+      e.preventDefault();
+      try {
+        sessionStorage.removeItem('emocog_developer_auth');
+        localStorage.removeItem('emocog_developer_auth');
+        localStorage.removeItem('emocog_api_token');
+        localStorage.removeItem('emocog_api_user');
+      } catch (_) {}
+      window.location.href = 'developer/login.html';
+    });
+
+    document.getElementById('changePasswordBtn').addEventListener('click', async function () {
+      var currentPassword = window.prompt('Current password:');
+      if (currentPassword == null) return;
+      var newPassword = window.prompt('New password (min 8 chars):');
+      if (newPassword == null) return;
+      if (String(newPassword).length < 8) { alert('New password too short'); return; }
+      try {
+        var base = (window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+        var token = window.API_TOKEN || localStorage.getItem('emocog_api_token') || '';
+        var r = await fetch(base + '/auth/me/password', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: 'Bearer ' + token } : {})
+          },
+          body: JSON.stringify({ currentPassword: currentPassword, newPassword: newPassword })
+        });
+        if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+        alert('Password updated successfully');
+      } catch (e) {
+        alert('Password update failed: ' + e.message);
+      }
+    });
+  </script>
+</body>
+</html>
