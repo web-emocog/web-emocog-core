@@ -760,14 +760,20 @@ export function drawFaceOverlay(faceData) {
 async function runLocalPrecheckAnalysis(videoElement) {
     // Инициализируем анализатор если ещё не создан
     if (!state.runtime.localAnalyzer) {
+        if (window.PrecheckAnalyzerReady) {
+            await window.PrecheckAnalyzerReady;
+        }
         state.runtime.localAnalyzer = new PrecheckAnalyzer({
             onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
             onError: (err) => console.error('[PreCheck] Ошибка анализатора:', err)
         });
     }
-    
+
     // Инициализируем FaceSegmenter если ещё не создан
     if (!state.runtime.faceSegmenter) {
+        if (window.FaceSegmenterReady) {
+            await window.FaceSegmenterReady;
+        }
         state.runtime.faceSegmenter = new FaceSegmenter({
             segmentationType: 'selfie_multiclass',
             onInitialized: () => console.log('[PreCheck] FaceSegmenter инициализирован'),

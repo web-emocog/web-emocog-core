@@ -1,15 +1,27 @@
 /**
- * Face Segmenter Module v1.2 - Browser Wrapper
- * 
- * Этот файл служит обёрткой для обратной совместимости.
- * Основной код находится в папке ./face-segmenter/
- * 
+ * Face Segmenter Module v1.2 — Browser Wrapper / Loader
+ *
+ * Загрузка устроена так:
+ *   1) Сразу синхронно объявляется inline-класс FaceSegmenterInline (упрощённая
+ *      реализация ниже) и публикуется как window.FaceSegmenter — safety net
+ *      для кода, который делает new FaceSegmenter() до резолва Promise (с warn).
+ *   2) Параллельно стартует dynamic import() ./face-segmenter/index.js. При
+ *      успехе window.FaceSegmenter переписывается на полную модульную версию
+ *      с per-region/symmetry/visualization функциональностью.
+ *   3) При ошибке загрузки папки остаёмся на inline-классе (console.error).
+ *   4) Promise window.FaceSegmenterReady резолвится в 'module' | 'inline'.
+ *      Новые потребители ждут его перед `new FaceSegmenter()`.
+ *
+ * Inline-копия здесь поддерживает совместимый публичный API, но имеет
+ * упрощённый анализ (только глобальная hand-detection и low_skin_visibility).
+ * Папка даёт расширенный режим (forehead/cheeks/eyes/nose/mouth/chin/symmetry).
+ *
  * @version 1.2.0
  * @requires @mediapipe/tasks-vision
  */
 
-// Встроенный класс для browser (без ES modules)
-class FaceSegmenter {
+// Встроенный класс — fallback при сбое загрузки папки.
+class FaceSegmenterInline {
     constructor(options = {}) {
         this.isInitialized = false;
         this.imageSegmenter = null;
@@ -222,12 +234,44 @@ class FaceSegmenter {
     }
 }
 
-// CommonJS export
+// CommonJS export (для node-тестов).
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = FaceSegmenter;
+    module.exports = FaceSegmenterInline;
 }
 
-// Browser global
+// Browser: loader-паттерн.
 if (typeof window !== 'undefined') {
-    window.FaceSegmenter = FaceSegmenter;
+    let _faceSegmenterResolvedKind = null; // 'module' | 'inline' | null
+
+    function FaceSegmenterProxy(...args) {
+        if (_faceSegmenterResolvedKind === null) {
+            console.warn(
+                '[FaceSegmenter] sync use before Ready — using inline fallback. ' +
+                'Update the consumer to `await window.FaceSegmenterReady` before `new FaceSegmenter()`.'
+            );
+        }
+        return new FaceSegmenterInline(...args);
+    }
+    FaceSegmenterProxy.prototype = FaceSegmenterInline.prototype;
+
+    window.FaceSegmenter = FaceSegmenterProxy;
+
+    window.FaceSegmenterReady = (async () => {
+        try {
+            const mod = await import('./face-segmenter/index.js');
+            const Cls = mod && (mod.FaceSegmenter || mod.default);
+            if (typeof Cls !== 'function') {
+                throw new Error('module did not export FaceSegmenter class');
+            }
+            window.FaceSegmenter = Cls;
+            _faceSegmenterResolvedKind = 'module';
+            console.info('[FaceSegmenter] folder version loaded');
+            return 'module';
+        } catch (e) {
+            window.FaceSegmenter = FaceSegmenterInline;
+            _faceSegmenterResolvedKind = 'inline';
+            console.error('[FaceSegmenter] folder load failed, using inline fallback', e);
+            return 'inline';
+        }
+    })();
 }

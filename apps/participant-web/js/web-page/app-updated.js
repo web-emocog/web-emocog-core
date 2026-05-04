@@ -57,7 +57,13 @@ export function handleGazeUpdate(gazeData) {
     const taskContext = getCurrentTaskContext();
     const screenWidth = window.innerWidth || 1;
     const screenHeight = window.innerHeight || 1;
-    const onScreen = x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight;
+    // Берём честный onScreen из gaze-tracker (считается по correctedX/correctedY до clamp).
+    // Fallback на boundary-чек по зажатым x/y оставляем ради старых сэмплов / тестов,
+    // где трекер мог не выставить флаг.
+    const onScreen = typeof gazeData.onScreen === 'boolean'
+        ? gazeData.onScreen
+        : (x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight);
+    const clipped = typeof gazeData.clipped === 'boolean' ? gazeData.clipped : !onScreen;
     const confidence = Number.isFinite(gazeData.confidence) ? gazeData.confidence : null;
     const hubLike =
         phase === 'test_hub' ||
@@ -96,16 +102,25 @@ export function handleGazeUpdate(gazeData) {
             stimulusType: taskContext.stimulusType ?? null,
             expectedResponse: taskContext.expectedResponse ?? null,
             onScreen,
+            clipped,
             confidence,
-            rawX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
-            rawY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
+            // Сырое предсказание модели (до post-correction). Полезно для
+            // последующего переобучения affine correction на собранных сессиях.
+            modelX: Number.isFinite(gazeData.modelX) ? gazeData.modelX : null,
+            modelY: Number.isFinite(gazeData.modelY) ? gazeData.modelY : null,
+            // После post-correction, до финального clamp. Аналитические координаты —
+            // именно по ним нужно считать AOI / heatmap / off-screen.
+            correctedX: Number.isFinite(gazeData.correctedX) ? gazeData.correctedX : null,
+            correctedY: Number.isFinite(gazeData.correctedY) ? gazeData.correctedY : null,
             screenWidth,
             screenHeight
         });
     }
 
     if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-        state.runtime.qcMetrics.addGazePoint({ x, y }, state.runtime.lastPoseData);
+        // Передаём onScreen, чтобы QC использовал честный флаг от трекера
+        // и не пересчитывал его по уже зажатым координатам.
+        state.runtime.qcMetrics.addGazePoint({ x, y, onScreen }, state.runtime.lastPoseData);
     }
 }
 
