@@ -1,25 +1,28 @@
 /**
- * Модуль Gaze Tracker v2.3.0 - обертка для браузера
- * 
- * Модуль оценки направления взгляда на основе landmarks радужки из MediaPipe Face Landmarker.
- * Использует ridge-регрессию для калибровки: признаки радужки → координаты экрана.
- * 
- * v2.3.0: Улучшена сетка калибровки (18 точек, включая центр), усреднение по 12 кадрам,
- *          сглаживание 0.10 для сбалансированного профиля задержки/стабильности,
- *          динамические задержки фиксации.
- * 
- * v2.2.0: Расширение до 17-мерного вектора признаков с терминами взаимодействия iris×head
- *          для лучшей точности в углах и по краям. Требуется 32+ точек калибровки
- *          (сетка 4×4 × 2 клика = 32, переопределенная система для 17 признаков).
- *          λ=0.001, smoothing=0.10, z-score стандартизация.
- * 
- * v2.1.1: 13-мерный вектор признаков, z-score стандартизация, addAveragedCalibrationPoint().
- * 
+ * Модуль Gaze Tracker v2.3.0 — Browser Wrapper / Loader
+ *
+ * Стратегия загрузки идентична qc-metrics.js / face-segmenter.js / precheck-analyzer.js:
+ *   1) Inline-класс GazeTrackerInline (полная реализация ниже) сразу публикуется
+ *      как window.GazeTracker — safety net для кода, который делает new GazeTracker()
+ *      синхронно (с warn о sync use).
+ *   2) Параллельно стартует dynamic import() ./gaze-tracker/index.js.
+ *      При успехе window.GazeTracker переписывается на модульную версию.
+ *   3) При ошибке остаёмся на inline-классе (console.error).
+ *   4) window.GazeTrackerReady — Promise (резолвится в 'module' | 'inline').
+ *
+ * Inline и модульная версии функционально эквивалентны (тот же 17-feature ridge,
+ * тот же predict() контракт). Папка gaze-tracker/ дополнительно даёт изолированные
+ * модули (features.js, ridge.js, attention-metrics.js, gaze-tests/).
+ *
+ * v2.3.0: Сглаживание 0.10 для сбалансированного профиля задержки/стабильности.
+ * v2.2.0: 17-мерный вектор с iris×head взаимодействиями.
+ * v2.1.1: 13-мерный вектор, z-score стандартизация, addAveragedCalibrationPoint().
+ *
  * @version 2.3.0
  * @requires PrecheckAnalyzer (для получения landmarks)
  */
 
-class GazeTracker {
+class GazeTrackerInline {
     constructor(options = {}) {
         // Состояние
         this._isCalibrated = false;
@@ -189,13 +192,15 @@ class GazeTracker {
      * 
      * На этапе предсказания применяется та же стандартизация до скалярного произведения.
      * 
-     * Требуется минимум 4 точки (рекомендуется 9+).
+     * Требуется минимум 16 точек (= числу не-bias признаков, чтобы ridge-система
+     * была well-conditioned). Рекомендуется 32+ (стандартная сетка 5×5 × 2 клика
+     * даёт 50). Раньше порог был 4 — это безопасно лишь для пустых edge-кейсов.
      * @returns {boolean} успешна ли калибровка
      */
     calibrate() {
         const n = this._calibrationData.length;
-        if (n < 4) {
-            console.warn(`[GazeTracker] Недостаточно точек для калибровки: ${n}/4`);
+        if (n < 16) {
+            console.warn(`[GazeTracker] Недостаточно точек для калибровки: ${n}/16`);
             return false;
         }
         
@@ -316,64 +321,83 @@ class GazeTracker {
     
     /**
      * Предсказывает координаты взгляда на экране.
+     *
+     * Возвращает три уровня координат:
+     *   - modelX/modelY: сырое предсказание ridge-регрессии, до post-correction.
+     *     Полезно для A/B анализа коррекции и пост-обучения correction на сессиях.
+     *   - correctedX/correctedY: после post-correction (если активна), но ДО
+     *     финального clamp в границы экрана. Это аналитические координаты —
+     *     именно по ним нужно считать onScreen и AOI hit-detection.
+     *   - x/y: после clamp и smoothing — координаты для отрисовки overlay.
+     *
      * @param {Array} landmarks - 478 landmarks из FaceLandmarker
-     * @returns {{ x: number, y: number, confidence: number } | null}
+     * @returns {{x:number, y:number, correctedX:number, correctedY:number,
+     *            modelX:number, modelY:number, confidence:number, timestamp:number} | null}
      */
     predict(landmarks) {
         if (!this._isCalibrated || !landmarks || landmarks.length < 478) {
             return null;
         }
-        
+
         const t0 = performance.now();
         const rawFeatures = this._extractFeatures(landmarks);
         if (!rawFeatures) return null;
-        
+
         // Применяем ту же стандартизацию, что и при калибровке
         const features = this._standardizeFeatures(rawFeatures);
-        
-        // Предсказание модели
+
+        // Предсказание модели (до post-correction)
         const modelX = this._dotProduct(features, this._modelX);
         const modelY = this._dotProduct(features, this._modelY);
 
         // Необязательная посткалибровочная аффинная коррекция
-        let rawX = modelX;
-        let rawY = modelY;
+        let correctedX = modelX;
+        let correctedY = modelY;
         if (this._postCalibrationCorrection) {
-            const corrected = this._applyPostCalibrationCorrection(rawX, rawY);
-            rawX = corrected.x;
-            rawY = corrected.y;
+            const corrected = this._applyPostCalibrationCorrection(correctedX, correctedY);
+            correctedX = corrected.x;
+            correctedY = corrected.y;
         }
-        
-        // Ограничиваем границами экрана (с небольшим запасом для предсказаний у краев)
-        rawX = Math.max(-50, Math.min(this._screenW + 50, rawX));
-        rawY = Math.max(-50, Math.min(this._screenH + 50, rawY));
-        
+
+        // Сглаживающий буфер: широкий clamp, чтобы EMA не «прыгала» при off-screen.
+        const smoothInputX = Math.max(-50, Math.min(this._screenW + 50, correctedX));
+        const smoothInputY = Math.max(-50, Math.min(this._screenH + 50, correctedY));
+
         // Сглаживание (экспоненциальное скользящее среднее)
         let x, y;
         if (this._lastPrediction && this._smoothingFactor > 0) {
             const s = this._smoothingFactor;
-            x = s * this._lastPrediction.x + (1 - s) * rawX;
-            y = s * this._lastPrediction.y + (1 - s) * rawY;
+            x = s * this._lastPrediction.x + (1 - s) * smoothInputX;
+            y = s * this._lastPrediction.y + (1 - s) * smoothInputY;
         } else {
-            x = rawX;
-            y = rawY;
+            x = smoothInputX;
+            y = smoothInputY;
         }
-        
-        // Финальное ограничение координат
+
+        // Финальное ограничение координат для отрисовки.
         x = Math.max(0, Math.min(this._screenW, x));
         y = Math.max(0, Math.min(this._screenH, y));
-        
+
+        // Честный onScreen считается по correctedX/correctedY ДО финального clamp.
+        // Раньше это считалось по уже зажатым x/y и почти всегда давало true,
+        // что искажало heatmap, AOI hit-rate и gaze_on_screen_pct.
+        const onScreen =
+            correctedX >= 0 && correctedX <= this._screenW &&
+            correctedY >= 0 && correctedY <= this._screenH;
+
         const result = {
             x: Math.round(x),
             y: Math.round(y),
-            rawX: Math.round(rawX),
-            rawY: Math.round(rawY),
+            correctedX: Math.round(correctedX),
+            correctedY: Math.round(correctedY),
             modelX: Math.round(modelX),
             modelY: Math.round(modelY),
+            onScreen,
+            clipped: !onScreen,
             confidence: this._estimateConfidence(landmarks),
             timestamp: Date.now()
         };
-        
+
         this._lastPrediction = result;
         this._stats.totalPredictions++;
         this._stats.avgFeatureExtractionMs = 
@@ -878,12 +902,44 @@ class GazeTracker {
     }
 }
 
-// Экспорт для CommonJS
+// CommonJS export (для node-тестов).
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = GazeTracker;
+    module.exports = GazeTrackerInline;
 }
 
-// Глобальная переменная в браузере
+// Browser: loader-паттерн.
 if (typeof window !== 'undefined') {
-    window.GazeTracker = GazeTracker;
+    let _gazeTrackerResolvedKind = null; // 'module' | 'inline' | null
+
+    function GazeTrackerProxy(...args) {
+        if (_gazeTrackerResolvedKind === null) {
+            console.warn(
+                '[GazeTracker] sync use before Ready — using inline fallback. ' +
+                'Update the consumer to `await window.GazeTrackerReady` before `new GazeTracker()`.'
+            );
+        }
+        return new GazeTrackerInline(...args);
+    }
+    GazeTrackerProxy.prototype = GazeTrackerInline.prototype;
+
+    window.GazeTracker = GazeTrackerProxy;
+
+    window.GazeTrackerReady = (async () => {
+        try {
+            const mod = await import('./gaze-tracker/index.js');
+            const Cls = mod && (mod.GazeTracker || mod.default);
+            if (typeof Cls !== 'function') {
+                throw new Error('module did not export GazeTracker class');
+            }
+            window.GazeTracker = Cls;
+            _gazeTrackerResolvedKind = 'module';
+            console.info('[GazeTracker] folder version loaded');
+            return 'module';
+        } catch (e) {
+            window.GazeTracker = GazeTrackerInline;
+            _gazeTrackerResolvedKind = 'inline';
+            console.error('[GazeTracker] folder load failed, using inline fallback', e);
+            return 'inline';
+        }
+    })();
 }

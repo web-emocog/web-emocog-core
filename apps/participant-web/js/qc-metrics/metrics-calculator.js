@@ -1,34 +1,42 @@
 /**
  * Metrics Calculator
- * 
- * Расчёт QC Score и итоговых метрик
- * 
+ *
+ * Расчёт QC Score и итоговых метрик.
+ * Формула синхронизирована с production-обёрткой qc-metrics.js v3.5.
+ *
  * @module qc-metrics/metrics-calculator
  */
 
-import { DEFAULT_THRESHOLDS, QC_WEIGHTS } from './constants.js';
+import { DEFAULT_THRESHOLDS, QC_WEIGHTS, QC_PENALTIES } from './constants.js';
 import { round1, round3, clamp01 } from './helpers.js';
 import { computePercentages } from './frame-analysis.js';
-import { getValidationMetrics } from './validation.js';
+import { getValidationMetrics, getTrackingDeviationMetrics } from './validation.js';
 
 /**
- * Вычисление QC Score
- * 
- * Returns 0-1 (LEGACY-compatible) with 3 decimal places.
- * Uses weighted average with hard penalties for critical failures.
- * 
- * @param {Object} percentages - проценты метрик
- * @param {Object} thresholds - пороговые значения
- * @param {Object} weights - весовые коэффициенты
- * @param {Object} counters - счётчики (для penalty checks)
- * @param {number} durationMs - длительность сессии
- * @returns {number} QC Score (0-1)
+ * Вычисление QC Score (0-1, 3 знака после запятой).
+ *
+ * Формула: взвешенная сумма нормализованных метрик с per-penalty штрафами
+ * за провал отдельных проверок. Совпадает с qc-metrics.js v3.5.
+ *
+ * @param {Object} percentages
+ * @param {Object} thresholds
+ * @param {Object} weights
+ * @param {Object} counters
+ * @param {number} durationMs
+ * @param {Object} validation - результат getValidationMetrics() (для gazeAccuracy)
+ * @returns {number}
  */
-export function computeQcScore(percentages, thresholds = DEFAULT_THRESHOLDS, weights = QC_WEIGHTS, counters = null, durationMs = 0) {
+export function computeQcScore(
+    percentages,
+    thresholds = DEFAULT_THRESHOLDS,
+    weights = QC_WEIGHTS,
+    counters = null,
+    durationMs = 0,
+    validation = null
+) {
     const nPct = x => clamp01(x / 100);
     const nInvPct = x => clamp01(1 - x / 100);
-    
-    // Normalize metrics
+
     const faceVis = nPct(percentages.faceVisiblePct);
     const faceOk = nPct(percentages.faceOkPct);
     const poseOk = nPct(percentages.poseOkPct);
@@ -37,10 +45,14 @@ export function computeQcScore(percentages, thresholds = DEFAULT_THRESHOLDS, wei
     const occlInv = nInvPct(percentages.occlusionPct);
     const gazeValid = nPct(percentages.gazeValidPct);
     const gazeOn = nPct(percentages.gazeOnScreenPct);
-    const dropoutInv = nInvPct(100 - percentages.gazeValidPct); // dropout = 100 - valid
     const fpsOk = nInvPct(percentages.lowFpsPct || 0);
-    
-    // Weighted average
+
+    let gazeAccuracy = 1.0;
+    if (validation && validation.accuracyPct !== null) {
+        const accThresh = thresholds.gaze_accuracy_pct_max;
+        gazeAccuracy = clamp01(1 - (validation.accuracyPct / (accThresh * 2)));
+    }
+
     let score =
         faceVis * weights.faceVis +
         faceOk * weights.faceOk +
@@ -50,43 +62,59 @@ export function computeQcScore(percentages, thresholds = DEFAULT_THRESHOLDS, wei
         occlInv * weights.occlInv +
         gazeValid * weights.gazeValid +
         gazeOn * weights.gazeOn +
-        dropoutInv * weights.dropoutInv +
+        gazeAccuracy * (weights.gazeAccuracy || 0) +
         fpsOk * weights.fpsOk;
-    
-    // LEGACY hard penalties to avoid "high score but invalid" artifacts
-    if (durationMs > 0 && durationMs < thresholds.minDurationMs) score *= 0.35;
-    if (percentages.faceVisiblePct < thresholds.face_visible_pct_min) score *= 0.6;
-    if (percentages.faceOkPct < thresholds.face_ok_pct_min) score *= 0.6;
-    if (percentages.occlusionPct > thresholds.occlusion_pct_max) score *= 0.7;
-    if (percentages.gazeValidPct < thresholds.gaze_valid_pct_min) score *= 0.7;
-    if (percentages.gazeOnScreenPct < thresholds.gaze_on_screen_pct_min) score *= 0.7;
-    if (counters && counters.totalLowFpsMs > thresholds.maxLowFpsTimeMs) score *= 0.6;
-    
-    // Return as 0-1 (legacy) with 3 decimal places
+
+    // Hard penalties: умножение на (1 - factor) при провале конкретной проверки.
+    if (durationMs > 0 && durationMs < thresholds.minDurationMs) {
+        score *= (1 - QC_PENALTIES.duration);
+    }
+    if (percentages.faceVisiblePct < thresholds.face_visible_pct_min) {
+        score *= (1 - QC_PENALTIES.faceVisible);
+    }
+    if (percentages.faceOkPct < thresholds.face_ok_pct_min) {
+        score *= (1 - QC_PENALTIES.faceOk);
+    }
+    if (percentages.poseOkPct < thresholds.pose_ok_pct_min) {
+        score *= (1 - QC_PENALTIES.poseOk);
+    }
+    if (percentages.illuminationOkPct < thresholds.illumination_ok_pct_min) {
+        score *= (1 - QC_PENALTIES.illumination);
+    }
+    if (percentages.occlusionPct > thresholds.occlusion_pct_max) {
+        score *= (1 - QC_PENALTIES.occlusion);
+    }
+    if (percentages.gazeValidPct < thresholds.gaze_valid_pct_min) {
+        score *= (1 - QC_PENALTIES.gazeValid);
+    }
+    if (percentages.gazeOnScreenPct < thresholds.gaze_on_screen_pct_min) {
+        score *= (1 - QC_PENALTIES.gazeOnScreen);
+    }
+    if (validation && validation.accuracyPct !== null &&
+        validation.accuracyPct > thresholds.gaze_accuracy_pct_max) {
+        score *= (1 - QC_PENALTIES.gazeAccuracy);
+    }
+    if (counters && counters.totalLowFpsMs > thresholds.maxLowFpsTimeMs) {
+        score *= (1 - QC_PENALTIES.lowFps);
+    }
+
     return round3(clamp01(score));
 }
 
 /**
- * Получение текущих метрик
- * 
- * @param {Object} counters - счётчики инструментов
- * @param {Object} gazeState - состояние gaze
- * @param {Object} fpsMonitor - монитор FPS
- * @param {number} startTime - время начала сессии
- * @param {Object} thresholds - пороги
- * @returns {Object} текущие метрики
+ * Получение текущих метрик.
  */
-export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS) {
+export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS, validationState = null) {
     const percentages = computePercentages(counters);
     const durationMs = Date.now() - startTime;
-    const qcScore = computeQcScore(percentages, thresholds, QC_WEIGHTS, counters, durationMs);
-    
+    const validation = validationState ? getValidationMetrics(validationState) : null;
+    const qcScore = computeQcScore(percentages, thresholds, QC_WEIGHTS, counters, durationMs, validation);
+
     return {
         durationMs,
         totalFrames: counters.totalFrames,
         qcScore,
-        
-        // Percentages
+
         faceVisiblePct: round1(percentages.faceVisiblePct),
         faceOkPct: round1(percentages.faceOkPct),
         poseOkPct: round1(percentages.poseOkPct),
@@ -95,38 +123,31 @@ export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, th
         occlusionPct: round1(percentages.occlusionPct),
         gazeValidPct: round1(percentages.gazeValidPct),
         gazeOnScreenPct: round1(percentages.gazeOnScreenPct),
-        
-        // FPS: теперь показываем оба значения
-        analysisFps: fpsMonitor?.getCurrentFps() || 0,     // FPS анализа (processFrame calls/sec)
-        cameraFps: fpsMonitor?.getCameraFps?.() || 0,      // Реальный FPS камеры
+
+        analysisFps: fpsMonitor?.getCurrentFps() || 0,
+        cameraFps: fpsMonitor?.getCameraFps?.() || 0,
         baselineFps: fpsMonitor?.getBaselineFps() || null,
         lowFpsPct: round1(percentages.lowFpsPct),
-        
-        // Gaze time
+
         gazeValidTimeMs: gazeState.validTimeMs,
         gazeOnScreenTimeMs: gazeState.onScreenTimeMs,
-        gazeTotal: counters.gazeTotal || 0, // Для отладки
-        
+        gazeTotal: counters.gazeTotal || 0,
+
         timestamp: Date.now()
     };
 }
 
 /**
- * Получение итогового summary
- * 
- * @param {Object} counters - счётчики
- * @param {Object} gazeState - состояние gaze
- * @param {Object} validationState - состояние валидации
- * @param {Object} fpsMonitor - монитор FPS
- * @param {number} startTime - время начала
- * @param {Object} thresholds - пороги
- * @returns {Object} итоговый summary
+ * Получение итогового summary с трекинг-девиацией и accuracy/precision проверками.
  */
-export function getSummary(counters, gazeState, validationState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS) {
-    const metrics = getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds);
+export function getSummary(counters, gazeState, validationState, trackingDeviationState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS) {
+    const metrics = getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds, validationState);
     const validation = getValidationMetrics(validationState);
-    
-    // Определяем pass/fail для каждой метрики
+    const trackingDeviation = getTrackingDeviationMetrics(trackingDeviationState, {
+        validationAccuracyPx: validation.accuracyPx,
+        baseRadiusPct: thresholds.tracking_on_target_base_radius_pct
+    });
+
     const checks = {
         duration: metrics.durationMs >= thresholds.minDurationMs,
         faceVisible: metrics.faceVisiblePct >= thresholds.face_visible_pct_min,
@@ -140,29 +161,30 @@ export function getSummary(counters, gazeState, validationState, fpsMonitor, sta
         lowFps: counters.totalLowFpsMs <= thresholds.maxLowFpsTimeMs,
         consecutiveLowFps: counters.maxConsecutiveLowFpsMs <= thresholds.maxConsecutiveLowFpsMs
     };
-    
-    // Добавляем проверки валидации если есть данные
+
     if (validation.accuracyPct !== null) {
         checks.gazeAccuracy = validation.accuracyPct <= thresholds.gaze_accuracy_pct_max;
         checks.gazePrecision = validation.precisionPct <= thresholds.gaze_precision_pct_max;
     }
-    
+    if (trackingDeviation.onTargetPct !== null) {
+        checks.trackingOnTarget = trackingDeviation.onTargetPct >= thresholds.tracking_on_target_min_pct;
+    }
+
     const passedChecks = Object.values(checks).filter(v => v === true).length;
     const totalChecks = Object.keys(checks).length;
     const overallPass = passedChecks === totalChecks;
-    
+
     return {
         ...metrics,
         validation,
+        trackingDeviation,
         checks,
         passedChecks,
         totalChecks,
         overallPass,
-        
-        // Raw counters
+
         counters: { ...counters },
-        
-        // FPS details
+
         fpsHistory: fpsMonitor?.getHistory() || [],
         maxConsecutiveLowFpsMs: counters.maxConsecutiveLowFpsMs,
         totalLowFpsMs: counters.totalLowFpsMs

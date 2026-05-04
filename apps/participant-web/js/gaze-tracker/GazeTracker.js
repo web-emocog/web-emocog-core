@@ -1,19 +1,23 @@
 /**
  * GazeTracker — версия ES-модуля
- * 
+ *
  * Оценка взгляда по радужке с использованием landmarks MediaPipe Face Landmarker
- * и калибровки на основе ridge-регрессии.
- * 
+ * и калибровки на основе ridge-регрессии. Функционально эквивалентен
+ * production-обёртке gaze-tracker.js v2.3.0.
+ *
+ * v2.3.0: Сглаживание 0.10 для сбалансированного профиля задержки/стабильности
+ *          (UI-настройки калибровки 5×5 + усреднение задаются вызывающим кодом).
+ *
  * v2.2.0: Расширен до 17-мерного вектора признаков с терминами взаимодействия iris×head
  *          для лучшей точности в углах и по краям. Требует 32+ калибровочных точек
  *          (сетка 4×4 × 2 клика = 32, переопределённая система для 17 признаков).
  *          λ=0.001, smoothing=0.10, z-score стандартизация.
- * 
+ *
  * v2.1.1: 13-мерный вектор признаков (без взаимодействий), λ=0.001, smoothing=0.10,
  *          z-score стандартизация, addAveragedCalibrationPoint() для усреднения по нескольким кадрам.
- * 
+ *
  * @module gaze-tracker/GazeTracker
- * @version 2.2.0
+ * @version 2.3.0
  * @license MIT
  */
 
@@ -223,6 +227,16 @@ export default class GazeTracker {
         this._lastPrediction = null;
     }
 
+    /**
+     * Предсказывает координаты взгляда. Возвращает три уровня:
+     *   - modelX/modelY: сырое предсказание ridge-регрессии до post-correction.
+     *   - correctedX/correctedY: после post-correction, до финального clamp.
+     *     Аналитические координаты для onScreen / AOI / heatmap.
+     *   - x/y: после clamp и smoothing — координаты для отрисовки overlay.
+     *
+     * @returns {{x:number,y:number,correctedX:number,correctedY:number,
+     *            modelX:number,modelY:number,confidence:number,timestamp:number} | null}
+     */
     predict(landmarks) {
         if (!this._isCalibrated || !landmarks || landmarks.length < MIN_LANDMARKS) {
             return null;
@@ -236,38 +250,46 @@ export default class GazeTracker {
 
         const modelX = dotProduct(features, this._modelX);
         const modelY = dotProduct(features, this._modelY);
-        let rawX = modelX;
-        let rawY = modelY;
+        let correctedX = modelX;
+        let correctedY = modelY;
         if (this._postCalibrationCorrection) {
-            const corrected = this._applyPostCalibrationCorrection(rawX, rawY);
-            rawX = corrected.x;
-            rawY = corrected.y;
+            const corrected = this._applyPostCalibrationCorrection(correctedX, correctedY);
+            correctedX = corrected.x;
+            correctedY = corrected.y;
         }
 
-        rawX = Math.max(-50, Math.min(this._screenW + 50, rawX));
-        rawY = Math.max(-50, Math.min(this._screenH + 50, rawY));
+        // Широкий clamp только для smoothing-буфера, не для аналитики.
+        const smoothInputX = Math.max(-50, Math.min(this._screenW + 50, correctedX));
+        const smoothInputY = Math.max(-50, Math.min(this._screenH + 50, correctedY));
 
         let x, y;
         if (this._lastPrediction && this._smoothingFactor > 0) {
             const s = this._smoothingFactor;
-            x = s * this._lastPrediction.x + (1 - s) * rawX;
-            y = s * this._lastPrediction.y + (1 - s) * rawY;
+            x = s * this._lastPrediction.x + (1 - s) * smoothInputX;
+            y = s * this._lastPrediction.y + (1 - s) * smoothInputY;
         } else {
-            x = rawX;
-            y = rawY;
+            x = smoothInputX;
+            y = smoothInputY;
         }
 
-        // Финальное ограничение координат
+        // Финальное ограничение координат для отрисовки.
         x = Math.max(0, Math.min(this._screenW, x));
         y = Math.max(0, Math.min(this._screenH, y));
+
+        // Честный onScreen считается по correctedX/correctedY ДО финального clamp.
+        const onScreen =
+            correctedX >= 0 && correctedX <= this._screenW &&
+            correctedY >= 0 && correctedY <= this._screenH;
 
         const result = {
             x: Math.round(x),
             y: Math.round(y),
-            rawX: Math.round(rawX),
-            rawY: Math.round(rawY),
+            correctedX: Math.round(correctedX),
+            correctedY: Math.round(correctedY),
             modelX: Math.round(modelX),
             modelY: Math.round(modelY),
+            onScreen,
+            clipped: !onScreen,
             confidence: estimateConfidence(landmarks),
             timestamp: Date.now()
         };
