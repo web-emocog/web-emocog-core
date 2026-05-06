@@ -27,7 +27,7 @@ function clearCanvas(canvas, ctx) {
 }
 
 function setupCanvas(canvas) {
-    if (!canvas) return { width: 1, height: 1 };
+    if (!canvas) return { width: 1, height: 1, ratio: 1 };
     const rect = canvas.getBoundingClientRect();
     const width = Math.max(1, Math.round(rect.width));
     const height = Math.max(1, Math.round(rect.height));
@@ -43,36 +43,30 @@ export async function runVisuospatialDrawingTest(options = {}) {
     const startedAt = Date.now();
 
     const container = document.getElementById('gazeTestsContainer');
-    const screen = document.getElementById('visuospatialTestScreen');
+    const introCard = document.getElementById('visuospatialTestScreen');
+    const drawingOverlay = document.getElementById('visuospatialDrawingOverlay');
     const promptTitle = document.getElementById('visuospatialPromptTitle');
     const promptText = document.getElementById('visuospatialPromptText');
-    const statusText = document.getElementById('visuospatialStatusText');
+    const promptHudText = document.getElementById('visuospatialPromptHudText');
+    const penStatus = document.getElementById('visuospatialPenStatus');
     const canvas = document.getElementById('visuospatialCanvas');
     const startBtn = document.getElementById('visuospatialStartBtn');
     const finishBtn = document.getElementById('visuospatialFinishBtn');
     const gazeDot = document.getElementById('visuospatialGazeDot');
 
+    // Intro-карточка показывается ВСЕГДА в обычном flow карточки тестов.
     show(container, 'block');
-    show(screen, 'block');
+    show(introCard, 'block');
+    hide(drawingOverlay);
     if (finishBtn) finishBtn.disabled = true;
-
-    const canvasInfo = setupCanvas(canvas);
-    const ctx = canvas ? canvas.getContext('2d') : null;
-    if (ctx) {
-        ctx.setTransform(canvasInfo.ratio, 0, 0, canvasInfo.ratio, 0, 0);
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = '#0f766e';
-    }
-    clearCanvas(canvas, ctx);
 
     const prompt = pickRandomPrompt();
     const trialId = `${prompt.id}_${Date.now()}`;
+    const promptTitleText = text(t, prompt.i18nTitleKey, prompt.fallbackTitle);
+    const promptBodyText = text(t, prompt.i18nTextKey, prompt.fallbackText);
 
-    if (promptTitle) promptTitle.textContent = text(t, prompt.i18nTitleKey, prompt.fallbackTitle);
-    if (promptText) promptText.textContent = text(t, prompt.i18nTextKey, prompt.fallbackText);
-    if (statusText) statusText.textContent = text(t, 'visuospatial_status_wait_start', 'Нажмите «Начать рисование», чтобы начать.');
+    if (promptTitle) promptTitle.textContent = promptTitleText;
+    if (promptText) promptText.textContent = promptBodyText;
 
     setTaskContext({
         blockId: 'visuospatial',
@@ -83,17 +77,10 @@ export async function runVisuospatialDrawingTest(options = {}) {
     });
     setSessionPhase(TEST_PHASES.VISUOSPATIAL_INSTRUCTION, { source: 'visuospatial_prompt' });
 
-    recordSessionEvent('visuospatial_run_start', {
-        runId,
-        trialId,
-        promptId: prompt.id
-    });
-    recordSessionEvent('visuospatial_prompt_selected', {
-        runId,
-        trialId,
-        promptId: prompt.id
-    });
+    recordSessionEvent('visuospatial_run_start', { runId, trialId, promptId: prompt.id });
+    recordSessionEvent('visuospatial_prompt_selected', { runId, trialId, promptId: prompt.id });
 
+    // 1. Ждём клика "Начать рисование" в intro-карточке.
     await new Promise(resolve => {
         if (!startBtn) {
             resolve();
@@ -106,24 +93,45 @@ export async function runVisuospatialDrawingTest(options = {}) {
         startBtn.addEventListener('click', onClick);
     });
 
+    // 2. Переключаемся в fullscreen drawing overlay.
+    hide(introCard);
+    show(drawingOverlay, 'block');
+
+    if (promptHudText) promptHudText.textContent = promptTitleText;
+    if (penStatus) {
+        penStatus.textContent = text(t, 'visuospatial_status_pen_up', 'Пауза (Пробел отпущен)');
+    }
+
+    // setupCanvas() читает getBoundingClientRect canvas'а — теперь это весь viewport
+    // (canvas внутри fixed overlay 100vw × 100vh). Канвас должен быть видим до setupCanvas,
+    // иначе rect = 0×0, поэтому setupCanvas вызываем ПОСЛЕ show(drawingOverlay).
+    const canvasInfo = setupCanvas(canvas);
+    const ctx = canvas ? canvas.getContext('2d') : null;
+    if (ctx) {
+        ctx.setTransform(canvasInfo.ratio, 0, 0, canvasInfo.ratio, 0, 0);
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#0f766e';
+    }
+    clearCanvas(canvas, ctx);
+
     if (startBtn) startBtn.disabled = true;
     if (finishBtn) finishBtn.disabled = false;
 
     setSessionPhase(TEST_PHASES.VISUOSPATIAL_DRAWING, { source: 'visuospatial_draw_start' });
-    recordSessionEvent('visuospatial_draw_start', {
-        runId,
-        trialId,
-        promptId: prompt.id
-    });
-
-    if (statusText) statusText.textContent = text(t, 'visuospatial_status_drawing', 'Рисование активно. Следите взглядом и завершите, когда будете готовы.');
+    recordSessionEvent('visuospatial_draw_start', { runId, trialId, promptId: prompt.id });
 
     const points = [];
     let rafId = null;
     let timeoutId = null;
     let stopped = false;
     let lastPoint = null;
+    let penDown = false;
+    let onKeyDown = null;
+    let onKeyUp = null;
     const drawStartMs = Date.now();
+    const requireSpace = VISUOSPATIAL_CONFIG.requireSpaceToDraw !== false;
 
     const stopPromise = new Promise(resolve => {
         const stopRun = (reason = 'manual') => {
@@ -131,6 +139,9 @@ export async function runVisuospatialDrawingTest(options = {}) {
             stopped = true;
             if (rafId) cancelAnimationFrame(rafId);
             if (timeoutId) clearTimeout(timeoutId);
+            if (onKeyDown) document.removeEventListener('keydown', onKeyDown);
+            if (onKeyUp) document.removeEventListener('keyup', onKeyUp);
+            if (gazeDot) gazeDot.classList.remove('is-pen-down');
             if (finishBtn) {
                 finishBtn.removeEventListener('click', onFinishClick);
                 finishBtn.disabled = true;
@@ -139,11 +150,35 @@ export async function runVisuospatialDrawingTest(options = {}) {
         };
 
         const onFinishClick = () => stopRun('manual');
-        if (finishBtn) {
-            finishBtn.addEventListener('click', onFinishClick);
-        }
+        if (finishBtn) finishBtn.addEventListener('click', onFinishClick);
 
         timeoutId = setTimeout(() => stopRun('timeout'), VISUOSPATIAL_CONFIG.maxDurationMs);
+
+        // Pen-down/pen-up через Пробел. При отпускании lastPoint = null,
+        // чтобы следующий pen-down не соединил линии через "разрыв".
+        onKeyDown = (e) => {
+            if (e.code === 'Space' && !penDown) {
+                penDown = true;
+                e.preventDefault();
+                if (gazeDot) gazeDot.classList.add('is-pen-down');
+                if (penStatus) {
+                    penStatus.textContent = text(t, 'visuospatial_status_pen_down', 'Рисование (Пробел зажат)');
+                }
+            }
+        };
+        onKeyUp = (e) => {
+            if (e.code === 'Space' && penDown) {
+                penDown = false;
+                e.preventDefault();
+                if (gazeDot) gazeDot.classList.remove('is-pen-down');
+                if (penStatus) {
+                    penStatus.textContent = text(t, 'visuospatial_status_pen_up', 'Пауза (Пробел отпущен)');
+                }
+                lastPoint = null;
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
 
         const drawTick = () => {
             if (stopped) return;
@@ -157,22 +192,25 @@ export async function runVisuospatialDrawingTest(options = {}) {
                 const y = gaze.y - rect.top;
                 const onScreen = x >= 0 && x <= rect.width && y >= 0 && y <= rect.height;
 
-                const point = {
-                    x,
-                    y,
-                    t: tNow,
-                    onScreen
-                };
+                const point = { x, y, t: tNow, onScreen, penDown };
                 points.push(point);
 
+                // gazeDot БЕЗ clamp — если за canvas, прячем (не приклеиваем к краю).
                 if (gazeDot) {
-                    gazeDot.style.display = 'block';
-                    gazeDot.style.left = `${Math.max(0, Math.min(rect.width, x))}px`;
-                    gazeDot.style.top = `${Math.max(0, Math.min(rect.height, y))}px`;
+                    if (onScreen) {
+                        gazeDot.style.display = 'block';
+                        gazeDot.style.left = `${x}px`;
+                        gazeDot.style.top = `${y}px`;
+                    } else {
+                        gazeDot.style.display = 'none';
+                    }
                 }
 
-                if (ctx && onScreen) {
-                    if (lastPoint && lastPoint.onScreen) {
+                // Линия рисуется только в пределах canvas И только при удерживаемом Space
+                // (если requireSpace=false, рисуется всегда — для legacy/смены поведения).
+                const drawingActive = !requireSpace || penDown;
+                if (ctx && onScreen && drawingActive) {
+                    if (lastPoint && lastPoint.onScreen && (!requireSpace || lastPoint.penDown)) {
                         ctx.beginPath();
                         ctx.moveTo(lastPoint.x, lastPoint.y);
                         ctx.lineTo(x, y);
@@ -180,7 +218,9 @@ export async function runVisuospatialDrawingTest(options = {}) {
                     }
                     lastPoint = point;
                 } else {
-                    lastPoint = point;
+                    // Pen-up или off-screen — линия не идёт; сбрасываем lastPoint
+                    // чтобы при возобновлении не соединить через "разрыв".
+                    lastPoint = null;
                 }
             }
 
@@ -195,6 +235,7 @@ export async function runVisuospatialDrawingTest(options = {}) {
 
     hide(gazeDot);
     if (startBtn) startBtn.disabled = false;
+    hide(drawingOverlay);
 
     const metrics = computeVisuospatialMetrics(points, VISUOSPATIAL_CONFIG, {
         width: canvasInfo.width,
@@ -209,7 +250,9 @@ export async function runVisuospatialDrawingTest(options = {}) {
         pathLengthPx: metrics.pathLengthPx,
         durationMs: metrics.drawingDurationMs,
         coveragePct: metrics.coveragePct,
-        onScreenPct: metrics.onScreenPct
+        onScreenPct: metrics.onScreenPct,
+        penDownPct: metrics.penDownPct,
+        pathLengthDiagPct: metrics.pathLengthDiagPct
     });
 
     if (endReason === 'timeout') {
@@ -233,9 +276,7 @@ export async function runVisuospatialDrawingTest(options = {}) {
             durationMs: drawEndMs - drawStartMs,
             reason: endReason
         },
-        config: {
-            ...VISUOSPATIAL_CONFIG
-        },
+        config: { ...VISUOSPATIAL_CONFIG },
         rawPath: points,
         metrics
     };
@@ -249,11 +290,13 @@ export async function runVisuospatialDrawingTest(options = {}) {
         pointCount: metrics.pointCount,
         pathLengthPx: metrics.pathLengthPx,
         drawingDurationMs: metrics.drawingDurationMs,
-        coveragePct: metrics.coveragePct
+        coveragePct: metrics.coveragePct,
+        penDownPct: metrics.penDownPct
     });
 
     clearTaskContext();
-    hide(screen);
+    hide(drawingOverlay);
+    hide(introCard);
     hide(container);
 
     return runPayload;

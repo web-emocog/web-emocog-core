@@ -37,7 +37,13 @@ export const VPC_CONFIG = Object.freeze({
 export const VISUOSPATIAL_CONFIG = Object.freeze({
     maxDurationMs: 60000,
     drawTickMs: 33,
+    // Pen-down: рисование активно только при удерживаемом Пробеле.
+    requireSpaceToDraw: true,
+    // Пиксельный порог idle оставлен для legacy-метрик (несравним между разрешениями).
     idleSpeedThresholdPxPerSec: 40,
+    // Нормированный порог idle: 5% диагонали canvas в секунду. Используется
+    // для сравнимых между разрешениями idlePct после fullscreen-редизайна.
+    idleSpeedThresholdNormPerSec: 0.05,
     coverageGridWidth: 40,
     coverageGridHeight: 30
 });
