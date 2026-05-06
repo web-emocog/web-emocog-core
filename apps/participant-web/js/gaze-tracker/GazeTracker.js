@@ -406,6 +406,22 @@ export default class GazeTracker {
         };
     }
 
+    /**
+     * Сбрасывает только smoothing-буфер EMA (_lastPrediction), не трогая
+     * калибровку, модель, post-correction и статистику.
+     *
+     * Вызывается между тестами/фазами, чтобы новая фаза начиналась без
+     * инерции от последней точки предыдущей. Особенно важно после теста
+     * рисования глазами, где взгляд часто оказывается у краёв canvas:
+     * без сброса EMA первые ~16 кадров (~480 мс при s=0.25) следующего
+     * теста плывут к этой залипшей точке.
+     *
+     * Идемпотентен. Безопасен при !isCalibrated().
+     */
+    resetSmoothingState() {
+        this._lastPrediction = null;
+    }
+
     clearCalibrationData() {
         this._calibrationData = [];
         this._stats.calibrationPoints = 0;
