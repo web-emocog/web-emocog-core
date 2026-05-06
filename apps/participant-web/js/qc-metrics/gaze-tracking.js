@@ -27,101 +27,110 @@ export function createGazeState() {
 }
 
 /**
- * Установка состояния gaze от внешнего трекера
- * 
- * @param {Object} state - текущее состояние
- * @param {boolean} valid - валидность gaze
- * @param {boolean|null} onScreen - на экране или нет
- * @param {boolean} occluded - флаг окклюзии (опционально)
- * @returns {Object} обновлённое состояние
- */
-export function setGazeScreenState(state, valid, onScreen, occluded = false) {
-    // Gaze cannot be valid if face is occluded
-    const actualValid = valid && !occluded;
-    
-    return {
-        ...state,
-        valid: actualValid,
-        onScreen: actualValid ? onScreen : null,
-        lastValidTime: actualValid ? Date.now() : state.lastValidTime,
-        hasData: true,
-        _lastOccluded: occluded
-    };
-}
-
-/**
- * Добавление gaze точки (LEGACY - для WebGazer)
- * 
+ * Добавление gaze точки.
+ *
+ * Возвращает обновлённое состояние и булевы инкременты счётчиков
+ * { gazeValidInc, gazeOnScreenInc } — чтобы вызывающий мог поднять
+ * counters.gazeValid / counters.gazeOnScreen ровно по факту валидной точки.
+ * Это устраняет P0-2 баг (раньше gazeValid/gazeOnScreen инкрементировались
+ * в processFrame на каждый кадр, что давало проценты >100%).
+ *
  * @param {Object} state - текущее состояние
  * @param {Object} gazeData - данные gaze {x, y, ...}
  * @param {Object} poseData - данные позы {yaw, pitch}
  * @param {Object} thresholds - пороги
  * @param {boolean} occluded - флаг окклюзии (опционально)
- * @returns {Object} обновлённое состояние
+ * @returns {{ state: Object, gazeValidInc: boolean, gazeOnScreenInc: boolean }}
  */
 export function addGazePoint(state, gazeData, poseData, thresholds = DEFAULT_THRESHOLDS, occluded = false) {
     const newState = { ...state };
     newState.totalGazePoints++;
     newState.hasData = true;
     newState._lastOccluded = occluded;
-    
-    // If face is occluded, gaze is invalid
+
+    // Окклюзия → gaze невалиден
     if (occluded) {
         newState.valid = false;
         newState.onScreen = null;
-        return newState;
+        return { state: newState, gazeValidInc: false, gazeOnScreenInc: false };
     }
-    
-    // Определяем валидность и onScreen
-    const { valid, onScreen } = inferOnScreenFromPoseAndGaze(gazeData, poseData, thresholds);
-    
-    newState.valid = valid;
-    newState.onScreen = onScreen;
-    
-    if (valid) {
-        newState.lastValidTime = Date.now();
+
+    // Нет данных взгляда → невалиден
+    if (!gazeData || gazeData.x == null || gazeData.y == null) {
+        newState.valid = false;
+        newState.onScreen = null;
+        return { state: newState, gazeValidInc: false, gazeOnScreenInc: false };
     }
-    
-    return newState;
+
+    // Есть данные → валиден
+    newState.valid = true;
+    newState.lastValidTime = Date.now();
+
+    // Если трекер передал честный onScreen (по correctedX/correctedY ДО clamp), доверяем ему.
+    // Иначе fallback — boundary-чек по координатам gazeData.x/y.
+    const trackerOnScreen = (typeof gazeData.onScreen === 'boolean') ? gazeData.onScreen : null;
+
+    const screenW = window.innerWidth || 1920;
+    const screenH = window.innerHeight || 1080;
+    const inBounds = trackerOnScreen !== null
+        ? trackerOnScreen
+        : (gazeData.x >= 0 && gazeData.x <= screenW &&
+           gazeData.y >= 0 && gazeData.y <= screenH);
+
+    if (poseData && poseData.yaw != null && poseData.pitch != null) {
+        const absYaw = Math.abs(poseData.yaw);
+        const absPitch = Math.abs(poseData.pitch);
+
+        // Явно off-screen по позе — переопределяет любой флаг трекера.
+        if (absYaw > thresholds.pose_yaw_off_min || absPitch > thresholds.pose_pitch_off_min) {
+            newState.onScreen = false;
+            return { state: newState, gazeValidInc: true, gazeOnScreenInc: false };
+        }
+
+        // В рамках on-max — доверяем флагу (от трекера или по координатам).
+        if (absYaw < thresholds.pose_yaw_on_max && absPitch < thresholds.pose_pitch_on_max) {
+            newState.onScreen = inBounds;
+            return { state: newState, gazeValidInc: true, gazeOnScreenInc: inBounds };
+        }
+    }
+
+    // Без явной позы — флаг трекера / boundary-чек.
+    newState.onScreen = inBounds;
+    return { state: newState, gazeValidInc: true, gazeOnScreenInc: inBounds };
 }
 
 /**
- * Инференс onScreen из позы и gaze данных (LEGACY - для WebGazer)
- * 
+ * Инференс onScreen из позы и gaze данных.
+ * Сохранён как вспомогательная функция для совместимости с index.js exports;
+ * новая addGazePoint() инлайнит ту же логику + boundary-чек fallback.
+ *
  * @param {Object} gazeData - данные gaze
  * @param {Object} poseData - данные позы
  * @param {Object} thresholds - пороги
  * @returns {Object} {valid, onScreen}
  */
 export function inferOnScreenFromPoseAndGaze(gazeData, poseData, thresholds = DEFAULT_THRESHOLDS) {
-    // Если нет gaze данных — невалидно
     if (!gazeData || gazeData.x == null || gazeData.y == null) {
         return { valid: false, onScreen: null };
     }
-    
-    // Если есть поза, проверяем углы
+
+    const screenW = window.innerWidth || 1920;
+    const screenH = window.innerHeight || 1080;
+    const inBounds = gazeData.x >= 0 && gazeData.x <= screenW &&
+                     gazeData.y >= 0 && gazeData.y <= screenH;
+
     if (poseData && poseData.yaw != null && poseData.pitch != null) {
         const absYaw = Math.abs(poseData.yaw);
         const absPitch = Math.abs(poseData.pitch);
-        
-        // Явно off-screen по позе
         if (absYaw > thresholds.pose_yaw_off_min || absPitch > thresholds.pose_pitch_off_min) {
             return { valid: true, onScreen: false };
         }
-        
-        // Явно on-screen по позе
         if (absYaw < thresholds.pose_yaw_on_max && absPitch < thresholds.pose_pitch_on_max) {
-            // Проверяем gaze координаты
-            const screenW = window.innerWidth || 1920;
-            const screenH = window.innerHeight || 1080;
-            const inBounds = gazeData.x >= 0 && gazeData.x <= screenW &&
-                            gazeData.y >= 0 && gazeData.y <= screenH;
             return { valid: true, onScreen: inBounds };
         }
     }
-    
-    // Неопределённо
-    return { valid: true, onScreen: null };
+
+    return { valid: true, onScreen: inBounds };
 }
 
 /**

@@ -1,39 +1,29 @@
 /**
- * QC Metrics Module v3.4 - Browser Wrapper
- * 
- * Этот файл служит обёрткой для обратной совместимости.
- * Основной код находится в папке ./qc-metrics/
- * 
- * ИЗМЕНЕНИЯ v3.4:
- * - Renamed currentFps → analysisFps in report output for clarity
- *   (this is the processFrame() call rate, not camera FPS)
- * 
- * ИЗМЕНЕНИЯ v3.3:
- * - Восстановлен метод setValidationData() — принимает результаты валидации gaze
- *   для включения accuracy/precision checks в getSummary()
- * 
- * ИЗМЕНЕНИЯ v3.2:
- * - Удалены неиспользуемые методы: setGazeScreenState()
- * - Удалён неиспользуемый threshold: fps_camera_min
- * 
- * ИЗМЕНЕНИЯ v3.1:
- * - Разделение FPS: analysisFps (частота анализа) и cameraFps (реальный FPS камеры)
- * - setCameraFps() для передачи реального FPS камеры
- * - lowFps проверка теперь использует cameraFps
- * 
+ * QC Metrics Module v3.5 — Browser Wrapper / Loader
+ *
+ * Загрузка устроена так:
+ *   1) Сразу синхронно объявляется inline-класс QCMetricsInline (полная реализация
+ *      ниже), и он публикуется в window.QCMetrics — это safety net для legacy-кода,
+ *      который делает new QCMetrics() сразу при загрузке страницы (с предупреждением
+ *      console.warn о sync use).
+ *   2) Параллельно запускается dynamic import() ES-модуля ./qc-metrics/index.js.
+ *      Если папка успешно загрузилась и экспортирует класс QCMetrics —
+ *      window.QCMetrics ПЕРЕзаписывается на модульную версию.
+ *   3) Если папка повреждена или не загрузилась — остаёмся на inline-классе и
+ *      ругаемся в консоль (console.error).
+ *   4) Состояние загрузки доступно как Promise window.QCMetricsReady,
+ *      резолвящийся в 'module' или 'inline'. Все НОВЫЕ потребители ОБЯЗАНЫ
+ *      делать `await window.QCMetricsReady` перед `new QCMetrics()`.
+ *
+ * Inline-копия здесь поддерживается как точная функциональная копия модульной
+ * версии (тот же публичный API, та же формула QC Score). При расхождении
+ * источником истины считается папка ./qc-metrics/.
+ *
  * @version 3.5.0
  */
 
-/**
- * ============================================================================
- * MIGRATION CHECKLIST (when gaze-tracker.js is ready):
- * ============================================================================
- * See ./qc-metrics/constants.js for full checklist
- * ============================================================================
- */
-
-// Встроенный класс для browser
-class QCMetrics {
+// Встроенный класс — fallback при сбое загрузки папки.
+class QCMetricsInline {
     constructor(options = {}) {
         this.thresholds = {
             minDurationMs: 8000,
@@ -290,8 +280,12 @@ class QCMetrics {
         // Есть данные взгляда — увеличиваем счётчик
         this._counters.gazeValid++;
         this._gazeState.valid = true;
-        
-        // Проверяем onScreen
+
+        // Если трекер уже посчитал честный onScreen (по correctedX/correctedY ДО clamp),
+        // используем его. Поза при этом может ещё ужесточить решение (off-screen по углам).
+        const trackerOnScreen = (typeof gazeData.onScreen === 'boolean') ? gazeData.onScreen : null;
+
+        // Поза: если задана, проверяем явные off/on-screen диапазоны.
         if (poseData?.yaw != null && poseData?.pitch != null) {
             const absYaw = Math.abs(poseData.yaw), absPitch = Math.abs(poseData.pitch);
             if (absYaw > this.thresholds.pose_yaw_off_min || absPitch > this.thresholds.pose_pitch_off_min) {
@@ -299,17 +293,27 @@ class QCMetrics {
                 return;
             }
             if (absYaw < this.thresholds.pose_yaw_on_max && absPitch < this.thresholds.pose_pitch_on_max) {
-                const w = window.innerWidth || 1920, h = window.innerHeight || 1080;
-                const isOnScreen = gazeData.x >= 0 && gazeData.x <= w && gazeData.y >= 0 && gazeData.y <= h;
+                let isOnScreen;
+                if (trackerOnScreen !== null) {
+                    isOnScreen = trackerOnScreen;
+                } else {
+                    const w = window.innerWidth || 1920, h = window.innerHeight || 1080;
+                    isOnScreen = gazeData.x >= 0 && gazeData.x <= w && gazeData.y >= 0 && gazeData.y <= h;
+                }
                 this._gazeState.onScreen = isOnScreen;
                 if (isOnScreen) this._counters.gazeOnScreen++;
                 return;
             }
         }
-        
-        // Без данных позы — проверяем только координаты
-        const w = window.innerWidth || 1920, h = window.innerHeight || 1080;
-        const isOnScreen = gazeData.x >= 0 && gazeData.x <= w && gazeData.y >= 0 && gazeData.y <= h;
+
+        // Без данных позы — приоритет честному флагу от трекера; иначе boundary-чек.
+        let isOnScreen;
+        if (trackerOnScreen !== null) {
+            isOnScreen = trackerOnScreen;
+        } else {
+            const w = window.innerWidth || 1920, h = window.innerHeight || 1080;
+            isOnScreen = gazeData.x >= 0 && gazeData.x <= w && gazeData.y >= 0 && gazeData.y <= h;
+        }
         this._gazeState.onScreen = isOnScreen;
         if (isOnScreen) this._counters.gazeOnScreen++;
     }
@@ -598,12 +602,51 @@ class QCMetrics {
     }
 }
 
-// CommonJS export
+// CommonJS export (для тестов под node)
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = QCMetrics;
+    module.exports = QCMetricsInline;
 }
 
-// Browser global
+// Browser: loader-паттерн.
+// Сначала publish'им inline-класс СИНХРОННО как safety net — старый код,
+// который делает new QCMetrics() до резолва Promise, не упадёт, но получит
+// console.warn, чтобы было видно непереведённые точки потребления.
 if (typeof window !== 'undefined') {
-    window.QCMetrics = QCMetrics;
+    let _qcMetricsResolvedKind = null; // 'module' | 'inline' | null (ещё не решено)
+
+    // Класс-прокси: до резолва выводит предупреждение и инстанцирует inline.
+    // После резолва window.QCMetrics ПЕРЕзаписывается реальным классом
+    // (модульным или inline), и прокси больше не используется для новых вызовов.
+    function QCMetricsProxy(...args) {
+        if (_qcMetricsResolvedKind === null) {
+            console.warn(
+                '[QCMetrics] sync use before Ready — using inline fallback. ' +
+                'Update the consumer to `await window.QCMetricsReady` before `new QCMetrics()`.'
+            );
+        }
+        return new QCMetricsInline(...args);
+    }
+    QCMetricsProxy.prototype = QCMetricsInline.prototype;
+
+    window.QCMetrics = QCMetricsProxy;
+
+    // Фоновая загрузка модульной версии.
+    window.QCMetricsReady = (async () => {
+        try {
+            const mod = await import('./qc-metrics/index.js');
+            const Cls = mod && (mod.QCMetrics || mod.default);
+            if (typeof Cls !== 'function') {
+                throw new Error('module did not export QCMetrics class');
+            }
+            window.QCMetrics = Cls;
+            _qcMetricsResolvedKind = 'module';
+            console.info('[QCMetrics] folder version loaded');
+            return 'module';
+        } catch (e) {
+            window.QCMetrics = QCMetricsInline;
+            _qcMetricsResolvedKind = 'inline';
+            console.error('[QCMetrics] folder load failed, using inline fallback', e);
+            return 'inline';
+        }
+    })();
 }
