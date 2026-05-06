@@ -143,6 +143,15 @@ export function stopGazeTestsAnalysisLoop() {
         clearTimeout(state.runtime.gazeTestsAnalysisInterval);
         state.runtime.gazeTestsAnalysisInterval = null;
     }
+
+    // Сбрасываем smoothing-буфер EMA и last-known gaze, чтобы следующая фаза
+    // не наследовала «прилипшую» точку у края canvas (drawing-test) или
+    // вообще последнюю позицию текущего теста. Без этого первые ~16 кадров
+    // (~480 мс при s=0.25) следующего predict'а плывут к старой точке.
+    if (state.runtime.gazeTracker && typeof state.runtime.gazeTracker.resetSmoothingState === 'function') {
+        state.runtime.gazeTracker.resetSmoothingState();
+    }
+    state.runtime.currentGaze = { x: null, y: null };
 }
 
 export function isGazeTestsAnalysisLoopRunning() {

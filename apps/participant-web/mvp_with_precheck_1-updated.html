@@ -357,21 +357,41 @@
                     </div>
                 </div>
 
+                <!--
+                    Visuospatial drawing test состоит из двух секций:
+                      1) #visuospatialTestScreen — intro-карточка с промптом и кнопкой "Начать".
+                         Отображается обычной частью карточки тестов.
+                      2) #visuospatialDrawingOverlay — fullscreen overlay с canvas + плавающими
+                         плашками. Появляется после клика "Начать". Позиционируется fixed,
+                         z-index выше остального UI (см. .visuospatial-drawing-overlay в style.css).
+                -->
                 <div id="visuospatialTestScreen" class="gaze-test-screen visuospatial-screen" style="display: none;">
                     <h2 data-i18n="test_card_visuospatial_title">Visuospatial drawing</h2>
                     <h3 id="visuospatialPromptTitle"></h3>
                     <p id="visuospatialPromptText" class="text-center"></p>
-                    <p id="visuospatialStatusText" class="test-meta"></p>
+                    <p id="visuospatialStatusText" class="test-meta" data-i18n="visuospatial_hint_hold_space">
+                        Удерживайте ПРОБЕЛ, чтобы рисовать. Отпустите — пауза. Завершить — кнопка в правом верхнем углу.
+                    </p>
 
                     <div class="visuospatial-controls">
                         <button class="btn" id="visuospatialStartBtn" data-i18n="visuospatial_btn_start">Начать рисование</button>
-                        <button class="btn btn-secondary" id="visuospatialFinishBtn" data-i18n="visuospatial_btn_finish">Завершить</button>
                     </div>
+                </div>
 
-                    <div class="visuospatial-canvas-wrap">
-                        <canvas id="visuospatialCanvas"></canvas>
-                        <div id="visuospatialGazeDot"></div>
+                <div id="visuospatialDrawingOverlay" class="visuospatial-drawing-overlay" style="display: none;">
+                    <canvas id="visuospatialCanvas"></canvas>
+                    <div id="visuospatialGazeDot" class="visuospatial-gaze-dot"></div>
+                    <div id="visuospatialPromptHud" class="visuospatial-prompt-hud">
+                        <span id="visuospatialPromptHudText"></span>
                     </div>
+                    <div id="visuospatialPenStatus" class="visuospatial-pen-status" data-i18n="visuospatial_status_pen_up">
+                        Пауза (Пробел отпущен)
+                    </div>
+                    <button class="btn btn-secondary visuospatial-finish-floating"
+                            id="visuospatialFinishBtn"
+                            data-i18n="visuospatial_btn_finish">
+                        Завершить
+                    </button>
                 </div>
 
                 <div id="bpmTestScreen" class="gaze-test-screen bpm-screen" style="display: none;">
