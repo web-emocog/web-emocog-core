@@ -71,7 +71,6 @@ class EmotionAnalyzer {
             total: 0
         };
 
-        // Инициализируем FACS-модель сразу (без ONNX)
         this.useFACSModel();
 
         console.log('[EmotionAnalyzer] Инициализирован с улучшенным FACS-анализом');
@@ -83,7 +82,7 @@ class EmotionAnalyzer {
         try {
             console.log('[EmotionAnalyzer] Начало инициализации...');
             this.faceLandmarker = faceLandmarker;
-            await this.loadEmotionModel();
+            this.useFACSModel(); // Всегда используем только FACS-модель
             console.log('[EmotionAnalyzer] Инициализация завершена');
             return true;
         } catch (error) {
@@ -92,26 +91,7 @@ class EmotionAnalyzer {
         }
     }
 
-    async loadEmotionModel() {
-        try {
-            if (typeof ort === 'undefined') {
-                console.warn('[EmotionAnalyzer] ONNX Runtime не загружен, используем FACS-модель');
-                this.useFACSModel();
-                return;
-            }
 
-            const modelPath = 'js/models/emotion-model.onnx';
-            this.emotionSession = await ort.InferenceSession.create(modelPath, {
-                executionProviders: ['wasm'],
-                graphOptimizationLevel: 'all'
-            });
-
-            console.log('[EmotionAnalyzer] ONNX модель загружена');
-        } catch (error) {
-            console.warn('[EmotionAnalyzer] Не удалось загрузить ONNX модель, используем FACS-модель:', error);
-            this.useFACSModel();
-        }
-    }
 
     useFACSModel() {
         console.log('[EmotionAnalyzer] Используется улучшенная FACS-модель на основе Action Units');

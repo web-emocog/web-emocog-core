@@ -2,6 +2,7 @@
  * UI-модуль (финальная версия).
  * Основа: ui-updated.js (репо) — сохранены все функции репо.
  * Добавлено: toggleConsent() из ui (2).js (наработка).
+ * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
 import { state } from './state.js';
 import { translations } from '../translations.js';
@@ -93,7 +94,6 @@ export function nextStep(stepNumber) {
 }
 
 // ── toggleConsent ────────────────────────────────────────────────────────────
-// Добавлено из ui (2).js: проверяет оба чекбокса согласия
 
 /**
  * Активирует кнопку «Далее» только если оба чекбокса согласия отмечены.
@@ -110,7 +110,6 @@ export function toggleConsent() {
     const bothChecked = consentRead.checked && consentAgree.checked;
     consentBtn.disabled = !bothChecked;
 
-    // Скрываем сообщение об ошибке если оба отмечены
     if (consentError) {
         consentError.style.display = bothChecked ? 'none' : '';
     }
@@ -144,12 +143,10 @@ export function generateIdsAndProceed() {
         participant: participantId.substring(0, 8) + '...'
     });
 
-    // Обновляем consent.participantId если согласие уже подписано
     if (state.sessionData.consent?.informed_consent) {
         state.sessionData.consent.informed_consent.participantId = participantId;
     }
 
-    // Показываем badge с ID
     const idDisplay = document.getElementById('idDisplay');
     if (idDisplay) {
         idDisplay.style.display = 'block';
@@ -169,7 +166,6 @@ export function submitEmail() {
 
     const email = emailInput.value.trim();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
     const errorEl = document.getElementById('emailError');
 
     if (!emailRegex.test(email)) {
@@ -199,7 +195,6 @@ export function submitForm() {
     const age    = parseInt(document.getElementById('ageInput')?.value);
     const gender = document.getElementById('genderSelect')?.value;
 
-    // Валидация возраста
     const ageError = document.getElementById('ageError');
     if (isNaN(age) || age <= 0) {
         if (ageError) { ageError.style.display = 'block'; ageError.innerText = t.age_zero_error; }
@@ -215,11 +210,10 @@ export function submitForm() {
     }
     if (ageError) ageError.style.display = 'none';
 
-    // Сохраняем данные формы
-    state.sessionData.user.age    = age;
-    state.sessionData.user.gender = gender;
-    state.sessionData.user.nativeLang  = document.getElementById('langSelect')?.value  || '';
-    state.sessionData.user.education   = document.getElementById('eduSelect')?.value   || '';
+    state.sessionData.user.age         = age;
+    state.sessionData.user.gender      = gender;
+    state.sessionData.user.nativeLang  = document.getElementById('langSelect')?.value   || '';
+    state.sessionData.user.education   = document.getElementById('eduSelect')?.value    || '';
     state.sessionData.user.vision      = document.getElementById('visionSelect')?.value || 'none';
     state.sessionData.user.hand        = document.getElementById('handSelect')?.value   || '';
     state.sessionData.user.inputDevice = document.getElementById('deviceSelect')?.value || '';
@@ -242,8 +236,9 @@ export function copyIds() {
 window.copyIds = copyIds;
 
 // ── stopPreCheckOnLeave ──────────────────────────────────────────────────────
+// ✅ ИСПРАВЛЕНО: function → export function
 
-function stopPreCheckOnLeave() {
+export function stopPreCheckOnLeave() {
     try {
         stopPreCheck();
         state.flags.isPrecheckRunning = false;
@@ -251,6 +246,8 @@ function stopPreCheckOnLeave() {
         console.warn('[UI] stopPreCheckOnLeave error:', e);
     }
 }
+
+window.stopPreCheckOnLeave = stopPreCheckOnLeave;
 
 // ── measureFPS helper ────────────────────────────────────────────────────────
 
@@ -263,3 +260,163 @@ export async function checkRenderFPS() {
         console.warn('[UI] measureRenderFPS error:', e);
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// НОВЫЕ ФУНКЦИИ — требуются app-updated.js
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── checkForm ────────────────────────────────────────────────────────────────
+
+export function checkForm() {
+    const lang = state.currentLang || 'ru';
+    const t    = translations[lang];
+
+    const age    = parseInt(document.getElementById('ageInput')?.value);
+    const gender = document.getElementById('genderSelect')?.value;
+    const edu    = document.getElementById('eduSelect')?.value;
+
+    const ageValid  = !isNaN(age) && age >= 18 && age <= 99;
+    const allFilled = ageValid
+        && gender && gender !== ''
+        && edu    && edu    !== '';
+
+    const btn = document.getElementById('btnSubmitForm');
+    if (btn) btn.disabled = !allFilled;
+
+    // Подсветка поля возраста
+    const ageInput = document.getElementById('ageInput');
+    if (ageInput && ageInput.value !== '') {
+        ageInput.classList.toggle('input-error', !ageValid);
+        ageInput.classList.toggle('input-ok',    ageValid);
+    }
+
+    return allFilled;
+}
+
+window.checkForm = checkForm;
+
+// ── validateEmailField ───────────────────────────────────────────────────────
+
+export function validateEmailField() {
+    const emailInput = document.getElementById('emailInput');
+    const btn        = document.getElementById('btnSubmitEmail');
+    const errorEl    = document.getElementById('emailError');
+
+    if (!emailInput) return false;
+
+    const value   = emailInput.value.trim();
+    const isEmpty = value === '';
+    // Email необязателен — пустое поле считается валидным
+    const isValid = isEmpty || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+    emailInput.classList.toggle('input-error', !isValid);
+    emailInput.classList.toggle('input-ok',    isValid && !isEmpty);
+
+    if (errorEl) errorEl.style.display = isValid ? 'none' : 'block';
+    if (btn)     btn.disabled = !isValid;
+
+    return isValid;
+}
+
+window.validateEmailField = validateEmailField;
+
+// ── collectTechDataAndProceed ────────────────────────────────────────────────
+
+export function collectTechDataAndProceed(nextStepNumber = 5) {
+    try {
+        const techData = {
+            userAgent:        navigator.userAgent,
+            platform:         navigator.platform,
+            language:         navigator.language,
+            screenW:          screen.width,
+            screenH:          screen.height,
+            devicePixelRatio: window.devicePixelRatio || 1,
+            colorDepth:       screen.colorDepth,
+            timezone:         Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timestamp:        Date.now(),
+            vision:    document.getElementById('visionSelect')?.value   || '',
+            lighting:  document.getElementById('lightingSelect')?.value || '',
+            distance:  document.getElementById('distanceSelect')?.value || ''
+        };
+
+        if (state.sessionData) {
+            state.sessionData.techData = techData;
+        }
+
+        console.log('[UI] Технические данные собраны:', techData);
+    } catch (err) {
+        console.warn('[UI] collectTechDataAndProceed error:', err);
+    }
+
+    nextStep(nextStepNumber);
+}
+
+window.collectTechDataAndProceed = collectTechDataAndProceed;
+
+// ── updateFinalStepWithQC ────────────────────────────────────────────────────
+
+export function updateFinalStepWithQC() {
+    try {
+        hideQcOverlay();
+
+        const payload   = buildAggregatesPayload(state.sessionData);
+        const lang      = state.currentLang || 'ru';
+        const t         = translations[lang];
+        const container = document.getElementById('finalQcSummary');
+
+        if (container && payload) {
+            const attention = payload.attentionMetrics || {};
+            const emotion   = payload.emotionMetrics   || {};
+
+            container.innerHTML = `
+                <div class="qc-metric">
+                    <span class="qc-label">${t?.qc_attention_label || 'Внимание'}</span>
+                    <span class="qc-value">${Math.round((attention.averageAttention || 0) * 100)}%</span>
+                </div>
+                <div class="qc-metric">
+                    <span class="qc-label">${t?.qc_valence_label || 'Валентность'}</span>
+                    <span class="qc-value">${(emotion.averageValence || 0).toFixed(2)}</span>
+                </div>
+                <div class="qc-metric">
+                    <span class="qc-label">${t?.qc_arousal_label || 'Возбуждение'}</span>
+                    <span class="qc-value">${(emotion.averageArousal || 0).toFixed(2)}</span>
+                </div>
+            `;
+        }
+
+        console.log('[UI] Финальный шаг обновлён с QC-данными');
+    } catch (err) {
+        console.warn('[UI] updateFinalStepWithQC error:', err);
+    }
+}
+
+window.updateFinalStepWithQC = updateFinalStepWithQC;
+
+// ── downloadData ─────────────────────────────────────────────────────────────
+
+export function downloadData() {
+    try {
+        const payload       = buildAggregatesPayload(state.sessionData);
+        const json          = JSON.stringify(payload, null, 2);
+        const blob          = new Blob([json], { type: 'application/json' });
+        const url           = URL.createObjectURL(blob);
+        const participantId = state.sessionData?.ids?.participant || 'unknown';
+        const timestamp     = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename      = `emocog_${participantId}_${timestamp}.json`;
+
+        const a = document.createElement('a');
+        a.href     = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        console.log(`[UI] Данные скачаны: ${filename}`);
+    } catch (err) {
+        console.error('[UI] downloadData error:', err);
+    }
+}
+
+window.downloadData = downloadData;
