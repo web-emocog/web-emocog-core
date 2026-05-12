@@ -237,7 +237,7 @@
 
       if (apiBaseInput) apiBaseInput.value = getApiBase();
 
-      btnGenerate.addEventListener('click', function () {
+      btnGenerate.addEventListener('click', async function () {
         var apiBase = getApiBase();
         var token = localStorage.getItem('emocog_api_token');
         var protocolId = parseInt((protocolIdInput.value || '').trim(), 10);
@@ -250,11 +250,20 @@
           return;
         }
         if (!Number.isFinite(protocolId) || protocolId <= 0) {
-          linkOutput.value = buildDeveloperTestLink();
-          btnCopy.disabled = false;
-          copyFeedback.style.display = 'inline';
-          copyFeedback.textContent = 'Protocol ID не задан: создана dev-ссылка (precheck/hub).';
-          return;
+          var loaded = protocolsCache;
+          if (!Array.isArray(loaded) || loaded.length === 0) {
+            loaded = await loadProtocols();
+          }
+          var fallbackProtocolId = loaded && loaded[0] && loaded[0].id ? parseInt(String(loaded[0].id), 10) : null;
+          if (Number.isFinite(fallbackProtocolId) && fallbackProtocolId > 0) {
+            protocolId = fallbackProtocolId;
+            protocolIdInput.value = String(fallbackProtocolId);
+          } else {
+            copyFeedback.style.display = 'inline';
+            copyFeedback.style.color = 'var(--muted)';
+            copyFeedback.textContent = 'Не удалось определить Protocol ID. Откройте исследовательский интерфейс и создайте/загрузите протокол, затем повторите.';
+            return;
+          }
         }
 
         var payload = { protocol_id: protocolId };
@@ -266,50 +275,71 @@
 
         btnGenerate.disabled = true;
         copyFeedback.style.display = 'none';
-        fetch(apiBase + '/invitations', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify(payload)
-        })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().catch(function () { return {}; }).then(function (j) {
-                throw new Error(j.error || (r.status + ' ' + r.statusText));
-              });
+        try {
+          var postInvite = async function (p) {
+            var resp = await fetch(apiBase + '/invitations', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+              },
+              body: JSON.stringify(p)
+            });
+            if (!resp.ok) {
+              var j = await resp.json().catch(function(){ return {}; });
+              throw new Error(j.error || (resp.status + ' ' + resp.statusText));
             }
-            return r.json();
-          })
-          .then(function (inv) {
-            linkOutput.value = buildLink(inv.code);
-            btnCopy.disabled = false;
+            return resp.json();
+          };
+
+          var inv;
+          try {
+            inv = await postInvite(payload);
+          } catch (e) {
+            var message0 = String(e && e.message ? e.message : e);
+            var isProtoMissing0 =
+              message0.indexOf('Protocol not found or access denied') >= 0 ||
+              message0.indexOf('Protocol not found') >= 0;
+            if (!isProtoMissing0) throw e;
+            var loadedProtocols = await loadProtocols();
+            var firstAccessible = loadedProtocols && loadedProtocols[0] && loadedProtocols[0].id
+              ? parseInt(String(loadedProtocols[0].id), 10)
+              : null;
+            var requestedInList = Array.isArray(loadedProtocols) && loadedProtocols.some(function (x) {
+              return String(x && x.id) === String(payload.protocol_id);
+            });
+            if (!requestedInList && Number.isFinite(firstAccessible) && firstAccessible > 0) {
+              payload.protocol_id = firstAccessible;
+              protocolIdInput.value = String(firstAccessible);
+              inv = await postInvite(payload);
+            } else {
+              throw e;
+            }
+          }
+          linkOutput.value = buildLink(inv.code);
+          btnCopy.disabled = false;
+          copyFeedback.style.display = 'inline';
+          copyFeedback.style.color = 'var(--good)';
+          copyFeedback.textContent = 'Ссылка создана';
+        } catch (e) {
+          var message = String(e && e.message ? e.message : e);
+          var isProtoMissing =
+            message.indexOf('Protocol not found or access denied') >= 0 ||
+            message.indexOf('Protocol not found') >= 0;
+          if (isProtoMissing) {
             copyFeedback.style.display = 'inline';
-            copyFeedback.textContent = 'Ссылка создана';
-          })
-          .catch(function (e) {
-            var message = String(e && e.message ? e.message : e);
-            var isProtoMissing =
-              message.indexOf('Protocol not found or access denied') >= 0 ||
-              message.indexOf('Protocol not found') >= 0;
-            if (isProtoMissing) {
-              linkOutput.value = buildDeveloperTestLink();
-              btnCopy.disabled = false;
-              copyFeedback.style.display = 'inline';
-              copyFeedback.style.color = 'var(--muted)';
-              copyFeedback.textContent =
-                'Протокол с таким ID не найден в базе или нет доступа. Проверьте Protocol ID (из списка GET /protocols) и API Base (например …/main/api). В поле ссылки — запасная dev-ссылка для теста без приглашения.';
-              return;
-            }
+            copyFeedback.style.color = 'var(--muted)';
+            copyFeedback.textContent =
+              'Для текущего аккаунта недоступен указанный протокол. Выберите Protocol ID из доступного списка /protocols или войдите под ролью с доступом к нужной организации.';
+          } else {
             copyFeedback.style.color = 'var(--good)';
             copyFeedback.style.display = 'inline';
             copyFeedback.textContent = 'Ошибка: ' + message;
-          })
-          .finally(function () {
-            btnGenerate.disabled = false;
-            loadInvites();
-          });
+          }
+        } finally {
+          btnGenerate.disabled = false;
+          loadInvites();
+        }
       });
 
       btnCopy.addEventListener('click', function () {

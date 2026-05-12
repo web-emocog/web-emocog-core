@@ -22,7 +22,6 @@ import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js';
 import { handleSendWithFallback } from './data-sender.js';
 
-
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
 let trackingTestOptions = null;
@@ -169,23 +168,15 @@ export async function startCalibration() {
     };
     
     // === ИНИЦИАЛИЗАЦИЯ QC METRICS ===
-    // Ждём завершения dynamic import() ES-модуля ./qc-metrics/. Если он успешен —
-    // window.QCMetrics будет реальным модульным классом; иначе остаётся inline-fallback.
-    if (window.QCMetricsReady) {
-        await window.QCMetricsReady;
-    }
     state.runtime.qcMetrics = new QCMetrics({
         screenWidth: window.screen.width,
         screenHeight: window.screen.height
     });
-    state.runtime.qcMetrics.start();
+    state.runtime.qcMetrics.start(); 
     state.runtime.sessionStartTime = Date.now();
     console.log('[QC] QCMetrics инициализирован и запущен');
-
+    
     // === ИНИЦИАЛИЗАЦИЯ GAZE TRACKER ===
-    if (window.GazeTrackerReady) {
-        await window.GazeTrackerReady;
-    }
     state.runtime.gazeTracker = new GazeTracker({
         screenWidth: window.innerWidth,
         screenHeight: window.innerHeight,
@@ -214,6 +205,8 @@ export async function startCalibration() {
     const point = document.getElementById('fullscreenCalibPoint');
     const instructionText = document.getElementById('calibInstructionText');
     const progressText = document.getElementById('calibProgressText');
+    const hasContainer = !!document.querySelector('.container');
+    const hasTopBar = !!document.querySelector('.top-bar');
     
     // Скрываем контейнер и шапку
     document.querySelector('.container').style.display = 'none';
@@ -480,7 +473,6 @@ export async function startCalibration() {
 
 }
 
-
 // === GAZE VALIDATION: Валидация точности после калибровки ===
 /**
  * Запускает этап валидации точности gaze
@@ -692,16 +684,9 @@ export function startGazeValidation() {
         if (fittedCorrection) {
             const correctedPoints = applyValidationAffineCorrection(filteredValidationPoints, fittedCorrection);
             const correctedMetrics = calculateValidationMetrics(correctedPoints);
-
-            // LOOCV-оценка обобщающей ошибки коррекции — fit на N-1 целях, проверка на N-й.
-            // Защищает от переобучения на тех же сэмплах, по которым коррекция построена.
-            const loocv = evaluateAffineCorrectionLOOCV(filteredValidationPoints);
-
-            const shouldApply = shouldApplyValidationCorrection(filteredMetrics, correctedMetrics, loocv);
-            const correctionId = generateCorrectionId();
+            const shouldApply = shouldApplyValidationCorrection(filteredMetrics, correctedMetrics);
 
             postCalibrationCorrection = {
-                correctionId,
                 fitted: true,
                 applied: shouldApply,
                 source: fittedCorrection.source,
@@ -725,22 +710,18 @@ export function startGazeValidation() {
                     precisionPct: correctedMetrics.precisionPct,
                     biasXPct: correctedMetrics.biasXPct,
                     biasYPct: correctedMetrics.biasYPct
-                },
-                loocv: loocv || { available: false }
+                }
             };
 
             if (shouldApply) {
                 if (typeof state.runtime.gazeTracker.setPostCalibrationCorrection === 'function') {
-                    state.runtime.gazeTracker.setPostCalibrationCorrection({
-                        ...fittedCorrection,
-                        correctionId
-                    });
+                    state.runtime.gazeTracker.setPostCalibrationCorrection(fittedCorrection);
                 }
                 metrics = correctedMetrics;
                 qcValidationSamples = flattenValidationSamples(correctedPoints);
                 console.log('[Validation] Применена post-calibration коррекция:', postCalibrationCorrection);
             } else {
-                console.log('[Validation] Коррекция рассчитана, но не применена (улучшение недостаточное или held-out регрессия):', postCalibrationCorrection);
+                console.log('[Validation] Коррекция рассчитана, но не применена (улучшение недостаточное):', postCalibrationCorrection);
             }
         } else {
             console.log('[Validation] Affine-коррекция не рассчитана (недостаточно или некачественные данные)');
@@ -1137,146 +1118,7 @@ function applyValidationAffineCorrection(points, correction) {
     }));
 }
 
-/**
- * Per-target медианы валидационных сэмплов.
- * Каждой validation-точке сопоставляется одна агрегированная (medianGazeX, medianGazeY)
- * + (targetX, targetY). Это устраняет within-target шум перед LOOCV-оценкой.
- *
- * @param {Array} points - validation points (каждый с .samples)
- * @returns {Array<{medianGazeX:number, medianGazeY:number, targetX:number, targetY:number, n:number}>}
- */
-function computePerTargetMedians(points) {
-    const out = [];
-    for (const pointData of points || []) {
-        const valid = (pointData?.samples || []).filter(s =>
-            Number.isFinite(s?.gazeX) && Number.isFinite(s?.gazeY) &&
-            Number.isFinite(s?.targetX) && Number.isFinite(s?.targetY)
-        );
-        if (valid.length === 0) continue;
-        const xs = valid.map(s => s.gazeX).sort((a, b) => a - b);
-        const ys = valid.map(s => s.gazeY).sort((a, b) => a - b);
-        const mid = Math.floor(xs.length / 2);
-        const medianGazeX = xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
-        const medianGazeY = ys.length % 2 ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
-        out.push({
-            medianGazeX,
-            medianGazeY,
-            targetX: valid[0].targetX,
-            targetY: valid[0].targetY,
-            n: valid.length
-        });
-    }
-    return out;
-}
-
-/**
- * Фит affine-коррекции по точкам {gazeX, gazeY} → {targetX, targetY}.
- * Использует те же нормальные уравнения с ridge'ом, что и fitValidationAffineCorrection.
- * Принимает массив объектов в формате computePerTargetMedians().
- */
-function fitAffineFromMedians(medians) {
-    if (!Array.isArray(medians) || medians.length < 4) return null;
-
-    let m00 = 0, m01 = 0, m02 = 0;
-    let m11 = 0, m12 = 0, m22 = 0;
-    let vx0 = 0, vx1 = 0, vx2 = 0;
-    let vy0 = 0, vy1 = 0, vy2 = 0;
-
-    for (const p of medians) {
-        const x = p.medianGazeX;
-        const y = p.medianGazeY;
-        const tx = p.targetX;
-        const ty = p.targetY;
-        m00 += x * x; m01 += x * y; m02 += x;
-        m11 += y * y; m12 += y;
-        m22 += 1;
-        vx0 += x * tx; vx1 += y * tx; vx2 += tx;
-        vy0 += x * ty; vy1 += y * ty; vy2 += ty;
-    }
-
-    const ridge = 1e-3;
-    const A = [
-        [m00 + ridge, m01, m02],
-        [m01, m11 + ridge, m12],
-        [m02, m12, m22 + ridge]
-    ];
-
-    const matrixX = solveLinear3x3(A, [vx0, vx1, vx2]);
-    const matrixY = solveLinear3x3(A, [vy0, vy1, vy2]);
-    if (!matrixX || !matrixY) return null;
-    return { matrixX, matrixY };
-}
-
-/**
- * Leave-one-target-out оценка affine-коррекции.
- *
- * Для каждой из N целевых точек:
- *  1. Фитим affine на медианах оставшихся N-1 целей.
- *  2. Применяем матрицу к удержанной (held-out) медиане.
- *  3. Считаем расстояние от прогноза до её targetX/targetY.
- *
- * Это честная оценка обобщающей ошибки коррекции (без переобучения на тех же
- * сэмплах, по которым она построена).
- *
- * Также возвращает rawTargetRmsPx — RMS расстояний (median_gaze - target) до коррекции.
- * Если loocvRmsHeldOutPx > rawTargetRmsPx + margin, коррекцию применять нельзя.
- *
- * @param {Array} filteredValidationPoints
- * @returns {{loocvRmsHeldOutPx, loocvMedianHeldOutPx, loocvP95HeldOutPx,
- *            rawTargetRmsPx, rawTargetMedianPx, targetCount} | null}
- */
-function evaluateAffineCorrectionLOOCV(filteredValidationPoints) {
-    const medians = computePerTargetMedians(filteredValidationPoints);
-    if (medians.length < 4) return null; // Минимум 4 цели для разумного LOOCV
-
-    const heldOutErrors = [];
-    for (let i = 0; i < medians.length; i++) {
-        const heldOut = medians[i];
-        const trainSet = medians.filter((_, j) => j !== i);
-        const fit = fitAffineFromMedians(trainSet);
-        if (!fit) continue;
-        const predX = fit.matrixX[0] * heldOut.medianGazeX + fit.matrixX[1] * heldOut.medianGazeY + fit.matrixX[2];
-        const predY = fit.matrixY[0] * heldOut.medianGazeX + fit.matrixY[1] * heldOut.medianGazeY + fit.matrixY[2];
-        const err = Math.hypot(predX - heldOut.targetX, predY - heldOut.targetY);
-        if (Number.isFinite(err)) heldOutErrors.push(err);
-    }
-    if (heldOutErrors.length === 0) return null;
-
-    const rawErrors = medians.map(m => Math.hypot(m.medianGazeX - m.targetX, m.medianGazeY - m.targetY));
-
-    const rms = arr => Math.sqrt(arr.reduce((s, v) => s + v * v, 0) / arr.length);
-    const sortedHO = [...heldOutErrors].sort((a, b) => a - b);
-    const sortedRaw = [...rawErrors].sort((a, b) => a - b);
-    const median = arr => arr[Math.floor(arr.length / 2)];
-    const p95 = arr => arr[Math.min(arr.length - 1, Math.ceil(arr.length * 0.95) - 1)];
-
-    return {
-        loocvRmsHeldOutPx: Math.round(rms(heldOutErrors) * 10) / 10,
-        loocvMedianHeldOutPx: Math.round(median(sortedHO) * 10) / 10,
-        loocvP95HeldOutPx: Math.round(p95(sortedHO) * 10) / 10,
-        rawTargetRmsPx: Math.round(rms(rawErrors) * 10) / 10,
-        rawTargetMedianPx: Math.round(median(sortedRaw) * 10) / 10,
-        targetCount: medians.length
-    };
-}
-
-/**
- * Решение, применять ли affine-коррекцию.
- *
- * Базовое условие — улучшение accuracy/precision на отфильтрованных сэмплах
- * (в самой выборке, по которой фитили) ≥ 0.6 п.п. без серьёзной регрессии,
- * либо переход через «общий gate» (precision_corr ≤ 6%, accuracy_corr ≤ 12%).
- *
- * Дополнительный гейт — LOOCV (если рассчитан): не применять коррекцию,
- * если held-out RMS обобщающей ошибки регрессирует относительно raw target RMS
- * больше чем на TOLERANCE px. Это страхует от переобучения на validation-сэмплах.
- *
- * @param {Object} rawMetrics - метрики на отфильтрованных сэмплах ДО коррекции
- * @param {Object} correctedMetrics - метрики ПОСЛЕ применения коррекции (in-sample)
- * @param {Object|null} loocv - результат evaluateAffineCorrectionLOOCV (опционально)
- * @returns {boolean}
- */
-function shouldApplyValidationCorrection(rawMetrics, correctedMetrics, loocv = null) {
+function shouldApplyValidationCorrection(rawMetrics, correctedMetrics) {
     const rawAcc = rawMetrics?.accuracyPx;
     const rawPrec = rawMetrics?.precisionPx;
     const corrAcc = correctedMetrics?.accuracyPx;
@@ -1296,30 +1138,7 @@ function shouldApplyValidationCorrection(rawMetrics, correctedMetrics, loocv = n
         correctedMetrics.precisionPct <= 6 &&
         correctedMetrics.accuracyPct <= 12;
 
-    const baseDecision = (significant && noSeriousRegression) || crossesCommonGate;
-    if (!baseDecision) return false;
-
-    // Held-out гейт: не применять, если LOOCV RMS заметно хуже raw target RMS.
-    // Допускаем небольшое регрессионное проседание (5px) — для шума и малой выборки.
-    if (loocv && Number.isFinite(loocv.loocvRmsHeldOutPx) && Number.isFinite(loocv.rawTargetRmsPx)) {
-        const HOLD_OUT_REGRESSION_TOLERANCE_PX = 5;
-        if (loocv.loocvRmsHeldOutPx > loocv.rawTargetRmsPx + HOLD_OUT_REGRESSION_TOLERANCE_PX) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-/**
- * Простой ID коррекции: timestamp + случайные 4 символа.
- * Достаточно уникально внутри одной сессии; помогает связывать сэмплы с конкретной
- * матрицей в логах/payload.
- */
-function generateCorrectionId() {
-    const t = Date.now().toString(36);
-    const r = Math.random().toString(36).slice(2, 6);
-    return `corr_${t}_${r}`;
+    return (significant && noSeriousRegression) || crossesCommonGate;
 }
 
 // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
@@ -1645,15 +1464,9 @@ export async function finishSession() {
 
     // === Heatmap + attention analytics (research-only) ===
     try {
-        // Передаём validationRmsPx из gazeValidation, чтобы heatmap получил
-        // quality-weighting (плохая калибровка → меньший вклад в bin'ы).
-        const validationRmsPx = Number.isFinite(state.sessionData?.gazeValidation?.metrics?.accuracyPx)
-            ? state.sessionData.gazeValidation.metrics.accuracyPx
-            : null;
         state.sessionData.heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
             gridWidth: 96,
-            gridHeight: 54,
-            validationRmsPx
+            gridHeight: 54
         });
     } catch (e) {
         console.warn('[finishSession] Ошибка расчёта heatmaps:', e);
