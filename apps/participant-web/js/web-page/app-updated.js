@@ -34,6 +34,11 @@ window.nextStep = nextStep;
 window.copyIds = copyIds;
 window.validateEmailField = validateEmailField;
 window.downloadData = downloadData;
+window.addEventListener('error', (e) => {
+});
+window.addEventListener('unhandledrejection', (e) => {
+    const reason = e?.reason;
+});
 
 export function handleGazeUpdate(gazeData) {
     const customDot = document.getElementById('customGazeDot');
@@ -57,13 +62,7 @@ export function handleGazeUpdate(gazeData) {
     const taskContext = getCurrentTaskContext();
     const screenWidth = window.innerWidth || 1;
     const screenHeight = window.innerHeight || 1;
-    // Берём честный onScreen из gaze-tracker (считается по correctedX/correctedY до clamp).
-    // Fallback на boundary-чек по зажатым x/y оставляем ради старых сэмплов / тестов,
-    // где трекер мог не выставить флаг.
-    const onScreen = typeof gazeData.onScreen === 'boolean'
-        ? gazeData.onScreen
-        : (x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight);
-    const clipped = typeof gazeData.clipped === 'boolean' ? gazeData.clipped : !onScreen;
+    const onScreen = x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight;
     const confidence = Number.isFinite(gazeData.confidence) ? gazeData.confidence : null;
     const hubLike =
         phase === 'test_hub' ||
@@ -102,25 +101,16 @@ export function handleGazeUpdate(gazeData) {
             stimulusType: taskContext.stimulusType ?? null,
             expectedResponse: taskContext.expectedResponse ?? null,
             onScreen,
-            clipped,
             confidence,
-            // Сырое предсказание модели (до post-correction). Полезно для
-            // последующего переобучения affine correction на собранных сессиях.
-            modelX: Number.isFinite(gazeData.modelX) ? gazeData.modelX : null,
-            modelY: Number.isFinite(gazeData.modelY) ? gazeData.modelY : null,
-            // После post-correction, до финального clamp. Аналитические координаты —
-            // именно по ним нужно считать AOI / heatmap / off-screen.
-            correctedX: Number.isFinite(gazeData.correctedX) ? gazeData.correctedX : null,
-            correctedY: Number.isFinite(gazeData.correctedY) ? gazeData.correctedY : null,
+            rawX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
+            rawY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
             screenWidth,
             screenHeight
         });
     }
 
     if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-        // Передаём onScreen, чтобы QC использовал честный флаг от трекера
-        // и не пересчитывал его по уже зажатым координатам.
-        state.runtime.qcMetrics.addGazePoint({ x, y, onScreen }, state.runtime.lastPoseData);
+        state.runtime.qcMetrics.addGazePoint({ x, y }, state.runtime.lastPoseData);
     }
 }
 
@@ -448,7 +438,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (emailInput) emailInput.addEventListener('blur', validateEmailField);
 
     const step3Btn = document.getElementById('step3NextBtn');
-    if (step3Btn) step3Btn.addEventListener('click', collectTechDataAndProceed);
+    if (step3Btn) {
+        step3Btn.addEventListener('click', async () => {
+            const emailEl = document.getElementById('userEmail');
+            const beforeStep = document.querySelector('.step.active')?.id || null;
+            try {
+                await collectTechDataAndProceed();
+                const afterStep = document.querySelector('.step.active')?.id || null;
+            } catch (err) {
+            }
+        });
+    }
 
     const userForm = document.getElementById('userForm');
     if (userForm) {
@@ -468,7 +468,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (startPrecheckBtn) startPrecheckBtn.addEventListener('click', startPreCheck);
 
     const startCalibBtn = document.getElementById('startCalibBtn');
-    if (startCalibBtn) startCalibBtn.addEventListener('click', startCalibration);
+    if (startCalibBtn) {
+        startCalibBtn.addEventListener('click', async () => {
+            try {
+                await startCalibration();
+            } catch (err) {
+            }
+        });
+    }
 
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) downloadBtn.addEventListener('click', () => downloadData());
