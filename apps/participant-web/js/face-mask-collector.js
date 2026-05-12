@@ -67,12 +67,10 @@ class FaceMaskCollector {
         this.sessionMetadata.startTime = Date.now();
         this.lastCollectionTime = Date.now();
 
-        console.log(`[FaceMaskCollector] ▶️ Запущен (фаза: ${phase}, режим: внешние landmarks)`);
+        console.log(`[FaceMaskCollector] ▶️ Запущен (фаза: ${phase})`);
 
-        // ❌ УДАЛИЛИ: this.collectionLoop();
-        // Теперь landmarks передаются извне через processLandmarks()
+        this.collectionLoop();
     }
-
 
     stop() {
         if (!this.isRunning) {
@@ -87,53 +85,60 @@ class FaceMaskCollector {
     }
 
     /**
- * Изменение фазы сессии
- * @param {string} phase
- */
-setPhase(phase) {
-    this.currentPhase = phase;
-    console.log(`[FaceMaskCollector] Фаза изменена на: ${phase}`);
-}
-
-    // ✅ НОВЫЙ МЕТОД: Обработка landmarks, полученных извне
-    /**
-     * Обрабатывает landmarks, полученные из основного цикла анализа
-     * @param {Array} landmarks - массив landmarks одного лица
+     * Изменение фазы сессии
+     * @param {string} phase
      */
-    processLandmarks(landmarks) {
-        if (!this.isRunning) {
-            return; // Модуль не запущен
-        }
+    setPhase(phase) {
+        this.currentPhase = phase;
+        console.log(`[FaceMaskCollector] Фаза изменена на: ${phase}`);
+    }
 
-        // Проверяем throttling (ограничение FPS)
+    async collectionLoop() {
+        if (!this.isRunning) return;
+
         const now = Date.now();
         const timeSinceLastCollection = now - this.lastCollectionTime;
         const targetInterval = 1000 / this.config.fps;
 
-        if (timeSinceLastCollection < targetInterval) {
-            return; // Слишком рано для следующего сбора
+        if (timeSinceLastCollection >= targetInterval) {
+            await this.collectMask();
+            this.lastCollectionTime = now;
         }
 
-        this.lastCollectionTime = now;
-
-        try {
-            if (!landmarks || !Array.isArray(landmarks) || landmarks.length === 0) {
-                this.recordMask(null, 'no_landmarks');
-                return;
-            }
-
-            // Генерируем маску
-            const mask = this.generateMask(landmarks);
-
-            // Записываем маску
-            this.recordMask(mask, 'success');
-
-        } catch (error) {
-            console.error('[FaceMaskCollector] Ошибка обработки landmarks:', error);
-            this.recordMask(null, 'error');
-        }
+        requestAnimationFrame(() => this.collectionLoop());
     }
 
+    async collectMask() {
+      try {
+          if (!this.videoElement || this.videoElement.readyState < 2) {
+              return;
+          }
+
+          let faceLandmarks = null;
+        
+          if (window.lastFaceLandmarks) {
+              faceLandmarks = window.lastFaceLandmarks;
+          } else {
+              this.recordMask(null, 'no_landmarks');
+              return;
+          }
+
+          if (!faceLandmarks || !faceLandmarks.faceLandmarks || faceLandmarks.faceLandmarks.length === 0) {
+              this.recordMask(null, 'no_face');
+              return;
+          }
+
+          const landmarks = faceLandmarks.faceLandmarks[0];
+
+          const mask = this.generateMask(landmarks);
+
+          this.recordMask(mask, 'success');
+
+      } catch (error) {
+          console.error('[FaceMaskCollector] Ошибка сбора маски:', error);
+          this.recordMask(null, 'error');
+      }
+    }
 
 
     /**
