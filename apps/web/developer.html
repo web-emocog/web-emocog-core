@@ -85,11 +85,11 @@
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
-        window.location.replace('developer/login.html');
+        window.location.replace('developer/login.html?next=developer');
         return;
       }
       window.EmocogAuthGuard.ensureProtectedPage({
-        loginPath: 'developer/login.html',
+        loginPath: 'developer/login.html?next=developer',
         allowedRoles: ['admin', 'developer'],
         preserveAuthOnRoleDenied: true,
         roleDeniedRedirect: 'researcher.html'
@@ -100,7 +100,7 @@
     <h1>🛠 Тестирование модулей</h1>
     <span style="display:flex;align-items:center;gap:12px;">
       <span id="authMeta" style="font-size:13px;color:#94a3b8;"></span>
-      <a href="developer/login.html" id="logoutLink" style="font-size:13px;color:#94a3b8;">Выйти</a>
+      <a href="developer/login.html?next=developer" id="logoutLink" style="font-size:13px;color:#94a3b8;">Выйти</a>
       <button type="button" id="changePasswordBtn" class="theme-toggle" aria-label="Change password">🔐</button>
       <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle theme">🌓</button>
       <a href="index.html">← На главную</a>
@@ -206,12 +206,16 @@
     document.getElementById('logoutLink').addEventListener('click', function (e) {
       e.preventDefault();
       try {
-        sessionStorage.removeItem('emocog_developer_auth');
-        localStorage.removeItem('emocog_developer_auth');
-        localStorage.removeItem('emocog_api_token');
-        localStorage.removeItem('emocog_api_user');
+        if (window.EmocogAuthGuard && typeof window.EmocogAuthGuard.clearAuth === 'function') {
+          window.EmocogAuthGuard.clearAuth();
+        } else {
+          sessionStorage.removeItem('emocog_developer_auth');
+          localStorage.removeItem('emocog_developer_auth');
+          localStorage.removeItem('emocog_api_token');
+          localStorage.removeItem('emocog_api_user');
+        }
       } catch (_) {}
-      window.location.href = 'developer/login.html';
+      window.location.replace('developer/login.html?next=developer');
     });
 
     document.getElementById('changePasswordBtn').addEventListener('click', async function () {

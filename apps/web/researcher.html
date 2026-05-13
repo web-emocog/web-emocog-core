@@ -2197,11 +2197,11 @@ body{
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
-        window.location.replace('developer/login.html');
+        window.location.replace('developer/login.html?next=researcher');
         return;
       }
       window.EmocogAuthGuard.ensureProtectedPage({
-        loginPath: 'developer/login.html',
+        loginPath: 'developer/login.html?next=researcher',
         allowedRoles: ['researcher', 'admin', 'PI', 'analyst', 'assistant', 'developer']
       }).then(function (result) {
         if (!result || !result.ok) return;
@@ -2481,7 +2481,7 @@ body{
         </div>
 
         <!-- Logout — at very bottom -->
-        <button class="quick-btn" style="width:100%;gap:10px;color:var(--muted);margin-top:4px;" id="qaLogout">
+        <button type="button" class="quick-btn" style="width:100%;gap:10px;color:var(--muted);margin-top:4px;" id="qaLogout">
           <span class="icon"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg></span>
           <span id="qaLogoutLabel">Log out</span>
         </button>
@@ -2540,6 +2540,103 @@ async function apiPost(path, body){
 }
 async function apiPatch(path, body){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'PATCH', headers: apiHeaders(), body: JSON.stringify(body || {}) }); if(!r.ok) throw await apiFailError(r); return r.json(); }
 async function apiDelete(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'DELETE', headers: apiHeaders() }); if(!r.ok) throw await apiFailError(r); return r.status === 204 ? null : r.json(); }
+function pickId(row){
+  if(!row || typeof row !== 'object') return null;
+  return row.id || row.project_id || row.protocol_id || row.organization_id || row.org_id || null;
+}
+function updateExperimentInStorage(experimentId, patch){
+  const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+  const idx = experiments.findIndex(e => e.id === experimentId);
+  if(idx < 0) return null;
+  experiments[idx] = Object.assign({}, experiments[idx], patch || {}, { updatedAt: new Date().toISOString() });
+  localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+  return experiments[idx];
+}
+async function ensureProjectForProtocolSync(){
+  let projects = [];
+  try {
+    const rows = await apiGet('/projects');
+    projects = Array.isArray(rows) ? rows : [];
+  } catch (_) {
+    projects = [];
+  }
+  if (projects.length) {
+    const p = projects[0] || {};
+    return {
+      projectId: p.id || p.project_id || null,
+      organizationId: p.organization_id || p.org_id || p.organizationId || null
+    };
+  }
+
+  const roleRaw = String((state.authUser && state.authUser.role) || state.role || '').toLowerCase();
+  const canProvision = ['admin', 'pi'].some(function(role){ return roleRaw.includes(role); });
+  if (!canProvision) {
+    throw new Error('No accessible project for protocol sync.');
+  }
+
+  let organizationId = null;
+  try {
+    const orgRows = await apiGet('/organizations');
+    const organizations = Array.isArray(orgRows) ? orgRows : [];
+    if (organizations.length) {
+      organizationId = organizations[0].id || organizations[0].organization_id || organizations[0].org_id || null;
+    }
+  } catch (_) {}
+
+  if (!organizationId) {
+    const orgName = 'Research Organization';
+    let createdOrg = null;
+    try {
+      createdOrg = await apiPost('/organizations', { name: orgName });
+    } catch (_) {
+      createdOrg = await apiPost('/organizations', { title: orgName });
+    }
+    organizationId = pickId(createdOrg);
+  }
+  if (!organizationId) throw new Error('Unable to prepare organization for protocol sync.');
+
+  const projectName = 'Research Project';
+  let createdProject = null;
+  try {
+    createdProject = await apiPost('/projects', { name: projectName, organization_id: organizationId });
+  } catch (_) {
+    createdProject = await apiPost('/projects', { title: projectName, org_id: organizationId });
+  }
+  const projectId = pickId(createdProject);
+  if (!projectId) throw new Error('Unable to prepare project for protocol sync.');
+  return { projectId: projectId, organizationId: organizationId };
+}
+async function syncExperimentProtocol(experimentEntry, protocolJson){
+  if (!experimentEntry || !experimentEntry.id) throw new Error('Experiment entry is required.');
+  const context = await ensureProjectForProtocolSync();
+  const payload = {
+    title: (protocolJson && protocolJson.title) || experimentEntry.title || 'Untitled protocol',
+    name: (protocolJson && protocolJson.title) || experimentEntry.title || 'Untitled protocol',
+    version: experimentEntry.version || ((protocolJson && protocolJson.version) || '1.0'),
+    project_id: context.projectId,
+    organization_id: context.organizationId || undefined,
+    definition: protocolJson,
+    protocol_json: protocolJson
+  };
+  let response = null;
+  const currentServerId = experimentEntry.serverProtocolId ? String(experimentEntry.serverProtocolId) : '';
+  if (currentServerId) {
+    try {
+      response = await apiPatch('/protocols/' + encodeURIComponent(currentServerId), payload);
+    } catch (_) {
+      response = await apiPost('/protocols', payload);
+    }
+  } else {
+    response = await apiPost('/protocols', payload);
+  }
+  const serverProtocolId = pickId(response);
+  if (!serverProtocolId) {
+    throw new Error('Protocol sync did not return server protocol ID.');
+  }
+  const updated = updateExperimentInStorage(experimentEntry.id, { serverProtocolId: String(serverProtocolId) });
+  if (!updated) throw new Error('Failed to store synced server protocol ID.');
+  return String(serverProtocolId);
+}
 
 function applyAdminNavAccess(){
   const nav = document.getElementById('nav-admin');
@@ -2573,7 +2670,7 @@ function logoutResearcher() {
       sessionStorage.removeItem('emocog_developer_auth');
     }
   } catch (_) {}
-  window.location.href = 'developer/login.html';
+  window.location.href = 'developer/login.html?next=researcher';
 }
 
 
@@ -3649,7 +3746,7 @@ function initInspectorButtons(){
 }
 
 // ========== SESSION CARD DASHBOARD DATA ==========
-const SESSION_DATA = {
+let SESSION_DATA = {
   session: {
     id: "S_2026_001_face_recognition",
     participant_id: "P_042",
@@ -3739,8 +3836,134 @@ const SESSION_DATA = {
     {name: "Block_1", duration_sec: 45, valid_pct: "97%", qc_score: 8.5, reasons: [{label:"FPS",value:"60",severity:"ok"}], tech:{fps_mean:60}, kpis:{gaze_on_target_pct:89}, validity_class:"VALID", segmentKey:"full"},
     {name: "Block_2", duration_sec: 52, valid_pct: "94%", qc_score: 8.1, reasons: [{label:"Взгляд",value:"94%",severity:"ok"}], tech:{fps_mean:59.5}, kpis:{gaze_on_target_pct:85}, validity_class:"VALID", segmentKey:"baseline"},
     {name: "Block_3", duration_sec: 48, valid_pct: "78%", qc_score: 6.8, reasons: [{label:"Лицо",value:"78%",severity:"warn"}], tech:{fps_mean:58}, kpis:{gaze_on_target_pct:78}, validity_class:"BORDERLINE", segmentKey:"task"}
-  ]
+  ],
+  proxy: {
+    metrics: {},
+    source: {},
+    source_payload: null
+  }
 };
+
+function classifyQcBadge(validity){
+  const v = String(validity || '').toLowerCase();
+  if(v === 'valid') return { cls: 'VALID', badge: 'good' };
+  if(v === 'borderline') return { cls: 'BORDERLINE', badge: 'warn' };
+  if(v === 'invalid') return { cls: 'INVALID', badge: 'bad' };
+  return { cls: null, badge: 'neutral' };
+}
+
+function toFinite(v){
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapApiSessionToSessionData(details){
+  if(!details || typeof details !== 'object') return SESSION_DATA;
+  const mapped = JSON.parse(JSON.stringify(SESSION_DATA));
+  const features = (details.features && typeof details.features === 'object') ? details.features : {};
+  const tech = (features.meta && features.meta.tech && typeof features.meta.tech === 'object') ? features.meta.tech : {};
+
+  const startedAtMs = Date.parse(details.started_at || '');
+  const stoppedAtMs = Date.parse(details.stopped_at || details.completed_at || '');
+  const durationSec = (Number.isFinite(startedAtMs) && Number.isFinite(stoppedAtMs) && stoppedAtMs >= startedAtMs)
+    ? Math.round((stoppedAtMs - startedAtMs) / 1000)
+    : mapped.session.duration_sec;
+
+  mapped.session = {
+    ...mapped.session,
+    id: details.session_id || mapped.session.id,
+    participant_id: details.participant_id || mapped.session.participant_id,
+    duration_sec: durationSec,
+    device: tech.device || mapped.session.device,
+    browser: tech.browser || mapped.session.browser,
+    fps_mean: toFinite(tech.fps_mean ?? tech.fpsMean ?? tech.camera_fps_mean) ?? mapped.session.fps_mean,
+    light: tech.light || tech.illumination || mapped.session.light,
+    protocol: String(details.protocol_id || mapped.session.protocol || ''),
+  };
+
+  const qcState = classifyQcBadge(details.qc_validity);
+  const reasonsRaw = Array.isArray(details.qc_fail_reasons) ? details.qc_fail_reasons : [];
+  mapped.qc = {
+    score: toFinite(details.qc_score),
+    class: qcState.cls,
+    badge: qcState.badge,
+    reasons: reasonsRaw.map(r => ({
+      label: typeof r === 'string' ? r : (r && (r.label || r.key)) || 'reason',
+      value: '',
+      severity: (qcState.cls === 'INVALID') ? 'bad' : (qcState.cls === 'BORDERLINE' ? 'warn' : 'ok')
+    }))
+  };
+
+  const apiBlocks = Array.isArray(features.blocks) ? features.blocks : [];
+  if(apiBlocks.length){
+    mapped.blocks = apiBlocks.map((b, idx) => ({
+      name: b && b.name ? String(b.name) : `Block_${idx + 1}`,
+      duration_sec: null,
+      valid_pct: mapped.qc.score != null ? `${Math.round(mapped.qc.score)}%` : '—',
+      qc_score: mapped.qc.score != null ? mapped.qc.score : '—',
+      reasons: mapped.qc.reasons.slice(0, 3),
+      tech: { fps_mean: mapped.session.fps_mean },
+      kpis: { gaze_on_target_pct: toFinite(b && b.gaze_on_target) },
+      validity_class: mapped.qc.class || 'INVALID',
+      segmentKey: idx === 0 ? 'full' : (idx === 1 ? 'baseline' : 'task')
+    }));
+
+    const first = apiBlocks[0] || {};
+    mapped.segments.full = {
+      ...mapped.segments.full,
+      valence_mean: toFinite(features.emotion_summary && features.emotion_summary.valence_mean) ?? mapped.segments.full.valence_mean,
+      arousal_mean: toFinite(features.emotion_summary && features.emotion_summary.arousal_mean) ?? mapped.segments.full.arousal_mean,
+      gaze_on_target: toFinite(first.gaze_on_target ?? first.attention) ?? mapped.segments.full.gaze_on_target,
+      fixation_duration: toFinite(first.rt) ?? mapped.segments.full.fixation_duration,
+    };
+  }
+
+  mapped.proxy = {
+    metrics: (details.proxy_metrics && typeof details.proxy_metrics === 'object') ? details.proxy_metrics : {},
+    source: {
+      qc_score: toFinite(details.qc_score),
+      proxy_ready: !!details.proxy_ready,
+      source_count: details.proxy_metrics && details.proxy_metrics.source_count != null
+        ? details.proxy_metrics.source_count
+        : null
+    },
+    source_payload: (details.proxy_source_data && typeof details.proxy_source_data === 'object') ? details.proxy_source_data : null
+  };
+
+  return mapped;
+}
+
+async function hydrateSessionDataFromApi(){
+  try {
+    const recent = await apiGet('/experiments/recent?limit=100');
+    const rows = Array.isArray(recent) ? recent : [];
+    if(!rows.length) return;
+
+    const picked = rows.find(r => r && r.session_status === 'completed') || rows[0];
+    if(!picked || !picked.id) return;
+    const details = await apiGet('/sessions/' + encodeURIComponent(String(picked.id)));
+    SESSION_DATA = mapApiSessionToSessionData(details);
+  } catch (err) {
+    console.warn('[SessionCard] fallback to demo data:', err && err.message ? err.message : err);
+  }
+}
+
+function renderProxyMetricsCards(){
+  const proxy = (SESSION_DATA && SESSION_DATA.proxy && SESSION_DATA.proxy.metrics) ? SESSION_DATA.proxy.metrics : {};
+  const source = (SESSION_DATA && SESSION_DATA.proxy && SESSION_DATA.proxy.source) ? SESSION_DATA.proxy.source : {};
+  const keys = ['emot_cog_index', 'engagement_index', 'stress_proxy_index', 'perception_quality_index'];
+
+  keys.forEach((k, idx) => {
+    const valueEl = document.getElementById('proxyMetricValue' + idx);
+    const sourceEl = document.getElementById('proxyMetricSource' + idx);
+    if(!valueEl || !sourceEl) return;
+    const v = toFinite(proxy[k]);
+    valueEl.textContent = (v != null) ? v.toFixed(2) : '—';
+    sourceEl.textContent = (source.qc_score != null)
+      ? `qc:${source.qc_score}`
+      : t('noDataLabel');
+  });
+}
 
 const METRIC_GROUPS = [
   {key: "emotion", title: "Эмоции", sub: "Facial Expression Analysis"},
@@ -3774,6 +3997,8 @@ function safeStat(v){ return (v === null || v === undefined || !isFinite(Number(
 
 function renderSessionCardHeader(){
   const data = SESSION_DATA;
+  const sid = document.getElementById("sessionIdHint");
+  if(sid) sid.textContent = `Сессия: ${data.session.id || '—'}`;
   const qcEl = document.getElementById("qcMain");
   const qcScore = (data.qc.score !== null && data.qc.score !== undefined) ? data.qc.score : null;
   const qcClass = data.qc.class || null;
@@ -4026,7 +4251,8 @@ function wireSessionControls(){
       segment: document.getElementById("segmentSelect").value,
       metrics: SESSION_DATA.segments[document.getElementById("segmentSelect").value],
       group: SESSION_DATA.group[document.getElementById("segmentSelect").value],
-      blocks: SESSION_DATA.blocks
+      blocks: SESSION_DATA.blocks,
+      proxy: SESSION_DATA.proxy || null
     };
     try{
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
@@ -4186,8 +4412,13 @@ function ExperimentsListView() {
             <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
               ${(exp.blocks||[]).length} блоков · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString()}
     </div>
+            <div style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px;margin-bottom:14px;">
+              <div><strong>Local ID:</strong> ${exp.id || '—'}</div>
+              <div><strong>Protocol ID:</strong> ${exp.serverProtocolId || '—'}</div>
+            </div>
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;">
               <button class="quick-btn edit-exp-btn" data-id="${exp.id}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
+              ${exp.serverProtocolId ? '' : `<button class="quick-btn sync-exp-btn" data-id="${exp.id}" style="font-size:12px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);">Sync ID</button>`}
               <button class="quick-btn del-exp-btn" data-id="${exp.id}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
       </div>
     </div>
@@ -4197,6 +4428,29 @@ function ExperimentsListView() {
 
     content.querySelectorAll('.edit-exp-btn').forEach(btn => {
       btn.addEventListener('click', (e) => { e.stopPropagation(); navigate(`#/experiments/edit/${btn.dataset.id}`); });
+    });
+    content.querySelectorAll('.sync-exp-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const exps = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+        const target = exps.find(ex => ex.id === btn.dataset.id);
+        if (!target) return;
+        btn.disabled = true;
+        try {
+          const protocolJson = {
+            title: target.title || 'Новый эксперимент',
+            version: 'v2.0_universal',
+            settings: target.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' },
+            blocks: target.blocks || []
+          };
+          const syncedId = await syncExperimentProtocol(target, protocolJson);
+          toast('Server protocol synced: ' + syncedId);
+          renderActiveTab();
+        } catch (err) {
+          toast('Sync failed: ' + (err && err.message ? err.message : err));
+          btn.disabled = false;
+        }
+      });
     });
     content.querySelectorAll('.del-exp-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -4375,7 +4629,7 @@ function _buildSessionCard() {
       <div class="card" style="padding:0;">
         <div class="dash-card-header">
           <h2>${t('qualityControlQc')}</h2>
-          <div class="hint">Сессия: ${SESSION_DATA.session.id}</div>
+          <div class="hint" id="sessionIdHint">Сессия: ${SESSION_DATA.session.id}</div>
         </div>
         <div class="qc-grid">
           <div class="qc-main" id="qcMain">
@@ -4500,11 +4754,11 @@ function _buildSessionCard() {
         </div>
         <div class="body" style="padding:14px 16px;">
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
-            ${t('proxyMetricsList').map(n=>`
+            ${t('proxyMetricsList').map((n, idx)=>`
               <div style="border:1px solid var(--stroke);border-radius:12px;padding:12px;background:rgba(255,255,255,.28);">
                 <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">${n}</div>
-                <div style="font-size:18px;font-weight:800;color:var(--muted2);">—</div>
-                <div style="font-size:10px;color:var(--muted2);margin-top:4px;">${t('noDataLabel')}</div>
+                <div id="proxyMetricValue${idx}" style="font-size:18px;font-weight:800;color:var(--muted2);">—</div>
+                <div id="proxyMetricSource${idx}" style="font-size:10px;color:var(--muted2);margin-top:4px;">${t('noDataLabel')}</div>
               </div>
             `).join('')}
           </div>
@@ -4548,11 +4802,15 @@ function _buildSessionCard() {
   `;
   
   setTimeout(() => {
-    renderSessionCardHeader();
-    wireSessionControls();
-    renderSessionMetrics(SELECTED_METRIC);
-    renderSessionDetail();
-    renderBlocks();
+    (async () => {
+      await hydrateSessionDataFromApi();
+      renderSessionCardHeader();
+      wireSessionControls();
+      renderSessionMetrics(SELECTED_METRIC);
+      renderSessionDetail();
+      renderBlocks();
+      renderProxyMetricsCards();
+    })();
   }, 0);
   
   return root;
@@ -10432,6 +10690,7 @@ function ExperimentBuilderView(options = {}) {
       title: expTitle, 
       blocks: experimentBlocks, 
       version: editingExp?.status === 'active' ? protocolVersion : (editingExp?.version || '1.0'), 
+      serverProtocolId: editingExp?.serverProtocolId || null,
       history: editingExp?.history || [],
       savedStep: currentStep,
       createdAt: editingExp?.createdAt || new Date().toISOString(), 
@@ -10493,7 +10752,7 @@ function ExperimentBuilderView(options = {}) {
     doSave();
   }
 
-  function doSave() {
+  async function doSave() {
     const srcData = parsedExperimentData?.json || {};
 
     const nameInput = document.getElementById('experimentNameInput');
@@ -10584,6 +10843,7 @@ function ExperimentBuilderView(options = {}) {
       title: json.title, 
       blocks: experimentBlocks, 
       version: protocolVersion, 
+      serverProtocolId: editingExp?.serverProtocolId || null,
       history: history,
       savedStep: 7,
       createdAt: editingExp?.createdAt || new Date().toISOString(), 
@@ -10594,6 +10854,18 @@ function ExperimentBuilderView(options = {}) {
     const idx = experiments.findIndex(e => e.id === id);
     if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+
+    try {
+      const syncedId = await syncExperimentProtocol(entry, json);
+      entry.serverProtocolId = syncedId;
+      const idxAfterSync = experiments.findIndex(e => e.id === id);
+      if (idxAfterSync >= 0) {
+        experiments[idxAfterSync] = Object.assign({}, experiments[idxAfterSync], { serverProtocolId: syncedId });
+        localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+      }
+    } catch (syncErr) {
+      toast('Сохранено локально. Sync с сервером не выполнен: ' + (syncErr && syncErr.message ? syncErr.message : syncErr));
+    }
     
     const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
