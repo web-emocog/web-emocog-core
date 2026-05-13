@@ -38,11 +38,11 @@
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
-        window.location.replace('login.html');
+        window.location.replace('login.html?next=developer');
         return;
       }
       window.EmocogAuthGuard.ensureProtectedPage({
-        loginPath: 'login.html',
+        loginPath: 'login.html?next=developer',
         allowedRoles: ['admin', 'developer'],
         preserveAuthOnRoleDenied: true,
         roleDeniedRedirect: '../researcher.html'
