@@ -1,6 +1,3 @@
-# Emocog API (Фаза 2)
-
-Бэкенд: Node/Express, Postgres, миграции (node-pg-migrate). Реализованы шаги 2.1–2.8 плана улучшений.
 
 ## Стек
 
@@ -28,6 +25,11 @@ npm start
 
 Порядок: users → organizations, projects, user_organizations → protocols, invitations → sessions, events, session_features, session_qc_summary.
 
+Дополнительно (миграция `1699000000008_qc_proxy_indexes`):
+- таблица `session_proxy_metrics` (готовые `payload` proxy-индексов + `source_payload` для прозрачного извлечения/пересчета),
+- индексы по QC (`qc_score`, `updated_at`, `fail_reasons`, `payload`),
+- индексы по `session_features.payload` для ускорения researcher-дашбордов и экспорта.
+
 ## Роли (RBAC)
 
 - **admin**, **PI**, **researcher**, **analyst**, **assistant**, **developer**, **respondent**
@@ -48,13 +50,13 @@ npm start
 | GET/POST/PATCH/DELETE | /projects | CRUD проектов | JWT + роль |
 | POST | /sessions/start | Старт сессии | JWT |
 | POST | /sessions/stop | Стоп сессии | JWT |
-| GET | /sessions | Список сессий (фильтры) | JWT |
-| GET | /sessions/:id | Карточка сессии + features | JWT |
+| GET | /sessions | Список сессий (фильтры, QC + proxy source) | JWT |
+| GET | /sessions/:id | Карточка сессии + features + QC/proxy source payload | JWT |
 | POST | /events/batch | Батч событий (session_id, participant_id, events[]) | JWT |
 | POST | /ingest | Приём агрегатов (payload buildAggregatesPayload) | — |
 | GET | /export | Экспорт CSV/JSON (project_id, protocol_id, date_from, date_to, qc_validity) | JWT |
-| GET | /experiments | Сводный учет экспериментов по сессиям/QC | JWT |
-| GET | /experiments/recent | Последние сессии экспериментов | JWT |
+| GET | /experiments | Сводный учет экспериментов по сессиям/QC + proxy readiness | JWT |
+| GET | /experiments/recent | Последние сессии экспериментов c QC + proxy source | JWT |
 | GET | /health | Health check | — |
 
 ## HTTPS и PII (Фаза 2.8)

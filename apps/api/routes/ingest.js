@@ -111,6 +111,167 @@ function normalizeDerivedPayload(payload) {
   return out;
 }
 
+function toFinite(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return v;
+}
+
+function average(values) {
+  const nums = (Array.isArray(values) ? values : []).filter(v => typeof v === 'number' && Number.isFinite(v));
+  if (!nums.length) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function roundTo(v, digits) {
+  const n = toFinite(v);
+  if (n == null) return null;
+  const p = 10 ** digits;
+  return Math.round(n * p) / p;
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function to01(value, maxScale) {
+  const v = toFinite(value);
+  if (v == null) return null;
+  if (maxScale === 1) return clamp(v, 0, 1);
+  if (maxScale === 100) return clamp(v / 100, 0, 1);
+  return null;
+}
+
+function extractProxyMetrics(payload, qcSummary, qcComputed) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const blocks = Array.isArray(p.blocks) ? p.blocks.filter(b => b && typeof b === 'object') : [];
+  const cognitiveRows = Array.isArray(p.cognitiveResults) ? p.cognitiveResults : [];
+
+  const emotionValence = toFinite(p.emotion_summary && p.emotion_summary.valence_mean);
+  const emotionArousal = toFinite(p.emotion_summary && p.emotion_summary.arousal_mean);
+
+  const attGlobal = p.attentionMetrics && p.attentionMetrics.global && typeof p.attentionMetrics.global === 'object'
+    ? p.attentionMetrics.global
+    : {};
+  const attentionScore = (() => {
+    const direct = toFinite(attGlobal.attentionScore) ??
+      toFinite(attGlobal.focusScore) ??
+      toFinite(attGlobal.attention) ??
+      toFinite(attGlobal.attentionPct);
+    if (direct != null) return direct;
+    const fallback = average(blocks.map(b => toFinite(b.attention)));
+    return fallback != null ? roundTo(fallback, 2) : null;
+  })();
+
+  const meanRtFromBlocks = average(blocks.map(b => toFinite(b.rt)));
+  const meanRtFromTrials = average(cognitiveRows.map(r => toFinite(r && r.rt)));
+  const meanRtMs = roundTo(meanRtFromBlocks ?? meanRtFromTrials, 2);
+
+  const omissionsFromBlocks = average(blocks.map(b => toFinite(b.omissions)));
+  const omissionsFromTrials = (() => {
+    if (!cognitiveRows.length) return null;
+    const omissionCount = cognitiveRows.filter(r => !r || r.response == null).length;
+    return (omissionCount / cognitiveRows.length) * 100;
+  })();
+  const omissionsPct = roundTo(omissionsFromBlocks ?? omissionsFromTrials, 2);
+
+  const blinkCount = roundTo(
+    average(blocks.map(b => toFinite(b.blinks))) ??
+      toFinite(attGlobal.blinkDynamics && attGlobal.blinkDynamics.blinkCount),
+    2
+  );
+  const bpmMean = roundTo(toFinite(p.bpm_summary && p.bpm_summary.bpmMean), 2);
+  const rppgSampleCount = (() => {
+    const n = p.rppg_summary && p.rppg_summary.sampleCount;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+    return Math.round(n);
+  })();
+
+  const qcScore = toFinite(qcComputed && qcComputed.qc_score);
+  const attention01 = to01(attentionScore, 100);
+  const valence01 = (() => {
+    if (emotionValence == null) return null;
+    return clamp((emotionValence + 1) / 2, 0, 1);
+  })();
+  const arousal01 = to01(emotionArousal, 1);
+  const rtNorm = (() => {
+    if (meanRtMs == null) return null;
+    // 300..1300ms -> 1..0 (faster is better)
+    return clamp(1 - ((meanRtMs - 300) / 1000), 0, 1);
+  })();
+  const omissions01 = (() => {
+    if (omissionsPct == null) return null;
+    // Lower omissions -> better normalized quality
+    return clamp(1 - (omissionsPct / 100), 0, 1);
+  })();
+  const qc01 = to01(qcScore, 100);
+
+  const emotCogIndex = (valence01 != null && attention01 != null)
+    ? roundTo(((valence01 * 0.5) + (attention01 * 0.5)) * 100, 2)
+    : null;
+  const engagement = (attention01 != null && valence01 != null)
+    ? roundTo(((attention01 * 0.6) + (valence01 * 0.4)) * 100, 2)
+    : null;
+  const stressProxy = (arousal01 != null && valence01 != null)
+    ? roundTo((arousal01 * (1 - valence01)) * 100, 2)
+    : null;
+  const perceptionQuality = (qc01 != null && rtNorm != null && omissions01 != null)
+    ? roundTo(((qc01 * 0.5) + (rtNorm * 0.3) + (omissions01 * 0.2)) * 100, 2)
+    : null;
+
+  const sourceFlags = {
+    has_qc: !!(qcComputed && qcComputed.validity),
+    has_emotion_summary: emotionValence != null || emotionArousal != null,
+    has_attention_metrics: attentionScore != null,
+    has_cognitive_signal: meanRtMs != null || omissionsPct != null,
+    has_biometry_signal: bpmMean != null || rppgSampleCount != null,
+    has_blocks: blocks.length > 0,
+  };
+  const sourceCount = Object.values(sourceFlags).filter(Boolean).length;
+  const proxyReady = sourceFlags.has_emotion_summary && sourceFlags.has_attention_metrics && sourceFlags.has_cognitive_signal;
+
+  return {
+    emotion_valence_mean: emotionValence,
+    emotion_arousal_mean: emotionArousal,
+    attention_score: attentionScore,
+    mean_rt_ms: meanRtMs,
+    omissions_pct: omissionsPct,
+    blink_count: blinkCount,
+    bpm_mean: bpmMean,
+    rppg_sample_count: rppgSampleCount,
+    payload: {
+      emot_cog_index: emotCogIndex,
+      engagement_index: engagement,
+      stress_proxy_index: stressProxy,
+      perception_quality_index: perceptionQuality,
+      qc_score: qcScore,
+      qc_validity: qcComputed ? qcComputed.validity : null,
+      proxy_ready: proxyReady,
+      source_count: sourceCount,
+      source_flags: sourceFlags,
+    },
+    source_payload: {
+      qc_summary: qcSummary && typeof qcSummary === 'object' ? qcSummary : {},
+      qc_computed: qcComputed && typeof qcComputed === 'object' ? qcComputed : {},
+      feature_inputs: {
+        emotion_summary: p.emotion_summary || null,
+        attention_metrics_global: p.attentionMetrics && p.attentionMetrics.global ? p.attentionMetrics.global : null,
+        blocks,
+        cognitive_results_count: cognitiveRows.length,
+        bpm_summary: p.bpm_summary || null,
+        rppg_summary: p.rppg_summary || null,
+      },
+      normalized: {
+        attention_01: attention01,
+        valence_01: valence01,
+        arousal_01: arousal01,
+        rt_norm: rtNorm,
+        omissions_01: omissions01,
+        qc_01: qc01,
+      }
+    },
+  };
+}
+
 function hasValidAuth(req) {
   try {
     const auth = req.headers.authorization;
@@ -288,10 +449,59 @@ router.post(
         [dbSessionId, qc_score, validity, JSON.stringify(fail_reasons || null), JSON.stringify(qcSummary || {})]
       );
 
+      const sessionScope = await pool.query(
+        'SELECT project_id, protocol_id FROM sessions WHERE id = $1',
+        [dbSessionId]
+      );
+      const proxy = extractProxyMetrics(payload, qcSummary, { validity, qc_score, fail_reasons });
+      await pool.query(
+        `INSERT INTO session_proxy_metrics (
+           session_id, project_id, protocol_id, qc_validity,
+           emotion_valence_mean, emotion_arousal_mean, attention_score, mean_rt_ms,
+           omissions_pct, blink_count, bpm_mean, rppg_sample_count, payload, source_payload
+         ) VALUES (
+           $1, $2, $3, $4,
+           $5, $6, $7, $8,
+           $9, $10, $11, $12, $13::jsonb, $14::jsonb
+         )
+         ON CONFLICT (session_id) DO UPDATE SET
+           project_id = $2,
+           protocol_id = $3,
+           qc_validity = $4,
+           emotion_valence_mean = $5,
+           emotion_arousal_mean = $6,
+           attention_score = $7,
+           mean_rt_ms = $8,
+           omissions_pct = $9,
+           blink_count = $10,
+           bpm_mean = $11,
+           rppg_sample_count = $12,
+           payload = $13::jsonb,
+           source_payload = $14::jsonb,
+           updated_at = current_timestamp`,
+        [
+          dbSessionId,
+          sessionScope.rows[0] ? sessionScope.rows[0].project_id : null,
+          sessionScope.rows[0] ? sessionScope.rows[0].protocol_id : null,
+          validity,
+          proxy.emotion_valence_mean,
+          proxy.emotion_arousal_mean,
+          proxy.attention_score,
+          proxy.mean_rt_ms,
+          proxy.omissions_pct,
+          proxy.blink_count,
+          proxy.bpm_mean,
+          proxy.rppg_sample_count,
+          JSON.stringify(proxy.payload),
+          JSON.stringify(proxy.source_payload),
+        ]
+      );
+
       res.status(201).json({
         session_id: sessionId,
         ingested: true,
         qc_validity: validity,
+        proxy_ready: !!proxy.payload.proxy_ready,
         lifecycle_status: completionApplied ? 'completed' : 'in_progress',
         completed_at: completedAtIso
       });
