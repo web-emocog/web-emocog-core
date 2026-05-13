@@ -68,12 +68,17 @@ router.get(
            COUNT(*) FILTER (WHERE q.validity = 'valid')::int AS qc_valid_count,
            COUNT(*) FILTER (WHERE q.validity = 'borderline')::int AS qc_borderline_count,
            COUNT(*) FILTER (WHERE q.validity = 'invalid')::int AS qc_invalid_count,
+           COUNT(*) FILTER (WHERE pm.payload->>'proxy_ready' = 'true')::int AS proxy_ready_sessions,
+           ROUND(AVG(pm.attention_score)::numeric, 2) AS avg_attention_score,
+           ROUND(AVG(pm.mean_rt_ms)::numeric, 2) AS avg_mean_rt_ms,
+           ROUND(AVG(pm.omissions_pct)::numeric, 2) AS avg_omissions_pct,
            MIN(s.started_at) AS first_started_at,
            MAX(s.started_at) AS last_started_at
          FROM sessions s
          ${scope.join}
          LEFT JOIN session_features sf ON sf.session_id = s.id
          LEFT JOIN session_qc_summary q ON q.session_id = s.id
+         LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
          ${where}
          GROUP BY 1, 2, 3
          ORDER BY last_started_at DESC NULLS LAST
@@ -112,11 +117,23 @@ router.get(
            CASE WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
            q.qc_score,
            q.validity AS qc_validity,
+           q.fail_reasons AS qc_fail_reasons,
+           COALESCE((pm.payload->>'proxy_ready')::boolean, false) AS proxy_ready,
+           pm.attention_score,
+           pm.mean_rt_ms,
+           pm.omissions_pct,
+           pm.emotion_valence_mean,
+           pm.emotion_arousal_mean,
+           pm.bpm_mean,
+           pm.rppg_sample_count,
+           pm.payload AS proxy_metrics,
+           pm.source_payload AS proxy_source_data,
            COALESCE(sf.payload->'ids'->>'invitationCode', '') AS invitation_code,
            COALESCE(sf.payload->'experimentMeta'->>'title', sf.payload->'meta'->>'protocolName', 'Untitled experiment') AS experiment_title
          FROM sessions s
          ${scope.join}
          LEFT JOIN session_qc_summary q ON q.session_id = s.id
+         LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
          LEFT JOIN session_features sf ON sf.session_id = s.id
          WHERE ${scope.predicate}
          ORDER BY s.started_at DESC NULLS LAST
