@@ -76,9 +76,9 @@
 </head>
 <body>
   <div class="box">
-    <h1>Вход в раздел разработчика</h1>
-    <p class="sub">Вход через API (researcher/developer/admin и др.)</p>
-    <form id="form" method="post" action="../developer.html">
+    <h1 id="loginTitle">Вход в кабинет</h1>
+    <p class="sub" id="loginSub">Вход через API (исследователь/разработчик/администратор)</p>
+    <form id="form" method="post" action="">
       <div class="error" id="error">Ошибка входа</div>
       <label for="login">Email</label>
       <input type="email" id="login" name="login" autocomplete="username" required autofocus placeholder="name@example.com">
@@ -89,7 +89,7 @@
       </div>
       <button type="submit">Войти</button>
     </form>
-    <div class="sep"></div>
+    <div class="sep" id="registerSep"></div>
     <form id="registerForm">
       <label for="regEmail">Регистрация исследователя</label>
       <input type="email" id="regEmail" autocomplete="off" placeholder="new-user@example.com">
@@ -109,6 +109,40 @@
           return window.location.origin + '/main/api';
         }
         return window.location.origin + '/api';
+      }
+
+      function resolveNextPortal() {
+        try {
+          var next = new URLSearchParams(window.location.search || '').get('next');
+          return next === 'developer' ? 'developer' : 'researcher';
+        } catch (_) {
+          return 'researcher';
+        }
+      }
+
+      function clearAuthState() {
+        try {
+          sessionStorage.removeItem('emocog_developer_auth');
+          localStorage.removeItem('emocog_developer_auth');
+          localStorage.removeItem('emocog_api_token');
+          localStorage.removeItem('emocog_api_user');
+        } catch (_) {}
+      }
+
+      var nextPortal = resolveNextPortal();
+      var loginTitle = document.getElementById('loginTitle');
+      var loginSub = document.getElementById('loginSub');
+      var registerSep = document.getElementById('registerSep');
+      var registerForm = document.getElementById('registerForm');
+
+      if (nextPortal === 'developer') {
+        if (loginTitle) loginTitle.textContent = 'Вход в раздел разработчика';
+        if (loginSub) loginSub.textContent = 'Доступ только для ролей developer и admin';
+        if (registerSep) registerSep.style.display = 'none';
+        if (registerForm) registerForm.style.display = 'none';
+      } else {
+        if (loginTitle) loginTitle.textContent = 'Вход в кабинет исследователя';
+        if (loginSub) loginSub.textContent = 'Если аккаунта нет, можно зарегистрироваться ниже';
       }
 
       var pwdInput = document.getElementById('password');
@@ -162,9 +196,15 @@
               localStorage.setItem('emocog_api_base', base);
             } catch (_) {}
             var role = (result && result.user && result.user.role) || '';
-            if (role === 'admin' || role === 'developer') {
+            if (nextPortal === 'developer' && !(role === 'admin' || role === 'developer')) {
+              clearAuthState();
+              errEl.textContent = 'Для этого раздела нужен аккаунт разработчика.';
+              errEl.classList.add('visible');
+              return;
+            }
+            if (nextPortal === 'developer') {
               window.location.href = '../developer.html';
-            } else if (['PI', 'researcher', 'analyst', 'assistant'].indexOf(role) >= 0) {
+            } else if (['admin', 'developer', 'PI', 'researcher', 'analyst', 'assistant'].indexOf(role) >= 0) {
               window.location.href = '../researcher.html';
             } else {
               window.location.href = '../index.html';
