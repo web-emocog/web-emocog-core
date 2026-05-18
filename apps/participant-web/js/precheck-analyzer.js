@@ -1,15 +1,25 @@
 /**
- * PreCheck Analyzer Module v2.1 - Browser Wrapper
- * 
- * Этот файл служит обёрткой для обратной совместимости.
- * Основной код находится в папке ./precheck-analyzer/
- * 
+ * PreCheck Analyzer Module v2.1 — Browser Wrapper / Loader
+ *
+ * Стратегия загрузки идентична qc-metrics.js / face-segmenter.js:
+ *   1) Inline-класс PrecheckAnalyzerInline сразу публикуется как
+ *      window.PrecheckAnalyzer (через прокси с warn о sync use).
+ *   2) Параллельно динамически импортируется ./precheck-analyzer/index.js.
+ *      При успехе window.PrecheckAnalyzer переписывается на модульную версию,
+ *      которая включает полную stability/history-логику pose-анализа.
+ *   3) При ошибке импорта остаёмся на inline-классе (console.error).
+ *   4) window.PrecheckAnalyzerReady — Promise (резолвится в 'module' | 'inline').
+ *
+ * Inline и модульная версии имеют идентичный публичный API; модульная даёт
+ * расширенный режим (pose stability через poseHistory, дополнительные модули
+ * recommendations / iris-gaze-direction для будущих сценариев).
+ *
  * @version 2.1.0
  * @requires @mediapipe/tasks-vision
  */
 
-// Встроенный класс для browser
-class PrecheckAnalyzer {
+// Встроенный класс — fallback при сбое загрузки папки.
+class PrecheckAnalyzerInline {
     constructor(options = {}) {
         this.isInitialized = false;
         this.faceLandmarker = null;
@@ -20,7 +30,7 @@ class PrecheckAnalyzer {
         
         this.thresholds = {
             illumination: { tooDark: 30, tooBright: 220 },
-            face: { minSize: 5, maxSize: 60, validZone: { minX: 0.15, maxX: 0.85, minY: 0.10, maxY: 0.90 } },
+            face: { minSize: 5, maxSize: 72, validZone: { minX: 0.15, maxX: 0.85, minY: 0.10, maxY: 0.90 } },
             pose: { maxYaw: 10, maxPitch: 10, maxRoll: 8, eyesCenterMaxDeviation: 0.15 },
             eyes: { earThreshold: 0.2 }
         };
@@ -52,9 +62,7 @@ class PrecheckAnalyzer {
             if (typeof FilesetResolver === 'undefined' || typeof FaceLandmarker === 'undefined') {
                 throw new Error('MediaPipe Vision не загружен.');
             }
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-            );
+            const vision = await FilesetResolver.forVisionTasks("js/vendor/mediapipe/wasm");
             this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
@@ -96,15 +104,20 @@ class PrecheckAnalyzer {
             this._canvas.height = height;
             this._ctx.drawImage(videoElement, 0, 0, width, height);
             const imageData = this._ctx.getImageData(0, 0, width, height);
-            
-            const illumination = this._analyzeIllumination(imageData);
+
+            // Сначала MediaPipe — нужны landmarks, чтобы illumination считался
+            // по face ROI, а не по всему кадру (тёмный/светлый фон не должен штрафовать
+            // пользователя при нормальном освещении лица).
             const timestamp = performance.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
-            
+
             const faceData = this._parseFaceResults(mpResults, width, height);
             const eyes = this._analyzeEyes(mpResults);
             const pose = this._analyzePose(mpResults);
             const landmarks = mpResults.faceLandmarks?.[0] || null;
+
+            // Illumination ПОСЛЕ детекции — с landmarks для face ROI / eye ROI.
+            const illumination = this._analyzeIllumination(imageData, landmarks);
             
             if (faceData.detected && landmarks) {
                 const centering = this._checkEyesCentering(landmarks);
@@ -113,14 +126,18 @@ class PrecheckAnalyzer {
                     pose.status = 'off_center';
                     pose.issues = pose.issues || [];
                     pose.issues.push('eyes_off_center');
+                    if (centering.hint) {
+                        pose.issues.push.apply(pose.issues, centering.hint);
+                    }
                 }
             }
             
             const mouth = this._analyzeMouth(mpResults);
+            const blendShapes = this._extractBlendShapes(mpResults);
             
             this.lastResult = {
                 illumination, face: faceData, pose, eyes, mouth,
-                landmarks, timestamp: Date.now(),
+                landmarks, blendShapes, timestamp: Date.now(),
                 frameSize: { width, height }
             };
             return this.lastResult;
@@ -129,33 +146,134 @@ class PrecheckAnalyzer {
         }
     }
 
-    _analyzeIllumination(imageData) {
+    _analyzeIllumination(imageData, landmarks = null) {
         const data = imageData.data;
-        let total = 0;
-        const count = data.length / 4;
-        for (let i = 0; i < data.length; i += 4) {
-            total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+        const width = imageData.width;
+        const height = imageData.height;
+
+        // Если есть landmarks — считаем яркость только по face ROI (bbox лэндмарок
+        // с небольшим padding'ом). Это устойчивее к тёмному/светлому фону.
+        let sx = 0, sy = 0, ex = width, ey = height;
+        let roiKind = 'full_frame';
+        if (landmarks && landmarks.length > 0) {
+            let minX = 1, maxX = 0, minY = 1, maxY = 0;
+            for (const p of landmarks) {
+                if (!p) continue;
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.y > maxY) maxY = p.y;
+            }
+            if (maxX > minX && maxY > minY) {
+                const padX = (maxX - minX) * 0.05;
+                const padY = (maxY - minY) * 0.05;
+                minX = Math.max(0, minX - padX);
+                maxX = Math.min(1, maxX + padX);
+                minY = Math.max(0, minY - padY);
+                maxY = Math.min(1, maxY + padY);
+                sx = Math.max(0, Math.floor(minX * width));
+                sy = Math.max(0, Math.floor(minY * height));
+                ex = Math.min(width, Math.ceil(maxX * width));
+                ey = Math.min(height, Math.ceil(maxY * height));
+                if (ex > sx && ey > sy) roiKind = 'face';
+                else { sx = 0; sy = 0; ex = width; ey = height; }
+            }
         }
-        const avg = total / count;
+
+        let total = 0;
+        let count = 0;
+        if (roiKind === 'face') {
+            for (let y = sy; y < ey; y++) {
+                for (let x = sx; x < ex; x++) {
+                    const i = (y * width + x) * 4;
+                    total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+                    count++;
+                }
+            }
+        } else {
+            for (let i = 0; i < data.length; i += 4) {
+                total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+                count++;
+            }
+        }
+
+        const avg = count > 0 ? total / count : 0;
         let status = 'optimal';
         if (avg < this.thresholds.illumination.tooDark) status = 'too_dark';
         else if (avg > this.thresholds.illumination.tooBright) status = 'too_bright';
-        return { value: Math.round((avg/255)*100), rawValue: Math.round(avg), status };
+        return {
+            value: Math.round((avg/255)*100),
+            rawValue: Math.round(avg),
+            status,
+            roi: roiKind
+        };
     }
 
     _parseFaceResults(mpResults, w, h) {
+        const tf = this.thresholds.face;
         if (!mpResults.faceLandmarks || mpResults.faceLandmarks.length === 0) {
-            return { detected: false, status: 'not_found', issues: ['no_face'] };
+            return {
+                detected: false,
+                confidence: 0,
+                size: 0,
+                status: 'not_found',
+                bbox: null,
+                issues: ['no_face']
+            };
         }
         const landmarks = mpResults.faceLandmarks[0];
-        let minX=1, maxX=0, minY=1, maxY=0;
+        let minX = 1, maxX = 0, minY = 1, maxY = 0;
         for (const p of landmarks) {
             minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
             minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
         }
-        const bbox = { x: minX, y: minY, width: maxX-minX, height: maxY-minY };
-        const size = (bbox.width * bbox.height) * 100;
-        return { detected: true, size: Math.round(size*10)/10, status: 'optimal', bbox, landmarkCount: landmarks.length };
+        const bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+        const sizePercent = (bbox.width * bbox.height) * 100;
+        const centerX = minX + bbox.width / 2;
+        const centerY = minY + bbox.height / 2;
+        const zone = tf.validZone;
+        const issues = [];
+        if (centerX < zone.minX || centerX > zone.maxX) issues.push('out_of_zone_horizontal');
+        if (centerY < zone.minY || centerY > zone.maxY) issues.push('out_of_zone_vertical');
+        let sizeStatus = 'optimal';
+        if (sizePercent < tf.minSize) {
+            sizeStatus = 'too_small';
+            issues.push('face_too_small');
+        } else if (sizePercent > tf.maxSize) {
+            sizeStatus = 'too_large';
+            issues.push('face_too_large');
+        }
+        let status = sizeStatus;
+        if (issues.includes('out_of_zone_horizontal') || issues.includes('out_of_zone_vertical')) {
+            status = 'out_of_zone';
+        }
+        const confidence = mpResults.faceBlendshapes?.[0]?.[0]?.score ?? 0.9;
+        return {
+            detected: true,
+            confidence,
+            size: Math.round(sizePercent * 10) / 10,
+            status,
+            bbox,
+            center: { x: centerX, y: centerY },
+            issues,
+            landmarkCount: landmarks.length
+        };
+    }
+
+    _extractBlendShapes(mpResults) {
+        if (!mpResults.faceBlendshapes || mpResults.faceBlendshapes.length === 0) {
+            return null;
+        }
+        const blendshapesData = mpResults.faceBlendshapes[0];
+        const categories = blendshapesData.categories || blendshapesData;
+        if (!categories || !Array.isArray(categories)) return null;
+        const result = {};
+        for (const shape of categories) {
+            if (shape?.categoryName !== undefined) {
+                result[shape.categoryName] = Math.round(shape.score * 1000) / 1000;
+            }
+        }
+        return Object.keys(result).length > 0 ? result : null;
     }
 
     _analyzePose(mpResults) {
@@ -248,12 +366,44 @@ class PrecheckAnalyzer {
     }
 }
 
-// CommonJS export
+// CommonJS export (для node-тестов).
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = PrecheckAnalyzer;
+    module.exports = PrecheckAnalyzerInline;
 }
 
-// Browser global
+// Browser: loader-паттерн.
 if (typeof window !== 'undefined') {
-    window.PrecheckAnalyzer = PrecheckAnalyzer;
+    let _precheckAnalyzerResolvedKind = null; // 'module' | 'inline' | null
+
+    function PrecheckAnalyzerProxy(...args) {
+        if (_precheckAnalyzerResolvedKind === null) {
+            console.warn(
+                '[PrecheckAnalyzer] sync use before Ready — using inline fallback. ' +
+                'Update the consumer to `await window.PrecheckAnalyzerReady` before `new PrecheckAnalyzer()`.'
+            );
+        }
+        return new PrecheckAnalyzerInline(...args);
+    }
+    PrecheckAnalyzerProxy.prototype = PrecheckAnalyzerInline.prototype;
+
+    window.PrecheckAnalyzer = PrecheckAnalyzerProxy;
+
+    window.PrecheckAnalyzerReady = (async () => {
+        try {
+            const mod = await import('./precheck-analyzer/index.js');
+            const Cls = mod && (mod.PrecheckAnalyzer || mod.default);
+            if (typeof Cls !== 'function') {
+                throw new Error('module did not export PrecheckAnalyzer class');
+            }
+            window.PrecheckAnalyzer = Cls;
+            _precheckAnalyzerResolvedKind = 'module';
+            console.info('[PrecheckAnalyzer] folder version loaded');
+            return 'module';
+        } catch (e) {
+            window.PrecheckAnalyzer = PrecheckAnalyzerInline;
+            _precheckAnalyzerResolvedKind = 'inline';
+            console.error('[PrecheckAnalyzer] folder load failed, using inline fallback', e);
+            return 'inline';
+        }
+    })();
 }

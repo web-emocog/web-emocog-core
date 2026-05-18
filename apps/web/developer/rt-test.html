@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reaction Time — тест считывания нажатий</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e8e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+    .back { align-self: flex-start; margin-bottom: 16px; color: #94a3b8; text-decoration: none; font-size: 14px; }
+    .back:hover { color: #5C66BD; }
+    h1 { font-size: 1.25rem; margin-bottom: 8px; }
+    .sub { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+    #screen {
+      width: 100%; max-width: 480px; aspect-ratio: 4/3; background: #0f0f1a; border-radius: 16px;
+      display: flex; align-items: center; justify-content: center; font-size: 48px; font-weight: 700;
+      border: 2px solid rgba(92,102,189,.3); user-select: none; margin-bottom: 24px;
+    }
+    #screen.fixation { color: #94a3b8; }
+    #screen.go { color: #10B981; background: rgba(16,185,129,.08); }
+    #screen.nogo { color: #EF4444; background: rgba(239,68,68,.08); }
+    #screen.wait { color: #64748b; font-size: 18px; }
+    .panel { width: 100%; max-width: 480px; background: #16213e; border: 1px solid rgba(92,102,189,.25); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin-bottom: 8px; }
+    #log { font-family: ui-monospace, monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+    #log .ev { margin: 2px 0; }
+    #log .rt { color: #10B981; }
+    #log .miss { color: #F59E0B; }
+    #log .comm { color: #EF4444; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+    button { padding: 10px 18px; background: #5C66BD; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    button:hover { opacity: .9; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.secondary { background: transparent; border: 1px solid rgba(92,102,189,.5); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
+    .stats span { font-size: 13px; color: #94a3b8; }
+    .stats strong { color: #e8e8f0; }
+  </style>
+</head>
+<body>
+  <a href="../developer.html" class="back">← К тестам разработчика</a>
+  <h1>Reaction Time — считывание нажатий</h1>
+  <p class="sub">Go/NoGo: при зелёном «GO» нажмите Space или кликните. При красном «NO GO» не нажимайте. Лог в формате rt_component (JSONL).</p>
+  <div class="panel" style="margin-bottom: 16px;">
+    <button type="button" id="btnStart">Старт</button>
+  </div>
+  <div id="screen" class="wait">Нажмите «Старт» или Space для начала теста</div>
+  <div class="panel" id="statsPanel" style="display: none;">
+    <h2>Метрики</h2>
+    <div class="stats" id="stats"></div>
+    <div class="row" style="margin-top: 12px;">
+      <button type="button" id="btnDownload" class="secondary">Скачать JSONL (для rt_component)</button>
+      <button type="button" id="btnAgain">Ещё раз</button>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Лог событий</h2>
+    <div id="log"></div>
+  </div>
+  <script src="rt-test.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "name": "emocog-api",
+  "version": "1.0.0",
+  "description": "Backend API — Фаза 2 (auth, orgs, projects, sessions, events, ingest, QC, export)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:phase4": "node server_phase4_updated.js",
+    "dev": "node --watch server.js",
+    "migrate": "node-pg-migrate",
+    "migrate:up": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "migrate:create": "node-pg-migrate create"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.1",
+    "node-pg-migrate": "^6.2.2",
+    "pg": "^8.11.3"
+  },
+  "private": true
+}

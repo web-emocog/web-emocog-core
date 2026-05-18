@@ -8,15 +8,23 @@
     <link rel="stylesheet" href="style.css">
 
     <!-- MediaPipe Vision (Face Landmarker) -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs" type="module"></script>
+    <script src="js/vendor/mediapipe/vision_bundle.mjs" type="module"></script>
     <script>
         // Загрузка MediaPipe как глобальных объектов для non-module скриптов
-        import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs')
+        import('js/vendor/mediapipe/vision_bundle.mjs')
             .then(vision => {
                 window.FilesetResolver = vision.FilesetResolver;
                 window.FaceLandmarker = vision.FaceLandmarker;
                 window.ImageSegmenter = vision.ImageSegmenter;
-                console.log('[MediaPipe] Vision modules loaded (FaceLandmarker + ImageSegmenter)');
+                console.log('[MediaPipe] Vision modules loaded (self-hosted)');
+            })
+            .catch(() => import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'))
+            .then(vision => {
+                if (!vision) return;
+                window.FilesetResolver = vision.FilesetResolver;
+                window.FaceLandmarker = vision.FaceLandmarker;
+                window.ImageSegmenter = vision.ImageSegmenter;
+                console.log('[MediaPipe] Vision modules loaded (cdn fallback)');
             })
             .catch(err => console.error('[MediaPipe] Load error:', err));
     </script>
@@ -29,6 +37,8 @@
     <script src="js/qc-metrics.js?v=3.3.0"></script>
     <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
     <script src="js/gaze-tracker.js?v=2.2.0"></script>
+    <script src="js/face-mask-collector.js?v=1.0.0"></script>
+    <script src="js/web-page/consent-signature.js"></script>
     
     
 </head>
@@ -100,7 +110,8 @@
                 <p data-i18n="consent_1_text">Мы проводим научное исследование когнитивных реакций. Ваше участие поможет нам понять, как люди воспринимают информацию.</p>
                 <h4 data-i18n="consent_2_title">2. Конфиденциальность</h4>
                 <p data-i18n="consent_2_text">Мы собираем обезличенные данные. Видеопоток обрабатывается локально.</p>
-                <p><a href="https://docs.google.com/document/d/1ILmtItogsXz78ozzsKLNkmWnRVm990MvSryaDPSbxzg/edit?usp=sharing" target="_blank" data-i18n="consent_link">Полный текст согласия</a></p>
+                <p><a href="documents/informed-consent-v1.0.html" target="_blank" data-i18n="consent_link">Полный текст согласия</a></p>
+                <p><a href="documents/privacy-policy-v1.0.html" target="_blank">Политика конфиденциальности</a></p>
             </div>
             <label class="checkbox-wrapper">
                 <input type="checkbox" id="consentCheck">
@@ -211,7 +222,7 @@
                     </div>
                 </div>
             </form>
-            <button class="btn" id="formBtn" data-i18n="btn_next">Далее</button>
+            <button class="btn" id="formBtn" data-i18n="btn_next" disabled>Далее</button>
         </div>
 
         <!-- ШАГ 5: настройка камеры (pre-check) -->
@@ -326,21 +337,39 @@
                     </div>
                 </div>
 
+                <!--
+                    Visuospatial drawing test состоит из двух секций:
+                      1) #visuospatialTestScreen — intro-карточка с промптом и кнопкой "Начать".
+                      2) #visuospatialDrawingOverlay — fullscreen overlay с canvas + плавающими
+                         плашками. Появляется после клика "Начать".
+                -->
                 <div id="visuospatialTestScreen" class="gaze-test-screen visuospatial-screen" style="display: none;">
                     <h2 data-i18n="test_card_visuospatial_title">Visuospatial drawing</h2>
                     <h3 id="visuospatialPromptTitle"></h3>
                     <p id="visuospatialPromptText" class="text-center"></p>
-                    <p id="visuospatialStatusText" class="test-meta"></p>
+                    <p id="visuospatialStatusText" class="test-meta" data-i18n="visuospatial_hint_hold_space">
+                        Удерживайте ПРОБЕЛ, чтобы рисовать. Отпустите — пауза. Завершить — кнопка в правом верхнем углу.
+                    </p>
 
                     <div class="visuospatial-controls">
                         <button class="btn" id="visuospatialStartBtn" data-i18n="visuospatial_btn_start">Начать рисование</button>
-                        <button class="btn btn-secondary" id="visuospatialFinishBtn" data-i18n="visuospatial_btn_finish">Завершить</button>
                     </div>
+                </div>
 
-                    <div class="visuospatial-canvas-wrap">
-                        <canvas id="visuospatialCanvas"></canvas>
-                        <div id="visuospatialGazeDot"></div>
+                <div id="visuospatialDrawingOverlay" class="visuospatial-drawing-overlay" style="display: none;">
+                    <canvas id="visuospatialCanvas"></canvas>
+                    <div id="visuospatialGazeDot" class="visuospatial-gaze-dot"></div>
+                    <div id="visuospatialPromptHud" class="visuospatial-prompt-hud">
+                        <span id="visuospatialPromptHudText"></span>
                     </div>
+                    <div id="visuospatialPenStatus" class="visuospatial-pen-status" data-i18n="visuospatial_status_pen_up">
+                        Пауза (Пробел отпущен)
+                    </div>
+                    <button class="btn btn-secondary visuospatial-finish-floating"
+                            id="visuospatialFinishBtn"
+                            data-i18n="visuospatial_btn_finish">
+                        Завершить
+                    </button>
                 </div>
             </div>
 
@@ -385,7 +414,6 @@
                     <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
                 </div>
             </div>
-            
             <button class="btn" id="downloadBtn" data-i18n="btn_download">📥 Скачать JSON</button>
             <button class="btn btn-secondary" id="restartBtn" data-i18n="btn_restart">Начать заново</button>
         </div>

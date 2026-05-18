@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmoCog — приглашение участника</title>
+  <style>
+    :root {
+      --bg: #0f0f1a;
+      --card: #16213e;
+      --text: #e8e8f0;
+      --muted: #94a3b8;
+      --accent: #5C66BD;
+      --border: rgba(92, 102, 189, 0.28);
+      --good: #10B981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 0%, rgba(92, 102, 189, .2), transparent 55%), var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .box {
+      width: 100%;
+      max-width: 520px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, .35);
+    }
+    h1 { font-size: 1.35rem; margin-bottom: 8px; }
+    .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; line-height: 1.45; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, .25);
+      color: var(--text);
+      font-size: 14px;
+      resize: vertical;
+      margin-bottom: 14px;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    button {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    button:hover { opacity: .93; }
+    a.home {
+      color: var(--muted);
+      font-size: 14px;
+      text-decoration: none;
+    }
+    a.home:hover { color: var(--accent); }
+    #err { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 1.2em; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 14px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Участник</h1>
+    <p class="sub">Вставьте полную ссылку-приглашение от исследователя (с параметром <code style="background:rgba(0,0,0,.3);padding:2px 6px;border-radius:4px;">?code=…</code>) или только код приглашения.</p>
+    <label for="inviteRaw">Ссылка или код</label>
+    <textarea id="inviteRaw" placeholder="https://…/run_new.html?code=ABC123&#10;или: ABC123"></textarea>
+    <div class="row">
+      <button type="button" id="goBtn">Продолжить</button>
+      <a class="home" href="../web/index.html">← На главную</a>
+    </div>
+    <div id="err"></div>
+    <p class="hint">Если вы разработчик или администратор платформы, войдите через раздел «Разработчик» — сессия откроется сразу с пречеком без приглашения.</p>
+  </div>
+  <script>
+    (function () {
+      function extractCode(raw) {
+        var value = String(raw || '').trim();
+        if (!value) return null;
+        try {
+          var u = new URL(value);
+          var c = u.searchParams.get('code');
+          if (c && c.trim()) return c.trim();
+        } catch (_) {}
+        if (value.indexOf('?') >= 0) {
+          try {
+            var q = value.split('?')[1] || '';
+            var sp = new URLSearchParams(q);
+            var c2 = sp.get('code');
+            if (c2 && c2.trim()) return c2.trim();
+          } catch (_) {}
+        }
+        if (/^https?:\/\//i.test(value)) return null;
+        var code = value;
+        if (code.length < 4 || code.length > 256) return null;
+        if (!/^[a-zA-Z0-9_-]+$/.test(code)) return null;
+        return code;
+      }
+
+      var btn = document.getElementById('goBtn');
+      var ta = document.getElementById('inviteRaw');
+      var err = document.getElementById('err');
+
+      function go() {
+        err.textContent = '';
+        var code = extractCode(ta.value);
+        if (!code) {
+          err.textContent = 'Не удалось распознать код. Нужна ссылка с ?code=… или корректный код приглашения.';
+          return;
+        }
+        var target = 'mvp_with_precheck_1-updated.html?code=' + encodeURIComponent(code);
+        window.location.href = target;
+      }
+
+      btn.addEventListener('click', go);
+      ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.ctrlKey) go();
+      });
+    })();
+  </script>
+</body>
+</html>

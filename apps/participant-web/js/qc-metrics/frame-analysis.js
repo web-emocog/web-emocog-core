@@ -103,29 +103,31 @@ export function computeFrameFlags(precheckResult, segmenterResult = null) {
 
 /**
  * Обновление счётчиков инструментов
- * 
+ *
+ * ИСПРАВЛЕНО: gazeValid и gazeOnScreen НЕ считаем здесь.
+ * Они инкрементируются только в addGazePoint() (см. gaze-tracking.js / QCMetrics.js),
+ * чтобы знаменатель gazeTotal соответствовал числителю gazeValid.
+ * Иначе при разной частоте processFrame и addGazePoint проценты могут быть >100%.
+ *
  * @param {Object} counters - текущие счётчики
  * @param {Object} flags - флаги кадра
- * @param {Object} gazeState - состояние gaze
+ * @param {Object} gazeState - состояние gaze (НЕ используется для gazeValid/gazeOnScreen)
  * @param {boolean} isLowFps - низкий FPS
  * @param {number} deltaMs - время с предыдущего кадра
  * @returns {Object} обновлённые счётчики
  */
 export function updateInstrumentCounters(counters, flags, gazeState, isLowFps, deltaMs) {
     const newCounters = { ...counters };
-    
+
     newCounters.totalFrames++;
-    
+
     if (flags.faceVisible) newCounters.faceVisible++;
     if (flags.faceOk) newCounters.faceOk++;
     if (flags.poseOk) newCounters.poseOk++;
     if (flags.illuminationOk) newCounters.illuminationOk++;
     if (flags.eyesOpen) newCounters.eyesOpen++;
     if (flags.occlusionDetected) newCounters.occlusionDetected++;
-    
-    if (gazeState.valid) newCounters.gazeValid++;
-    if (gazeState.onScreen === true) newCounters.gazeOnScreen++;
-    
+
     // FPS tracking
     if (isLowFps) {
         newCounters.lowFpsFrames++;
@@ -138,7 +140,7 @@ export function updateInstrumentCounters(counters, flags, gazeState, isLowFps, d
     } else {
         newCounters.consecutiveLowFpsMs = 0;
     }
-    
+
     return newCounters;
 }
 

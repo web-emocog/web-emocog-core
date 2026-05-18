@@ -37,9 +37,12 @@ export const MIN_LANDMARKS = 478;
 // Размер вектора признаков (16 признаков + 1 bias = 17)
 export const FEATURE_SIZE = 17;
 
-// Конфигурация по умолчанию
+// Конфигурация по умолчанию.
+// minCalibrationPoints = 16 — минимум для well-conditioned ridge-системы
+// при 17-feature векторе (16 не-bias признаков). Стандартная UI-сетка 5×5 × 2 клика
+// даёт 50 точек, так что порог срабатывает только для пустых edge-кейсов.
 export const DEFAULTS = {
     ridgeLambda: 0.001,
     smoothingFactor: 0.10,
-    minCalibrationPoints: 4
+    minCalibrationPoints: 16
 };

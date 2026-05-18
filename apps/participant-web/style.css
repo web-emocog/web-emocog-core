@@ -868,6 +868,52 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     text-align: center;
 }
 
+.bpm-screen {
+    text-align: center;
+}
+
+.bpm-video-wrap {
+    position: relative;
+    margin: 10px auto 12px;
+    width: min(88vw, 760px);
+    aspect-ratio: 4 / 3;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #0f172a;
+}
+
+#bpmVideo,
+#bpmOverlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+#bpmVideo {
+    object-fit: cover;
+    transform: scaleX(-1);
+}
+
+#bpmOverlay {
+    pointer-events: none;
+    transform: scaleX(-1);
+}
+
+.bpm-live-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.bpm-live-value {
+    font-size: 42px;
+    font-weight: 700;
+    color: #10B981;
+}
+
 .visuospatial-controls {
     display: flex;
     justify-content: center;
@@ -882,19 +928,15 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     margin-top: 0;
 }
 
-.visuospatial-canvas-wrap {
-    position: relative;
-    width: 100%;
-    height: min(68vh, 560px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background:
-        repeating-linear-gradient(
-            to bottom,
-            #ffffff 0px,
-            #ffffff 28px,
-            #f3f4f6 29px
-        );
+/* Полноэкранный overlay для рисования. Включается при display:block после клика
+   "Начать рисование" в introCard, паттерн от .tracking-test-area. */
+.visuospatial-drawing-overlay {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #ffffff;
+    z-index: 2000;
     overflow: hidden;
 }
 
@@ -902,9 +944,16 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     width: 100%;
     height: 100%;
     display: block;
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            #ffffff 0px,
+            #ffffff 28px,
+            #f3f4f6 29px
+        );
 }
 
-#visuospatialGazeDot {
+.visuospatial-gaze-dot {
     position: absolute;
     width: 14px;
     height: 14px;
@@ -914,6 +963,51 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     pointer-events: none;
     transform: translate(-50%, -50%);
     display: none;
+}
+
+/* Pen-down: красный, чтобы было ясно "сейчас рисуется". */
+.visuospatial-gaze-dot.is-pen-down {
+    background: rgba(220, 38, 38, 0.85);
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.55);
+}
+
+/* Мини-плашка с заголовком задания, левый верх. */
+.visuospatial-prompt-hud {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    max-width: 38vw;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    pointer-events: none;
+}
+
+/* Индикатор pen-down/pen-up, левый низ. */
+.visuospatial-pen-status {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    pointer-events: none;
+}
+
+/* Кнопка "Завершить", правый верх, выше overlay'а чтобы клик ловился. */
+.visuospatial-finish-floating {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: auto;
+    padding: 10px 18px;
+    z-index: 2001;
 }
 
 @media (max-width: 900px) {
