@@ -44,6 +44,28 @@ function getBoundingBox(points) {
     };
 }
 
+/**
+ * Нормированный bbox: координаты и размеры в % от canvas (0..100).
+ * Сравним между сессиями с разными разрешениями экрана.
+ */
+function getBoundingBoxNorm(points, canvasW, canvasH) {
+    if (!(canvasW > 0) || !(canvasH > 0)) {
+        return { leftPct: 0, topPct: 0, rightPct: 0, bottomPct: 0, widthPct: 0, heightPct: 0 };
+    }
+    const bb = getBoundingBox(points);
+    if (bb.minX === null) {
+        return { leftPct: 0, topPct: 0, rightPct: 0, bottomPct: 0, widthPct: 0, heightPct: 0 };
+    }
+    return {
+        leftPct: round((bb.minX / canvasW) * 100, 2) || 0,
+        topPct: round((bb.minY / canvasH) * 100, 2) || 0,
+        rightPct: round((bb.maxX / canvasW) * 100, 2) || 0,
+        bottomPct: round((bb.maxY / canvasH) * 100, 2) || 0,
+        widthPct: round((bb.width / canvasW) * 100, 2) || 0,
+        heightPct: round((bb.height / canvasH) * 100, 2) || 0
+    };
+}
+
 function computeCoverage(points, width, height, gridW, gridH) {
     if (width <= 0 || height <= 0 || !Array.isArray(points) || points.length === 0) return 0;
 
@@ -62,26 +84,59 @@ function computeCoverage(points, width, height, gridW, gridH) {
     return (occupied.size / total) * 100;
 }
 
+/**
+ * Вычисляет метрики visuospatial drawing.
+ *
+ * Изменения после fullscreen + pen-down редизайна:
+ *  - `pathLengthPx` теперь учитывает только сегменты между двумя соседними
+ *    pen-down точками (если флаг penDown отсутствует во входе — поведение
+ *    как раньше, считаем все сегменты, для совместимости).
+ *  - Добавлены нормированные поля: `pathLengthDiagPct`, `boundingBoxNorm`.
+ *    На разных разрешениях экрана они сравнимы между собой.
+ *  - `idlePct` дополнительно считается через нормированный порог скорости
+ *    (`config.idleSpeedThresholdNormPerSec`, % диагонали в секунду).
+ *    Старый пиксельный `idlePct` оставлен как `idlePctLegacy` для обратной
+ *    совместимости.
+ *  - Добавлен `penDownPct` — % точек с зажатым пробелом.
+ */
 export function computeVisuospatialMetrics(points, config, canvasSize) {
     const sorted = (points || [])
         .filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y) && Number.isFinite(point?.t))
         .sort((a, b) => a.t - b.t);
 
+    const canvasW = (canvasSize && canvasSize.width) > 0 ? canvasSize.width : 0;
+    const canvasH = (canvasSize && canvasSize.height) > 0 ? canvasSize.height : 0;
+    const diagonalPx = Math.hypot(canvasW, canvasH);
+
     if (sorted.length === 0) {
         return {
             pointCount: 0,
             pathLengthPx: 0,
+            pathLengthDiagPct: 0,
             drawingDurationMs: 0,
             coveragePct: 0,
             boundingBox: getBoundingBox([]),
+            boundingBoxNorm: getBoundingBoxNorm([], canvasW, canvasH),
             idlePct: 0,
-            onScreenPct: 0
+            idlePctLegacy: 0,
+            onScreenPct: 0,
+            penDownPct: 0
         };
     }
 
+    // Если ни в одной точке нет penDown-флага — считаем все сегменты (legacy режим).
+    const hasPenDownFlag = sorted.some(p => typeof p.penDown === 'boolean');
+
     let pathLength = 0;
+    let idleMsLegacy = 0;
     let idleMs = 0;
     let activeMs = 0;
+    let penDownCount = 0;
+
+    const idleThreshNormPerSec = Number.isFinite(config?.idleSpeedThresholdNormPerSec)
+        ? config.idleSpeedThresholdNormPerSec
+        : 0.05;
+    const idleThreshDiagPerMs = idleThreshNormPerSec / 1000; // доля диагонали за 1 ms
 
     for (let i = 1; i < sorted.length; i++) {
         const prev = sorted[i - 1];
@@ -93,34 +148,58 @@ export function computeVisuospatialMetrics(points, config, canvasSize) {
         const dx = curr.x - prev.x;
         const dy = curr.y - prev.y;
         const distance = Math.hypot(dx, dy);
-        pathLength += distance;
 
-        const speed = distance / (dt / 1000);
-        if (speed < config.idleSpeedThresholdPxPerSec) {
-            idleMs += dt;
+        // pathLength считаем только по непрерывным pen-down сегментам.
+        // Если флаг отсутствует — учитываем всё (legacy).
+        const segmentDrawing = !hasPenDownFlag || (prev.penDown === true && curr.penDown === true);
+        if (segmentDrawing) pathLength += distance;
+
+        // Скорость для idle-метрик считается всегда (по всем сегментам).
+        const speedPxPerSec = distance / (dt / 1000);
+        if (speedPxPerSec < (config?.idleSpeedThresholdPxPerSec ?? 40)) {
+            idleMsLegacy += dt;
+        }
+        if (diagonalPx > 0) {
+            const speedDiagPerMs = (distance / diagonalPx) / dt;
+            if (speedDiagPerMs < idleThreshDiagPerMs) {
+                idleMs += dt;
+            }
+        } else {
+            idleMs += dt; // нет диагонали — считаем всё idle (защита от деления на ноль)
         }
         activeMs += dt;
+    }
+
+    for (const p of sorted) {
+        if (p.penDown === true) penDownCount++;
     }
 
     const drawingDurationMs = Math.max(0, sorted[sorted.length - 1].t - sorted[0].t);
     const onScreenCount = sorted.filter(point => point.onScreen !== false).length;
     const onScreenPct = sorted.length > 0 ? (onScreenCount / sorted.length) * 100 : 0;
+    const penDownPct = sorted.length > 0 ? (penDownCount / sorted.length) * 100 : 0;
 
     const coveragePct = computeCoverage(
         sorted,
-        canvasSize.width,
-        canvasSize.height,
-        config.coverageGridWidth,
-        config.coverageGridHeight
+        canvasW,
+        canvasH,
+        config?.coverageGridWidth ?? 40,
+        config?.coverageGridHeight ?? 30
     );
+
+    const pathLengthDiagPct = diagonalPx > 0 ? (pathLength / diagonalPx) * 100 : 0;
 
     return {
         pointCount: sorted.length,
         pathLengthPx: round(pathLength, 1) || 0,
+        pathLengthDiagPct: round(pathLengthDiagPct, 2) || 0,
         drawingDurationMs: round(drawingDurationMs, 1) || 0,
         coveragePct: round(coveragePct, 2) || 0,
         boundingBox: getBoundingBox(sorted),
+        boundingBoxNorm: getBoundingBoxNorm(sorted, canvasW, canvasH),
         idlePct: activeMs > 0 ? round((idleMs / activeMs) * 100, 2) : 0,
-        onScreenPct: round(onScreenPct, 2) || 0
+        idlePctLegacy: activeMs > 0 ? round((idleMsLegacy / activeMs) * 100, 2) : 0,
+        onScreenPct: round(onScreenPct, 2) || 0,
+        penDownPct: round(penDownPct, 2) || 0
     };
 }

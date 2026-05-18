@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход — раздел разработчика</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #e8e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .box {
+      width: 100%;
+      max-width: 360px;
+      background: #16213e;
+      border: 1px solid rgba(92, 102, 189, 0.25);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    h1 { font-size: 1.25rem; margin-bottom: 8px; }
+    .sub { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+    label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(92, 102, 189, 0.3);
+      border-radius: 8px;
+      background: #0f0f1a;
+      color: #e8e8f0;
+      font-size: 15px;
+    }
+    input:focus { outline: none; border-color: #5C66BD; }
+    .password-wrap { position: relative; margin-bottom: 16px; }
+    .password-wrap input { margin-bottom: 0; padding-right: 48px; }
+    .password-wrap .toggle-pwd {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      width: auto;
+    }
+    .password-wrap .toggle-pwd:hover { color: #e8e8f0; background: rgba(92,102,189,.2); }
+    .error { color: #EF4444; font-size: 13px; margin-bottom: 12px; display: none; }
+    .error.visible { display: block; }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #5C66BD;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { opacity: .92; }
+    .sep { margin: 16px 0; border-top: 1px solid rgba(92, 102, 189, 0.25); }
+    .back { display: block; text-align: center; margin-top: 16px; color: #94a3b8; font-size: 14px; text-decoration: none; }
+    .back:hover { color: #5C66BD; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Вход в раздел разработчика</h1>
+    <p class="sub">Вход через API (researcher/developer/admin и др.)</p>
+    <form id="form" method="post" action="../developer.html">
+      <div class="error" id="error">Ошибка входа</div>
+      <label for="login">Email</label>
+      <input type="email" id="login" name="login" autocomplete="username" required autofocus placeholder="name@example.com">
+      <label for="password">Пароль</label>
+      <div class="password-wrap">
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <button type="button" class="toggle-pwd" id="togglePwd" title="Показать пароль">Показать</button>
+      </div>
+      <button type="submit">Войти</button>
+    </form>
+    <div class="sep"></div>
+    <form id="registerForm">
+      <label for="regEmail">Регистрация исследователя</label>
+      <input type="email" id="regEmail" autocomplete="off" placeholder="new-user@example.com">
+      <label for="regPassword">Пароль</label>
+      <input type="password" id="regPassword" autocomplete="new-password" placeholder="Минимум 8 символов">
+      <p style="font-size:12px;color:#94a3b8;margin-bottom:12px;line-height:1.35;">Публичная регистрация создаёт роль <strong>исследователя</strong>. Роли разработчика и администратора выдаёт только администратор платформы.</p>
+      <button type="submit">Создать аккаунт</button>
+    </form>
+    <a href="../index.html" class="back">← На главную</a>
+  </div>
+  <script>
+    (function () {
+      function getApiBase() {
+        if (window.API_BASE) return window.API_BASE;
+        var path = window.location.pathname || '';
+        if (path.indexOf('/main/') === 0) {
+          return window.location.origin + '/main/api';
+        }
+        return window.location.origin + '/api';
+      }
+
+      var pwdInput = document.getElementById('password');
+      var toggleBtn = document.getElementById('togglePwd');
+      toggleBtn.addEventListener('click', function () {
+        if (pwdInput.type === 'password') {
+          pwdInput.type = 'text';
+          toggleBtn.textContent = 'Скрыть';
+          toggleBtn.title = 'Скрыть пароль';
+        } else {
+          pwdInput.type = 'password';
+          toggleBtn.textContent = 'Показать';
+          toggleBtn.title = 'Показать пароль';
+        }
+      });
+
+      document.getElementById('form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var login = (document.getElementById('login').value || '').trim().toLowerCase();
+        var password = (document.getElementById('password').value || '').trim();
+        var errEl = document.getElementById('error');
+        errEl.classList.remove('visible');
+        errEl.style.color = '';
+
+        if (!login || !password) {
+          errEl.textContent = 'Введите email и пароль';
+          errEl.classList.add('visible');
+          return;
+        }
+
+        var base = (getApiBase() || '').replace(/\/$/, '');
+        fetch(base + '/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: login, password: password })
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return {}; }).then(function (j) {
+                throw new Error(j.error || (r.status + ' ' + r.statusText));
+              });
+            }
+            return r.json();
+          })
+          .then(function (result) {
+            try {
+              sessionStorage.setItem('emocog_developer_auth', '1');
+              localStorage.setItem('emocog_developer_auth', '1');
+              if (result && result.token) localStorage.setItem('emocog_api_token', result.token);
+              if (result && result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
+              localStorage.setItem('emocog_api_base', base);
+            } catch (_) {}
+            var role = (result && result.user && result.user.role) || '';
+            if (role === 'admin' || role === 'developer') {
+              window.location.href = '../developer.html';
+            } else if (['PI', 'researcher', 'analyst', 'assistant'].indexOf(role) >= 0) {
+              window.location.href = '../researcher.html';
+            } else {
+              window.location.href = '../index.html';
+            }
+          })
+          .catch(function (err) {
+            errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
+            errEl.classList.add('visible');
+          });
+      });
+
+      document.getElementById('registerForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var email = (document.getElementById('regEmail').value || '').trim().toLowerCase();
+        var password = (document.getElementById('regPassword').value || '').trim();
+        var errEl = document.getElementById('error');
+        errEl.classList.remove('visible');
+        errEl.style.color = '';
+        if (!email || !password) {
+          errEl.textContent = 'Для регистрации укажите email и пароль';
+          errEl.classList.add('visible');
+          return;
+        }
+        var base = (getApiBase() || '').replace(/\/$/, '');
+        fetch(base + '/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, password: password })
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return {}; }).then(function (j) {
+                throw new Error(j.error || (r.status + ' ' + r.statusText));
+              });
+            }
+            return r.json();
+          })
+          .then(function (result) {
+            try {
+              document.getElementById('regEmail').value = '';
+              document.getElementById('regPassword').value = '';
+            } catch (_) {}
+            try {
+              sessionStorage.setItem('emocog_developer_auth', '1');
+              localStorage.setItem('emocog_developer_auth', '1');
+              if (result && result.token) localStorage.setItem('emocog_api_token', result.token);
+              if (result && result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
+              localStorage.setItem('emocog_api_base', base);
+            } catch (_) {}
+            errEl.textContent = 'Аккаунт исследователя создан. Переход в кабинет…';
+            errEl.classList.remove('visible');
+            errEl.style.color = '#10B981';
+            errEl.classList.add('visible');
+            document.getElementById('login').value = email;
+            document.getElementById('password').value = '';
+            window.location.href = '../researcher.html';
+          })
+          .catch(function (err) {
+            errEl.textContent = 'Ошибка регистрации: ' + (err.message || err);
+            errEl.classList.add('visible');
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

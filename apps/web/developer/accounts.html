@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аккаунты и роли — EmoCog</title>
+  <style>
+    :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --ok:#10B981; --danger:#ef4444; --border:rgba(92,102,189,.25); }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
+    .top a { color:var(--muted); text-decoration:none; font-size:14px; }
+    .top a:hover { color:var(--accent); }
+    .grid { display:grid; grid-template-columns:minmax(320px,480px) minmax(360px,1fr); gap:16px; max-width:1240px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; }
+    h1 { font-size:1.35rem; }
+    h2 { font-size:1rem; margin-bottom:10px; }
+    label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:8px 0 6px; }
+    input, select { width:100%; background:rgba(0,0,0,.2); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+    .row { display:flex; gap:10px; }
+    .row > * { flex:1; }
+    button { margin-top:12px; border:none; background:var(--accent); color:#fff; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:600; }
+    button:hover { opacity:.92; }
+    .hint { color:var(--muted); font-size:12px; margin-top:8px; line-height:1.35; }
+    .status { font-size:13px; margin-top:10px; min-height:1.2em; }
+    .status.ok { color:var(--ok); }
+    .status.err { color:var(--danger); }
+    table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+    th, td { border-bottom:1px solid var(--border); text-align:left; padding:8px 6px; vertical-align:middle; }
+    th { color:var(--muted); font-weight:600; }
+    .tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+    .tools input, .tools select { max-width:220px; }
+    .small { font-size:11px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <script src="../auth-guard.js"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
+  <div class="top">
+    <h1>Аккаунты и роли</h1>
+    <a href="../developer.html">← К тестам разработчика</a>
+  </div>
+  <div class="grid">
+    <section class="card">
+      <h2>Создать учетную запись</h2>
+      <label for="email">Email</label>
+      <input id="email" type="email" placeholder="name@example.com" autocomplete="off">
+      <div class="row">
+        <div>
+          <label for="password">Пароль</label>
+          <input id="password" type="password" placeholder="Минимум 8 символов" autocomplete="new-password">
+        </div>
+        <div>
+          <label for="role">Роль</label>
+          <select id="role">
+            <option value="respondent">respondent</option>
+            <option value="developer">developer</option>
+            <option value="researcher">researcher</option>
+            <option value="analyst">analyst</option>
+            <option value="assistant">assistant</option>
+            <option value="PI">PI</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+      </div>
+      <label for="displayName">Имя (опционально)</label>
+      <input id="displayName" type="text" placeholder="Например: Demo Researcher" autocomplete="off">
+      <label for="orgs">Org IDs через запятую (опционально)</label>
+      <input id="orgs" type="text" placeholder="1,2,5" autocomplete="off">
+      <button type="button" id="createBtn">Создать аккаунт</button>
+      <p class="hint">Используется `POST /auth/users` (если есть права) либо `POST /auth/register` как fallback.</p>
+      <p id="createStatus" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>Существующие пользователи</h2>
+      <div class="tools">
+        <input id="searchQ" type="text" placeholder="Поиск email/имени" autocomplete="off">
+        <select id="roleFilter">
+          <option value="">Все роли</option>
+          <option value="respondent">respondent</option>
+          <option value="developer">developer</option>
+          <option value="researcher">researcher</option>
+          <option value="analyst">analyst</option>
+          <option value="assistant">assistant</option>
+          <option value="PI">PI</option>
+          <option value="admin">admin</option>
+        </select>
+        <button type="button" id="reloadBtn" style="margin-top:0;">Обновить</button>
+      </div>
+      <div class="small">Для смены роли выберите новое значение и нажмите Save.</div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Email</th><th>Role</th><th>Org IDs</th><th>Action</th></tr>
+        </thead>
+        <tbody id="usersBody"></tbody>
+      </table>
+      <p id="listStatus" class="status"></p>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      var token = localStorage.getItem('emocog_api_token') || '';
+      var base = (localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+      var gridEl = document.querySelector('.grid');
+      var createStatus = document.getElementById('createStatus');
+      var listStatus = document.getElementById('listStatus');
+      var usersBody = document.getElementById('usersBody');
+
+      function setStatus(el, text, isErr) {
+        el.textContent = text || '';
+        el.className = 'status ' + (text ? (isErr ? 'err' : 'ok') : '');
+      }
+
+      function jsonHeaders() {
+        var headers = { 'Content-Type': 'application/json' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        return headers;
+      }
+
+      function parseOrgIds(raw) {
+        return String(raw || '')
+          .split(',')
+          .map(function (x) { return parseInt(x.trim(), 10); })
+          .filter(function (x) { return Number.isInteger(x) && x > 0; });
+      }
+
+      async function createUser() {
+        setStatus(createStatus, '');
+        var payload = {
+          email: (document.getElementById('email').value || '').trim().toLowerCase(),
+          password: (document.getElementById('password').value || '').trim(),
+          role: document.getElementById('role').value,
+          display_name: (document.getElementById('displayName').value || '').trim() || null,
+          organization_ids: parseOrgIds(document.getElementById('orgs').value)
+        };
+        if (!payload.email || !payload.password) {
+          setStatus(createStatus, 'Укажите email и пароль.', true);
+          return;
+        }
+        try {
+          var path = '/auth/users';
+          var r = await fetch(base + path, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload) });
+          if (!r.ok && (r.status === 403 || r.status === 404)) {
+            r = await fetch(base + '/auth/register', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload) });
+          }
+          if (!r.ok) {
+            var errorPayload = await r.json().catch(function () { return {}; });
+            throw new Error(errorPayload.error || (r.status + ' ' + r.statusText));
+          }
+          var user = await r.json();
+          setStatus(createStatus, 'Аккаунт создан: ' + (user.email || payload.email));
+          document.getElementById('password').value = '';
+          loadUsers();
+        } catch (err) {
+          setStatus(createStatus, 'Ошибка: ' + (err.message || err), true);
+        }
+      }
+
+      function renderUsers(rows) {
+        if (!rows.length) {
+          usersBody.innerHTML = '<tr><td colspan="5">Нет данных</td></tr>';
+          return;
+        }
+        usersBody.innerHTML = rows.map(function (u) {
+          var roleOptions = ['respondent', 'developer', 'researcher', 'analyst', 'assistant', 'PI', 'admin']
+            .map(function (role) {
+              return '<option value="' + role + '"' + (u.role === role ? ' selected' : '') + '>' + role + '</option>';
+            })
+            .join('');
+          var orgs = Array.isArray(u.organization_ids) ? u.organization_ids.join(',') : '';
+          return (
+            '<tr data-id="' + u.id + '">' +
+              '<td>' + u.id + '</td>' +
+              '<td>' + (u.email || '—') + '</td>' +
+              '<td><select class="user-role">' + roleOptions + '</select></td>' +
+              '<td>' + (orgs || '—') + '</td>' +
+              '<td><button type="button" class="save-user" style="margin-top:0;padding:6px 10px;">Save</button></td>' +
+            '</tr>'
+          );
+        }).join('');
+
+        Array.from(document.querySelectorAll('.save-user')).forEach(function (btn) {
+          btn.addEventListener('click', async function () {
+            var tr = btn.closest('tr');
+            var userId = tr.getAttribute('data-id');
+            var role = tr.querySelector('.user-role').value;
+            try {
+              var r = await fetch(base + '/auth/users/' + encodeURIComponent(userId), {
+                method: 'PATCH',
+                headers: jsonHeaders(),
+                body: JSON.stringify({ role: role })
+              });
+              if (!r.ok) {
+                var e = await r.json().catch(function () { return {}; });
+                throw new Error(e.error || (r.status + ' ' + r.statusText));
+              }
+              setStatus(listStatus, 'Роль обновлена для user #' + userId);
+            } catch (err) {
+              setStatus(listStatus, 'Ошибка обновления: ' + (err.message || err), true);
+            }
+          });
+        });
+      }
+
+      async function loadUsers() {
+        setStatus(listStatus, '');
+        var q = new URLSearchParams();
+        var role = document.getElementById('roleFilter').value;
+        var search = (document.getElementById('searchQ').value || '').trim();
+        if (role) q.set('role', role);
+        if (search) q.set('q', search);
+        try {
+          var r = await fetch(base + '/auth/users?' + q.toString(), { headers: jsonHeaders() });
+          if (!r.ok) {
+            var errPayload = await r.json().catch(function () { return {}; });
+            throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
+          }
+          var rows = await r.json();
+          renderUsers(Array.isArray(rows) ? rows : []);
+          setStatus(listStatus, 'Загружено: ' + (Array.isArray(rows) ? rows.length : 0));
+        } catch (err) {
+          usersBody.innerHTML = '<tr><td colspan="5">Ошибка загрузки</td></tr>';
+          setStatus(listStatus, 'Ошибка: ' + (err.message || err), true);
+        }
+      }
+
+      function lockAccountsUi(message) {
+        if (gridEl) {
+          gridEl.innerHTML =
+            '<section class="card" style="grid-column:1/-1"><h2>Нет доступа</h2><p class="hint">' +
+            (message || 'Эта страница доступна только платформенному администратору.') +
+            '</p><p class="hint"><a href="../researcher.html" style="color:var(--accent)">← Кабинет исследователя</a></p></section>';
+        }
+      }
+
+      fetch(base + '/auth/permissions', { headers: jsonHeaders() })
+        .then(function (r) {
+          if (!r.ok) throw new Error('permissions');
+          return r.json();
+        })
+        .then(function (perms) {
+          if (!perms || !perms.is_platform_admin) {
+            lockAccountsUi(
+              'Создание аккаунтов с ролями admin / PI / developer и выдача прав разработчика — только у администратора платформы (не у роли «разработчик» или PI).'
+            );
+            return;
+          }
+          document.getElementById('createBtn').addEventListener('click', createUser);
+          document.getElementById('reloadBtn').addEventListener('click', loadUsers);
+          loadUsers();
+        })
+        .catch(function () {
+          lockAccountsUi();
+        });
+    })();
+  </script>
+</body>
+</html>

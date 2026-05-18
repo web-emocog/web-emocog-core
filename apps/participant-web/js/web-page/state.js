@@ -19,7 +19,7 @@ export const state = {
     
     // Основные данные сессии (то, что идет в JSON)
     sessionData: {
-        ids: { session: null, participant: null },
+        ids: { session: null, participant: null, invitationCode: null },
         user: { interfaceLanguage: 'ru' }, // Будет обновлено при старте
         tech: {}, 
         precheck: {},
@@ -31,6 +31,7 @@ export const state = {
         gazeValidation: null,
         heatmaps: null,
         attentionMetrics: null,
+        emotionEvents: [],
         testHub: {
             version: '1.0.0',
             selections: [],
@@ -41,7 +42,11 @@ export const state = {
             visuospatialRuns: []
         },
         events: [],
+        lifecycle: null,
+        upload: null,
         qcSummary: null,
+        bpmSummary: null,
+        rppgSummary: null,
         startTime: Date.now()
     },
 
@@ -84,6 +89,7 @@ export const state = {
         // Объекты анализаторов
         localAnalyzer: null,
         faceSegmenter: null,
+        faceMaskCollector: null,
         qcMetrics: null,
         gazeTracker: null,        // GazeTracker instance
 

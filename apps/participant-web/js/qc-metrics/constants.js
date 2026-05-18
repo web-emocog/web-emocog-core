@@ -1,41 +1,10 @@
 /**
  * QC Metrics Constants
- * 
- * Пороговые значения и MIGRATION CHECKLIST
- * 
+ *
+ * Пороговые значения и веса. Синхронизировано с production-обёрткой
+ * qc-metrics.js v3.5.
+ *
  * @module qc-metrics/constants
- */
-
-/**
- * ============================================================================
- * MIGRATION CHECKLIST (when gaze-tracker.js is ready):
- * ============================================================================
- * 
- * ▸ STEP 1: IN THIS FILE (qc-metrics.js)
- * --------------------------------------
- * 1. DELETE method: addGazePoint()
- * 2. DELETE method: _inferOnScreenFromPoseAndGaze()
- * 3. DELETE thresholds: pose_yaw_on_max, pose_pitch_on_max, pose_yaw_off_min, pose_pitch_off_min
- * 4. UPDATE videoElementIdCandidates: remove "webgazerVideoFeed", add gaze-tracker video id
- * 5. KEEP method: setGazeScreenState() — this is the API for gaze-tracker.js
- * 
- * ▸ STEP 2: IN HTML (mvp_with_precheck_1.html)
- * --------------------------------------------
- * 1. REMOVE script: <script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
- * 2. ADD script:    <script src="js/gaze-tracker.js"></script>
- * 
- * ▸ STEP 3: REQUIRED gaze-tracker.js API
- * --------------------------------------
- * gaze-tracker.js MUST export these methods:
- * 
- * interface GazeTracker {
- *   init(options: { videoElementId?: string }): Promise<void>;
- *   startCalibration(): Promise<void>;
- *   getScreenState(): { valid: boolean; onScreen: boolean | null; };
- *   stop(): void;
- * }
- * 
- * ============================================================================
  */
 
 /**
@@ -49,7 +18,7 @@ export const DEFAULT_THRESHOLDS = {
     face_visible_pct_min: 85,
     face_ok_pct_min: 85,
     pose_ok_pct_min: 85,
-    illumination_ok_pct_min: 90,
+    illumination_ok_pct_min: 92,
     eyes_open_pct_min: 85,
     occlusion_pct_max: 20,
 
@@ -73,14 +42,18 @@ export const DEFAULT_THRESHOLDS = {
     maxLowFpsTimeMs: 4000,
     maxConsecutiveLowFpsMs: 2000,
 
-    // [LEGACY - DELETE when gaze-tracker.js ready]
+    // pose thresholds (используются в addGazePoint для onScreen-инференса по позе)
     pose_yaw_on_max: 20,
     pose_pitch_on_max: 18,
     pose_yaw_off_min: 35,
     pose_pitch_off_min: 30,
 
     // dropout segments
-    maxConsecutiveDropoutMs: 1200
+    maxConsecutiveDropoutMs: 1200,
+
+    // tracking deviation (отклонение взгляда от подвижной цели)
+    tracking_on_target_base_radius_pct: 0.15,
+    tracking_on_target_min_pct: 50
 };
 
 /**
@@ -96,20 +69,37 @@ export const VIDEO_ELEMENT_IDS = [
 ];
 
 /**
- * Весовые коэффициенты для QC Score
- * LEGACY-compatible weights (sum = 1.0)
+ * Весовые коэффициенты для QC Score (sum = 1.0).
+ * Синхронизированы с production-обёрткой qc-metrics.js v3.5.
  */
 export const QC_WEIGHTS = {
-    faceVis: 0.14,
-    faceOk: 0.16,
-    poseOk: 0.08,
-    lightOk: 0.06,
+    faceVis: 0.12,
+    faceOk: 0.14,
+    poseOk: 0.14,
+    lightOk: 0.10,
     eyesOpen: 0.06,
-    occlInv: 0.10,
-    gazeValid: 0.14,
-    gazeOn: 0.16,
-    dropoutInv: 0.04,
+    occlInv: 0.08,
+    gazeValid: 0.12,
+    gazeOn: 0.12,
+    gazeAccuracy: 0.06,
     fpsOk: 0.06,
+};
+
+/**
+ * Множители «жёстких пенальти» для QC Score: при провале конкретной проверки
+ * результат умножается на (1 - factor). Совпадают с обёрткой qc-metrics.js v3.5.
+ */
+export const QC_PENALTIES = {
+    duration: 0.65,
+    faceVisible: 0.40,
+    faceOk: 0.40,
+    poseOk: 0.45,
+    illumination: 0.35,
+    occlusion: 0.30,
+    gazeValid: 0.30,
+    gazeOnScreen: 0.30,
+    gazeAccuracy: 0.25,
+    lowFps: 0.40,
 };
 
 /**

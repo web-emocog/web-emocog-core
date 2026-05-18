@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Учет экспериментов — EmoCog</title>
+  <style>
+    :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --border:rgba(92,102,189,.25); --ok:#10B981; --danger:#ef4444; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+    .top a { color:var(--muted); text-decoration:none; font-size:14px; }
+    .top a:hover { color:var(--accent); }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:14px; max-width:1240px; }
+    h1 { font-size:1.35rem; }
+    h2 { font-size:1rem; margin-bottom:10px; }
+    .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+    .field { min-width:160px; }
+    .field label { display:block; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px; }
+    input { width:100%; border:1px solid var(--border); background:rgba(0,0,0,.2); color:var(--text); border-radius:10px; padding:9px 11px; }
+    button { border:none; border-radius:10px; padding:10px 14px; background:var(--accent); color:#fff; cursor:pointer; font-weight:600; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; border-bottom:1px solid var(--border); padding:8px 6px; vertical-align:middle; }
+    th { color:var(--muted); }
+    .status { font-size:13px; color:var(--muted); margin-top:10px; min-height:1.2em; }
+    .status.err { color:var(--danger); }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  </style>
+</head>
+<body>
+  <script src="../auth-guard.js"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
+  <div class="top">
+    <h1>Учет экспериментов</h1>
+    <a href="../developer.html">← К тестам разработчика</a>
+  </div>
+
+  <section class="card">
+    <h2>Фильтры</h2>
+    <div class="filters">
+      <div class="field">
+        <label>Project ID</label>
+        <input id="projectId" type="number" min="1" placeholder="Напр. 1">
+      </div>
+      <div class="field">
+        <label>Protocol ID</label>
+        <input id="protocolId" type="number" min="1" placeholder="Напр. 2">
+      </div>
+      <div class="field">
+        <label>Date from</label>
+        <input id="dateFrom" type="date">
+      </div>
+      <div class="field">
+        <label>Date to</label>
+        <input id="dateTo" type="date">
+      </div>
+      <button id="reloadBtn" type="button">Обновить</button>
+    </div>
+    <p id="overviewStatus" class="status"></p>
+  </section>
+
+  <section class="card">
+    <h2>Сводка по экспериментам</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Experiment</th>
+          <th>Project</th>
+          <th>Protocol</th>
+          <th>Total</th>
+          <th>Completed</th>
+          <th>In progress</th>
+          <th>Avg QC</th>
+          <th>QC valid/borderline/invalid</th>
+        </tr>
+      </thead>
+      <tbody id="overviewBody"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Последние сессии</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Session</th>
+          <th>Experiment</th>
+          <th>Participant</th>
+          <th>Invitation code</th>
+          <th>Status</th>
+          <th>QC</th>
+          <th>Started</th>
+        </tr>
+      </thead>
+      <tbody id="recentBody"></tbody>
+    </table>
+    <p id="recentStatus" class="status"></p>
+  </section>
+
+  <script>
+    (function () {
+      var token = localStorage.getItem('emocog_api_token') || '';
+      var base = (localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+      var overviewBody = document.getElementById('overviewBody');
+      var recentBody = document.getElementById('recentBody');
+      var overviewStatus = document.getElementById('overviewStatus');
+      var recentStatus = document.getElementById('recentStatus');
+
+      function setStatus(el, text, isErr) {
+        el.textContent = text || '';
+        el.className = 'status' + (text ? (isErr ? ' err' : '') : '');
+      }
+      function headers() {
+        return token ? { Authorization: 'Bearer ' + token } : {};
+      }
+
+      function filtersToQuery() {
+        var q = new URLSearchParams();
+        var projectId = document.getElementById('projectId').value;
+        var protocolId = document.getElementById('protocolId').value;
+        var dateFrom = document.getElementById('dateFrom').value;
+        var dateTo = document.getElementById('dateTo').value;
+        if (projectId) q.set('project_id', projectId);
+        if (protocolId) q.set('protocol_id', protocolId);
+        if (dateFrom) q.set('date_from', dateFrom);
+        if (dateTo) q.set('date_to', dateTo);
+        return q;
+      }
+
+      function renderOverview(rows) {
+        if (!rows.length) {
+          overviewBody.innerHTML = '<tr><td colspan="8">Нет данных</td></tr>';
+          return;
+        }
+        overviewBody.innerHTML = rows.map(function (r) {
+          var qc = [
+            r.qc_valid_count || 0,
+            r.qc_borderline_count || 0,
+            r.qc_invalid_count || 0
+          ].join(' / ');
+          return '<tr>' +
+            '<td>' + (r.experiment_title || '—') + '</td>' +
+            '<td>' + (r.project_id || '—') + '</td>' +
+            '<td>' + (r.protocol_id || '—') + '</td>' +
+            '<td>' + (r.total_sessions || 0) + '</td>' +
+            '<td>' + (r.completed_sessions || 0) + '</td>' +
+            '<td>' + (r.in_progress_sessions || 0) + '</td>' +
+            '<td>' + (r.avg_qc_score != null ? r.avg_qc_score : '—') + '</td>' +
+            '<td>' + qc + '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      function renderRecent(rows) {
+        if (!rows.length) {
+          recentBody.innerHTML = '<tr><td colspan="7">Нет данных</td></tr>';
+          return;
+        }
+        recentBody.innerHTML = rows.map(function (r) {
+          return '<tr>' +
+            '<td class="mono">' + (r.session_id || '—') + '</td>' +
+            '<td>' + (r.experiment_title || '—') + '</td>' +
+            '<td>' + (r.participant_id || '—') + '</td>' +
+            '<td class="mono">' + (r.invitation_code || '—') + '</td>' +
+            '<td>' + (r.session_status || '—') + '</td>' +
+            '<td>' + (r.qc_validity || '—') + (r.qc_score != null ? ' (' + r.qc_score + ')' : '') + '</td>' +
+            '<td>' + (r.started_at ? new Date(r.started_at).toLocaleString() : '—') + '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      async function loadOverview() {
+        setStatus(overviewStatus, '');
+        var q = filtersToQuery();
+        try {
+          var r = await fetch(base + '/experiments?' + q.toString(), { headers: headers() });
+          if (!r.ok) {
+            var errPayload = await r.json().catch(function () { return {}; });
+            throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
+          }
+          var rows = await r.json();
+          rows = Array.isArray(rows) ? rows : [];
+          renderOverview(rows);
+          setStatus(overviewStatus, 'Загружено сводок: ' + rows.length);
+        } catch (err) {
+          setStatus(overviewStatus, 'Ошибка: ' + (err.message || err), true);
+          overviewBody.innerHTML = '<tr><td colspan="8">Ошибка загрузки</td></tr>';
+        }
+      }
+
+      async function loadRecent() {
+        setStatus(recentStatus, '');
+        try {
+          var r = await fetch(base + '/experiments/recent?limit=50', { headers: headers() });
+          if (!r.ok) {
+            var errPayload = await r.json().catch(function () { return {}; });
+            throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
+          }
+          var rows = await r.json();
+          rows = Array.isArray(rows) ? rows : [];
+          renderRecent(rows);
+          setStatus(recentStatus, 'Загружено сессий: ' + rows.length);
+        } catch (err) {
+          setStatus(recentStatus, 'Ошибка: ' + (err.message || err), true);
+          recentBody.innerHTML = '<tr><td colspan="7">Ошибка загрузки</td></tr>';
+        }
+      }
+
+      async function reloadAll() {
+        await loadOverview();
+        await loadRecent();
+      }
+      document.getElementById('reloadBtn').addEventListener('click', reloadAll);
+      reloadAll();
+    })();
+  </script>
+</body>
+</html>
