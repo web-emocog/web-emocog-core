@@ -1,1 +1,13 @@
 .DS_Store
+
+# Dependencies
+node_modules/
+
+# Test artifacts (Playwright)
+playwright-report/
+test-results/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local

@@ -1,5 +1,7 @@
 # web_cognitive_hse
 
+[![CI](https://github.com/web-emocog/web-emocog-core/actions/workflows/ci.yml/badge.svg)](https://github.com/web-emocog/web-emocog-core/actions/workflows/ci.yml)
+
 Web-платформа для когнитивных исследований:
 - participant web
 - researcher web
