@@ -49,6 +49,7 @@ async function runTick() {
         localState.lastVideoTime = videoTime;
 
         const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(localState.video);
+        state.runtime.lastPrecheckResult = precheckResult;
 
         if (precheckResult && precheckResult.pose) {
             state.runtime.lastPoseData = {

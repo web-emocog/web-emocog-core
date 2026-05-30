@@ -54,4 +54,71 @@ function computeQcValidity(qcSummary, payload) {
   return { validity, qc_score, fail_reasons };
 }
 
-module.exports = { computeQcValidity };
+const RT_QC_THRESHOLDS = Object.freeze({
+  omission_rate: 0.25,
+  commission_rate: 0.35,
+  rt_outlier_frac: 0.4,
+});
+
+function meanBlockMetric(rtFeatures, metricId) {
+  if (!rtFeatures?.blocks) return null;
+  const vals = [];
+  for (const block of rtFeatures.blocks) {
+    const entry = block?.computed_metrics?.[metricId];
+    if (entry && typeof entry.value === 'number' && Number.isFinite(entry.value)) {
+      vals.push(entry.value);
+    }
+  }
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+/** Block-level behavioral RT QC; does not invalidate whole session by default. */
+function mergeBehavioralRtQc(qcState, rtFeatures, payload) {
+  const out = {
+    validity: qcState.validity,
+    qc_score: qcState.qc_score,
+    fail_reasons: [...(qcState.fail_reasons || [])],
+  };
+  const behavioral = { blocks: [] };
+
+  const omission = meanBlockMetric(rtFeatures, 'omission_rate');
+  if (omission != null && omission >= RT_QC_THRESHOLDS.omission_rate) {
+    if (!out.fail_reasons.includes('high_omission_rate')) out.fail_reasons.push('high_omission_rate');
+    behavioral.blocks.push({ reason: 'high_omission_rate', value: omission, level: 'block' });
+  }
+
+  const commission = meanBlockMetric(rtFeatures, 'commission_rate');
+  if (commission != null && commission >= RT_QC_THRESHOLDS.commission_rate) {
+    if (!out.fail_reasons.includes('high_commission_rate')) out.fail_reasons.push('high_commission_rate');
+    behavioral.blocks.push({ reason: 'high_commission_rate', value: commission, level: 'block' });
+  }
+
+  const outlier = meanBlockMetric(rtFeatures, 'rt_outlier_frac');
+  if (outlier != null && outlier >= RT_QC_THRESHOLDS.rt_outlier_frac) {
+    if (!out.fail_reasons.includes('high_rt_outlier_frac')) out.fail_reasons.push('high_rt_outlier_frac');
+    behavioral.blocks.push({ reason: 'high_rt_outlier_frac', value: outlier, level: 'block' });
+  }
+
+  if (rtFeatures?.blocks) {
+    for (const block of rtFeatures.blocks) {
+      if (block.status === 'no_events' || block.status === 'analyzer_unavailable') {
+        behavioral.blocks.push({
+          block_id: block.block_id,
+          reason: block.status === 'analyzer_unavailable' ? 'rt_analyzer_unavailable' : 'rt_block_incomplete',
+          level: 'block',
+        });
+        const code = block.status === 'analyzer_unavailable' ? 'rt_analyzer_unavailable' : 'rt_block_incomplete';
+        if (!out.fail_reasons.includes(code)) out.fail_reasons.push(code);
+      }
+    }
+  }
+
+  if (payload && typeof payload === 'object') {
+    payload.rt_qc = behavioral;
+  }
+
+  return out;
+}
+
+module.exports = { computeQcValidity, mergeBehavioralRtQc, RT_QC_THRESHOLDS };

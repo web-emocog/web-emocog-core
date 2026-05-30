@@ -49,9 +49,9 @@ def _group_by_trial(events: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, An
         g[tid].sort(key=lambda e: float(e.get("t_mono", 0.0)))
     return g
 
-def build_trials(log_path: str, task: str, cfg: ProjectConfig) -> Tuple[List[TrialOutcome], Dict[str, Any]]:
-    # Парсит лог событий и преобразует в список структурированных испытаний
-    events = list(read_jsonl(log_path))
+def build_trials_from_events(events: List[Dict[str, Any]], task: str, cfg: ProjectConfig,
+                             meta_extra: Optional[Dict[str, Any]] = None) -> Tuple[List[TrialOutcome], Dict[str, Any]]:
+    # Парсит список событий и преобразует в структурированные испытания (без изменения логики классификации)
     bounds: TaskBounds = cfg.task_bounds.get(task, cfg.task_bounds["simple"])
     g = _group_by_trial(events)
     prem_ms = cfg.analysis.premature_window_ms
@@ -154,8 +154,24 @@ def build_trials(log_path: str, task: str, cfg: ProjectConfig) -> Tuple[List[Tri
 
         trials.append(out)
 
-    meta = {"log_path": log_path, "task": task, "bounds": {"min_rt_ms": bounds.min_rt_ms, "max_rt_ms": bounds.max_rt_ms, "timeout_ms": bounds.timeout_ms}, "n_trials": len(trials)}
+    meta: Dict[str, Any] = {
+        "task": task,
+        "bounds": {
+            "min_rt_ms": bounds.min_rt_ms,
+            "max_rt_ms": bounds.max_rt_ms,
+            "timeout_ms": bounds.timeout_ms,
+        },
+        "n_trials": len(trials),
+    }
+    if meta_extra:
+        meta.update(meta_extra)
     return trials, meta
+
+
+def build_trials(log_path: str, task: str, cfg: ProjectConfig) -> Tuple[List[TrialOutcome], Dict[str, Any]]:
+    events = list(read_jsonl(log_path))
+    return build_trials_from_events(events, task, cfg, meta_extra={"log_path": log_path})
+
 
 def compute_metrics(trials: List[TrialOutcome], task: str, cfg: ProjectConfig) -> Dict[str, Any]:
     # Вычисляет статистические показатели производительности
@@ -228,9 +244,38 @@ def compute_metrics(trials: List[TrialOutcome], task: str, cfg: ProjectConfig) -
 
     # Возвращает полный набор метрик
     return {
-        "counts": {"total_trials": total,"correct":correct,"wrong":wrong,"commission":commission,"omission":omission,"anticipation":anticipation,"timeout":timeout,"go_trials":go_trials,"nogo_trials":n[...]
-        "rt": {"n_valid":len(rt_valid),"mean_rt_ms":mean_rt,"median_rt_ms":median_rt,"rt_std_ms":rt_std,"rt_cv":rt_cv,"rt_slope_ms_per_trial":rt_slope,"lapses_gt_ms":lapse_ms,"lapses_count":lapses,"la[...]
-        "rates": {"accuracy":accuracy,"omission_rate":omission_rate,"commission_error_rate":commission_rate,"timeout_rate":timeout_rate,"anticipation_rate":anticipation_rate,"hit_rate":hit_rate,"false[...]
+        "counts": {
+            "total_trials": total,
+            "correct": correct,
+            "wrong": wrong,
+            "commission": commission,
+            "omission": omission,
+            "anticipation": anticipation,
+            "timeout": timeout,
+            "go_trials": go_trials,
+            "nogo_trials": nogo_trials,
+        },
+        "rt": {
+            "n_valid": len(rt_valid),
+            "mean_rt_ms": mean_rt,
+            "median_rt_ms": median_rt,
+            "rt_std_ms": rt_std,
+            "rt_cv": rt_cv,
+            "rt_slope_ms_per_trial": rt_slope,
+            "lapses_gt_ms": lapse_ms,
+            "lapses_count": lapses,
+            "lapse_rate": lapse_rate,
+        },
+        "rates": {
+            "accuracy": accuracy,
+            "omission_rate": omission_rate,
+            "commission_error_rate": commission_rate,
+            "timeout_rate": timeout_rate,
+            "anticipation_rate": anticipation_rate,
+            "hit_rate": hit_rate,
+            "false_alarm_rate": fa_rate,
+            "d_prime": d_prime,
+        },
         "speed_accuracy": {"pearson_r_rt_correctness": speed_accuracy_r},
         "bounds": {"min_rt_ms": bounds.min_rt_ms, "max_rt_ms": bounds.max_rt_ms, "timeout_ms": bounds.timeout_ms},
     }

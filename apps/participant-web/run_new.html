@@ -10,6 +10,13 @@
     (function () {
       var search = window.location.search || '';
       var params = new URLSearchParams(search);
+      if (!params.get('code') && window.location.hash) {
+        var hm = window.location.hash.match(/^#\/?participant\/([^/?#]+)/i);
+        if (hm && hm[1]) {
+          params.set('code', decodeURIComponent(hm[1]).trim());
+          search = '?' + params.toString();
+        }
+      }
       if (params.get('code')) {
         window.location.replace('mvp_with_precheck_1-updated.html' + search + (window.location.hash || ''));
         return;

@@ -4,6 +4,15 @@ import { pickRandomPrompt } from './prompts.js';
 import { computeVisuospatialMetrics } from './metrics.js';
 import { pushVisuospatialSessionRun } from '../session-schema.js';
 
+function dbg(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.log(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+let _visDrawLogN = 0;
+
 function text(t, key, fallback) {
     if (typeof t === 'function') {
         const value = t(key);
@@ -38,6 +47,7 @@ function setupCanvas(canvas) {
 }
 
 export async function runVisuospatialDrawingTest(options = {}) {
+    dbg('visuospatial', 'screen:opened', {});
     const t = options.t;
     const runId = `visuospatial_run_${Date.now()}`;
     const startedAt = Date.now();
@@ -97,6 +107,16 @@ export async function runVisuospatialDrawingTest(options = {}) {
     hide(introCard);
     show(drawingOverlay, 'block');
 
+    const active = document.activeElement;
+    if (active && (active.tagName === 'BUTTON' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        try { active.blur(); } catch (_) { /* ignore */ }
+        dbg('visuospatial', 'focus:cleared', { tag: active.tagName, id: active.id || null });
+    }
+    if (drawingOverlay && !drawingOverlay.hasAttribute('tabindex')) {
+        drawingOverlay.setAttribute('tabindex', '-1');
+        try { drawingOverlay.focus({ preventScroll: true }); } catch (_) { /* ignore */ }
+    }
+
     if (promptHudText) promptHudText.textContent = promptTitleText;
     if (penStatus) {
         penStatus.textContent = text(t, 'visuospatial_status_pen_up', 'Пауза (Пробел отпущен)');
@@ -107,6 +127,12 @@ export async function runVisuospatialDrawingTest(options = {}) {
     // иначе rect = 0×0, поэтому setupCanvas вызываем ПОСЛЕ show(drawingOverlay).
     const canvasInfo = setupCanvas(canvas);
     const ctx = canvas ? canvas.getContext('2d') : null;
+    dbg('visuospatial', 'canvas:setup', {
+        canvasFound: !!canvas,
+        canvasSize: canvasInfo,
+        contextExists: !!ctx,
+        overlayVisible: drawingOverlay ? drawingOverlay.style.display : null
+    });
     if (ctx) {
         ctx.setTransform(canvasInfo.ratio, 0, 0, canvasInfo.ratio, 0, 0);
         ctx.lineWidth = 2;
@@ -139,8 +165,9 @@ export async function runVisuospatialDrawingTest(options = {}) {
             stopped = true;
             if (rafId) cancelAnimationFrame(rafId);
             if (timeoutId) clearTimeout(timeoutId);
-            if (onKeyDown) document.removeEventListener('keydown', onKeyDown);
-            if (onKeyUp) document.removeEventListener('keyup', onKeyUp);
+            if (onKeyDown) document.removeEventListener('keydown', onKeyDown, { capture: true });
+            if (onKeyUp) document.removeEventListener('keyup', onKeyUp, { capture: true });
+            globalThis.__WECOG_ACTIVE_LISTENERS__ = 0;
             if (gazeDot) gazeDot.classList.remove('is-pen-down');
             if (finishBtn) {
                 finishBtn.removeEventListener('click', onFinishClick);
@@ -159,6 +186,7 @@ export async function runVisuospatialDrawingTest(options = {}) {
         onKeyDown = (e) => {
             if (e.code === 'Space' && !penDown) {
                 penDown = true;
+                dbg('visuospatial', 'keydown:Space', { drawingActive: true });
                 e.preventDefault();
                 if (gazeDot) gazeDot.classList.add('is-pen-down');
                 if (penStatus) {
@@ -169,6 +197,7 @@ export async function runVisuospatialDrawingTest(options = {}) {
         onKeyUp = (e) => {
             if (e.code === 'Space' && penDown) {
                 penDown = false;
+                dbg('visuospatial', 'keyup:Space', { drawingActive: false });
                 e.preventDefault();
                 if (gazeDot) gazeDot.classList.remove('is-pen-down');
                 if (penStatus) {
@@ -177,8 +206,9 @@ export async function runVisuospatialDrawingTest(options = {}) {
                 lastPoint = null;
             }
         };
-        document.addEventListener('keydown', onKeyDown);
-        document.addEventListener('keyup', onKeyUp);
+        document.addEventListener('keydown', onKeyDown, { capture: true });
+        document.addEventListener('keyup', onKeyUp, { capture: true });
+        globalThis.__WECOG_ACTIVE_LISTENERS__ = 2;
 
         const drawTick = () => {
             if (stopped) return;
@@ -186,6 +216,17 @@ export async function runVisuospatialDrawingTest(options = {}) {
             const gaze = state.runtime.currentGaze || { x: null, y: null };
             const rect = canvas.getBoundingClientRect();
             const tNow = Date.now();
+            const gazeValid = Number.isFinite(gaze.x) && Number.isFinite(gaze.y);
+            globalThis.__WECOG_VIS_DIAG__ = {
+                spaceDown: penDown,
+                penDown,
+                canvasWidth: canvasInfo.width,
+                canvasHeight: canvasInfo.height,
+                canvasPixelWidth: canvas?.width ?? 0,
+                canvasPixelHeight: canvas?.height ?? 0,
+                currentGazeValid: gazeValid,
+                focusTag: globalThis.__WECOG_VIS_DIAG__?.focusTag ?? null
+            };
 
             if (Number.isFinite(gaze.x) && Number.isFinite(gaze.y)) {
                 const x = gaze.x - rect.left;
@@ -215,14 +256,36 @@ export async function runVisuospatialDrawingTest(options = {}) {
                         ctx.moveTo(lastPoint.x, lastPoint.y);
                         ctx.lineTo(x, y);
                         ctx.stroke();
+                        if (window.WECOG_DEBUG?.enabled && _visDrawLogN % 45 === 0) {
+                            dbg('visuospatial', 'draw:call', { x, y, penDown, drawingActive });
+                        }
                     }
                     lastPoint = point;
                 } else {
+                    if (window.WECOG_DEBUG?.enabled && _visDrawLogN % 60 === 0) {
+                        let reason = 'unknown';
+                        if (!ctx) reason = 'no_ctx';
+                        else if (!onScreen) reason = 'offscreen';
+                        else if (!drawingActive) reason = 'not_drawing';
+                        dbg('visuospatial', 'draw:skipped', { reason, penDown, requireSpace });
+                    }
                     // Pen-up или off-screen — линия не идёт; сбрасываем lastPoint
                     // чтобы при возобновлении не соединить через "разрыв".
                     lastPoint = null;
                 }
+                if (window.WECOG_DEBUG?.enabled && _visDrawLogN % 30 === 0) {
+                    dbg('visuospatial', 'gaze:sample', {
+                        gazeX: gaze.x,
+                        gazeY: gaze.y,
+                        penDown,
+                        drawingActive,
+                        onScreen
+                    });
+                }
+            } else if (window.WECOG_DEBUG?.enabled && _visDrawLogN % 60 === 0) {
+                dbg('visuospatial', 'draw:skipped', { reason: 'no_gaze' });
             }
+            _visDrawLogN += 1;
 
             rafId = requestAnimationFrame(drawTick);
         };
@@ -282,6 +345,10 @@ export async function runVisuospatialDrawingTest(options = {}) {
     };
 
     pushVisuospatialSessionRun(state.sessionData, runPayload);
+    dbg('visuospatial', 'finish:clicked', {
+        endReason,
+        savedDrawingSampleCount: metrics.pointCount
+    });
 
     recordSessionEvent('visuospatial_run_end', {
         runId,

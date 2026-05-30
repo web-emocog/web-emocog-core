@@ -1,0 +1,6 @@
+branch=local-fixed-integration
+commit=df35326d6c375bafb8c3415edf41c3b70003cacd
+deployed_via=zip:/tmp/emocog-local-fixed-integration-df35326.zip
+nginx_root=/var/www/emocog
+participant_entry=apps/participant-web/run_new.html?code=
+updated=2026-05-26

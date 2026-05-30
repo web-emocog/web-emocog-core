@@ -1,3 +1,6 @@
+// DEPRECATED: use mvp_with_precheck_1-updated.html with app-updated.js / tests-updated.js
+console.warn('[DEPRECATED] js/web-page/app.js — official entrypoint: mvp_with_precheck_1-updated.html + app-updated.js');
+
 // 1. Импорты всех модулей
 import { state, getCurrentTaskContext, getRelativeSessionTimeMs } from './state.js';
 import { 

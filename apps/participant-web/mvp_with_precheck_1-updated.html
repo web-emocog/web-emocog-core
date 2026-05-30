@@ -6,6 +6,18 @@
     <title>EmoCog Research (Multilingual)</title>
 
     <link rel="stylesheet" href="style.css">
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search || '');
+        if (params.get('code')) return;
+        var m = (window.location.hash || '').match(/^#\/?participant\/([^/?#]+)/i);
+        if (!m || !m[1]) return;
+        var u = new URL(window.location.href);
+        u.searchParams.set('code', decodeURIComponent(m[1]).trim());
+        u.hash = '';
+        window.location.replace(u.pathname + u.search);
+      })();
+    </script>
 
     <!-- MediaPipe Vision (Face Landmarker) -->
     <script src="js/vendor/mediapipe/vision_bundle.mjs" type="module"></script>
@@ -451,6 +463,7 @@
                     <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
                 </div>
             </div>
+            <div id="finalQcSummary" class="final-qc-summary" aria-live="polite"></div>
             
             <label class="checkbox-wrapper" style="display: block; margin-bottom: 10px;">
                 <input type="checkbox" id="aggregatesOnlyCheckbox">
@@ -466,6 +479,31 @@
 
     </div>
 
+    <script src="js/web-page/debug-runtime.js"></script>
+    <script src="js/web-page/debug-hud.js"></script>
+    <script>
+      if (!window.WECOG_DEBUG) {
+        console.error('[WECOG_DEBUG] debug-runtime.js failed to load — using no-op stub');
+        window.WECOG_DEBUG = {
+          enabled: false,
+          isEnabled: function () { return false; },
+          log: function () {},
+          warn: function () {},
+          error: function () {},
+          mark: function () {},
+          dump: function () { return []; },
+          clear: function () {},
+          exportJson: function () {
+            return { enabled: false, events: [], error: 'debug-runtime.js not loaded' };
+          },
+          exportDebugBundle: function () {
+            return { enabled: false, error: 'debug-runtime.js not loaded' };
+          },
+          downloadDebugBundle: function () {},
+          find: function () { return []; }
+        };
+      }
+    </script>
     <script type="module" src="js/web-page/app-updated.js"></script>
     <script>
       (function () {

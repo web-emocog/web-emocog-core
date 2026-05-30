@@ -18,6 +18,13 @@ import {
 let hubBusy = false;
 let hubEmotionTimer = null;
 
+function dbg(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.log(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
 function emotionDisplayName(dominant) {
     const lang = state.currentLang || 'ru';
     const key = 'emotion_' + String(dominant || 'neutral');
@@ -84,6 +91,27 @@ function setActiveStep(stepId) {
     if (step) step.classList.add('active');
 }
 
+function applyInvitationHubVisibility() {
+    const allowed = state.runtime?.invitationSelectedMetrics;
+    const invitationCode = state.sessionData?.ids?.invitationCode
+        || state.runtime?.invitationProtocolMeta?.code;
+    const map = {
+        rt: 'hubRunRtBtn',
+        tracking: 'hubRunTrackingBtn',
+        bpm: 'hubRunBpmBtn',
+        vpc: 'hubRunVpcBtn',
+        visuospatial: 'hubRunVisuospatialBtn'
+    };
+    const showAll = !invitationCode && (!Array.isArray(allowed) || !allowed.length);
+    Object.keys(map).forEach((metric) => {
+        const btn = document.getElementById(map[metric]);
+        if (!btn) return;
+        const visible = showAll || allowed.includes(metric);
+        btn.style.display = visible ? '' : 'none';
+        btn.disabled = !visible;
+    });
+}
+
 function setHubButtonsDisabled(disabled) {
     const ids = [
         'hubRunRtBtn',
@@ -97,6 +125,7 @@ function setHubButtonsDisabled(disabled) {
         const btn = document.getElementById(id);
         if (btn) btn.disabled = disabled;
     }
+    if (!disabled) applyInvitationHubVisibility();
 }
 
 function showHubContainers() {
@@ -306,6 +335,7 @@ export function startTestHub(handlers = {}) {
     state.flags.isRecording = true;
 
     renderHubTexts();
+    applyInvitationHubVisibility();
     showHubContainers();
 
     setSessionPhase(TEST_PHASES.HUB, { source: 'start_test_hub' });
@@ -323,19 +353,34 @@ export function startTestHub(handlers = {}) {
     const finishBtn = document.getElementById('hubFinishSessionBtn');
 
     if (rtBtn) {
-        rtBtn.onclick = () => runSelectedTest(TEST_IDS.RT, handlers);
+        rtBtn.onclick = () => {
+            dbg('ui', 'button:hubRunRtBtn', { testId: TEST_IDS.RT });
+            runSelectedTest(TEST_IDS.RT, handlers);
+        };
     }
     if (trackingBtn) {
-        trackingBtn.onclick = () => runSelectedTest(TEST_IDS.TRACKING, handlers);
+        trackingBtn.onclick = () => {
+            dbg('ui', 'button:hubRunTrackingBtn', { testId: TEST_IDS.TRACKING });
+            runSelectedTest(TEST_IDS.TRACKING, handlers);
+        };
     }
     if (bpmBtn) {
-        bpmBtn.onclick = () => runSelectedTest(TEST_IDS.BPM, handlers);
+        bpmBtn.onclick = () => {
+            dbg('ui', 'button:hubRunBpmBtn', { testId: TEST_IDS.BPM });
+            runSelectedTest(TEST_IDS.BPM, handlers);
+        };
     }
     if (vpcBtn) {
-        vpcBtn.onclick = () => runSelectedTest(TEST_IDS.VPC, handlers);
+        vpcBtn.onclick = () => {
+            dbg('ui', 'button:hubRunVpcBtn', { testId: TEST_IDS.VPC });
+            runSelectedTest(TEST_IDS.VPC, handlers);
+        };
     }
     if (visBtn) {
-        visBtn.onclick = () => runSelectedTest(TEST_IDS.VISUOSPATIAL, handlers);
+        visBtn.onclick = () => {
+            dbg('ui', 'button:hubRunVisuospatialBtn', { testId: TEST_IDS.VISUOSPATIAL });
+            runSelectedTest(TEST_IDS.VISUOSPATIAL, handlers);
+        };
     }
     if (finishBtn) {
         finishBtn.onclick = async () => {

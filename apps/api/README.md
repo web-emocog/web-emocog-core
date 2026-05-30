@@ -1,6 +1,3 @@
-# Emocog API (Фаза 2)
-
-Бэкенд: Node/Express, Postgres, миграции (node-pg-migrate). Реализованы шаги 2.1–2.8 плана улучшений.
 
 ## Стек
 
@@ -28,6 +25,11 @@ npm start
 
 Порядок: users → organizations, projects, user_organizations → protocols, invitations → sessions, events, session_features, session_qc_summary.
 
+Дополнительно (миграция `1699000000008_qc_proxy_indexes`):
+- таблица `session_proxy_metrics` (скалярные proxy-поля + `payload` / `source_payload`),
+- уникальный индекс по `session_id`,
+- индекс по `(payload->>'proxy_ready')` для агрегатов experiments.
+
 ## Роли (RBAC)
 
 - **admin**, **PI**, **researcher**, **analyst**, **assistant**, **developer**, **respondent**
@@ -48,14 +50,32 @@ npm start
 | GET/POST/PATCH/DELETE | /projects | CRUD проектов | JWT + роль |
 | POST | /sessions/start | Старт сессии | JWT |
 | POST | /sessions/stop | Стоп сессии | JWT |
-| GET | /sessions | Список сессий (фильтры) | JWT |
-| GET | /sessions/:id | Карточка сессии + features | JWT |
+| GET | /sessions | Список сессий (фильтры, QC + proxy source) | JWT |
+| GET | /sessions/:id | Карточка сессии + features + QC/proxy source payload | JWT |
 | POST | /events/batch | Батч событий (session_id, participant_id, events[]) | JWT |
 | POST | /ingest | Приём агрегатов (payload buildAggregatesPayload) | — |
 | GET | /export | Экспорт CSV/JSON (project_id, protocol_id, date_from, date_to, qc_validity) | JWT |
-| GET | /experiments | Сводный учет экспериментов по сессиям/QC | JWT |
-| GET | /experiments/recent | Последние сессии экспериментов | JWT |
+| GET | /experiments | Сводный учет экспериментов по сессиям/QC + proxy readiness | JWT |
+| GET | /experiments/recent | Последние сессии экспериментов c QC + proxy source | JWT |
 | GET | /health | Health check | — |
+| GET | /ready | DB readiness | — |
+| GET | /proxy-metrics/schema | Контракт proxy metrics v1 | — |
+| GET | /sessions/:sessionRef/proxy-metrics | Proxy metrics одной сессии (id или session_id) | JWT |
+| GET | /projects/:id/proxy-metrics | Список proxy metrics по проекту | JWT |
+| GET | /protocols/:id/proxy-metrics | Список proxy metrics по протоколу | JWT |
+| POST | /proxy-metrics/internal/sessions/:sessionRef | Upsert v1 metrics (только admin + `ENABLE_PROXY_METRICS_INTERNAL_UPSERT=true`) | JWT |
+
+## Proxy metrics v1 (read infrastructure)
+
+Таблица `session_proxy_metrics` хранит ingest-скаляры (`attention_score`, `emotion_*`, `mean_rt_ms`, …) и JSONB `metrics` для будущего расчётчика.
+
+- **Без строки** → `GET .../proxy-metrics` возвращает `status: "not_computed"`, `metrics: {}` (без synthetic values).
+- **После ingest** → `status: "partial"` (скаляры + mapping adapter).
+- **После будущего calculator** → запись в `metrics` JSONB, `status: "computed"`.
+
+Миграции: `1699000000008_qc_proxy_indexes`, `1699000000009_add_respiration_proxy_metrics`, `1699000000010_proxy_metrics_v1_contract`.
+
+Тесты контракта: `npm test` (без БД).
 
 ## HTTPS и PII (Фаза 2.8)
 
