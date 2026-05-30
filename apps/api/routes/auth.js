@@ -83,6 +83,20 @@ router.post(
       );
       const user = result.rows[0];
       const effectiveRole = getEffectiveRole(user.email, user.role);
+      try {
+        const defaultOrg = await pool.query('SELECT organization_id FROM projects WHERE id = 1 LIMIT 1');
+        const orgId = defaultOrg.rows[0]?.organization_id;
+        if (orgId) {
+          await pool.query(
+            `INSERT INTO user_organizations (user_id, organization_id, role)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, organization_id) DO NOTHING`,
+            [user.id, orgId, effectiveRole]
+          );
+        }
+      } catch (orgErr) {
+        console.warn('[auth/register] default org link skipped:', orgErr.message);
+      }
       const token = jwt.sign(
         { sub: user.id, email: user.email, role: effectiveRole, bypass_admin: isBypassAdminEmail(user.email) },
         config.jwt.secret,

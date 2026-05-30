@@ -23,11 +23,38 @@ import {
 
 import { 
     startCalibration, 
-    finishSession 
+    finishSession
 } from './tests-updated.js';
+
+import {
+    deriveInvitationHubMetrics,
+    getInvitationSessionPlan,
+    getParticipantShell
+} from './protocol-invite-utils.js';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
 initQcPauseOverlay({ getLang: () => state.currentLang });
+
+if (typeof window !== 'undefined') {
+    window.__WECOG_STATE__ = state;
+}
+
+function dbg(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.log(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+function dbgErr(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.error(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+let _gazeDebugSampleN = 0;
+let _eyeTrackingShapeLogged = false;
 
 window.setLanguage = setLanguage;
 window.nextStep = nextStep;
@@ -37,7 +64,37 @@ window.downloadData = downloadData;
 
 export function handleGazeUpdate(gazeData) {
     const customDot = document.getElementById('customGazeDot');
-    
+    const d = window.WECOG_DEBUG;
+    if (d && d.enabled) {
+        if (d.recordGazeSample) {
+            d.recordGazeSample({
+                onScreen: typeof gazeData.onScreen === 'boolean' ? gazeData.onScreen : null,
+                clipped: typeof gazeData.clipped === 'boolean' ? gazeData.clipped : null,
+                correctedX: gazeData.correctedX,
+                correctedY: gazeData.correctedY,
+                screenWidth: window.innerWidth || 1,
+                screenHeight: window.innerHeight || 1
+            });
+        }
+        _gazeDebugSampleN += 1;
+        if (_gazeDebugSampleN % 30 === 0) {
+            const sw = window.innerWidth || 1;
+            const sh = window.innerHeight || 1;
+            dbg('gaze', 'handleGazeUpdate', {
+                sampleIndex: _gazeDebugSampleN,
+                modelXFinite: Number.isFinite(gazeData?.modelX),
+                modelYFinite: Number.isFinite(gazeData?.modelY),
+                correctedXFinite: Number.isFinite(gazeData?.correctedX),
+                correctedYFinite: Number.isFinite(gazeData?.correctedY),
+                clipped: gazeData?.clipped,
+                onScreen: gazeData?.onScreen,
+                onScreenSource: typeof gazeData?.onScreen === 'boolean' ? 'gazeData' : 'boundary_fallback',
+                bounds: { xMin: 0, xMax: sw, yMin: 0, yMax: sh },
+                phase: state.runtime.currentPhase || null
+            });
+        }
+    }
+
     if (!gazeData || gazeData.x === null || gazeData.y === null) {
         state.runtime.currentGaze = { x: null, y: null };
         if (customDot) customDot.style.display = 'none';
@@ -90,7 +147,7 @@ export function handleGazeUpdate(gazeData) {
     }
 
     if (state.flags.isRecording) {
-        state.sessionData.eyeTracking.push({
+        const eyeSample = {
             x,
             y,
             t,
@@ -114,7 +171,21 @@ export function handleGazeUpdate(gazeData) {
             correctedY: Number.isFinite(gazeData.correctedY) ? gazeData.correctedY : null,
             screenWidth,
             screenHeight
-        });
+        };
+        state.sessionData.eyeTracking.push(eyeSample);
+        if (d && d.enabled && !_eyeTrackingShapeLogged) {
+            _eyeTrackingShapeLogged = true;
+            dbg('gaze', 'eyeTracking:sampleShape', {
+                hasModelX: Object.prototype.hasOwnProperty.call(eyeSample, 'modelX'),
+                hasModelY: Object.prototype.hasOwnProperty.call(eyeSample, 'modelY'),
+                hasCorrectedX: Object.prototype.hasOwnProperty.call(eyeSample, 'correctedX'),
+                hasCorrectedY: Object.prototype.hasOwnProperty.call(eyeSample, 'correctedY'),
+                hasClipped: Object.prototype.hasOwnProperty.call(eyeSample, 'clipped'),
+                hasOnScreen: Object.prototype.hasOwnProperty.call(eyeSample, 'onScreen'),
+                hasRawX: Object.prototype.hasOwnProperty.call(eyeSample, 'rawX'),
+                hasRawY: Object.prototype.hasOwnProperty.call(eyeSample, 'rawY')
+            });
+        }
     }
 
     if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
@@ -159,20 +230,42 @@ export function handleEyeSignalUpdate(signalData) {
 
 window.handleEyeSignalUpdate = handleEyeSignalUpdate;
 
+export function getActiveInvitationParticipantShell() {
+    if (state.runtime?.invitationParticipantShell) {
+        return state.runtime.invitationParticipantShell;
+    }
+    if (state.runtime?.invitationProtocolDefinition) {
+        return getParticipantShell(state.runtime.invitationProtocolDefinition);
+    }
+    return null;
+}
+
+window.getActiveInvitationParticipantShell = getActiveInvitationParticipantShell;
+
 function getParticipantApiBase() {
+    const origin = window.location.origin || '';
+    const defaultBase = (origin + '/api').replace(/\/$/, '');
     try {
         const fromStorage = localStorage.getItem('emocog_api_base');
-        if (fromStorage && fromStorage.trim()) return fromStorage.trim().replace(/\/$/, '');
+        if (fromStorage && fromStorage.trim()) {
+            const base = fromStorage.trim().replace(/\/$/, '');
+            const isLocalApi = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(base);
+            const isLocalPage = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(origin);
+            if (isLocalApi && !isLocalPage) return defaultBase;
+            return base;
+        }
     } catch (_) {}
     if (window.PROTOCOL_RUN_API_BASE) return String(window.PROTOCOL_RUN_API_BASE).replace(/\/$/, '');
     if (window.API_BASE) return String(window.API_BASE).replace(/\/$/, '');
-    return (window.location.origin + '/api').replace(/\/$/, '');
+    return defaultBase;
 }
 
 async function loadInvitationProtocolByCode(code) {
     const base = getParticipantApiBase();
+    dbg('api', 'invitation:load:start', { code, base });
     const response = await fetch(base + '/invitations/by-code/' + encodeURIComponent(code));
     if (!response.ok) {
+        dbgErr('api', 'invitation:load:error', { code, base, status: response.status });
         throw new Error('Invitation lookup failed: HTTP ' + response.status);
     }
     const payload = await response.json();
@@ -233,12 +326,26 @@ async function loadInvitationProtocolByCode(code) {
         if (payload.protocol_id != null) {
             state.sessionData.ids.protocolId = payload.protocol_id;
         }
+        state.sessionData.ids.invitationCode = payload.code || code;
+        const plan = getInvitationSessionPlan(payload.definition);
+        state.runtime.invitationParticipantShell = plan.shell;
+        state.runtime.invitationSelectedMetrics = plan.hubMetrics;
+        state.runtime.invitationSessionPlan = plan;
+        dbg('api', 'invitation:load:success', {
+            code,
+            protocolId: payload.protocol_id || null,
+            projectId: payload.project_id || null,
+            blockCount: protocolBlocks.length,
+            hubMetrics: plan.hubMetrics,
+            shell: plan.shell,
+            runProtocolAfterShell: plan.runProtocolAfterShell
+        });
     }
 }
 
 function isPlausibleInvitationCode(code) {
     const c = String(code || '').trim();
-    if (c.length < 4 || c.length > 256) return false;
+    if (c.length < 1 || c.length > 64) return false;
     return /^[a-zA-Z0-9_-]+$/.test(c);
 }
 
@@ -256,15 +363,26 @@ function extractInvitationCodeFromInput(rawValue) {
         }
     };
 
+    const fromParticipantHash = (hash) => {
+        const m = String(hash || '').match(/^#\/?participant\/([^/?#]+)/i);
+        if (!m || !m[1]) return null;
+        const c = decodeURIComponent(m[1]).trim();
+        return isPlausibleInvitationCode(c) ? c : null;
+    };
+
     let code = null;
     try {
         const u = new URL(value);
         code = u.searchParams.get('code');
         if (code) code = code.trim();
+        if (!code) code = fromParticipantHash(u.hash);
     } catch (_) {
         if (value.includes('?')) {
             const qs = value.split('?')[1] || '';
             code = fromSearchParams(qs);
+        }
+        if (!code && value.includes('#')) {
+            code = fromParticipantHash(value.slice(value.indexOf('#')));
         }
     }
 
@@ -309,6 +427,8 @@ function ensureDeveloperSessionIds() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    dbg('app', 'app:init:start', { href: window.location.href });
+    dbg('api', 'api:base', { base: getParticipantApiBase() });
     console.log('App initialized (Phase 0 – privacy & aggregates)');
     try {
         const pendingLang = window.__EMOCOG_PENDING_LANG__;
@@ -383,6 +503,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnStartIntro = document.getElementById('btnStartIntro');
     if (btnStartIntro) {
         btnStartIntro.addEventListener('click', async () => {
+            dbg('ui', 'button:btnStartIntro', { hasInviteInput: !!inviteInput });
             const hint = inviteHint || inviteHintGlobal;
             if (inviteInput) {
                 const raw = (inviteInput.value || '').trim();
@@ -442,13 +563,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (consentCheck) consentCheck.addEventListener('change', toggleConsent);
 
     const consentBtn = document.getElementById('consentBtn');
-    if (consentBtn) consentBtn.addEventListener('click', generateIdsAndProceed);
+    if (consentBtn) consentBtn.addEventListener('click', () => {
+        dbg('ui', 'button:consentBtn', {});
+        generateIdsAndProceed();
+    });
     
     const emailInput = document.getElementById('userEmail');
     if (emailInput) emailInput.addEventListener('blur', validateEmailField);
 
     const step3Btn = document.getElementById('step3NextBtn');
-    if (step3Btn) step3Btn.addEventListener('click', collectTechDataAndProceed);
+    if (step3Btn) {
+        step3Btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            dbg('ui', 'button:step3NextBtn', {});
+            await collectTechDataAndProceed(5);
+        });
+    }
 
     const userForm = document.getElementById('userForm');
     if (userForm) {
@@ -460,15 +590,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (formBtn) {
         formBtn.addEventListener('click', (e) => {
             e.preventDefault();
+            dbg('ui', 'button:formBtn', { formValid: checkForm() });
             if (checkForm()) nextStep(5);
         });
     }
 
     const startPrecheckBtn = document.getElementById('startPrecheckBtn');
-    if (startPrecheckBtn) startPrecheckBtn.addEventListener('click', startPreCheck);
+    if (startPrecheckBtn) startPrecheckBtn.addEventListener('click', () => {
+        dbg('precheck', 'button:startPrecheckBtn', {});
+        startPreCheck();
+    });
 
     const startCalibBtn = document.getElementById('startCalibBtn');
-    if (startCalibBtn) startCalibBtn.addEventListener('click', startCalibration);
+    if (startCalibBtn) startCalibBtn.addEventListener('click', () => {
+        dbg('calibration', 'button:startCalibBtn', {});
+        startCalibration();
+    });
 
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) downloadBtn.addEventListener('click', () => downloadData());
@@ -503,11 +640,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             try { localStorage.removeItem('emocog_dev_auto_precheck'); } catch (_) {}
         }
     }
+
     if (window.__EMOCOG_PENDING_LANG__) {
         setLanguage(window.__EMOCOG_PENDING_LANG__);
         window.__EMOCOG_PENDING_LANG__ = null;
     }
     initSecureSenderToggle();
+    dbg('app', 'app:init:done', {
+        invitationCode: state.sessionData.ids.invitationCode || invitationCode || null,
+        developerBypass: participantInviteBypass
+    });
+
+    if (window.WECOG_DEBUG_HUD && window.WECOG_DEBUG?.enabled) {
+        window.WECOG_DEBUG_HUD.start();
+    }
 });
 
 window.addEventListener('beforeunload', () => {

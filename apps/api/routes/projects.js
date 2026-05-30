@@ -5,6 +5,7 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { listProjectProxyMetrics } = require('./proxy_metrics');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -72,6 +73,22 @@ router.post(
       res.status(500).json({ error: 'Create failed' });
     }
   }
+);
+
+router.get(
+  '/:id/proxy-metrics',
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  [
+    param('id').isInt(),
+    query('protocol_id').optional().isInt(),
+    query('status').optional().isIn(['not_computed', 'partial', 'computed', 'failed']),
+    query('computed_from').optional().isISO8601(),
+    query('computed_to').optional().isISO8601(),
+    query('metric_name').optional().isString(),
+    query('limit').optional().isInt({ min: 1, max: 500 }),
+    query('offset').optional().isInt({ min: 0 }),
+  ],
+  listProjectProxyMetrics
 );
 
 router.get(

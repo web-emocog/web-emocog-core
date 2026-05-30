@@ -6,17 +6,20 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { listProtocolProxyMetrics } = require('./proxy_metrics');
 
 const router = express.Router();
 router.use(requireAuth);
 
+const STAFF_ROLES = new Set(['admin', 'PI', 'developer', 'researcher', 'analyst', 'assistant']);
+
 function hasGlobalProtocolAccess(user) {
-  return !!user && (user.bypass_admin === true || user.role === 'admin' || user.role === 'PI');
+  return !!user && (user.bypass_admin === true || STAFF_ROLES.has(user.role));
 }
 
 router.get(
   '/',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   [query('project_id').optional().isInt()],
   async (req, res) => {
     try {
@@ -47,7 +50,7 @@ router.get(
 
 router.post(
   '/',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   [
     body('project_id').isInt(),
     body('name').trim().notEmpty(),
@@ -80,8 +83,23 @@ router.post(
 );
 
 router.get(
+  '/:id/proxy-metrics',
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  [
+    param('id').isInt(),
+    query('status').optional().isIn(['not_computed', 'partial', 'computed', 'failed']),
+    query('computed_from').optional().isISO8601(),
+    query('computed_to').optional().isISO8601(),
+    query('metric_name').optional().isString(),
+    query('limit').optional().isInt({ min: 1, max: 500 }),
+    query('offset').optional().isInt({ min: 0 }),
+  ],
+  listProtocolProxyMetrics
+);
+
+router.get(
   '/:id',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   [param('id').isInt()],
   async (req, res) => {
     try {
@@ -111,7 +129,7 @@ router.get(
 
 router.patch(
   '/:id',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   [
     param('id').isInt(),
     body('name').optional().trim().notEmpty(),
@@ -165,7 +183,7 @@ router.patch(
 
 router.delete(
   '/:id',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   [param('id').isInt()],
   async (req, res) => {
     try {
