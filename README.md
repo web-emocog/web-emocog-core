@@ -1,11 +1,17 @@
-# web_cognitive_hse
+# EmoCog — web-emocog-core
 
-Web-платформа для когнитивных исследований:
-- participant web
-- researcher web
-- backend API
-- ML runtime (browser inference)
+Веб-платформа для когнитивных исследований: снятие мультимодальных сигналов
+в браузере (взгляд, пульс, эмоции, время реакции), серверная агрегация
+с контролем качества, конструктор протоколов и аналитика для исследователя.
 
-Monorepo без k8s/terraform, ориентирован на локальный dev.
+> ℹ️ **Полная документация проекта временно находится в ветке
+> `update-from-wec-alfa`** (готовится к мёржу в `develop` → `main`):
+>
+> 📄 **[Открыть полный README »](https://github.com/web-emocog/web-emocog-core/blob/update-from-wec-alfa/README.md)**
+>
+> Внутри: архитектура, быстрый старт, конфигурация, REST API, схема БД,
+> браузерный ML, тестирование, деплой и ссылки на README всех модулей.
 
-Порты: 80, 20, 3000 
+## Лицензия
+
+[Apache License 2.0](LICENSE).
