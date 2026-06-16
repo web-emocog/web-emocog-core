@@ -48,17 +48,51 @@ function cloneProtocolData(value) {
     ];
   }
 
+  const STANDARD_FOLDER_ID = 'folder_standard';
+  const STANDARD_FOLDER_NAME = 'Стандартные';
+
+  function ensureStandardFolder() {
+    let folder = folders.find(f => f.id === STANDARD_FOLDER_ID || f.name === STANDARD_FOLDER_NAME);
+    if (!folder) {
+      folder = { id: STANDARD_FOLDER_ID, name: STANDARD_FOLDER_NAME, stimuliIds: [], system: true };
+      folders.push(folder);
+    }
+    return folder;
+  }
+
+  function getStandardFolderId() {
+    ensureStandardFolder();
+    localStorage.setItem('emocog_folders', JSON.stringify(folders));
+    const folder = folders.find(f => f.id === STANDARD_FOLDER_ID || f.name === STANDARD_FOLDER_NAME);
+    return folder ? folder.id : STANDARD_FOLDER_ID;
+  }
+
   function ensureStandardStimuli() {
+    const folder = ensureStandardFolder();
     const known = new Set(stimuliList.map(s => String(s.id)));
-    let changed = false;
+    let stimuliChanged = false;
+    let folderChanged = false;
     standardProtocolStimuli().forEach(stim => {
-      if (!known.has(stim.id)) {
-        stimuliList.push({ ...stim, standard:true, createdAt:new Date().toISOString() });
+      const existing = stimuliList.find(s => String(s.id) === String(stim.id));
+      if (existing) {
+        ['name', 'type', 'info', 'emotion', 'text'].forEach(function (key) {
+          if (stim[key] != null && existing[key] !== stim[key]) {
+            existing[key] = stim[key];
+            stimuliChanged = true;
+          }
+        });
+      } else if (!known.has(stim.id)) {
+        stimuliList.push({ ...stim, standard: true, createdAt: new Date().toISOString() });
         known.add(stim.id);
-        changed = true;
+        stimuliChanged = true;
+      }
+      if (!folder.stimuliIds.includes(stim.id)) {
+        folder.stimuliIds.push(stim.id);
+        folderChanged = true;
       }
     });
-    if (changed) localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+    if (stimuliChanged) localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+    if (folderChanged || stimuliChanged) localStorage.setItem('emocog_folders', JSON.stringify(folders));
   }
 
   function trial(stimulusId, condition, action, duration, repetitions = 1, extra = {}) {
@@ -317,6 +351,26 @@ Maintain a comfortable position in front of the camera.`
     return repeatTrials(rows, repetitions);
   }
 
+  function buildEmotionViewingTrialSets() {
+    const passiveExtra = { passive: true, analytics: ['mediapipe_face', 'gaze_aoi_eyes_mouth'] };
+    const makeTrial = (s) => trial(s.id, s.emotion, '', 4000, 1, passiveExtra);
+    const byEmotion = {};
+    standardProtocolStimuli().filter(function (s) { return s.id.startsWith('std_emo_'); }).forEach(function (s) {
+      const em = s.emotion || 'neutral';
+      if (!byEmotion[em]) byEmotion[em] = [];
+      byEmotion[em].push(s);
+    });
+    const order = ['neutral', 'happy', 'anger', 'sad', 'fear', 'surprise', 'disgust'];
+    const training = ['neutral', 'happy', 'sad']
+      .map(function (em) { return byEmotion[em] && byEmotion[em][0]; })
+      .filter(Boolean)
+      .map(makeTrial);
+    const main = order.flatMap(function (em) {
+      return (byEmotion[em] || []).slice(0, 4).map(makeTrial);
+    });
+    return { training: training, main: main };
+  }
+
   function readyProtocolForTemplate(template) {
     const stroop = [
       ['std_stroop_red_red','congruent/red','arrow_left',2000], ['std_stroop_blue_blue','congruent/blue','arrow_down',2000], ['std_stroop_green_green','congruent/green','arrow_right',2000],
@@ -326,8 +380,7 @@ Maintain a comfortable position in front of the camera.`
       ['std_flanker_right_cong','congruent/right','arrow_right',1500], ['std_flanker_left_cong','congruent/left','arrow_left',1500],
       ['std_flanker_right_incong','incongruent/right','arrow_right',1500], ['std_flanker_left_incong','incongruent/left','arrow_left',1500]
     ];
-    const emotions = standardProtocolStimuli().filter(s => s.id.startsWith('std_emo_')).slice(0, 40)
-      .map(s => trial(s.id, s.emotion, '', 4000, 1, { passive:true, analytics:['mediapipe_face','gaze_aoi_eyes_mouth'] }));
+    const emotions = buildEmotionViewingTrialSets();
 
     const protocols = {
       simple_rt: completeProtocol([
@@ -427,11 +480,11 @@ Maintain a comfortable position in front of the camera.`
 На экране будут по очереди появляться лица людей с разными эмоциями. Ваша задача - просто внимательно смотреть на эти изображения.
 Поскольку в этом задании для анализа используется камера, пожалуйста, убедитесь, что вы сидите ровно, ваше лицо хорошо освещено и полностью находится в кадре.
 Не закрывайте глаза и старайтесь не делать резких движений головой. Сейчас мы выведем пару тестовых изображений.`),
-        cognitiveProtocolBlock('Emotion Viewing - тренировка', 'emotion_viewing', { trials:emotions.slice(0,2), randomize:false, useRT:false, useAOI:true, useFixation:true, fixationDuration:1000, stimulusDuration:4000, responseType:'none', analytics:{ webcam:true, mediapipe:true, gazeAoi:['eyes','mouth','face'] } }),
+        cognitiveProtocolBlock('Emotion Viewing - тренировка', 'emotion_viewing', { trials: emotions.training, randomize:false, useRT:false, useAOI:true, useFixation:true, fixationDuration:1000, stimulusDuration:4000, responseType:'none', analytics:{ webcam:true, mediapipe:true, gazeAoi:['eyes','mouth','face'] } }),
         instructionProtocolBlock('Инструкция: Просмотр эмоций - основной этап', `Переходим к просмотру.
 Просто смотрите на экран в естественном для вас темпе, пока изображения не перестанут сменять друг друга.
 Сохраняйте удобное положение перед камерой.`),
-        cognitiveProtocolBlock('Emotion Viewing - свободный просмотр', 'emotion_viewing', { trials:emotions.slice(2), randomize:true, useRT:false, useAOI:true, useFixation:true, fixationDuration:1000, stimulusDuration:4000, responseType:'none', analytics:{ webcam:true, mediapipe:true, gazeAoi:['eyes','mouth','face'] } })
+        cognitiveProtocolBlock('Emotion Viewing - свободный просмотр', 'emotion_viewing', { trials: emotions.main, randomize:true, useRT:false, useAOI:true, useFixation:true, fixationDuration:1000, stimulusDuration:4000, responseType:'none', analytics:{ webcam:true, mediapipe:true, gazeAoi:['eyes','mouth','face'] } })
       ])
     };
 

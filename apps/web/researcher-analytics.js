@@ -620,6 +620,14 @@ function AnalyticsView(sub) {
   document.getElementById('pageTitle').textContent = t('analyticsToolsNav');
   setChips([]);
 
+  const analyticsCfg = typeof getExperimentAnalyticsConfig === 'function'
+    ? getExperimentAnalyticsConfig(localStorage.getItem('emocog_active_experiment_id') || 'draft')
+    : { tabs: { 'session-card': true, 'group-comparison': true, 'data-quality': true, 'connectedness': true } };
+  const visibleTabs = ANALYTICS_TABS.filter(tab => analyticsCfg.tabs[tab.key] !== false);
+  if (!visibleTabs.some(tab => tab.key === sub)) {
+    sub = visibleTabs[0]?.key || 'session-card';
+  }
+
   // Build wrapper with tab bar + content area
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'display:flex;flex-direction:column;min-height:100%;margin:-20px;'; // negate view padding
@@ -627,7 +635,7 @@ function AnalyticsView(sub) {
   // Tab bar
   const tabBar = document.createElement('div');
   tabBar.className = 'analytics-tabs';
-  tabBar.innerHTML = ANALYTICS_TABS.map(tab => `
+  tabBar.innerHTML = visibleTabs.map(tab => `
     <div class="analytics-tab ${tab.key === sub ? 'active' : ''}" data-tab="${tab.key}">
       <span class="tab-icon">${tab.icon}</span>
       ${t(tab.labelKey)}
@@ -654,22 +662,6 @@ function AnalyticsView(sub) {
   // Render content
   function renderDashContent(key) {
     body.innerHTML = '';
-    // Inspector
-    const inspMap = {
-      'session-card': {title:'Session Card',subtitle:'Детальный анализ одной сессии',status:'good'},
-      'group-comparison': {title:'Group Comparison',subtitle:'Сравнение групп по протоколам',status:'good'},
-      'data-quality': {title:'Data Quality',subtitle:'QC метрики и техническое качество',status:'good'},
-      'connectedness': {title:'Connectedness',subtitle:'Корреляции между метриками',status:'good'},
-    };
-    const ctaMap = {
-      'session-card':     {label:'← All Sessions',    action:"navigate('#/sessions')"},
-      'group-comparison': {label:'Open in Export…',   action:"navigate('#/export')"},
-      'data-quality':     {label:'Download QC Report',action:"navigate('#/export')"},
-      'connectedness':    {label:'Export Correlations',action:"navigate('#/export')"},
-    };
-    const insp = inspMap[key] || {title:'Analytics',subtitle:'',status:'neutral'};
-    setInspector({type:'Analytics', ...insp, cta: ctaMap[key] || null});
-
     if (key === 'session-card') {
       const node = _buildSessionCard();
       body.appendChild(node);

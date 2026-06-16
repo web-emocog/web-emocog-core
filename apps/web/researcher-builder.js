@@ -30,11 +30,8 @@ function ExperimentBuilderView(options = {}) {
   function defaultExportTrialsForCognitiveBlock(content) {
     const existing = Array.isArray(content?.trials) ? content.trials : [];
     if (existing.length) return existing;
-    let taskType = String(content?.taskType || 'other').toLowerCase();
-    if (taskType === 'other' && content?.useRT !== false) {
-      taskType = 'simple_rt';
-    }
-    if (taskType === 'simple_rt' || taskType === 'pvt') {
+    let taskType = normalizeAnalyzerTaskType(content?.taskType || content?.rt_task);
+    if (taskType === 'simple' || taskType === 'pvt') {
       return [{
         stimulusId: 'std_simple_black_square',
         condition: 'target',
@@ -60,10 +57,10 @@ function ExperimentBuilderView(options = {}) {
 
   function describeParticipantShellForUi(shell) {
     const parts = [];
-    if (shell.consent) parts.push(trb('информированное согласие','informed consent'));
-    if (shell.questionnaire) parts.push(trb('анкета','questionnaire'));
-    if (shell.precheck) parts.push(trb('проверка камеры','camera check'));
-    if (shell.calibration) parts.push(trb('калибровка','calibration'));
+    if (shell.consent) parts.push(trb('информированное согласие', 'informed consent'));
+    if (shell.questionnaire) parts.push(trb('анкета', 'questionnaire'));
+    if (shell.precheck) parts.push(trb('проверка камеры', 'camera pre-check'));
+    if (shell.calibration) parts.push(trb('калибровка взгляда', 'gaze calibration'));
     if (!parts.length) {
       return trb(
         'Подготовительные этапы отключены — участник сразу перейдёт к блокам эксперимента.',
@@ -75,11 +72,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function resolveTaskTypeForRtMetrics(content) {
-    let taskType = String(content?.taskType || content?.rt_task || 'other').toLowerCase();
-    if (taskType === 'other' && content?.useRT !== false) {
-      taskType = 'simple_rt';
-    }
-    return taskType;
+    return normalizeAnalyzerTaskType(content?.taskType || content?.rt_task);
   }
 
   /** RT metrics are defined per task in RtRegistry (rt-registry.js), not user-picked. */
@@ -140,9 +133,215 @@ function ExperimentBuilderView(options = {}) {
     highestStep = currentStep;
   }
 
-  document.getElementById('pageTitle').textContent = 'Конструктор протокола';
+  document.getElementById('pageTitle').textContent = (CURRENT_LANG === 'en' ? I18N.en : I18N.ru).protocolBuilder;
 
-  const trb = (ru) => ru;
+  if (typeof ensureStandardStimuli === 'function') ensureStandardStimuli();
+
+  const trb = (ru, en) => CURRENT_LANG === 'en'
+    ? (en || (typeof autoTranslateString === 'function' ? autoTranslateString(ru, 'en') : ru))
+    : ru;
+
+  const RT_ANALYZER_TASK_BOUNDS = {
+    simple: { min: 100, max: 2000, timeout: 2500 },
+    choice: { min: 150, max: 2000, timeout: 2500 },
+    go_nogo: { min: 100, max: 1500, timeout: 2000 },
+    stroop: { min: 200, max: 3000, timeout: 3500 },
+    pvt: { min: 100, max: 5000, timeout: 5000 },
+    cpt: { min: 100, max: 2000, timeout: 2000 },
+  };
+
+  const LEGACY_TASK_TYPE_TO_ANALYZER = {
+    simple_rt: 'simple',
+    other: 'simple',
+    generic: 'simple',
+    flanker: 'choice',
+    nback_2: 'choice',
+    nback: 'choice',
+    task_switching: 'choice',
+    ax_cpt: 'cpt',
+  };
+
+  function normalizeAnalyzerTaskType(taskType) {
+    const t = String(taskType || 'simple').toLowerCase();
+    if (RT_ANALYZER_TASK_BOUNDS[t]) return t;
+    return LEGACY_TASK_TYPE_TO_ANALYZER[t] || 'simple';
+  }
+
+  const TASK_TYPE_OPTIONS = [
+    { value: 'simple', label: trb('Простая реакция', 'Simple RT') },
+    { value: 'choice', label: trb('Выбор (choice)', 'Choice') },
+    { value: 'go_nogo', label: 'Go / No-Go' },
+    { value: 'stroop', label: 'Stroop' },
+    { value: 'pvt', label: 'PVT' },
+    { value: 'cpt', label: 'CPT' },
+  ];
+
+  function defaultRtBoundsForTaskType(taskType) {
+    const key = normalizeAnalyzerTaskType(taskType);
+    const b = RT_ANALYZER_TASK_BOUNDS[key];
+    return { min: b.min, max: b.max, timeout: b.timeout };
+  }
+
+  function resolveRtBounds(content) {
+    const taskType = resolveTaskTypeForRtMetrics(content);
+    const defaults = defaultRtBoundsForTaskType(taskType);
+    const min = parseInt(content?.rtMin);
+    const max = parseInt(content?.rtWindow);
+    return {
+      rtMin: Number.isFinite(min) && min > 0 ? min : defaults.min,
+      rtWindow: Number.isFinite(max) && max > 0 ? max : defaults.max
+    };
+  }
+
+  function legacyTaskTypeLabel(type) {
+    const labels = {
+      simple_rt: trb('Простая реакция', 'Simple RT'),
+      flanker: 'Flanker',
+      nback_2: '2-back',
+      nback: 'N-back',
+      task_switching: trb('Переключение задач', 'Task switching'),
+      ax_cpt: 'AX-CPT',
+      other: trb('Другое', 'Other'),
+      generic: trb('Другое', 'Other'),
+    };
+    return labels[type] || type;
+  }
+
+  function taskTypeSelectEditorHtml(block) {
+    const c = block.content || {};
+    const current = String(c.taskType || c.rt_task || 'simple_rt').toLowerCase();
+    const options = [...TASK_TYPE_OPTIONS];
+    const known = new Set(options.map(opt => opt.value));
+    if (current && !known.has(current)) {
+      options.unshift({ value: current, label: legacyTaskTypeLabel(current) });
+    }
+    return `
+      <select class="proto-task-type-sel" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);color:var(--text);width:100%;">
+        ${options.map(opt => `<option value="${opt.value}" ${current === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('')}
+      </select>`;
+  }
+
+  function buildBlockInlineEditor(block) {
+    const c = block.content || {};
+    const folderOpts = (folders || []).map(f =>
+      `<option value="${f.id}" ${c.stimuliFolder === f.id ? 'selected' : ''}>${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</option>`).join('');
+
+    if (block.type === 'instruction') {
+      return `
+        <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Заголовок', 'Title')}</label>
+          <input class="proto-field" data-field="title" value="${localizedInstructionValue(c, 'title')}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст', 'Text')}</label>
+          <textarea class="proto-field" data-field="text" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${localizedInstructionValue(c, 'text')}</textarea>
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Кнопка', 'Button')}</label>
+          <input class="proto-field" data-field="buttonText" value="${localizedInstructionValue(c, 'buttonText', 'Далее')}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+        </div>`;
+    }
+    if (block.type === 'rest') {
+      return `
+        <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст для участника', 'Text for participant')}</label>
+          <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${c.text || trb('Сделайте небольшой перерыв', 'Take a short break')}</textarea>
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Длительность (сек)', 'Duration (sec)')}</label>
+          <input class="proto-field" data-field="duration" type="number" value="${c.duration || 30}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
+        </div>`;
+    }
+    if (block.type === 'finish') {
+      return `
+        <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Заголовок', 'Title')}</label>
+          <input class="proto-field" data-field="title" value="${c.title || trb('Эксперимент завершён', 'Experiment completed')}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст', 'Text')}</label>
+          <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${c.text || trb('Спасибо за участие!', 'Thank you for participating!')}</textarea>
+        </div>`;
+    }
+    if (block.type === 'cognitive_task' || block.type === 'passive') {
+      const taskTypeField = block.type === 'cognitive_task' ? `
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Тип задачи', 'Task type')}</label>
+          ${taskTypeSelectEditorHtml(block)}` : '';
+      return `
+        <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Название блока', 'Block name')}</label>
+          <input class="proto-label-input" value="${localizedBlockLabel(block, block.label)}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          ${taskTypeField}
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Откуда брать стимулы?', 'Stimulus source')}</label>
+          <select class="proto-field" data-field="stimuliSource" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">
+            <option value="library" ${c.stimuliSource === 'library' || !c.stimuliSource ? 'selected' : ''}>${trb('Вся библиотека', 'Entire library')}</option>
+            <option value="folder" ${c.stimuliSource === 'folder' ? 'selected' : ''}>${trb('Из папки', 'From folder')}</option>
+          </select>
+          <div class="proto-folder-field" style="${c.stimuliSource === 'folder' ? '' : 'display:none;'}">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Папка', 'Folder')}</label>
+            <select class="proto-field" data-field="stimuliFolder" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">
+              <option value="">— ${trb('папка', 'folder')} —</option>
+              ${folderOpts}
+            </select>
+          </div>
+          <button type="button" class="quick-btn proto-save-inline" style="font-size:11px;align-self:flex-start;margin-top:4px;">${trb('Сохранить', 'Save')}</button>
+        </div>`;
+    }
+    return '';
+  }
+
+  function saveBlockInlineFields(block, card) {
+    block.content = block.content || {};
+    const labelInput = card.querySelector('.proto-label-input');
+    if (labelInput) {
+      block.label = labelInput.value || block.label;
+      block[CURRENT_LANG === 'en' ? 'labelEn' : 'labelRu'] = block.label;
+    }
+    card.querySelectorAll('.proto-field').forEach(el => {
+      const field = el.dataset.field;
+      if (el.type === 'checkbox') block.content[field] = el.checked;
+      else if (el.type === 'number') block.content[field] = parseFloat(el.value) || 0;
+      else block.content[field] = el.value;
+    });
+    const taskTypeSel = card.querySelector('.proto-task-type-sel');
+    if (taskTypeSel) {
+      block.content.taskType = taskTypeSel.value;
+      block.content.rt_task = taskTypeSel.value;
+      block.content.selected_metrics = autoRtMetricsForTaskType(block.content.taskType, block.content);
+    }
+    if (block.type === 'instruction') {
+      ['title', 'text', 'buttonText'].forEach(field => {
+        if (block.content[field] === undefined) return;
+        block.content[field + (CURRENT_LANG === 'en' ? 'En' : 'Ru')] = block.content[field];
+      });
+    }
+    localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+  }
+
+  function wireBlockCardInteractions(card, block) {
+    const taskTypeSel = card.querySelector('.proto-task-type-sel');
+    if (taskTypeSel) {
+      taskTypeSel.addEventListener('click', e => e.stopPropagation());
+      taskTypeSel.addEventListener('change', () => {
+        block.content = block.content || {};
+        block.content.taskType = taskTypeSel.value;
+        block.content.rt_task = taskTypeSel.value;
+        block.content.selected_metrics = autoRtMetricsForTaskType(block.content.taskType, block.content);
+        localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+      });
+    }
+    const srcSelect = card.querySelector('[data-field="stimuliSource"]');
+    if (srcSelect) {
+      srcSelect.addEventListener('change', () => {
+        const ff = card.querySelector('.proto-folder-field');
+        if (ff) ff.style.display = srcSelect.value === 'folder' ? '' : 'none';
+      });
+    }
+    card.querySelector('.proto-save-inline')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      saveBlockInlineFields(block, card);
+      toast(trb('Блок сохранён', 'Block saved'));
+    });
+    card.querySelectorAll('.proto-field').forEach(el => {
+      el.addEventListener('click', e => e.stopPropagation());
+      el.addEventListener('change', () => saveBlockInlineFields(block, card));
+    });
+    card.querySelectorAll('.proto-label-input, .proto-inline-editor input, .proto-inline-editor textarea, .proto-inline-editor select').forEach(el => {
+      el.addEventListener('click', e => e.stopPropagation());
+    });
+  }
   const localizedInstructionValue = (content, field, fallback = '') => {
     const c = content || {};
     if (CURRENT_LANG === 'en') {
@@ -164,26 +363,79 @@ function ExperimentBuilderView(options = {}) {
     }
     return block.labelRu || block.label || fallback;
   };
-  const STEPS = I18N.ru.builderSteps;
+  function i18nPack() {
+    return (typeof I18N !== 'undefined' && CURRENT_LANG === 'en') ? I18N.en : I18N.ru;
+  }
+
+  function tKey(key) {
+    return i18nPack()[key] || key;
+  }
+
+  function blockTypeLabel(type) {
+    const pack = i18nPack();
+    const map = {
+      consent: pack.blockConsent,
+      questionnaire: pack.blockQuestionnaire,
+      precheck: pack.blockPrecheck,
+      calibration: pack.blockCalibration,
+      cognitive_task: pack.blockTask,
+      passive: pack.blockPassive,
+      rest: pack.blockBreak,
+      finish: pack.blockFinish,
+      instruction: trb('Инструкция', 'Instruction'),
+    };
+    return map[type] || type;
+  }
+
+  function builderStepHint(stepIdx) {
+    const hints = [
+      trb('Заполните базовые параметры протокола. Поля со звездочкой обязательны.', 'Fill in basic protocol parameters. Required fields are marked with an asterisk.'),
+      trb('Можно выбрать несколько задач: они будут добавлены в один эксперимент последовательно.', 'You can select multiple tasks: they will be added to one experiment sequentially.'),
+      trb('Соберите последовательность блоков и настройте подготовительные этапы для участника.', 'Build the block sequence and configure participant preparation steps.'),
+      trb('Настройте логику показа стимулов и таблицы проб для каждого блока.', 'Configure stimulus presentation and trial tables for each block.'),
+      trb('Определите зоны интереса и целевые области для анализа взгляда.', 'Define areas of interest and target regions for gaze analysis.'),
+      trb('Запустите пользовательскую часть эксперимента без системных блоков, чтобы проверить порядок и настройки.', 'Run the user-facing part without system blocks to verify order and settings.'),
+      trb('Задайте пороговые значения контроля качества записи сессии.', 'Set quality control thresholds for session recording.'),
+      trb('Выберите инструменты, которые будут доступны при просмотре данных этого эксперимента.', 'Choose tools available when viewing data from this experiment.'),
+      trb('Проверьте эксперимент и сохраните протокол — ссылка для участников станет рабочей.', 'Review the experiment and save the protocol to activate the participant link.'),
+    ];
+    return hints[stepIdx] || '';
+  }
+
+  function builderStepHeader(stepIdx, extraHtml = '') {
+    const title = i18nPack().builderSteps[stepIdx] || '';
+    const hint = builderStepHint(stepIdx);
+    return `
+      <div class="builder-step-header" style="padding:16px 18px;border-radius:16px;background:linear-gradient(135deg,rgba(92,102,189,.14),rgba(14,165,233,.08));border:1px solid rgba(92,102,189,.18);">
+        <div style="font-size:20px;font-weight:800;color:var(--text);">${title}</div>
+        ${hint ? `<div style="font-size:13px;color:var(--muted);line-height:1.55;margin-top:6px;max-width:720px;">${hint}</div>` : ''}
+        ${extraHtml}
+      </div>`;
+  }
+
+  const BUILDER_CANVAS_PAD = '14px 16px';
 
   const BLOCK_TYPES = [
-    { type:'consent',        label:I18N.ru.blockConsent,       color:'#6366f1', icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-    { type:'questionnaire',  label:I18N.ru.blockQuestionnaire, color:'#8b5cf6', icon:'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
-    { type:'precheck',       label:I18N.ru.blockPrecheck,      color:'#0ea5e9', icon:'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
-    { type:'calibration',    label:I18N.ru.blockCalibration,   color:'#10b981', icon:'M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z' },
-    { type:'instruction',    label:trb('Инструкция','Instruction'), color:'#f59e0b', icon:'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { type:'cognitive_task', label:I18N.ru.blockTask,          color:'#ef4444', icon:'M13 10V3L4 14h7v7l9-11h-7z' },
-    { type:'passive',        label:I18N.ru.blockPassive,       color:'#ec4899', icon:'M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z' },
-    { type:'rest',           label:I18N.ru.blockBreak,         color:'#64748b', icon:'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { type:'finish',         label:trb('Финальный экран','Finish screen'), color:'#5C66BD', icon:'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z' },
+    { type:'consent',        color:'#6366f1', icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    { type:'questionnaire',  color:'#8b5cf6', icon:'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+    { type:'precheck',       color:'#0ea5e9', icon:'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
+    { type:'calibration',    color:'#10b981', icon:'M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z' },
+    { type:'instruction',    color:'#f59e0b', icon:'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { type:'cognitive_task', color:'#ef4444', icon:'M13 10V3L4 14h7v7l9-11h-7z' },
+    { type:'passive',        color:'#ec4899', icon:'M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z' },
+    { type:'rest',           color:'#64748b', icon:'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { type:'finish',         color:'#5C66BD', icon:'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z' },
   ];
 
-  function getMeta(type) { return BLOCK_TYPES.find(b => b.type === type) || BLOCK_TYPES[BLOCK_TYPES.length-1]; }
+  function getMeta(type) {
+    const base = BLOCK_TYPES.find(b => b.type === type) || BLOCK_TYPES[BLOCK_TYPES.length - 1];
+    return { ...base, label: blockTypeLabel(type) };
+  }
 
   function defaultContent(type) {
     switch(type) {
-      case 'instruction':    return { title:'Инструкция', text:'', buttonText:'Далее' };
-      case 'cognitive_task': return { taskType:'other', showFeedback:true, useRT:true, stimulusDuration:1000, trials:[], stimuliSource:'library', stimuliFolder:'' };
+      case 'instruction':    return { title: trb('Инструкция', 'Instruction'), text:'', buttonText: trb('Далее', 'Next') };
+      case 'cognitive_task': return { taskType:'simple_rt', showFeedback:true, useRT:true, stimulusDuration:1000, trials:[], stimuliSource:'library', stimuliFolder:'' };
       case 'questionnaire':  return { questions:[] };
       case 'passive':        return { slideDuration:5000, slides:[], stimuliSource:'library', stimuliFolder:'' };
       case 'rest':           return { text:trb('Сделайте небольшой перерыв','Take a short break'), duration:30 };
@@ -195,7 +447,7 @@ function ExperimentBuilderView(options = {}) {
 
 
   const root = document.createElement('div');
-  root.style.cssText = 'display:flex; gap:0; height:100%; min-height:0; overflow:hidden; max-width: 1100px; margin: 0 auto; width: 100%;';
+  root.style.cssText = 'display:flex; gap:0; height:100%; min-height:0; overflow:hidden; width:100%;';
 
   const stepperCol = document.createElement('div');
   stepperCol.style.cssText = 'width:200px; flex-shrink:0; display:flex; flex-direction:column; overflow-y:auto; border-right:1px solid var(--stroke); padding:14px 10px;';
@@ -210,8 +462,8 @@ function ExperimentBuilderView(options = {}) {
     if (!experimentId) localStorage.setItem('emocog_protocol_step_draft', String(currentStep));
 
     stepperCol.innerHTML = `
-      <div style="font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--muted2);padding:0 4px 10px;">Шаги</div>
-      ${STEPS.map((label, i) => {
+      <div style="font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--muted2);padding:0 4px 10px;">${tKey('builderStepsLabel')}</div>
+      ${i18nPack().builderSteps.map((label, i) => {
         const done = i < currentStep || i < highestStep || (editingExp?.status === 'active');
         const active = i === currentStep;
         const locked = i > highestStep;
@@ -230,7 +482,7 @@ function ExperimentBuilderView(options = {}) {
       <div style="margin-top:auto; padding-top:20px;">
         <button id="saveDraftGlobalBtn" class="quick-btn" style="width:100%; justify-content:center; font-size:11px; background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.3); color:var(--warn); font-weight:600;">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
-          Сохранить черновик
+          ${tKey('saveDraftBtn')}
         </button>
       </div>
     `;
@@ -246,197 +498,6 @@ function ExperimentBuilderView(options = {}) {
     setTimeout(() => applyAutoI18n(stepperCol), 0);
   }
 
-  function clearInspector() {
-    setInspector({ customHtml: `<div style="color:var(--muted);font-size:12px;padding:8px 0;">${trb('Выберите блок для настройки','Select block to configure')}</div>` });
-  }
-
-  function showBlockInspector(blockId) {
-    selectedBlockId = blockId;
-    const block = experimentBlocks.find(b => b.id === blockId);
-    if (!block) { clearInspector(); return; }
-    const meta = getMeta(block.type);
-    const c = block.content || {};
-    const lockedTypes = ['consent','questionnaire','precheck','calibration'];
-    const isLockedBlock = lockedTypes.includes(block.type);
-
-    const folderOpts = (folders||[]).map(f =>
-      `<option value="${f.id}" ${c.stimuliFolder===f.id?'selected':''}>${f.name}</option>`).join('');
-
-    let typeFields = '';
-    if (block.type === 'instruction') {
-      const instrTitle = localizedInstructionValue(c, 'title');
-      const instrText = localizedInstructionValue(c, 'text');
-      const instrButton = localizedInstructionValue(c, 'buttonText', 'Далее');
-      typeFields = `
-        <div class="insp-field">
-          <label>${trb('Заголовок','Title')}</label>
-          <input data-field="title" value="${instrTitle}" />
-        </div>
-        <div class="insp-field">
-          <label>${trb('Текст','Text')}</label>
-          <textarea data-field="text" rows="4">${instrText}</textarea>
-        </div>
-        <div class="insp-field">
-          <label>${trb('Кнопка','Button')}</label>
-          <input data-field="buttonText" value="${instrButton}" />
-        </div>`;
-    } else if (block.type === 'cognitive_task' || block.type === 'passive') {
-      typeFields = `
-        ${block.type === 'cognitive_task' ? `
-        <div class="insp-field">
-          <label>Тип когнитивной задачи</label>
-          <select data-field="taskType">
-            <option value="simple_rt" ${c.taskType==='simple_rt'?'selected':''}>Простая реакция</option>
-            <option value="go_nogo" ${c.taskType==='go_nogo'?'selected':''}>Go / No-Go</option>
-            <option value="stroop" ${c.taskType==='stroop'?'selected':''}>Stroop</option>
-            <option value="pvt" ${c.taskType==='pvt'?'selected':''}>PVT</option>
-            <option value="ax_cpt" ${c.taskType==='ax_cpt'||c.taskType==='cpt'?'selected':''}>CPT</option>
-            <option value="other" ${!c.taskType||c.taskType==='other'||c.taskType==='generic'?'selected':''}>Другое</option>
-          </select>
-        </div>` : ''}
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin:6px 0;">Источник данных</div>
-        <div class="insp-field">
-          <label>Откуда брать стимулы?</label>
-          <select data-field="stimuliSource">
-            <option value="library" ${c.stimuliSource==='library'||!c.stimuliSource?'selected':''}>Вся библиотека</option>
-            <option value="folder" ${c.stimuliSource==='folder'?'selected':''}>Из папки</option>
-          </select>
-        </div>
-        <div class="insp-field" id="folderField_${blockId}" style="${c.stimuliSource==='folder'?'':'display:none;'}">
-          <label>Папка</label>
-          <select data-field="stimuliFolder">
-            <option value="">— папка —</option>
-            ${folderOpts}
-          </select>
-        </div>
-      `;
-    } else if (block.type === 'rest') {
-      typeFields = `
-        <div class="insp-field">
-          <label>${trb('Текст для участника','Text for participant')}</label>
-          <textarea data-field="text" rows="3">${c.text||trb('Сделайте небольшой перерыв','Take a short break')}</textarea>
-        </div>
-        <div class="insp-field">
-          <label>${trb('Длительность (сек)','Duration (sec)')}</label>
-          <input data-field="duration" type="number" value="${c.duration||30}" />
-        </div>`;
-    } else if (block.type === 'finish') {
-      typeFields = `
-        <div class="insp-field">
-          <label>${trb('Заголовок','Title')}</label>
-          <input data-field="title" data-auto-i18n-value value="${c.title||trb('Эксперимент завершён','Experiment completed')}" />
-        </div>
-        <div class="insp-field">
-          <label>${trb('Текст','Text')}</label>
-          <textarea data-field="text" rows="3">${c.text||trb('Спасибо за участие!','Thank you for participating!')}</textarea>
-        </div>`;
-    }
-
-    const blockLabel = localizedBlockLabel(block, meta.label);
-    const html = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--stroke);">
-        <div style="width:26px;height:26px;border-radius:8px;background:${meta.color}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
-        </div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.2;">${meta.label}</div>
-      </div>
-      ${isLockedBlock ? `
-      <div style="font-size:11px;color:var(--muted2);padding:8px 10px;border:1px solid var(--stroke);border-radius:10px;background:rgba(255,255,255,.35);margin-bottom:12px;">
-        Этот системный блок нельзя редактировать.
-      </div>
-      <div class="insp-field">
-        <label>${trb('Название блока','Block name')}</label>
-        <div style="padding:7px 9px;border-radius:8px;border:1px solid var(--stroke);background:rgba(255,255,255,.45);font-size:12px;color:var(--text);">${blockLabel}</div>
-      </div>
-      ` : `
-      <div class="insp-field">
-        <label>${trb('Название блока','Block name')}</label>
-        <input id="insp_label" value="${blockLabel}" />
-      </div>
-      `}
-      ${typeFields}
-      ${isLockedBlock ? '' : `<button id="inspSaveBtn" class="quick-btn" style="width:100%;margin-top:8px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">
-        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-        ${trb('Сохранить','Save')}
-      </button>`}
-      <style>
-        .insp-field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
-        .insp-field label{font-size:11px;font-weight:600;color:var(--muted);}
-        .insp-field input,.insp-field select,.insp-field textarea{width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--stroke);background:rgba(255,255,255,.6);font-size:12px;color:var(--text);font-family:inherit;resize:vertical;}
-      </style>
-    `;
-    setInspector({ customHtml: html });
-
-    setTimeout(() => {
-      applyAutoI18n(document.getElementById('inspector'));
-
-      const insp = document.getElementById('inspector');
-      if (!insp) return;
-      const srcSelect = insp.querySelector('[data-field="stimuliSource"]');
-      if (srcSelect) {
-        srcSelect.addEventListener('change', () => {
-          const ff = insp.querySelector('#folderField_' + blockId);
-          if (ff) ff.style.display = srcSelect.value === 'folder' ? '' : 'none';
-        });
-      }
-
-      const taskTypeSelect = insp.querySelector('[data-field="taskType"]');
-      if (taskTypeSelect) {
-        taskTypeSelect.addEventListener('change', () => {
-          block.content = block.content || {};
-          block.content.taskType = taskTypeSelect.value || 'other';
-          block.content.rt_task = block.content.taskType;
-          block.content.selected_metrics = autoRtMetricsForTaskType(
-            block.content.taskType,
-            block.content
-          );
-          localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
-        });
-      }
-
-      const slideMode = insp.querySelector('[data-field="slideChangeMode"]');
-      if (slideMode) {
-        slideMode.addEventListener('change', () => {
-          const durF = insp.querySelector('#slideDurationField_' + blockId);
-          const keyF = insp.querySelector('#manualKeyField_' + blockId);
-          if (durF) durF.style.display = slideMode.value === 'manual' ? 'none' : '';
-          if (keyF) keyF.style.display = slideMode.value === 'manual' ? '' : 'none';
-        });
-      }
-
-      const trialsBtn = insp.querySelector(`#btn_edit_trials_${blockId}`);
-      if (trialsBtn) {
-        trialsBtn.addEventListener('click', () => {
-          showTrialTableModal(block);
-        });
-      }
-
-      const saveBtn = insp.querySelector('#inspSaveBtn');
-      if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
-          block.label = insp.querySelector('#insp_label')?.value || block.label;
-          block[CURRENT_LANG === 'en' ? 'labelEn' : 'labelRu'] = block.label;
-          block.content = block.content || {};
-          insp.querySelectorAll('[data-field]').forEach(el => {
-            const field = el.dataset.field;
-            if (el.type === 'checkbox') block.content[field] = el.checked;
-            else if (el.type === 'number') block.content[field] = parseFloat(el.value) || 0;
-            else block.content[field] = el.value;
-          });
-          if (block.type === 'instruction') {
-            ['title', 'text', 'buttonText'].forEach(field => {
-              if (block.content[field] === undefined) return;
-              block.content[field + (CURRENT_LANG === 'en' ? 'En' : 'Ru')] = block.content[field];
-            });
-          }
-          localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
-          renderCanvasBlocks();
-          toast(trb('Блок сохранён','Block saved'));
-        });
-      }
-    }, 50);
-  }
-
   function showTrialTableModal(block, onSaveCallback) {
     if (!block.content.trials) block.content.trials = [];
     let currentTrials = JSON.parse(JSON.stringify(block.content.trials));
@@ -448,131 +509,178 @@ function ExperimentBuilderView(options = {}) {
     modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:26px 24px 20px;width:1120px;max-width:98vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
 
     const stimuliOptions = stimuliList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-    const selectedFolderId = block.content.stimuliFolder || '';
-    const folderOptions = folders.map(f => `<option value="${f.id}" ${f.id === selectedFolderId ? 'selected' : ''}>${f.name}</option>`).join('');
+    const standardFolderId = typeof getStandardFolderId === 'function' ? getStandardFolderId() : 'folder_standard';
+    const autoGenDefault = block.content?.stimuliFolder || standardFolderId;
+    const folderOptions = folders.map(f => `<option value="${f.id}" ${f.id === autoGenDefault ? 'selected' : ''}>${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</option>`).join('');
+    const rtBounds = resolveRtBounds(block.content || {});
+    const rtMinVal = block.content?.rtMin != null && block.content.rtMin !== '' ? block.content.rtMin : '';
+    const rtMaxVal = block.content?.rtWindow != null && block.content.rtWindow !== '' ? block.content.rtWindow : '';
 
     modal.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;gap:16px;">
         <div>
+          <div style="font-size:11px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">${trb('Таблица проб', 'Trial table')}</div>
           <div style="font-size:18px;font-weight:700;color:var(--text);">
-            <span>${trb('Настройка логики:','Configure logic:')}</span> <span style="color:var(--accent);">${block.label}</span>
+            ${block.label}
+            <span id="trialCountBadge" style="display:inline-block;margin-left:8px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(92,102,189,.12);color:var(--accent);vertical-align:middle;">0</span>
           </div>
         </div>
-        <button id="trialCloseBtn" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;">
+        <button id="trialCloseBtn" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;border-radius:8px;">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="22" height="22"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
-      <div style="display:flex; gap:16px; background:var(--card-bg); border:1px solid var(--stroke); padding:12px 16px; border-radius:12px; flex-wrap:nowrap; align-items:flex-end;">
-
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <label style="font-size:9px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.04em; line-height:1.2;">${trb('Расчет времени реакции','Reaction time calculation')}</label>
-          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);">
-              <input type="checkbox" id="useRtCalcCb" ${(block.content.useRT !== false) ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);">
-              ${trb('нужен расчет','calculation required')}
-            </label>
-            <input type="number" id="rtWindowInput" min="1" value="${block.content.rtWindow || 1000}" style="width:90px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
-            <span style="font-size:12px; color:var(--muted);">${trb('макс. мс','max. ms')}</span>
-          </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+        <div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;">
+          <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;">${trb('Измерения', 'Measurements')}</div>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="useRtCalcCb" ${(block.content.useRT !== false) ? 'checked' : ''} style="margin-top:2px;accent-color:var(--accent);">
+            <span style="flex:1;">
+              <span style="font-weight:600;display:block;">${trb('Время реакции', 'Reaction time')}</span>
+              <span style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                <input type="number" id="rtMinInput" min="1" placeholder="${rtBounds.rtMin}" value="${rtMinVal}" title="${trb('Мин. (мс)', 'Min (ms)')}" style="width:64px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
+                <span style="font-size:11px;color:var(--muted);">—</span>
+                <input type="number" id="rtWindowInput" min="1" placeholder="${rtBounds.rtWindow}" value="${rtMaxVal}" title="${trb('Макс. (мс)', 'Max (ms)')}" style="width:64px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
+                <span style="font-size:11px;color:var(--muted);">${trb('мс', 'ms')}</span>
+              </span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="useBpmCb" ${block.content.useBPM ? 'checked' : ''} style="accent-color:var(--accent);">
+            <span style="font-weight:600;">${trb('Расчёт BPM', 'Calculate BPM')}</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="trialEmotionCb" ${block.content.useEmotionTracking ? 'checked' : ''} style="accent-color:var(--accent);">
+            <span style="font-weight:600;">${trb('Отслеживание эмоций', 'Emotion tracking')}</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="trialAoiCb" ${block.content.useAOI ? 'checked' : ''} style="accent-color:var(--accent);">
+            <span style="font-weight:600;">AOI (${trb('области интереса', 'areas of interest')})</span>
+          </label>
         </div>
 
-        <div style="width:1px; height:36px; background:var(--stroke); margin:0 4px;"></div>
-
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <label style="font-size:9px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.04em; line-height:1.2;">Фиксация (+)</label>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" id="useFixationCb" ${block.content.useFixation ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);">
-            <input type="number" id="fixationDuration" value="${block.content.fixationDuration || 500}" placeholder="мс" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.useFixation ? '' : 'disabled'}>
-            <span style="font-size:12px; color:var(--muted);">мс</span>
-          </div>
+        <div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;">
+          <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;">${trb('Презентация', 'Presentation')}</div>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="useFixationCb" ${block.content.useFixation ? 'checked' : ''} style="margin-top:2px;accent-color:var(--accent);">
+            <span style="flex:1;">
+              <span style="font-weight:600;display:block;">${trb('Фиксация (+)', 'Fixation (+)')}</span>
+              <span style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+                <input type="number" id="fixationDuration" value="${block.content.fixationDuration || 500}" style="width:72px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.useFixation ? '' : 'disabled'}>
+                <span style="font-size:11px;color:var(--muted);">${trb('мс', 'ms')}</span>
+              </span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="trialRandomizeCb" ${block.content.randomize ? 'checked' : ''} style="accent-color:var(--warn);">
+            <span style="font-weight:600;color:var(--warn);">${trb('Перемешивать пробы', 'Randomize trials')}</span>
+          </label>
         </div>
 
         ${block.type === 'cognitive_task' ? `
-          <div style="width:1px; height:36px; background:var(--stroke); margin:0 4px;"></div>
-
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            <label style="font-size:9px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.04em; line-height:1.2;">${trb('Обратная связь','Feedback')}</label>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="fbCb" ${block.content.showFeedback ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="${trb('Показывать','Show')}">
-              <input type="text" id="fbCorr" data-auto-i18n-value value="${block.content.feedbackCorrect || trb('Верно!','Correct!')}" placeholder="${trb('Успех','Success')}" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
-              <input type="text" id="fbInc" data-auto-i18n-value value="${block.content.feedbackIncorrect || trb('Ошибка!','Error!')}" placeholder="${trb('Ошибка','Error')}" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
-            </div>
+        <div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;min-width:0;overflow:hidden;">
+          <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;">${trb('Обратная связь', 'Feedback')}</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+            <input type="checkbox" id="fbCb" ${block.content.showFeedback ? 'checked' : ''} style="accent-color:var(--accent);">
+            <span style="font-weight:600;">${trb('Показывать участнику', 'Show to participant')}</span>
+          </label>
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:0;">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);min-width:0;">
+              <span>${trb('Верный ответ', 'Correct response')}</span>
+              <input type="text" id="fbCorr" data-auto-i18n-value value="${block.content.feedbackCorrect || trb('Верно!','Correct!')}" placeholder="${trb('Например: Верно!', 'e.g. Correct!')}" style="width:100%;box-sizing:border-box;min-width:0;padding:6px 8px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.showFeedback ? '' : 'disabled'}>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);min-width:0;">
+              <span>${trb('Неверный ответ', 'Incorrect response')}</span>
+              <input type="text" id="fbInc" data-auto-i18n-value value="${block.content.feedbackIncorrect || trb('Ошибка!','Error!')}" placeholder="${trb('Например: Ошибка!', 'e.g. Error!')}" style="width:100%;box-sizing:border-box;min-width:0;padding:6px 8px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.showFeedback ? '' : 'disabled'}>
+            </label>
           </div>
+        </div>
 
-          <div style="width:1px; height:36px; background:var(--stroke); margin:0 4px;"></div>
-
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            <label style="font-size:9px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.04em; line-height:1.2;">Действие при пропуске</label>
-            <select id="omissionRuleSel" style="padding:6px 10px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none; background:white;">
-              <option value="flag" ${block.content.omissionRule==='flag'?'selected':''}>Пометить как ошибку</option>
-              <option value="skip" ${block.content.omissionRule==='skip'?'selected':''}>Проигнорировать</option>
+        <div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;">
+          <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;">${trb('Правила ошибок', 'Error rules')}</div>
+          <label style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px;">
+            <span>${trb('Пропуск ответа', 'Omission')}</span>
+            <select id="omissionRuleSel" style="padding:6px 8px;font-size:12px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);">
+              <option value="flag" ${block.content.omissionRule==='flag'?'selected':''}>${trb('Пометить как ошибку', 'Mark as error')}</option>
+              <option value="skip" ${block.content.omissionRule==='skip'?'selected':''}>${trb('Проигнорировать', 'Ignore')}</option>
             </select>
-          </div>
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            <label style="font-size:9px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.04em; line-height:1.2;">Действие при лишнем нажатии</label>
-            <select id="commissionRuleSel" style="padding:6px 10px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none; background:white;">
-              <option value="flag" ${block.content.commissionRule==='flag'?'selected':''}>Пометить как ошибку</option>
-              <option value="skip" ${block.content.commissionRule==='skip'?'selected':''}>Проигнорировать</option>
+          </label>
+          <label style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px;">
+            <span>${trb('Лишнее нажатие', 'Commission')}</span>
+            <select id="commissionRuleSel" style="padding:6px 8px;font-size:12px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);">
+              <option value="flag" ${block.content.commissionRule==='flag'?'selected':''}>${trb('Пометить как ошибку', 'Mark as error')}</option>
+              <option value="skip" ${block.content.commissionRule==='skip'?'selected':''}>${trb('Проигнорировать', 'Ignore')}</option>
             </select>
-          </div>
-        ` : ''}
+          </label>
+        </div>` : ''}
       </div>
 
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:4px;flex-wrap:wrap;">
-        <button id="addTrialRowBtn" class="quick-btn" style="background:var(--card-bg);border:1px solid var(--stroke);">+ Строка</button>
-        <div style="width:1px;height:24px;background:var(--stroke);margin:0 4px;"></div>
-        <span style="font-size:12px;color:var(--muted);font-weight:600;">Автогенерация из:</span>
-        <select id="autoGenFolder" style="padding:6px 10px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);min-width:150px;">
-          <option value="">— Выбрать папку —</option>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:4px;">
+        <button id="addTrialRowBtn" class="quick-btn" style="font-size:12px;">+ ${trb('Добавить пробу', 'Add trial')}</button>
+        <div style="width:1px;height:22px;background:var(--stroke);"></div>
+        <span style="font-size:12px;color:var(--muted);font-weight:600;">${trb('Автогенерация:', 'Auto-generate:')}</span>
+        <select id="autoGenFolder" style="padding:6px 10px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);min-width:160px;">
+          <option value="">— ${trb('папка', 'folder')} —</option>
           ${folderOptions}
         </select>
-        <button id="autoGenBtn" class="quick-btn" style="background:rgba(92,102,189,.1);color:var(--accent);border:none;">Сгенерировать</button>
-
-        <div style="flex:1;"></div>
-
-        <div style="display:flex;align-items:center;gap:6px;background:rgba(245,158,11,.1);padding:6px 12px;border-radius:8px;">
-          <input type="checkbox" id="trialRandomizeCb" ${block.content.randomize ? 'checked' : ''} style="accent-color:var(--warn);width:16px;height:16px;cursor:pointer;">
-          <label for="trialRandomizeCb" style="font-size:12px;font-weight:700;color:var(--warn);cursor:pointer;">Перемешивать пробы</label>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;background:rgba(92,102,189,.10);padding:6px 12px;border-radius:8px;">
-          <input type="checkbox" id="trialAoiCb" ${block.content.useAOI ? 'checked' : ''} style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer;">
-          <label for="trialAoiCb" style="font-size:12px;font-weight:700;color:var(--accent);cursor:pointer;">AOI</label>
-        </div>
+        <button id="autoGenBtn" class="quick-btn" style="background:rgba(92,102,189,.1);color:var(--accent);border-color:rgba(92,102,189,.2);font-size:12px;">${trb('Сгенерировать', 'Generate')}</button>
       </div>
 
-      <div style="display:grid;grid-template-columns:40px 2fr 1.2fr 1.4fr 1fr 80px 40px;gap:8px;padding:0 8px;font-size:11px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.05em;">
-        <div>№</div>
-        <div>Стимул</div>
-        <div>Условие</div>
-        <div style="display:flex;align-items:center;gap:6px;">
-            <span>${trb('Действие','Action')}</span>
-          <span title="${trb('Действие участника в ответ на стимул (клик мышью/клавишей)','Action participant takes in response to stimulus (mouse/keyboard)')}" style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:1px solid var(--stroke);font-size:10px;line-height:1;cursor:help;color:var(--muted);">!</span>
-        </div>
-        <div>Длит.(мс)</div>
-        <div>Повторы</div>
-        <div></div>
+      <div id="trialsContainer" style="flex:1;min-height:220px;max-height:42vh;overflow:auto;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.45);">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:rgba(92,102,189,.08);border-bottom:1px solid var(--stroke);">
+              <th style="padding:10px 8px;width:44px;text-align:center;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">№</th>
+              <th style="padding:10px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">${trb('Стимул', 'Stimulus')}</th>
+              <th style="padding:10px 8px;width:120px;text-align:left;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">${trb('Условие', 'Condition')}</th>
+              <th style="padding:10px 8px;width:140px;text-align:left;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">
+                <div style="display:flex;align-items:center;gap:5px;">
+                  <span>${trb('Действие', 'Action')}</span>
+                  <button type="button" id="actionHelpBtn" title="${trb('Действие участника в ответ на стимул: клик мышью или нажатие клавиши (пробел, стрелки).', 'Participant action in response to stimulus: mouse click or key press (space, arrows).')}" style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--stroke);font-size:9px;line-height:1;cursor:pointer;color:var(--muted);background:var(--card-bg);padding:0;flex-shrink:0;">!</button>
+                </div>
+              </th>
+              <th style="padding:10px 8px;width:88px;text-align:center;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">${trb('Длит.', 'Dur.')}</th>
+              <th style="padding:10px 8px;width:72px;text-align:center;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">${trb('Повт.', 'Reps')}</th>
+              <th style="padding:10px 8px;width:40px;"></th>
+            </tr>
+          </thead>
+          <tbody id="trialsTbody"></tbody>
+        </table>
       </div>
-      <div id="trialsContainer" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px;min-height:200px;background:rgba(92,102,189,.03);border-radius:12px;border:1px inset var(--stroke);"></div>
 
       <div style="display:flex;gap:12px;justify-content:flex-end;flex-shrink:0;padding-top:12px;border-top:1px solid var(--stroke);">
-        <button class="quick-btn" id="trialCancelBtn" style="background:transparent;border:1px solid var(--stroke);">Отмена</button>
-        <button class="quick-btn" id="trialSaveBtn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;">Сохранить таблицу</button>
+        <button class="quick-btn" id="trialCancelBtn" style="background:transparent;border:1px solid var(--stroke);">${trb('Отмена', 'Cancel')}</button>
+        <button class="quick-btn" id="trialSaveBtn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;">${trb('Сохранить', 'Save')}</button>
       </div>
     `;
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const container = modal.querySelector('#trialsContainer');
+    const container = modal.querySelector('#trialsTbody');
+    const trialCountBadge = modal.querySelector('#trialCountBadge');
+
+    function updateTrialCountBadge() {
+      if (trialCountBadge) trialCountBadge.textContent = String(currentTrials.length);
+    }
 
     const fixCb = modal.querySelector('#useFixationCb');
     const fixInput = modal.querySelector('#fixationDuration');
     fixCb.addEventListener('change', () => { fixInput.disabled = !fixCb.checked; });
     const useRtCalcCb = modal.querySelector('#useRtCalcCb');
+    const rtMinInput = modal.querySelector('#rtMinInput');
     const rtWindowInput = modal.querySelector('#rtWindowInput');
     useRtCalcCb.addEventListener('change', () => {
-      rtWindowInput.disabled = !useRtCalcCb.checked;
+      const on = useRtCalcCb.checked;
+      if (rtMinInput) rtMinInput.disabled = !on;
+      rtWindowInput.disabled = !on;
+    });
+    modal.querySelector('#actionHelpBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toast(trb(
+        'Действие участника в ответ на стимул: клик мышью или нажатие клавиши (пробел, стрелки).',
+        'Participant action in response to stimulus: mouse click or key press (space, arrows).'
+      ));
     });
 
     if (block.type === 'cognitive_task') {
@@ -586,38 +694,47 @@ function ExperimentBuilderView(options = {}) {
     }
 
     function renderRows() {
+      updateTrialCountBadge();
       if (currentTrials.length === 0) {
-        container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">Таблица пуста. Добавьте строку или сгенерируйте из папки.</div>`;
+        container.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:48px 20px;color:var(--muted);font-size:13px;">${trb('Таблица пуста. Добавьте пробу или сгенерируйте из папки.', 'Table is empty. Add a trial or generate from a folder.')}</td></tr>`;
         return;
       }
 
       container.innerHTML = currentTrials.map((trial, index) => `
-        <div class="trial-row" data-index="${index}" style="display:grid;grid-template-columns:40px 2fr 1.2fr 1.4fr 1fr 80px 40px;gap:8px;align-items:center;background:var(--card-bg);padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);">
-          <div style="font-size:12px;font-weight:600;color:var(--muted);text-align:center;">${index + 1}</div>
-
-          <select class="t-input t-stimulus" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);">
-            <option value="">— Выбрать —</option>
-            ${stimuliOptions}
-          </select>
-
-          <input class="t-input t-condition" value="${trial.condition || ''}" placeholder="условие" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:rgba(255,255,255,.55);" />
-
-          <select class="t-input t-action" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);" ${trial.stimulusId ? '' : 'disabled'}>
-            <option value="">- (действие не нужно)</option>
-            <option value="mouse_click">Клик мышью</option>
-            <option value="space">Пробел</option>
-            <option value="arrow_up">Вверх</option>
-            <option value="arrow_down">Вниз</option>
-            <option value="arrow_right">Вправо</option>
-            <option value="arrow_left">Влево</option>
-          </select>
-          <input type="number" class="t-input t-duration" min="1" value="${trial.duration || 1000}" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
-          <input type="number" class="t-input t-reps" value="${trial.repetitions || 1}" min="1" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
-
-          <button class="del-row-btn" data-index="${index}" style="background:none;border:none;color:var(--bad);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;border-radius:6px;">
-            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-          </button>
-        </div>
+        <tr class="trial-row" data-index="${index}" style="border-bottom:1px solid var(--stroke);background:${index % 2 ? 'rgba(92,102,189,.03)' : 'transparent'};">
+          <td style="padding:8px;text-align:center;font-weight:600;color:var(--muted);">${index + 1}</td>
+          <td style="padding:8px;">
+            <select class="t-input t-stimulus" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);">
+              <option value="">— ${trb('выбрать', 'select')} —</option>
+              ${stimuliOptions}
+            </select>
+          </td>
+          <td style="padding:8px;">
+            <input class="t-input t-condition" value="${trial.condition || ''}" placeholder="${trb('условие', 'condition')}" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          </td>
+          <td style="padding:8px;">
+            <select class="t-input t-action" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);" ${trial.stimulusId ? '' : 'disabled'}>
+              <option value="">— ${trb('не нужно', 'none')} —</option>
+              <option value="mouse_click">${trb('Клик мышью', 'Mouse click')}</option>
+              <option value="space">${trb('Пробел', 'Space')}</option>
+              <option value="arrow_up">${trb('Вверх', 'Up')}</option>
+              <option value="arrow_down">${trb('Вниз', 'Down')}</option>
+              <option value="arrow_right">${trb('Вправо', 'Right')}</option>
+              <option value="arrow_left">${trb('Влево', 'Left')}</option>
+            </select>
+          </td>
+          <td style="padding:8px;">
+            <input type="number" class="t-input t-duration" min="1" value="${trial.duration || 1000}" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
+          </td>
+          <td style="padding:8px;">
+            <input type="number" class="t-input t-reps" value="${trial.repetitions || 1}" min="1" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
+          </td>
+          <td style="padding:8px;text-align:center;">
+            <button class="del-row-btn" data-index="${index}" title="${trb('Удалить', 'Delete')}" style="background:none;border:none;color:var(--bad);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:4px;border-radius:6px;">
+              <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </td>
+        </tr>
       `).join('');
 
       container.querySelectorAll('.trial-row').forEach(row => {
@@ -688,7 +805,8 @@ function ExperimentBuilderView(options = {}) {
     modal.querySelector('#addTrialRowBtn').addEventListener('click', () => {
       currentTrials.push({ stimulusId: '', condition: '', action: '', correctResponse: '', duration: 1000, repetitions: 1 });
       renderRows();
-      setTimeout(() => container.scrollTop = container.scrollHeight, 50);
+      const scrollWrap = modal.querySelector('#trialsContainer');
+      setTimeout(() => { if (scrollWrap) scrollWrap.scrollTop = scrollWrap.scrollHeight; }, 50);
     });
 
     modal.querySelector('#autoGenBtn').addEventListener('click', () => {
@@ -712,7 +830,8 @@ function ExperimentBuilderView(options = {}) {
       });
 
       renderRows();
-      setTimeout(() => container.scrollTop = container.scrollHeight, 50);
+      const scrollWrap = modal.querySelector('#trialsContainer');
+      setTimeout(() => { if (scrollWrap) scrollWrap.scrollTop = scrollWrap.scrollHeight; }, 50);
       toast(`Успешно добавлено ${folder.stimuliIds.length} проб!`);
     });
 
@@ -736,13 +855,37 @@ function ExperimentBuilderView(options = {}) {
       block.content.trials = currentTrials.map(({ feedbackCorrect, feedbackIncorrect, correctFeedback, incorrectFeedback, feedbackText, feedbackError, ...trial }) => trial);
       block.content.randomize = modal.querySelector('#trialRandomizeCb').checked;
       block.content.useAOI = modal.querySelector('#trialAoiCb').checked;
+      block.content.useEmotionTracking = !!modal.querySelector('#trialEmotionCb')?.checked;
+      if (block.content.useEmotionTracking) {
+        block.content.analytics = { ...(block.content.analytics || {}), webcam: true, mediapipe: true };
+      } else if (block.content.analytics) {
+        const nextAnalytics = { ...block.content.analytics };
+        delete nextAnalytics.mediapipe;
+        block.content.analytics = Object.keys(nextAnalytics).length ? nextAnalytics : null;
+      }
       const useRtCalc = modal.querySelector('#useRtCalcCb').checked;
       if (useRtCalc && (parseInt(modal.querySelector('#rtWindowInput').value) || 0) <= 0) {
         toast('Укажите максимальное время ожидаемой реакции > 0 мс');
         return;
       }
       block.content.useRT = useRtCalc;
-      block.content.rtWindow = useRtCalc ? (parseInt(modal.querySelector('#rtWindowInput').value) || 1000) : null;
+      if (useRtCalc) {
+        const bounds = resolveRtBounds(block.content);
+        const minRaw = parseInt(modal.querySelector('#rtMinInput').value);
+        const maxRaw = parseInt(modal.querySelector('#rtWindowInput').value);
+        block.content.rtMin = Number.isFinite(minRaw) && minRaw > 0 ? minRaw : null;
+        block.content.rtWindow = Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : null;
+        const resolvedMin = block.content.rtMin ?? bounds.rtMin;
+        const resolvedMax = block.content.rtWindow ?? bounds.rtWindow;
+        if (resolvedMin >= resolvedMax) {
+          toast(trb('Минимальное время реакции должно быть меньше максимального', 'Minimum RT must be less than maximum RT'));
+          return;
+        }
+      } else {
+        block.content.rtMin = null;
+        block.content.rtWindow = null;
+      }
+      block.content.useBPM = !!modal.querySelector('#useBpmCb')?.checked;
       block.content.useFixation = fixCb.checked;
       block.content.fixationDuration = parseInt(fixInput.value) || 500;
 
@@ -753,11 +896,7 @@ function ExperimentBuilderView(options = {}) {
 
         block.content.omissionRule = modal.querySelector('#omissionRuleSel').value;
         block.content.commissionRule = modal.querySelector('#commissionRuleSel').value;
-        block.content.rt_task = block.content.taskType || 'other';
-        block.content.selected_metrics = autoRtMetricsForTaskType(
-          block.content.taskType,
-          block.content
-        );
+        block.content.selected_metrics = autoRtMetricsForTaskType(block.content.taskType, block.content);
       }
 
       localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
@@ -777,7 +916,6 @@ function ExperimentBuilderView(options = {}) {
     else if (currentStep === 2) renderStep1();
     else if (currentStep === 3) renderStep2Stimuli();
     else renderPlaceholder(currentStep);
-    clearInspector();
 
     setTimeout(() => applyAutoI18n(), 0);
   }
@@ -801,12 +939,9 @@ function ExperimentBuilderView(options = {}) {
 
   function renderMetadataStep() {
     canvasCol.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:100%;padding:22px 24px;gap:18px;overflow-y:auto;">
-        <div>
-          <div style="font-size:19px;font-weight:800;color:var(--text);margin-bottom:4px;">${trb('Описание эксперимента','Experiment description')}</div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.5;">${trb('Заполните базовые параметры протокола. Поля со звездочкой обязательны для продолжения.','Fill in the basic protocol parameters. Fields marked with an asterisk are required to continue.')}</div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:860px;">
+      <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;overflow-y:auto;">
+        ${builderStepHeader(0)}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);">
             ${trb('Название эксперимента *','Experiment title *')}
             <input id="metaTitle" value="${protocolMeta.title || ''}" placeholder="${trb('Например: Внимание и рабочая память','For example: Attention and working memory')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);">
@@ -1026,20 +1161,19 @@ function ExperimentBuilderView(options = {}) {
 
     canvasCol.innerHTML = `
       <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
-        <!-- Header -->
-        <div style="flex-shrink:0;padding:20px 24px 0;">
-          <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px;">${trb('Выбор задачи','Task selection')}</div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.5;">${trb('Можно выбрать несколько задач: они будут добавлены в один эксперимент последовательно.','You can select multiple tasks: they will be added to one experiment sequentially.')}</div>
+        <div style="flex-shrink:0;padding:${BUILDER_CANVAS_PAD};padding-bottom:0;">
+          ${builderStepHeader(1)}
         </div>
 
-        <!-- Cards grid scroll area -->
-        <div id="s0grid" style="flex:1;overflow-y:auto;padding:16px 24px 8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;align-content:start;"></div>
+        <!-- Cards — vertical scroll -->
+        <div style="flex:1;min-height:0;padding:12px 16px 8px;">
+          <div id="s0grid" style="height:100%;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:12px;padding:4px 2px;scroll-behavior:smooth;scrollbar-width:thin;"></div>
+        </div>
 
         <!-- Footer -->
-        <div style="flex-shrink:0;padding:12px 24px 16px;border-top:1px solid var(--stroke);display:flex;align-items:center;justify-content:space-between;gap:12px;">
-          <button id="step0Back" class="quick-btn" style="font-size:12px;">← Назад</button>
-          <div id="s0hint" style="font-size:12px;color:var(--muted2);line-height:1.4;flex:1;">← ${trb('Выберите одну или несколько задач, чтобы продолжить','Select one or more tasks to continue')}</div>
-          <button id="step0Next" class="quick-btn" style="opacity:.35;pointer-events:none;padding:9px 28px;font-weight:600;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);white-space:nowrap;">Далее →</button>
+        <div style="flex-shrink:0;padding:12px 16px 16px;border-top:1px solid var(--stroke);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <button id="step0Back" class="quick-btn" style="font-size:12px;">← ${trb('Назад', 'Back')}</button>
+          <button id="step0Next" class="quick-btn" style="opacity:.35;pointer-events:none;padding:9px 28px;font-weight:600;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);white-space:nowrap;">${trb('Далее', 'Next')} →</button>
         </div>
       </div>
     `;
@@ -1047,7 +1181,6 @@ function ExperimentBuilderView(options = {}) {
     const grid = canvasCol.querySelector('#s0grid');
     const nextBtn = canvasCol.querySelector('#step0Next');
     const backBtn = canvasCol.querySelector('#step0Back');
-    const hintEl = canvasCol.querySelector('#s0hint');
     const selectedIds = () => new Set(selectedTemplates.map(t => t.id));
     const updateNextState = () => {
       nextBtn.style.opacity = selectedTemplates.length ? '1' : '.35';
@@ -1061,6 +1194,7 @@ function ExperimentBuilderView(options = {}) {
         const isSelected = selectedIds().has(tpl.id);
         card.style.cssText = [
           'display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:16px;cursor:pointer;',
+          'width:100%;flex-shrink:0;',
           'border:2px solid ' + (isSelected ? 'var(--accent)' : 'var(--stroke)') + ';',
           'background:' + (isSelected ? 'rgba(92,102,189,.06)' : 'var(--card-bg)') + ';',
           'transition:border-color .12s, background .12s, box-shadow .12s;',
@@ -1100,9 +1234,6 @@ function ExperimentBuilderView(options = {}) {
           selectedTemplates = isSelected
             ? selectedTemplates.filter(x => x.id !== tpl.id)
             : [...selectedTemplates, tpl];
-          hintEl.innerHTML = selectedTemplates.length
-            ? `<strong style="color:var(--text);">${trb('Выбрано:','Selected:')} ${selectedTemplates.length}</strong> — ${selectedTemplates.map(x => x.label).join(', ')}`
-            : `← ${trb('Выберите одну или несколько задач, чтобы продолжить','Select one or more tasks to continue')}`;
           updateNextState();
           renderCards();
         });
@@ -1126,7 +1257,7 @@ function ExperimentBuilderView(options = {}) {
           const skipTypes = [...SYSTEM_BLOCK_TYPES, 'finish'];
           return blocks.filter(b => !skipTypes.includes(b.type));
         });
-        const finalBlocks = [...mergedBlocks, { type:'finish', label:'Финальный экран', content:{ title:'Эксперимент завершен', text:'Спасибо за участие!' } }];
+        const finalBlocks = [...mergedBlocks, { type:'finish', label: trb('Финальный экран', 'Finish screen'), content:{ title: trb('Эксперимент завершён', 'Experiment completed'), text: trb('Спасибо за участие!', 'Thank you for participating!') } }];
         experimentBlocks = finalBlocks.map((b, i) => ({
           id: 'block_' + Date.now() + '_' + i,
           type: b.type,
@@ -1149,44 +1280,42 @@ function ExperimentBuilderView(options = {}) {
   function renderStep1() {
     const shell = getParticipantShellMeta();
     canvasCol.innerHTML = `
-      <div style="display:flex;gap:0;height:100%;overflow:hidden;">
-        <!-- Block library palette -->
-        <div style="width:196px;flex-shrink:0;border-right:1px solid var(--stroke);overflow-y:auto;padding:12px 10px;">
-          <div style="font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--muted2);margin-bottom:10px;padding:0 2px;">Блоки</div>
-          <div id="blockPalette" style="display:flex;flex-direction:column;gap:5px;"></div>
-        </div>
-        <!-- Timeline -->
-        <div style="flex:1;display:flex;flex-direction:column;padding:14px;overflow:hidden;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0;">
-            <div>
-              <div style="font-size:14px;font-weight:700;color:var(--text);">Таймлайн протокола</div>
-              <div id="participantShellHint" style="font-size:11px;color:var(--muted);line-height:1.45;margin-top:4px;max-width:720px;">
+      <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;padding:${BUILDER_CANVAS_PAD};gap:12px;">
+        ${builderStepHeader(2)}
+        <div style="display:flex;flex:1;min-height:0;overflow:hidden;border:1px solid var(--stroke);border-radius:14px;background:rgba(255,255,255,.12);">
+          <div style="width:196px;flex-shrink:0;border-right:1px solid var(--stroke);overflow-y:auto;padding:12px 10px;display:flex;flex-direction:column;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--muted2);margin-bottom:10px;padding:0 2px;">${tKey('builderBlocksPalette')}</div>
+            <div id="blockPalette" style="display:flex;flex-direction:column;gap:5px;"></div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:12px 14px;overflow:hidden;min-width:0;">
+            <div style="flex-shrink:0;margin-bottom:10px;">
+              <div id="participantShellHint" style="font-size:11px;color:var(--muted);line-height:1.45;max-width:720px;">
                 ${describeParticipantShellForUi(shell)}
               </div>
               <div style="display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:10px;max-width:720px;">
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
                   <input type="checkbox" id="shellConsent" ${shell.consent ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Согласие','Consent')}
+                  ${trb('Согласие', 'Consent')}
                 </label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
                   <input type="checkbox" id="shellQuestionnaire" ${shell.questionnaire ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Анкета','Questionnaire')}
+                  ${trb('Анкета', 'Questionnaire')}
                 </label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
                   <input type="checkbox" id="shellPrecheck" ${shell.precheck ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Пречек камеры','Camera pre-check')}
+                  ${trb('Проверка камеры', 'Camera pre-check')}
                 </label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
                   <input type="checkbox" id="shellCalibration" ${shell.calibration ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Калибровка взгляда','Gaze calibration')}
+                  ${trb('Калибровка взгляда', 'Gaze calibration')}
                 </label>
               </div>
             </div>
-          </div>
-          <div id="protoCanvas" style="flex:1;overflow-y:auto;border:2px dashed var(--stroke);border-radius:14px;padding:10px;background:rgba(255,255,255,.2);min-height:200px;"></div>
-          <div style="display:flex;justify-content:space-between;margin-top:10px;flex-shrink:0;">
-            <button class="quick-btn" id="backBtn0" style="font-size:12px;">← Назад</button>
-            <button class="quick-btn" id="nextBtn2" style="font-size:12px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;">Далее →</button>
+            <div id="protoCanvas" style="flex:1;overflow-y:auto;border:2px dashed var(--stroke);border-radius:14px;padding:10px;background:rgba(255,255,255,.2);min-height:200px;"></div>
+            <div style="display:flex;justify-content:space-between;margin-top:10px;flex-shrink:0;">
+              <button class="quick-btn" id="backBtn0" style="font-size:12px;">${tKey('builderBack')}</button>
+              <button class="quick-btn" id="nextBtn2" style="font-size:12px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;">${tKey('builderNext')}</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1194,15 +1323,16 @@ function ExperimentBuilderView(options = {}) {
 
     const palette = canvasCol.querySelector('#blockPalette');
     BLOCK_TYPES.filter(bt => !SYSTEM_BLOCK_TYPES.includes(bt.type)).forEach(bt => {
+      const meta = getMeta(bt.type);
       const item = document.createElement('div');
       item.draggable = true;
       item.dataset.type = bt.type;
       item.style.cssText = 'display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:9px;border:1px solid var(--stroke);background:var(--card-bg);cursor:grab;font-size:11px;color:var(--text);';
       item.innerHTML = `
-        <div style="width:22px;height:22px;border-radius:6px;background:${bt.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <svg fill="none" stroke="${bt.color}" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="${bt.icon}"/></svg>
+        <div style="width:22px;height:22px;border-radius:6px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
         </div>
-        <span style="flex:1;line-height:1.3;">${bt.label}</span>
+        <span style="flex:1;line-height:1.3;">${meta.label}</span>
         <button data-type="${bt.type}" style="background:none;border:none;cursor:pointer;color:var(--muted2);display:flex;align-items:center;padding:1px;border-radius:4px;flex-shrink:0;" title="${trb('Добавить','Add')}">
           <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
         </button>
@@ -1213,7 +1343,6 @@ function ExperimentBuilderView(options = {}) {
     });
 
     renderCanvasBlocks();
-    initDragDrop();
 
     function syncParticipantShellFromForm() {
       protocolMeta.participantShell = {
@@ -1238,6 +1367,89 @@ function ExperimentBuilderView(options = {}) {
       syncParticipantShellFromForm();
       currentStep=3; renderStepper(); renderCanvas();
     });
+  }
+
+  function resolveInsertIndexFromY(canvas, clientY) {
+    const zones = [...canvas.querySelectorAll('.proto-drop-zone')];
+    if (!zones.length) return 0;
+    let bestZone = zones[0];
+    let bestScore = Infinity;
+    zones.forEach(zone => {
+      const rect = zone.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      const score = Math.abs(clientY - mid);
+      if (score < bestScore) {
+        bestScore = score;
+        bestZone = zone;
+      }
+    });
+    return parseInt(bestZone.dataset.insertIdx, 10);
+  }
+
+  function wireDropZones(canvas) {
+    let highlightedZone = null;
+
+    function setDropHighlight(zone) {
+      if (highlightedZone && highlightedZone !== zone) {
+        highlightedZone.style.background = '';
+        highlightedZone.style.outline = '';
+        if (!highlightedZone.classList.contains('proto-drop-zone-empty')) {
+          highlightedZone.style.height = '12px';
+        }
+      }
+      highlightedZone = zone || null;
+      if (zone) {
+        zone.style.background = 'rgba(92,102,189,.16)';
+        zone.style.outline = '2px dashed rgba(92,102,189,.45)';
+        if (!zone.classList.contains('proto-drop-zone-empty')) {
+          zone.style.height = '32px';
+        }
+      }
+    }
+
+    canvas.ondragover = (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      canvas.style.borderColor = 'var(--accent)';
+      const zones = canvas.querySelectorAll('.proto-drop-zone');
+      let best = null;
+      let bestScore = Infinity;
+      zones.forEach(zone => {
+        const rect = zone.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        const score = Math.abs(e.clientY - mid);
+        if (score < bestScore) {
+          bestScore = score;
+          best = zone;
+        }
+      });
+      setDropHighlight(best);
+    };
+
+    canvas.ondragleave = (e) => {
+      if (!canvas.contains(e.relatedTarget)) {
+        canvas.style.borderColor = 'var(--stroke)';
+        setDropHighlight(null);
+      }
+    };
+
+    canvas.ondrop = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const insertIdx = resolveInsertIndexFromY(canvas, e.clientY);
+      canvas.style.borderColor = 'var(--stroke)';
+      setDropHighlight(null);
+      const blockType = e.dataTransfer.getData('blockType');
+      const fromRaw = e.dataTransfer.getData('protocolBlockIndex');
+      if (blockType) {
+        addBlock(blockType, insertIdx);
+        return;
+      }
+      if (fromRaw !== '') {
+        const from = parseInt(fromRaw, 10);
+        if (Number.isFinite(from) && Number.isFinite(insertIdx)) moveBlockToIndex(from, insertIdx);
+      }
+    };
   }
 
   function showImportInterface() {
@@ -1400,9 +1612,21 @@ function ExperimentBuilderView(options = {}) {
     });
   }
 
-  function addBlock(type) {
+  function addBlock(type, insertAt) {
     const meta = getMeta(type);
-    experimentBlocks.push({ id: type+'_'+Date.now(), type, label: meta.label, content: defaultContent(type) });
+    const block = { id: type + '_' + Date.now(), type, label: meta.label, content: defaultContent(type) };
+    const idx = Number.isFinite(insertAt) ? Math.max(0, Math.min(insertAt, experimentBlocks.length)) : experimentBlocks.length;
+    experimentBlocks.splice(idx, 0, block);
+    localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+    renderCanvasBlocks();
+  }
+
+  function moveBlockToIndex(from, toIndex) {
+    if (!Number.isFinite(from) || !Number.isFinite(toIndex) || from < 0 || from >= experimentBlocks.length) return;
+    let target = Math.max(0, Math.min(toIndex, experimentBlocks.length));
+    const [moved] = experimentBlocks.splice(from, 1);
+    if (from < target) target -= 1;
+    experimentBlocks.splice(target, 0, moved);
     localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
     renderCanvasBlocks();
   }
@@ -1412,103 +1636,89 @@ function ExperimentBuilderView(options = {}) {
     if (!canvas) return;
     if (experimentBlocks.length === 0) {
       canvas.innerHTML = `
-        <div style="height:100%;min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);text-align:center;gap:8px;pointer-events:none;">
+        <div class="proto-drop-zone proto-drop-zone-empty" data-insert-idx="0" style="height:100%;min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);text-align:center;gap:8px;border-radius:11px;">
           <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" width="36" height="36" style="opacity:.35;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
           <div style="font-size:13px;font-weight:600;">${trb('Перетащите блоки сюда','Drag blocks here')}</div>
           <div style="font-size:11px;">${trb('или нажмите + рядом с блоком','or press + next to block')}</div>
         </div>`;
+      wireDropZones(canvas);
       return;
     }
-    canvas.innerHTML = experimentBlocks.map((b, i) => {
+
+    const parts = [];
+    experimentBlocks.forEach((b, i) => {
+      parts.push(`<div class="proto-drop-zone" data-insert-idx="${i}" style="height:12px;margin:4px 0;border-radius:4px;transition:height .12s, background .12s, outline .12s;"></div>`);
       const meta = getMeta(b.type);
       const sel = b.id === selectedBlockId;
-      const trialsCount = b.content?.trials?.length;
-      const extraInfo = trialsCount ? ` · ${trialsCount} проб` : '';
       const blockLabel = localizedBlockLabel(b, meta.label);
+      const inlineEditor = sel ? buildBlockInlineEditor(b) : '';
+      const canEdit = ['instruction', 'rest', 'finish', 'cognitive_task', 'passive'].includes(b.type);
 
-      return `
-        <div class="proto-card ${sel?'proto-card-sel':''}" data-id="${b.id}" data-idx="${i}" draggable="true"
-          style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:11px;border:1px solid ${sel?'var(--accent)':'var(--stroke)'};background:${sel?'rgba(92,102,189,.07)':'var(--card-bg)'};cursor:pointer;margin-bottom:6px;position:relative;">
-          <div style="width:28px;height:28px;border-radius:8px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-            <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
+      parts.push(`
+        <div class="proto-card ${sel ? 'proto-card-sel' : ''}" data-id="${b.id}" data-idx="${i}"
+          style="display:flex;flex-direction:column;padding:9px 11px;border-radius:11px;border:1px solid ${sel ? 'var(--accent)' : 'var(--stroke)'};background:${sel ? 'rgba(92,102,189,.07)' : 'var(--card-bg)'};margin-bottom:2px;position:relative;">
+          <div style="display:flex;align-items:center;gap:9px;">
+            <div class="proto-drag-handle" draggable="true" title="${trb('Перетащите для изменения порядка', 'Drag to reorder')}" style="width:28px;height:28px;border-radius:8px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:grab;touch-action:none;">
+              <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${blockLabel}</div>
+            </div>
+            <div style="display:flex;gap:2px;flex-shrink:0;align-items:center;">
+              ${canEdit ? `<button class="pcbtn edit-btn" data-id="${b.id}" title="${trb('Редактировать', 'Edit')}" style="background:${sel ? 'rgba(92,102,189,.14)' : 'none'};border:none;cursor:pointer;color:${sel ? 'var(--accent)' : 'var(--muted2)'};padding:3px;border-radius:5px;display:flex;align-items:center;">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+              </button>` : ''}
+              <button class="pcbtn del-btn" data-id="${b.id}" title="${trb('Удалить', 'Delete')}" style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
+                <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
           </div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${blockLabel}</div>
-            ${extraInfo ? `<div style="font-size:10px;color:var(--muted);">${extraInfo}</div>` : ''}
-          </div>
-          <div style="display:flex;gap:2px;flex-shrink:0;">
-            <button class="pcbtn up-btn" data-idx="${i}" title="Вверх" ${i===0?'disabled':''} style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
-              <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
-            </button>
-            <button class="pcbtn dn-btn" data-idx="${i}" title="Вниз" ${i===experimentBlocks.length-1?'disabled':''} style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
-              <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
-            </button>
-            <button class="pcbtn del-btn" data-id="${b.id}" title="Удалить" style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
-              <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-          </div>
-        </div>`;
-    }).join('');
+          ${inlineEditor}
+        </div>`);
+    });
+    parts.push(`<div class="proto-drop-zone" data-insert-idx="${experimentBlocks.length}" style="height:12px;margin:4px 0;border-radius:4px;transition:height .12s, background .12s, outline .12s;"></div>`);
+    canvas.innerHTML = parts.join('');
 
     canvas.querySelectorAll('.proto-card').forEach(card => {
-      card.addEventListener('click', e => { if(e.target.closest('.pcbtn')) return; showBlockInspector(card.dataset.id); renderCanvasBlocks(); });
-      card.addEventListener('dragstart', e => {
-        if (e.target.closest('.pcbtn')) { e.preventDefault(); return; }
-        e.dataTransfer.setData('protocolBlockIndex', card.dataset.idx);
-        card.style.opacity = '.55';
-      });
-      card.addEventListener('dragend', () => { card.style.opacity = ''; });
-      card.addEventListener('dragover', e => {
-        const dragTypes = Array.from(e.dataTransfer.types || []).map(x => String(x).toLowerCase());
-        if (dragTypes.includes('protocolblockindex')) {
-          e.preventDefault();
-          card.style.borderColor = 'var(--accent)';
-        }
-      });
-      card.addEventListener('dragleave', () => { card.style.borderColor = ''; });
-      card.addEventListener('drop', e => {
-        const fromRaw = e.dataTransfer.getData('protocolBlockIndex');
-        if (fromRaw === '') return;
-        e.preventDefault();
+      const block = experimentBlocks.find(b => b.id === card.dataset.id);
+      if (!block) return;
+      wireBlockCardInteractions(card, block);
+      card.querySelector('.edit-btn')?.addEventListener('click', e => {
         e.stopPropagation();
-        const from = parseInt(fromRaw);
-        const to = parseInt(card.dataset.idx);
-        if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return;
-        const [moved] = experimentBlocks.splice(from, 1);
-        experimentBlocks.splice(to, 0, moved);
-        localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+        selectedBlockId = selectedBlockId === block.id ? null : block.id;
         renderCanvasBlocks();
       });
-    });
-    canvas.querySelectorAll('.up-btn').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); const i=parseInt(btn.dataset.idx); if(i>0){[experimentBlocks[i-1],experimentBlocks[i]]=[experimentBlocks[i],experimentBlocks[i-1]]; renderCanvasBlocks();} });
-    });
-    canvas.querySelectorAll('.dn-btn').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); const i=parseInt(btn.dataset.idx); if(i<experimentBlocks.length-1){[experimentBlocks[i],experimentBlocks[i+1]]=[experimentBlocks[i+1],experimentBlocks[i]]; renderCanvasBlocks();} });
+      const dragHandle = card.querySelector('.proto-drag-handle');
+      dragHandle?.addEventListener('dragstart', e => {
+        e.stopPropagation();
+        e.dataTransfer.setData('protocolBlockIndex', card.dataset.idx);
+        e.dataTransfer.effectAllowed = 'move';
+        card.style.opacity = '.55';
+        dragHandle.style.cursor = 'grabbing';
+      });
+      dragHandle?.addEventListener('dragend', () => {
+        card.style.opacity = '';
+        dragHandle.style.cursor = 'grab';
+        canvas.querySelectorAll('.proto-drop-zone').forEach(z => {
+          z.style.background = '';
+          z.style.outline = '';
+          if (!z.classList.contains('proto-drop-zone-empty')) z.style.height = '12px';
+        });
+      });
     });
     canvas.querySelectorAll('.del-btn').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation();
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
         experimentBlocks = experimentBlocks.filter(b => b.id !== btn.dataset.id);
-        if (selectedBlockId === btn.dataset.id) { selectedBlockId = null; clearInspector(); }
+        if (selectedBlockId === btn.dataset.id) selectedBlockId = null;
         localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
         renderCanvasBlocks();
-        toast(trb('Блок удалён','Block deleted'));
+        toast(trb('Блок удалён', 'Block deleted'));
       });
     });
 
+    wireDropZones(canvas);
     setTimeout(() => applyAutoI18n(), 0);
-  }
-
-  function initDragDrop() {
-    const canvas = canvasCol.querySelector('#protoCanvas');
-    if (!canvas) return;
-    canvas.addEventListener('dragover', e => { e.preventDefault(); canvas.style.borderColor='var(--accent)'; });
-    canvas.addEventListener('dragleave', () => { canvas.style.borderColor='var(--stroke)'; });
-    canvas.addEventListener('drop', e => {
-      e.preventDefault(); canvas.style.borderColor='var(--stroke)';
-      const t = e.dataTransfer.getData('blockType');
-      if (t) addBlock(t);
-    });
   }
 
   function renderStep2() {
@@ -1670,15 +1880,12 @@ function ExperimentBuilderView(options = {}) {
     wrapper.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden;';
 
     const header = document.createElement('div');
-    header.style.cssText = 'padding:16px 18px 10px;flex-shrink:0;border-bottom:1px solid var(--stroke);';
-    header.innerHTML = `
-      <div style="font-size:17px;font-weight:800;color:var(--text);"><span>${trb('Стимулы и Таблицы проб','Stimuli and Trial Tables')}</span></div>
-      <div style="font-size:12px;color:var(--muted);margin-top:2px;"><span>${trb('Настройте логику показа стимулов (Trials) для каждого блока','Configure stimulus presentation logic (Trials) for each block')}</span></div>
-    `;
+    header.style.cssText = `padding:${BUILDER_CANVAS_PAD};padding-bottom:0;flex-shrink:0;`;
+    header.innerHTML = builderStepHeader(3);
     wrapper.appendChild(header);
 
     const body = document.createElement('div');
-    body.style.cssText = 'flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:16px;';
+    body.style.cssText = `flex:1;overflow-y:auto;padding:12px 16px 14px;display:flex;flex-direction:column;gap:16px;`;
 
     const uploadPanel = document.createElement('div');
     uploadPanel.style.cssText = 'border:2px dashed var(--stroke);border-radius:14px;padding:16px;background:rgba(92,102,189,.04);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;';
@@ -1715,7 +1922,11 @@ function ExperimentBuilderView(options = {}) {
         const meta = getMeta(block.type);
         const trialsCount = (block.content?.trials || []).reduce((sum, trial) => sum + (parseInt(trial.repetitions) || 1), 0);
 
-        const folderName = folders.find(f => f.id === block.content.stimuliFolder)?.name || `<span>${trb('Не выбрана','Not selected')}</span>`;
+        const folderName = (() => {
+          const f = folders.find(x => x.id === block.content.stimuliFolder);
+          if (!f) return `<span>${trb('Не выбрана','Not selected')}</span>`;
+          return typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name;
+        })();
         const sourceHtml = block.content?.stimuliSource === 'folder'
           ? `<span>${trb('Папка:','Folder:')}</span> <span style="color:var(--text);">${folderName}</span>`
           : `<span>${trb('Вся библиотека','Entire library')}</span>`;
@@ -1867,8 +2078,8 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function renderPlaceholder(stepIdx) {
-    const s = STEPS[stepIdx];
-    const isLast = stepIdx === STEPS.length - 1;
+    const s = i18nPack().builderSteps[stepIdx];
+    const isLast = stepIdx === i18nPack().builderSteps.length - 1;
     const isPreview = stepIdx === 5;
     const isQC = stepIdx === 6; // QC rules step
     const isAnalyticsStep = stepIdx === 7;
@@ -1891,10 +2102,8 @@ function ExperimentBuilderView(options = {}) {
     }
 
     canvasCol.innerHTML = `
-    <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-        <div style="font-size:18px;font-weight:800;color:var(--text);">${s}</div>
-      </div>
+    <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;">
+      ${builderStepHeader(stepIdx)}
       <div style="flex:1;display:flex;align-items:center;justify-content:center;border:2px dashed var(--stroke);border-radius:14px;background:rgba(255,255,255,.2);color:var(--muted);text-align:center;flex-direction:column;gap:10px;">
         <div style="font-size:14px;font-weight:600;color:var(--text);">${s}</div>
         <div style="font-size:12px;max-width:260px;">${trb('Этот шаг находится в разработке.','This step is in development.')}</div>
@@ -1973,11 +2182,8 @@ function ExperimentBuilderView(options = {}) {
     const shell = getParticipantShellMeta();
     const shellLine = describeParticipantShellForUi(shell);
     canvasCol.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;overflow-y:auto;">
-        <div>
-          <div style="font-size:18px;font-weight:800;color:var(--text);">${trb('Завершение','Finish')}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:3px;">${trb('Проверьте эксперимент и нажмите «Сохранить протокол» — протокол опубликуется в API, ссылка станет рабочей.','Review the experiment and click “Save protocol” to publish to the API and activate the invite link.')}</div>
-        </div>
+      <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;overflow-y:auto;">
+        ${builderStepHeader(8)}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div style="padding:14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);">
             <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;">${trb('Эксперимент','Experiment')}</div>
@@ -2117,10 +2323,20 @@ function ExperimentBuilderView(options = {}) {
       return `<div style="font-size:clamp(58px,11vw,110px);font-weight:900;letter-spacing:.08em;color:#0f172a;">${previewEscape(text)}</div>`;
     }
     if (id.startsWith('std_emo_')) {
-      const emotion = previewEscape(stimulus.emotion || (stimulus.name || '').split(':').pop()?.trim() || 'emotion');
-      return `<div style="width:min(340px,70vw);aspect-ratio:4/3;border-radius:24px;background:linear-gradient(135deg,rgba(92,102,189,.18),rgba(119,169,232,.20));border:1px solid rgba(92,102,189,.24);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#0f172a;">
-        <div style="font-size:76px;line-height:1;">◉‿◉</div>
-        <div style="font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;">${emotion}</div>
+      const emotionKey = String(stimulus.emotion || (id.match(/^std_emo_([a-z]+)_/i) || [])[1] || 'neutral').toLowerCase();
+      const emoVisual = {
+        neutral:  { emoji: '😐', bg: 'rgba(148,163,184,.22)', border: 'rgba(148,163,184,.45)', label: CURRENT_LANG === 'en' ? 'neutral' : 'нейтрально' },
+        happy:    { emoji: '😊', bg: 'rgba(245,158,11,.18)', border: 'rgba(245,158,11,.42)', label: CURRENT_LANG === 'en' ? 'happy' : 'радость' },
+        anger:    { emoji: '😠', bg: 'rgba(220,38,38,.14)', border: 'rgba(220,38,38,.38)', label: CURRENT_LANG === 'en' ? 'anger' : 'гнев' },
+        sad:      { emoji: '😢', bg: 'rgba(59,130,246,.14)', border: 'rgba(59,130,246,.38)', label: CURRENT_LANG === 'en' ? 'sad' : 'грусть' },
+        fear:     { emoji: '😨', bg: 'rgba(139,92,246,.14)', border: 'rgba(139,92,246,.38)', label: CURRENT_LANG === 'en' ? 'fear' : 'страх' },
+        surprise: { emoji: '😲', bg: 'rgba(6,182,212,.14)', border: 'rgba(6,182,212,.38)', label: CURRENT_LANG === 'en' ? 'surprise' : 'удивление' },
+        disgust:  { emoji: '🤢', bg: 'rgba(22,163,74,.14)', border: 'rgba(22,163,74,.38)', label: CURRENT_LANG === 'en' ? 'disgust' : 'отвращение' },
+      };
+      const vis = emoVisual[emotionKey] || emoVisual.neutral;
+      return `<div style="width:min(340px,70vw);aspect-ratio:4/3;border-radius:24px;background:${vis.bg};border:1px solid ${vis.border};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#0f172a;">
+        <div style="font-size:76px;line-height:1;">${vis.emoji}</div>
+        <div style="font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;">${previewEscape(vis.label)}</div>
       </div>`;
     }
 
@@ -2283,7 +2499,7 @@ function ExperimentBuilderView(options = {}) {
     });
 
     let idx = 0;
-    let speed = 1;
+    let speed = 1.0;
     let timer = null;
     let closed = false;
     let feedbackActive = false;
@@ -2458,7 +2674,7 @@ function ExperimentBuilderView(options = {}) {
           <div style="display:flex;align-items:center;gap:8px;">
             <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;">${trb('Скорость','Speed')}
               <select id="previewSpeed" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);background:#fff;">
-                ${[1,2,5,10].map(v => `<option value="${v}" ${speed === v ? 'selected' : ''}>${v}x</option>`).join('')}
+                ${[1, 1.5, 2].map(v => `<option value="${v}" ${Math.abs(speed - v) < 0.01 ? 'selected' : ''}>${v}x</option>`).join('')}
               </select>
             </label>
             <button id="previewRunClose" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;">×</button>
@@ -2494,7 +2710,7 @@ function ExperimentBuilderView(options = {}) {
         showPreviewFeedback(screen, previewExpectedAction(screen) === 'mouse_click');
       });
       modal.querySelector('#previewSpeed').addEventListener('change', (e) => {
-        speed = parseInt(e.target.value) || 1;
+        speed = parseFloat(e.target.value) || 1;
         render();
       });
       modal.querySelector('#previewRunPause')?.addEventListener('click', () => {
@@ -2519,11 +2735,8 @@ function ExperimentBuilderView(options = {}) {
   function renderExperimentPreviewStep() {
     const blocks = previewableExperimentBlocks();
     canvasCol.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;overflow-y:auto;">
-        <div>
-          <div style="font-size:18px;font-weight:800;color:var(--text);">${trb('Предпросмотр','Preview')}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:3px;">${trb('Запустите пользовательскую часть эксперимента без обязательных системных блоков, чтобы проверить инструкции, порядок и настройки задач.','The user part of the experiment can be previewed without required system blocks to check instructions, order, and task settings.')}</div>
-        </div>
+      <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;overflow-y:auto;">
+        ${builderStepHeader(5)}
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
           <button class="quick-btn" id="runUserPreviewBtn" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:800;">▶ ${trb('Запустить предпросмотр','Start preview')}</button>
           <span style="font-size:12px;color:var(--muted);">${blocks.length} ${trb('блоков в пользовательской части','user part blocks')}</span>
@@ -2563,14 +2776,9 @@ function ExperimentBuilderView(options = {}) {
 
     canvasCol.innerHTML = '';
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;overflow-y:auto;';
+    wrap.style.cssText = `display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;overflow-y:auto;`;
     wrap.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-        <div>
-          <div style="font-size:18px;font-weight:800;color:var(--text);">${trb('Правила контроля качества','Quality Control Rules')}</div>
-          <div style="font-size:12px;color:var(--muted);">${trb('Пороговые значения контроля качества','Quality control thresholds')}</div>
-        </div>
-      </div>
+      ${builderStepHeader(6)}
       <div style="flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
         ${[
           { key:'gazeValid', label:trb('Взгляд валиден','Gaze valid'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с валидным взглядом','Minimum % of frames with valid gaze'), yellowFrom:51, greenFrom:70 },
@@ -2623,33 +2831,80 @@ function ExperimentBuilderView(options = {}) {
 
   function renderAnalyticsStep() {
     const analyticsKey = 'emocog_analytics_config_' + (experimentId || 'draft');
-    const cfg = JSON.parse(localStorage.getItem(analyticsKey) || 'null') || {
-      perParticipantSessionQuality: true,
-      groupAnalytics: true,
-      dataQuality: true
-    };
+    const cfg = typeof getExperimentAnalyticsConfig === 'function'
+      ? getExperimentAnalyticsConfig(experimentId || 'draft')
+      : { tabs: { 'session-card': true, 'group-comparison': true, 'data-quality': true, 'connectedness': true } };
+    const tabDefs = [
+      { key: 'session-card', icon: '📋', color: '#5c66bd', title: trb('Карточка сессии', 'Session Card'), desc: trb('QC, метрики и таймлайн одной сессии.', 'QC, metrics, and timeline for a single session.') },
+      { key: 'group-comparison', icon: '👥', color: '#0ea5e9', title: trb('Групповое сравнение', 'Group Comparison'), desc: trb('Сравнение групп по протоколам и метрикам.', 'Compare groups across protocols and metrics.') },
+      { key: 'data-quality', icon: '✓', color: '#22c55e', title: trb('Качество данных', 'Data Quality'), desc: trb('Валидность записи и QC-показатели.', 'Recording validity and QC indicators.') },
+      { key: 'connectedness', icon: '🔗', color: '#f59e0b', title: trb('Связанность метрик', 'Connectedness'), desc: trb('Корреляции между метриками эксперимента.', 'Correlations between experiment metrics.') }
+    ];
+    const selectedCount = tabDefs.filter(t => cfg.tabs[t.key] !== false).length;
+    const analyticsHeaderExtra = `
+      <div id="analyticsSelectedSummary" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid rgba(92,102,189,.16);font-size:12px;font-weight:600;color:var(--accent);">
+        ${selectedCount} ${trb('из', 'of')} ${tabDefs.length} ${trb('инструментов выбрано', 'tools selected')}
+      </div>`;
     canvasCol.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;">
-        <div style="font-size:18px;font-weight:800;color:var(--text);">Аналитика</div>
-        <div style="font-size:12px;color:var(--muted);">Отметьте, какая аналитика вам нужна.</div>
-        <div style="display:flex;flex-direction:column;gap:10px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);padding:12px;">
-          <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);"><input id="anPerParticipant" type="checkbox" ${cfg.perParticipantSessionQuality ? 'checked' : ''}>Качество сессии по каждому участнику</label>
-          <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);"><input id="anGroupAnalytics" type="checkbox" ${cfg.groupAnalytics ? 'checked' : ''}>Групповая аналитика</label>
-          <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);"><input id="anDataQuality" type="checkbox" ${cfg.dataQuality ? 'checked' : ''}>Качество данных</label>
+      <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:16px;overflow-y:auto;">
+        ${builderStepHeader(7, analyticsHeaderExtra)}
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;">
+          ${tabDefs.map(tab => {
+            const on = cfg.tabs[tab.key] !== false;
+            return `
+            <label class="an-tab-card" data-tab="${tab.key}" style="display:flex;flex-direction:column;gap:10px;padding:16px;border:2px solid ${on ? tab.color : 'var(--stroke)'};border-radius:14px;background:${on ? `linear-gradient(180deg,${tab.color}12,transparent)` : 'var(--card-bg)'};cursor:pointer;transition:border-color .15s, box-shadow .15s, background .15s;box-shadow:${on ? `0 8px 24px ${tab.color}22` : 'none'};">
+              <div style="display:flex;align-items:flex-start;gap:12px;">
+                <div style="width:40px;height:40px;border-radius:12px;background:${tab.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">${tab.icon}</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                    <div style="font-size:14px;font-weight:700;color:var(--text);">${tab.title}</div>
+                    <input type="checkbox" class="an-tab-cb" data-tab="${tab.key}" ${on ? 'checked' : ''} style="accent-color:${tab.color};width:16px;height:16px;flex-shrink:0;">
+                  </div>
+                  <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px;">${tab.desc}</div>
+                </div>
+              </div>
+            </label>`;
+          }).join('')}
         </div>
+
+        <div style="font-size:12px;color:var(--muted);padding:12px 14px;border-radius:12px;background:rgba(92,102,189,.05);border:1px dashed rgba(92,102,189,.18);line-height:1.5;">
+          ${trb('Выбранные инструменты появятся во вкладках раздела «Инструменты аналитики» после сохранения протокола.', 'Selected tools will appear as tabs in Analytics Tools after you save the protocol.')}
+        </div>
+
         <div style="display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid var(--stroke);margin-top:auto;">
-          <button class="quick-btn" id="analyticsBackBtn" style="font-size:12px;">← Назад</button>
-          <button class="quick-btn" id="analyticsNextBtn" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">Далее →</button>
+          <button class="quick-btn" id="analyticsBackBtn" style="font-size:12px;">← ${trb('Назад', 'Back')}</button>
+          <button class="quick-btn" id="analyticsNextBtn" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">${trb('Далее', 'Next')} →</button>
         </div>
       </div>
     `;
-    function saveAnalyticsStep() {
-      localStorage.setItem(analyticsKey, JSON.stringify({
-        perParticipantSessionQuality: !!canvasCol.querySelector('#anPerParticipant').checked,
-        groupAnalytics: !!canvasCol.querySelector('#anGroupAnalytics').checked,
-        dataQuality: !!canvasCol.querySelector('#anDataQuality').checked
-      }));
+
+    function refreshAnalyticsCards() {
+      const tabs = {};
+      canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
+      const count = Object.values(tabs).filter(Boolean).length;
+      const summary = canvasCol.querySelector('#analyticsSelectedSummary');
+      if (summary) summary.textContent = `${count} ${trb('из', 'of')} ${tabDefs.length} ${trb('инструментов выбрано', 'tools selected')}`;
+      tabDefs.forEach(tab => {
+        const card = canvasCol.querySelector(`.an-tab-card[data-tab="${tab.key}"]`);
+        const cb = card?.querySelector('.an-tab-cb');
+        if (!card || !cb) return;
+        const on = cb.checked;
+        card.style.borderColor = on ? tab.color : 'var(--stroke)';
+        card.style.background = on ? `linear-gradient(180deg,${tab.color}12,transparent)` : 'var(--card-bg)';
+        card.style.boxShadow = on ? `0 8px 24px ${tab.color}22` : 'none';
+      });
     }
+
+    function saveAnalyticsStep() {
+      const tabs = {};
+      canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
+      localStorage.setItem(analyticsKey, JSON.stringify({ tabs }));
+    }
+
+    canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => {
+      cb.addEventListener('change', refreshAnalyticsCards);
+    });
     canvasCol.querySelector('#analyticsBackBtn').addEventListener('click', () => { saveAnalyticsStep(); currentStep--; renderStepper(); renderCanvas(); });
     canvasCol.querySelector('#analyticsNextBtn').addEventListener('click', () => { saveAnalyticsStep(); currentStep++; renderStepper(); renderCanvas(); });
   }
@@ -2743,13 +2998,22 @@ function ExperimentBuilderView(options = {}) {
       }));
     const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
 
+    const hubMetrics = [];
+    userBlocks.forEach((b) => {
+      if (b.content?.useBPM) hubMetrics.push('bpm');
+    });
+    const analyticsCfg = typeof getExperimentAnalyticsConfig === 'function'
+      ? getExperimentAnalyticsConfig(builderKey)
+      : null;
+
     const json = {
       title: expTitle,
       protocolId: protocolMeta.protocolId,
       estimatedDuration: protocolMeta.estimatedDuration,
       description: protocolMeta.description,
       participantShell: shell,
-      testHubMetrics: [],
+      testHubMetrics: [...new Set(hubMetrics)],
+      analyticsConfig: analyticsCfg,
       version: 'v2.0_universal',
       settings: srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' },
       blocks: [
@@ -2763,10 +3027,11 @@ function ExperimentBuilderView(options = {}) {
             buttonText: localizedInstructionValue(b.content, 'buttonText', 'Далее')
           };
         } else if (b.type === 'cognitive_task') {
-          const taskType = b.content?.taskType || 'other';
+          const taskType = b.content?.taskType || b.content?.rt_task || 'simple_rt';
           out.taskType = taskType;
           out.rt_task = b.content?.rt_task || taskType;
           const rtMetrics = autoRtMetricsForTaskType(taskType, b.content);
+          const rtResolved = resolveRtBounds(b.content || {});
           out.blockConfig = {
             taskType,
             rt_task: out.rt_task,
@@ -2777,8 +3042,10 @@ function ExperimentBuilderView(options = {}) {
               incorrectText: b.content?.feedbackIncorrect || trb("Ошибка!","Error!")
             } : null,
             useRT: b.content?.useRT !== false,
+            useBPM: !!b.content?.useBPM,
             stimulusDuration: b.content?.stimulusDuration || 1000,
-            rtWindow: b.content?.rtWindow || 1000,
+            rtMin: b.content?.rtMin != null && b.content.rtMin !== '' ? b.content.rtMin : rtResolved.rtMin,
+            rtWindow: b.content?.rtWindow != null && b.content.rtWindow !== '' ? b.content.rtWindow : rtResolved.rtWindow,
             responseType: b.content?.responseType || 'keys',
             omissionRule: b.content?.omissionRule || 'skip',
             commissionRule: b.content?.commissionRule || 'flag',
@@ -2786,8 +3053,12 @@ function ExperimentBuilderView(options = {}) {
             stimuliSource: b.content?.stimuliSource || 'library',
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
+            useAOI: !!b.content?.useAOI,
+            useEmotionTracking: !!b.content?.useEmotionTracking,
             protocolDurationMs: b.content?.protocolDurationMs || null,
-            analytics: b.content?.analytics || null,
+            analytics: b.content?.useEmotionTracking
+              ? { webcam: true, mediapipe: true, ...(b.content?.analytics || {}) }
+              : (b.content?.analytics || null),
           };
           if (b.content?.useFixation) {
             out.blockConfig.fixation = {
@@ -2858,6 +3129,7 @@ function ExperimentBuilderView(options = {}) {
     const idx = experiments.findIndex(e => e.id === id);
     if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+    localStorage.setItem('emocog_active_experiment_id', id);
     clearExperimentBuilderDraft();
 
     const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
@@ -2954,6 +3226,3 @@ function ExperimentBuilderView(options = {}) {
   renderCanvas();
   return root;
 }
-//~
-
-//(Аня)

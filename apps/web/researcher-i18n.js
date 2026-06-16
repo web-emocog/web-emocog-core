@@ -299,7 +299,7 @@ const I18N = {
     // blocks
     blockConsent: "Informed Consent",
     blockQuestionnaire: "Questionnaire",
-    blockPrecheck: "Pre‑check",
+    blockPrecheck: "Camera pre-check",
     blockCalibration: "Calibration",
     blockTask: "Reaction Time Task",
     blockPassive: "Passive viewing",

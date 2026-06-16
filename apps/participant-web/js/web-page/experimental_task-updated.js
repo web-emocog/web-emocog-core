@@ -48,6 +48,22 @@ let pendingStimulusTimeoutCallback = null;
 let qcTaskPaused = false;
 let qcPauseStartedPerf = null;
 
+function resolveTrialStimulusObject(stimulusId, meta) {
+    const std = typeof window !== 'undefined' ? window.StandardStimuli : null;
+    if (std) {
+        return std.resolveParticipantStimulus({
+            stimulusId,
+            meta,
+            lang: state.currentLang || 'ru',
+        });
+    }
+    return {
+        type: 'shape',
+        style: { width: '140px', height: '140px', borderRadius: '8px', backgroundColor: '#5C66BD' },
+        stimulusId: stimulusId || undefined,
+    };
+}
+
 function buildDefaultTrials(seed = 'default') {
     return [
         {
@@ -121,11 +137,6 @@ function toInstructionBlock(id, title, text) {
 function toCognitiveBlockFromStimuli(defBlock, index) {
     const params = defBlock?.params || {};
     const stimuliMap = state.runtime?.invitationStimuliMap || {};
-    const resolveStimulusUrl = (meta) => {
-        if (!meta || typeof meta !== 'object') return null;
-        const md = meta.metadata || {};
-        return md.url || md.file_url || md.preview_url || null;
-    };
     const normalizeStimulusId = (id) => {
         const raw = String(id || '');
         if (raw.startsWith('api:')) return raw.slice(4);
@@ -138,16 +149,13 @@ function toCognitiveBlockFromStimuli(defBlock, index) {
                 ? params.stimuli_ids.map((stimulusId, i) => {
                     const normalizedStimulusId = normalizeStimulusId(stimulusId);
                     const row = stimuliMap[normalizedStimulusId] || null;
-                    const stimulusUrl = resolveStimulusUrl(row);
-                    const stimulusType = stimulusUrl ? 'image' : 'shape';
+                    const stimulus = resolveTrialStimulusObject(normalizedStimulusId, row);
                     return {
                     id: `trial_${index}_${i}_${String(stimulusId)}`,
                     condition: 'go',
                     correctResponse: 'Space',
                     stimulus: {
-                        type: stimulusType,
-                        src: stimulusUrl || undefined,
-                        style: { width: '140px', height: '140px', borderRadius: '8px', backgroundColor: '#5C66BD' },
+                        ...stimulus,
                         stimulusId: normalizedStimulusId,
                         stimulusName: row?.name || normalizedStimulusId
                     }
@@ -224,14 +232,12 @@ function normalizeV2Trials(trials) {
         for (let r = 0; r < reps; r += 1) {
             const sid = t.stimulusId || `trial_${index}`;
             const meta = stimuliMap[String(sid).replace(/^api:/, '')] || null;
-            const url = meta?.metadata?.url || meta?.metadata?.file_url || meta?.metadata?.preview_url || null;
+            const stimulus = resolveTrialStimulusObject(sid, meta);
             out.push({
                 id: `${sid}_${index}_${r}`,
                 condition: t.condition || '',
                 correctResponse: mapActionToCorrectResponse(t.action || t.correctResponse),
-                stimulus: url
-                    ? { type: 'image', src: url, stimulusId: sid }
-                    : { type: 'shape', style: { width: '140px', height: '140px', borderRadius: '8px', backgroundColor: '#5C66BD' }, stimulusId: sid },
+                stimulus: { ...stimulus, stimulusId: sid },
                 duration: t.duration || null
             });
         }
@@ -491,6 +497,15 @@ function renderStimulus(trial) {
 
     if (shapeEl) {
         shapeEl.style.cssText = '';
+        shapeEl.textContent = '';
+        if (stimulusType === 'text') {
+            shapeEl.textContent = stimulus.text || '';
+            if (stimulus.style && typeof stimulus.style === 'object') {
+                Object.assign(shapeEl.style, stimulus.style);
+            }
+            shapeEl.style.display = 'block';
+            return;
+        }
         if (stimulus.style && typeof stimulus.style === 'object') {
             Object.assign(shapeEl.style, stimulus.style);
         }
