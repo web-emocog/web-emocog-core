@@ -41,7 +41,7 @@ function StimuliAOIView() {
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13" style="flex-shrink:0;opacity:.7;">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>`;
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</span>`;
       leftTabs.appendChild(folderTab);
     });
 
@@ -400,13 +400,6 @@ function StimuliAOIView() {
     toast('AOI template creation – coming soon');
   });
 
-  setInspector({
-    type: 'Stimuli',
-    title: t('stimuliLibrary'),
-    subtitle: '',
-    status: 'neutral'
-  });
-
   return root;
 }
 
@@ -478,7 +471,7 @@ function updateStimuliSubnav() {
       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13" style="flex-shrink:0;">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
       </svg>
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</span>
     </a>
   `).join('');
   container.querySelectorAll('.stimuli-folder-nav-item').forEach(item => {
@@ -572,7 +565,6 @@ function selectStimulus(id) {
       <button class="quick-btn" onclick="toast('AOI editor coming soon')" style="width:100%;">${t('createAoiTemplate')}</button>
     </div>
   `;
-  setInspector({ customHtml: aoiHtml });
 }
 
 function renderFoldersList() { updateStimuliSubnav(); }

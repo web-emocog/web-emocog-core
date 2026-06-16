@@ -260,6 +260,5 @@ function ExperimentsListView() {
   setExperimentsConstructorMode(false);
   renderActiveTab();
 
-  setInspector({ type: 'Experiments', title: t('experimentsListTitle'), subtitle: '', status: 'neutral', hideScope: true  });
   return root;
 }

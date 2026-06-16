@@ -64,11 +64,11 @@ body{
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Layout - ADAPTIVE grid */
+/* Layout - ADAPTIVE grid (no inspector / right panel) */
 .app{
   height:100%;
   display:grid;
-  grid-template-columns:280px minmax(600px,1fr) 320px;
+  grid-template-columns:280px minmax(600px,1fr);
   gap:12px;
   padding:12px;
   transition:grid-template-columns 120ms ease-out;
@@ -77,7 +77,7 @@ body{
 
 /* Sidebar collapsed state */
 .app.sidebar-collapsed{
-  grid-template-columns:0px minmax(600px,1fr) 320px;
+  grid-template-columns:0px minmax(600px,1fr);
 }
 
 /* Analytics mode - hide right panel */
@@ -276,9 +276,17 @@ body{
   pointer-events:none;
 }
 
-/* Experiments constructor - keep inspector, hide quick actions */
+/* Experiments constructor */
 .app.experiments-constructor-mode .quick-actions{
   display:none;
+}
+
+.app.experiments-constructor-mode #view{
+  padding:0;
+}
+
+.app .panel.right-panel{
+  display:none !important;
 }
 
 /* Glass panels - Frosted matte effect - OPTIMIZED */
@@ -2716,7 +2724,7 @@ body{
     })();
   </script>
   <script src="auth-guard.js"></script>
-  <script>
+  <!-- <script>
     (function () {
       if (!window.EmocogAuthGuard) {
         window.location.replace('developer/login.html');
@@ -2733,9 +2741,9 @@ body{
         } catch (_) {}
       });
     })();
-  </script>
+  </script> -->
   
-  <!--
+  
   <script>
     /* запуск страницы исследователя без логина и API */
     (function () {
@@ -2745,7 +2753,7 @@ body{
       } catch (_) {}
     })();
   </script>
-  -->
+ 
   <script src="cognitive-task-protocols.js"></script>
   <script src="../shared/rt-registry.js"></script>
 
@@ -2856,7 +2864,6 @@ body{
 </svg>
               </span>
               <span>Главная</span>
-              <span class="lock"><kbd>⌥1</kbd></span>
             </a>
             
             <a href="#/experiments" id="nav-experiments">
@@ -2866,7 +2873,6 @@ body{
 </svg>
               </span>
               <span>All Experiments</span>
-              <span class="lock"><kbd>⌥2</kbd></span>
             </a>
             
             <div class="has-subnav" id="nav-stimuli-parent">
@@ -2877,7 +2883,6 @@ body{
 </svg>
               </span>
                 <span>Библиотека стимулов</span>
-              <span class="lock"><kbd>⌥3</kbd></span>
             </a>
             </div>
             
@@ -2889,7 +2894,6 @@ body{
 </svg>
                 </span>
                 <span id="navAnalyticsLabel">Инструменты аналитики</span>
-                <span class="lock"><kbd>⌥4</kbd></span>
               </a>
               <div class="subnav">
                 <a href="#/analytics/session-card" id="nav-analytics-session-card-sub">Session Card</a>
@@ -2906,7 +2910,6 @@ body{
                 </svg>
               </span>
               <span>Admin</span>
-              <span class="lock"><kbd>⌥5</kbd></span>
             </a>
             
             <a href="#/settings" id="nav-settings">
@@ -2917,7 +2920,6 @@ body{
 </svg>
               </span>
               <span>Settings</span>
-              <span class="lock"><kbd>⌥6</kbd></span>
             </a>
             
             <a href="#/billing" id="nav-billing" class="disabled" data-disabled="1">
@@ -3002,26 +3004,8 @@ body{
       </div>
     </div>
     
-    <!-- RIGHT PANEL -->
-    <div class="panel right-panel">
-      <div class="hdr" style="gap:8px;">
-        <div class="pill" id="inspectorLabel">
-          Inspector
-        </div>
-        <div style="display:flex;gap:4px;margin-left:auto;">
-          <button class="iconBtn" id="btnInspView" title="View mode" style="width:28px;height:28px;border-radius:8px;" onclick="setInspectorMode('view')">
-            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-          </button>
-          <button class="iconBtn" id="btnInspEdit" title="Edit / Customize mode" style="width:28px;height:28px;border-radius:8px;" onclick="setInspectorMode('edit')">
-            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-          </button>
-        </div>
-      </div>
-      
-      <div class="inspector-body" id="inspector">
-        <!-- Dynamic inspector content here -->
-      </div>
-      
+    <!-- RIGHT PANEL (quick actions only; inspector removed) -->
+    <div class="panel right-panel" aria-hidden="true">
       <div class="quick-actions">
         <!-- ====== ACTIONS BLOCK — always visible ====== -->
         <div style="padding:0;border-top:1px solid var(--stroke);padding-top:14px;margin-bottom:2px;">

@@ -30,7 +30,6 @@ function ExportView(){
       <button onclick="toast('Upgrade — coming soon')" style="padding:12px 28px;border-radius:14px;border:1px solid rgba(92,102,189,.35);background:rgba(92,102,189,.12);color:var(--accent);font-weight:700;font-family:var(--sans);font-size:14px;cursor:pointer;">Перейти на Pro →</button>
     </div>
   `;
-  setInspector({type:'Export',title:'Export',subtitle:'Выгрузка данных — только для платных планов. В бесплатном плане кнопки заблокированы.',status:'warn'});
   return root;
 }
 
@@ -46,7 +45,6 @@ function AdminView(){
         <p>Access denied. This section is available only for users with <code>admin</code> role.</p>
       </div>
     `;
-    setInspector({type:'Admin',title:'Admin panel',subtitle:'Доступ только для администраторов',status:'warn'});
     return root;
   }
   root.innerHTML = `
@@ -200,7 +198,6 @@ function AdminView(){
   const rbacCard = root.querySelector('#adminRbacAccountsCard');
   if (rbacCard && state.authPermissions && state.authPermissions.can_grant_developer) rbacCard.style.display = 'block';
   loadAdminData();
-  setInspector({type:'Admin',title:'Admin panel',subtitle:'Администратор управляет allowlist email и выдаёт developer-доступ.',status:'good'});
   return root;
 }
 
@@ -236,6 +233,5 @@ function BillingView(){
     </div>
     <div class="empty-state">Feature locked</div>
   `;
-  setInspector({type:'Billing',title:'Billing',subtitle:'Account info',status:'warn'});
   return root;
 }

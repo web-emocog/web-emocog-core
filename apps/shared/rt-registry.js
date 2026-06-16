@@ -163,7 +163,14 @@ const RT_METRICS = Object.freeze({
 const QC_REQUIRED_METRICS = Object.freeze(['omission_rate', 'commission_rate', 'rt_outlier_frac']);
 
 function getTaskDef(taskType) {
-  return RT_TASKS[taskType] || RT_TASKS.other;
+  const t = String(taskType || 'other').toLowerCase();
+  if (RT_TASKS[t]) return RT_TASKS[t];
+  const analyzerKeys = ['simple', 'choice', 'go_nogo', 'stroop', 'pvt', 'cpt'];
+  if (analyzerKeys.includes(t)) {
+    const match = Object.values(RT_TASKS).find((def) => def.analyzer_task === t);
+    if (match) return match;
+  }
+  return RT_TASKS.other;
 }
 
 function mapWebTaskToAnalyzer(taskType) {

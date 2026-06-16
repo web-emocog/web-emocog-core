@@ -99,10 +99,11 @@ function deriveSelectedMetricsFromBlocks(blocks) {
   (blocks || []).forEach(function (block) {
     if (!block || block.type !== 'cognitive_task') return;
     var cfg = block.blockConfig || block.content || {};
-    var taskType = String(block.taskType || cfg.taskType || cfg.rt_task || 'other').toLowerCase();
-    if (taskType === 'other' && cfg.useRT !== false) taskType = 'simple_rt';
+    var taskType = reg
+      ? reg.mapWebTaskToAnalyzer(String(block.taskType || cfg.taskType || cfg.rt_task || 'simple'))
+      : String(block.taskType || cfg.taskType || cfg.rt_task || 'simple').toLowerCase();
     var list = reg
-      ? reg.resolveSelectedMetrics(taskType, null)
+      ? reg.resolveSelectedMetrics(taskType, cfg.selected_metrics || null)
       : (cfg.selected_metrics || []);
     if (Array.isArray(list)) {
       list.forEach(function (m) { if (m && metrics.indexOf(m) < 0) metrics.push(m); });
@@ -244,6 +245,14 @@ let selectedStimulusId = null;
 let currentStimuliFilter = 'all';  // all / image / video / audio / text
 let folders = JSON.parse(localStorage.getItem('emocog_folders')) || [];
 let selectedFolder = null;
+
+function localizedFolderName(folder) {
+  if (!folder) return '';
+  if (folder.id === 'folder_standard' || folder.name === 'Стандартные') {
+    return (typeof CURRENT_LANG !== 'undefined' && CURRENT_LANG === 'en') ? 'Standard' : 'Стандартные';
+  }
+  return folder.name;
+}
 //Конец изменения
 
 // Sidebar toggle
@@ -325,163 +334,35 @@ function setChips(arr){
   c.style.display = arr.length ? '' : 'none';
 }
 
-// Inspector mode state
-let inspectorMode = 'view';
-let currentInspectorData = {};
-
-function setInspectorMode(mode){
-  inspectorMode = mode;
-  document.getElementById('btnInspView').classList.toggle('active', mode === 'view');
-  document.getElementById('btnInspEdit').classList.toggle('active', mode === 'edit');
-  document.getElementById('inspectorLabel').textContent = mode === 'edit' ? 'Inspector — Edit' : 'Inspector';
-  renderInspector();
-}
-
-function renderInspector(){
-  const data = currentInspectorData;
-  const el = $('#inspector');
-
-  // Custom HTML override (used by Builder, Stimuli etc.)
-  if(data && data.customHtml){
-    el.innerHTML = data.customHtml;
-    return;
-  }
-
-  if(inspectorMode === 'view'){
-    // ── VIEW MODE ──────────────────────────────────────────────
-    // Цель: быстро ответить на вопросы
-    //   "На какие данные я сейчас смотрю?" → Scope
-    //   "Всё ли в порядке с этим разделом?" → Status
-    //   "Что здесь самое полезное действие?" → 1 CTA
-    // Type/Title/Subtitle скрыты — это настройки страницы, а не информация для чтения.
-
-    // Контекстный CTA зависит от страницы, а НЕ всегда ведёт на Export.
-    // Каждая страница сама передаёт нужный CTA через setInspector().
-    let scopeHtml = '';
-    if (!data.hideScope) {
-        scopeHtml = `
-      <div class="insp-section">
-        <h4>Scope</h4>
-        <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0 10px;">
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px;flex-wrap:wrap;">
-            <span style="font-weight:700;color:var(--text);font-size:13px;">${state.org||'—'}</span>
-            <span style="color:var(--muted2);font-size:10px;">▸</span>
-            <span style="font-weight:500;color:var(--muted);">${state.project||'—'}</span>
-            <span style="color:var(--muted2);font-size:10px;">▸</span>
-            <span style="color:var(--muted);font-size:12px;">${state.experiment||'—'}</span>
-          </div>
-        </div>
-        <div class="insp-row" style="border-bottom:none;padding-top:6px;">
-          <span class="label">Status</span>
-          <span class="badge ${data.status||'neutral'}">${(data.status||'neutral').toUpperCase()}</span>
-        </div>
-      </div>
-        `;
+// Inspector removed — no-op for legacy callers
+function setInspectorMode(){}
+function setInspector(){}
+function getExperimentAnalyticsConfig(experimentKey) {
+  const key = 'emocog_analytics_config_' + (experimentKey || 'draft');
+  const defaults = {
+    tabs: {
+      'session-card': true,
+      'group-comparison': true,
+      'data-quality': true,
+      'connectedness': true
     }
-
-    el.innerHTML = `
-      ${scopeHtml}
-      ${data.cta ? `
-      <div style="padding:0 0 14px;">
-        <button class="quick-btn" style="width:100%;background:rgba(92,102,189,.10);border-color:rgba(92,102,189,.28);color:var(--accent);font-weight:600;justify-content:center;gap:8px;" onclick="${data.cta.action}">
-          ${data.cta.label}
-        </button>
-      </div>` : ''}
-      <div class="insp-section" style="border-top:1px solid var(--stroke);padding-top:16px;margin-top:4px;">
-        <h4>About this page</h4>
-        <div class="insp-row">
-          <span class="label">Section</span>
-          <span class="value" style="font-size:12px;">${data.title||'—'}</span>
-        </div>
-        ${data.subtitle ? `<div style="font-size:11px;color:var(--muted2);line-height:1.5;padding:6px 0 2px;">${data.subtitle}</div>` : ''}
-      </div>
-    `;
-  } else {
-    // ── EDIT / CUSTOMIZE MODE ──────────────────────────────────
-    // Цель: настройка страницы/дашборда без лишних кликов.
-    // Показываем всё: тип, заголовок, описание, scope, параметры виджетов.
-    // В проде здесь будет drag-and-drop порядка карточек, выбор метрик, пороги QC и т.д.
-    el.innerHTML = `
-      <div class="insp-section">
-        <h4>Page identity</h4>
-        <div class="insp-row">
-          <span class="label">Type</span>
-          <span class="value">${data.type||'—'}</span>
-        </div>
-        <div class="insp-row">
-          <span class="label">Title</span>
-          <span class="value" style="font-size:12px;">${data.title||'—'}</span>
-        </div>
-        <div class="insp-row" style="border-bottom:none;">
-          <span class="label">Status</span>
-          <span class="badge ${data.status||'neutral'}">${data.status||'—'}</span>
-        </div>
-        ${data.subtitle ? `<div style="font-size:11px;color:var(--muted2);line-height:1.5;padding:8px 0 4px;border-top:1px solid var(--stroke);margin-top:4px;">${data.subtitle}</div>` : ''}
-      </div>
-
-      <div class="insp-section">
-        <h4>Data scope</h4>
-        <div class="insp-row">
-          <span class="label">Org</span>
-          <span class="value">${state.org||'—'}</span>
-        </div>
-        <div class="insp-row">
-          <span class="label">Project</span>
-          <span class="value">${state.project||'—'}</span>
-        </div>
-        <div class="insp-row" style="border-bottom:none;">
-          <span class="label">Experiment</span>
-          <span class="value">${state.experiment||'—'}</span>
-        </div>
-      </div>
-
-      <div class="insp-section">
-        <h4>Widget settings</h4>
-        <div class="insp-row">
-          <span class="label">QC threshold</span>
-          <span class="value" style="display:flex;align-items:center;gap:6px;">
-            <input type="range" min="50" max="95" value="80" style="width:72px;height:4px;cursor:pointer;accent-color:var(--accent);" oninput="this.nextElementSibling.textContent=this.value">
-            <span style="font-size:12px;font-weight:700;color:var(--accent);min-width:24px;">80</span>
-          </span>
-        </div>
-        <div class="insp-row">
-          <span class="label">Date range</span>
-          <span class="value" style="font-size:11px;">Last 30 days</span>
-        </div>
-        <div class="insp-row" style="border-bottom:none;">
-          <span class="label">Cards visible</span>
-          <span style="display:flex;gap:4px;flex-wrap:wrap;">
-            ${['QC','Metrics','Blocks','Timeline'].map(c=>`<span style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;background:rgba(92,102,189,.10);border:1px solid rgba(92,102,189,.25);color:var(--accent);cursor:pointer;">${c}</span>`).join('')}
-          </span>
-        </div>
-      </div>
-
-      <div class="insp-section">
-        <h4>Layout order</h4>
-        <div style="display:flex;flex-direction:column;gap:4px;padding:4px 0;">
-          ${['1. Overview summary','2. Key metrics','3. Timeline / Charts','4. Data table'].map((item,i)=>`
-            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.35);cursor:grab;font-size:12px;color:var(--muted);">
-              <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="opacity:.4;flex-shrink:0;"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8h16M4 16h16"/></svg>
-              <span>${item}</span>
-            </div>
-          `).join('')}
-        </div>
-        <div style="font-size:11px;color:var(--muted2);margin-top:6px;">Drag to reorder · в проде</div>
-      </div>
-    `;
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!saved) return defaults;
+    if (saved.tabs) return { tabs: { ...defaults.tabs, ...saved.tabs } };
+    const legacy = {
+      'session-card': saved.perParticipantSessionQuality !== false,
+      'group-comparison': saved.groupAnalytics !== false,
+      'data-quality': saved.dataQuality !== false,
+      'connectedness': saved.connectedness !== false
+    };
+    return { tabs: { ...defaults.tabs, ...legacy } };
+  } catch (_) {
+    return defaults;
   }
 }
-
-// Inspector
-function setInspector(data){
-  currentInspectorData = data;
-  renderInspector();
-}
-
-// Initialize inspector mode buttons
-function initInspectorButtons(){
-  document.getElementById('btnInspView').classList.add('active');
-}
+window.getExperimentAnalyticsConfig = getExperimentAnalyticsConfig;
 
 // Hash parsing
 function parseHash(h){
@@ -642,7 +523,6 @@ window.addEventListener('hashchange',()=>{
 
 // Initialize
 applyFocus();
-initInspectorButtons();
 if(state.sidebarCollapsed) {
   $('#app').classList.add('sidebar-collapsed');
   $('#btnToggleSidebar').classList.add('active');
