@@ -5,6 +5,7 @@ const express = require('express');
 const { query, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { rowToProxyMetricsResponse } = require('../proxy_metrics/contract');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -92,10 +93,30 @@ router.get(
         SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id, s.started_at, s.stopped_at,
                q.qc_score, q.validity AS qc_validity, q.fail_reasons,
                q.payload AS qc_summary_payload,
-               f.payload AS features_payload
+               f.payload AS features_payload,
+               pm.session_id AS pm_session_id,
+               pm.status AS proxy_metrics_status,
+               pm.schema_version AS proxy_metrics_schema_version,
+               pm.metrics AS proxy_metrics_v1,
+               pm.missing_metrics AS proxy_missing_metrics,
+               pm.error AS proxy_error,
+               pm.computed_at AS proxy_computed_at,
+               pm.updated_at AS proxy_updated_at,
+               pm.attention_score AS pm_attention_score,
+               pm.emotion_valence_mean AS pm_emotion_valence_mean,
+               pm.emotion_arousal_mean AS pm_emotion_arousal_mean,
+               pm.mean_rt_ms AS pm_mean_rt_ms,
+               pm.omissions_pct AS pm_omissions_pct,
+               pm.blink_count AS pm_blink_count,
+               pm.bpm_mean AS pm_bpm_mean,
+               pm.rppg_sample_count AS pm_rppg_sample_count,
+               pm.respiration_rate_mean AS pm_respiration_rate_mean,
+               pm.respiration_available AS pm_respiration_available,
+               pm.payload AS pm_payload
         FROM sessions s
         LEFT JOIN session_qc_summary q ON q.session_id = s.id
         LEFT JOIN session_features f ON f.session_id = s.id
+        LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
         ${scopedJoinAndWhere(1)}
         WHERE 1=1
       `;
@@ -117,12 +138,44 @@ router.get(
         const payload = row.features_payload && typeof row.features_payload === 'object' ? row.features_payload : {};
         const blocks = normalizeBlocks(payload);
         const qcSummary = normalizeQcSummary(row);
-        return { ...row, _blocks: blocks, _blocks_count: blocks.length, _qc_summary: qcSummary };
+        const proxyRow = row.pm_session_id != null ? {
+          session_id: row.pm_session_id,
+          schema_version: row.proxy_metrics_schema_version,
+          status: row.proxy_metrics_status,
+          metrics: row.proxy_metrics_v1,
+          missing_metrics: row.proxy_missing_metrics,
+          error: row.proxy_error,
+          computed_at: row.proxy_computed_at,
+          updated_at: row.proxy_updated_at,
+          attention_score: row.pm_attention_score,
+          emotion_valence_mean: row.pm_emotion_valence_mean,
+          emotion_arousal_mean: row.pm_emotion_arousal_mean,
+          mean_rt_ms: row.pm_mean_rt_ms,
+          omissions_pct: row.pm_omissions_pct,
+          blink_count: row.pm_blink_count,
+          bpm_mean: row.pm_bpm_mean,
+          rppg_sample_count: row.pm_rppg_sample_count,
+          respiration_rate_mean: row.pm_respiration_rate_mean,
+          respiration_available: row.pm_respiration_available,
+          payload: row.pm_payload,
+        } : null;
+        const proxyContract = rowToProxyMetricsResponse(
+          {
+            session_id: row.session_id,
+            participant_id: row.participant_id,
+            project_id: row.project_id,
+            protocol_id: row.protocol_id,
+          },
+          proxyRow,
+          payload,
+          { qc_score: row.qc_score, validity: row.qc_validity, fail_reasons: row.fail_reasons, payload: row.qc_summary_payload }
+        );
+        return { ...row, _blocks: blocks, _blocks_count: blocks.length, _qc_summary: qcSummary, _proxy_metrics: proxyContract };
       });
 
       if (format === 'csv') {
         const maxBlocks = normalizedRows.reduce((acc, row) => Math.max(acc, row._blocks_count), 0);
-        const headers = ['id', 'session_id', 'participant_id', 'project_id', 'protocol_id', 'started_at', 'stopped_at', 'qc_score', 'qc_validity', 'fail_reasons', 'qc_summary', 'blocks_count'];
+        const headers = ['id', 'session_id', 'participant_id', 'project_id', 'protocol_id', 'started_at', 'stopped_at', 'qc_score', 'qc_validity', 'fail_reasons', 'qc_summary', 'proxy_metrics_status', 'blocks_count'];
         for (let i = 0; i < maxBlocks; i++) {
           headers.push(
             `block_${i}_name`,
@@ -144,6 +197,7 @@ router.get(
           const flat = {
             ...row,
             qc_summary: row._qc_summary,
+            proxy_metrics_status: row._proxy_metrics ? row._proxy_metrics.status : 'not_computed',
             blocks_count: row._blocks_count,
           };
           row._blocks.forEach((b, idx) => {
@@ -188,6 +242,7 @@ router.get(
           blocks_count: row._blocks_count,
           blocks: row._blocks,
           features_payload: row.features_payload,
+          proxy_metrics: row._proxy_metrics,
         })),
       });
     } catch (err) {

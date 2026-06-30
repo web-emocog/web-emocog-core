@@ -8,16 +8,17 @@ import path from 'path';
  */
 export function getPageUrl(): string {
   const httpCandidate = process.env.PAGE_URL ||
-    'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1.html';
+    'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
   if (httpCandidate.startsWith('http://') || httpCandidate.startsWith('https://')) {
     return httpCandidate;
   }
 
   const candidates = [
     process.env.HTML_PATH,
+    path.resolve(process.cwd(), 'mvp_with_precheck_1-updated.html'),
+    path.resolve(process.cwd(), '..', 'participant-web', 'mvp_with_precheck_1-updated.html'),
     path.resolve(process.cwd(), 'mvp_with_precheck_1.html'),
     path.resolve(process.cwd(), '..', 'participant-web', 'mvp_with_precheck_1.html'),
-    path.resolve(process.cwd(), '..', 'participant-web', 'mvp_with_precheck_1-updated.html'),
   ].filter(Boolean) as string[];
 
   const htmlPath = candidates.find(p => existsSync(p));

@@ -90,11 +90,21 @@
       function extractCode(raw) {
         var value = String(raw || '').trim();
         if (!value) return null;
+        var fromHash = function (hash) {
+          var m = String(hash || '').match(/^#\/?participant\/([^/?#]+)/i);
+          if (!m || !m[1]) return null;
+          var c = decodeURIComponent(m[1]).trim();
+          return c && /^[a-zA-Z0-9_-]+$/.test(c) ? c : null;
+        };
         try {
           var u = new URL(value);
           var c = u.searchParams.get('code');
           if (c && c.trim()) return c.trim();
+          c = fromHash(u.hash);
+          if (c) return c;
         } catch (_) {}
+        var hashOnly = fromHash(value.indexOf('#') >= 0 ? value.slice(value.indexOf('#')) : value);
+        if (hashOnly) return hashOnly;
         if (value.indexOf('?') >= 0) {
           try {
             var q = value.split('?')[1] || '';
@@ -105,7 +115,7 @@
         }
         if (/^https?:\/\//i.test(value)) return null;
         var code = value;
-        if (code.length < 4 || code.length > 256) return null;
+        if (code.length < 1 || code.length > 64) return null;
         if (!/^[a-zA-Z0-9_-]+$/.test(code)) return null;
         return code;
       }
@@ -121,8 +131,7 @@
           err.textContent = 'Не удалось распознать код. Нужна ссылка с ?code=… или корректный код приглашения.';
           return;
         }
-        var target = 'mvp_with_precheck_1-updated.html?code=' + encodeURIComponent(code);
-        window.location.href = target;
+        window.location.href = 'run_new.html?code=' + encodeURIComponent(code);
       }
 
       btn.addEventListener('click', go);

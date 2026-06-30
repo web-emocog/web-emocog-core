@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Standard stimuli preview (local)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #f8fafc; color: #0f172a; }
+    h1 { font-size: 20px; margin-bottom: 8px; }
+    p { color: #64748b; font-size: 14px; max-width: 720px; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-top: 24px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 220px; }
+    .stage { width: 100%; min-height: 160px; display: flex; align-items: center; justify-content: center; background: #fff; border-radius: 12px; border: 1px dashed #cbd5e1; }
+    .label { font-size: 11px; font-weight: 700; color: #64748b; text-align: center; word-break: break-all; }
+    #cogShape { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Standard stimuli — local preview</h1>
+  <p>
+    Open via static server from repo root, e.g.
+    <code>python -m http.server 8000</code>
+    then
+    <code>http://localhost:8000/apps/participant-web/tools/standard-stimuli-preview.html</code>
+  </p>
+  <div id="grid" class="grid"></div>
+  <div id="cogShape"></div>
+  <script src="../../shared/standard-stimuli.js"></script>
+  <script>
+    const IDS = [
+      'std_simple_black_square',
+      'std_go_green_circle',
+      'std_nogo_red_circle',
+      'std_stroop_red_blue',
+      'std_flanker_right_cong',
+      'std_nback_circle',
+      'std_pvt_counter',
+      'std_cpt_a',
+    ];
+
+    function renderStimulus(stimulus, host) {
+      host.innerHTML = '';
+      if (stimulus.type === 'image' && stimulus.src) {
+        const img = document.createElement('img');
+        img.src = stimulus.src;
+        img.alt = stimulus.stimulusId || 'stimulus';
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '140px';
+        host.appendChild(img);
+        return;
+      }
+      const el = document.createElement('div');
+      if (stimulus.type === 'text') {
+        el.textContent = stimulus.text || '';
+      }
+      if (stimulus.style) Object.assign(el.style, stimulus.style);
+      host.appendChild(el);
+    }
+
+    const grid = document.getElementById('grid');
+    IDS.forEach((id) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const stage = document.createElement('div');
+      stage.className = 'stage';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = id;
+      const stimulus = window.StandardStimuli.resolveParticipantStimulus({ stimulusId: id, lang: 'ru' });
+      renderStimulus(stimulus, stage);
+      card.appendChild(stage);
+      card.appendChild(label);
+      grid.appendChild(card);
+    });
+  </script>
+</body>
+</html>

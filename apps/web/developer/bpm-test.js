@@ -24,6 +24,8 @@
     var running = false;
     var faceLandmarker = null;
     var engine = null;
+    var SessionReporterCtor = null;
+    var reporter = null;
     var frameCount = 0;
     var lastVideoTime = -1;
     var lastCenter = null;
@@ -266,8 +268,11 @@
         try {
           await probeEngineUrl(url);
           var mod = await import(url);
-          if (mod && mod.RppgEngine) return mod.RppgEngine;
-          errors.push(url + ' -> loaded but RppgEngine export not found');
+          if (mod && mod.RppgEngine && mod.SessionReporter) {
+            SessionReporterCtor = mod.SessionReporter;
+            return mod.RppgEngine;
+          }
+          errors.push(url + ' -> loaded but RppgEngine/SessionReporter export not found');
         } catch (e) {
           lastErr = e;
           errors.push(url + ' -> ' + (e && (e.message || String(e))));
@@ -335,6 +340,16 @@
       setStatus('Остановлено');
       btnStart.disabled = false;
       btnStop.disabled = true;
+      if (reporter) {
+        var sessionJson = reporter.finalize();
+        var respRows = (sessionJson && sessionJson.samples) ? sessionJson.samples : [];
+        var respVals = respRows.map(function (s) { return s.resp_rate; }).filter(function (v) { return Number.isFinite(v); });
+        var respMean = respVals.length
+          ? Math.round((respVals.reduce(function (a, b) { return a + b; }, 0) / respVals.length) * 10) / 10
+          : null;
+        appendLog('Respiration session samples: ' + respRows.length + (respMean != null ? (' · mean ' + respMean + '/min') : ''), '');
+        reporter = null;
+      }
       appendLog('BPM тест остановлен', '');
       stableFrames = 0;
       centerMotionEma = 0;
@@ -411,12 +426,16 @@
         drawRoiDiagnostics(out.roiDiagnostics);
       }
       if (out) {
+        if (reporter) reporter.push(out, timestampMs);
         var bpm = out.bpmPublished ?? out.bpmSmoothed ?? out.bpm;
         var confidence = Number.isFinite(out.confidence) ? out.confidence : null;
+        var feat = out.features || {};
+        var rr = feat.respRate != null ? feat.respRate : feat.respRateRaw;
+        var respPart = Number.isFinite(rr) ? (' · дыхание ~' + Math.round(rr) + '/мин') : '';
         if (Number.isFinite(bpm)) {
           setBpm(bpm);
           var confText = confidence != null ? (' · conf ' + confidence.toFixed(2)) : '';
-          setStatus(out.published ? ('BPM опубликован' + confText) : ('Сигнал стабилизируется' + confText));
+          setStatus((out.published ? ('BPM опубликован' + confText) : ('Сигнал стабилизируется' + confText)) + respPart);
         } else {
           setBpm(null);
           setStatus('Ожидание стабильного ppg-сигнала…');
@@ -440,28 +459,8 @@
       try {
         var RppgEngineCtor = await loadEngine();
         await initMediaPipe();
-        // Песочница: чуть жёстче сглаживание и трекинг, чем в общем config (меньше «рандома» 40–120 при rPPG)
-        engine = new RppgEngineCtor({
-          algorithm: 'pos',
-          mode: 'safe',
-          bpmSmoothing: {
-            historySize: 14,
-            maxJumpBpm: 10,
-            minConfidenceForJump: 0.74
-          },
-          modes: {
-            safe: {
-              tracking: {
-                rangeBpm: 20,
-                escapeRatio: 1.32,
-                escapeMinPeak01: 0.38,
-                escapeConfirm: 3,
-                continuityStrength: 0.72,
-                fullContinuityStrength: 0.44
-              }
-            }
-          }
-        });
+        engine = new RppgEngineCtor({ algorithm: 'pos', mode: 'safe' });
+        reporter = SessionReporterCtor ? new SessionReporterCtor() : null;
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 720 } },
           audio: false

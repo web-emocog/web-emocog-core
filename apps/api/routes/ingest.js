@@ -8,7 +8,12 @@ const { body, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const { computeQcValidity } = require('../qc/aggregator');
+const { computeQcValidity, mergeBehavioralRtQc } = require('../qc/aggregator');
+const {
+  computeSessionRtFeatures,
+  mergeRtIntoProxyScalars,
+  buildProxyMetricsJson,
+} = require('../rt/compute');
 
 const router = express.Router();
 
@@ -111,6 +116,201 @@ function normalizeDerivedPayload(payload) {
   return out;
 }
 
+function toFinite(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return v;
+}
+
+function average(values) {
+  const nums = (Array.isArray(values) ? values : []).filter(v => typeof v === 'number' && Number.isFinite(v));
+  if (!nums.length) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function roundTo(v, digits) {
+  const n = toFinite(v);
+  if (n == null) return null;
+  const p = 10 ** digits;
+  return Math.round(n * p) / p;
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function to01(value, maxScale) {
+  const v = toFinite(value);
+  if (v == null) return null;
+  if (maxScale === 1) return clamp(v, 0, 1);
+  if (maxScale === 100) return clamp(v / 100, 0, 1);
+  return null;
+}
+
+function extractRespirationMetrics(payload) {
+  const rs = payload && payload.respiration_summary;
+  if (!rs || typeof rs !== 'object') {
+    return {
+      respiration_rate_mean: null,
+      respiration_rate_min: null,
+      respiration_rate_max: null,
+      respiration_sample_count: 0,
+      respiration_available: false,
+    };
+  }
+
+  const sampleCountRaw = rs.resp_sample_count;
+  const respiration_sample_count = (typeof sampleCountRaw === 'number' && Number.isFinite(sampleCountRaw))
+    ? Math.max(0, Math.round(sampleCountRaw))
+    : 0;
+
+  return {
+    respiration_rate_mean: roundTo(toFinite(rs.resp_rate_mean), 2),
+    respiration_rate_min: roundTo(toFinite(rs.resp_rate_min), 2),
+    respiration_rate_max: roundTo(toFinite(rs.resp_rate_max), 2),
+    respiration_sample_count,
+    respiration_available: Boolean(rs.resp_available),
+  };
+}
+
+function extractProxyMetrics(payload, qcSummary, qcComputed) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const respiration = extractRespirationMetrics(p);
+  const blocks = Array.isArray(p.blocks) ? p.blocks.filter(b => b && typeof b === 'object') : [];
+  const cognitiveRows = Array.isArray(p.cognitiveResults) ? p.cognitiveResults : [];
+
+  const emotionValence = toFinite(p.emotion_summary && p.emotion_summary.valence_mean);
+  const emotionArousal = toFinite(p.emotion_summary && p.emotion_summary.arousal_mean);
+
+  const attGlobal = p.attentionMetrics && p.attentionMetrics.global && typeof p.attentionMetrics.global === 'object'
+    ? p.attentionMetrics.global
+    : {};
+  const attentionScore = (() => {
+    const direct = toFinite(attGlobal.attentionScore) ??
+      toFinite(attGlobal.focusScore) ??
+      toFinite(attGlobal.attention) ??
+      toFinite(attGlobal.attentionPct);
+    if (direct != null) return direct;
+    const fallback = average(blocks.map(b => toFinite(b.attention)));
+    return fallback != null ? roundTo(fallback, 2) : null;
+  })();
+
+  const meanRtFromBlocks = average(blocks.map(b => toFinite(b.rt)));
+  const meanRtFromTrials = average(cognitiveRows.map(r => toFinite(r && r.rt)));
+  const meanRtMs = roundTo(meanRtFromBlocks ?? meanRtFromTrials, 2);
+
+  const omissionsFromBlocks = average(blocks.map(b => toFinite(b.omissions)));
+  const omissionsFromTrials = (() => {
+    if (!cognitiveRows.length) return null;
+    const omissionCount = cognitiveRows.filter(r => !r || r.response == null).length;
+    return (omissionCount / cognitiveRows.length) * 100;
+  })();
+  const omissionsPct = roundTo(omissionsFromBlocks ?? omissionsFromTrials, 2);
+
+  const blinkCount = roundTo(
+    average(blocks.map(b => toFinite(b.blinks))) ??
+      toFinite(attGlobal.blinkDynamics && attGlobal.blinkDynamics.blinkCount),
+    2
+  );
+  const bpmMean = roundTo(toFinite(p.bpm_summary && p.bpm_summary.bpmMean), 2);
+  const rppgSampleCount = (() => {
+    const n = p.rppg_summary && p.rppg_summary.sampleCount;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+    return Math.round(n);
+  })();
+
+  const qcScore = toFinite(qcComputed && qcComputed.qc_score);
+  const attention01 = to01(attentionScore, 100);
+  const valence01 = (() => {
+    if (emotionValence == null) return null;
+    return clamp((emotionValence + 1) / 2, 0, 1);
+  })();
+  const arousal01 = to01(emotionArousal, 1);
+  const rtNorm = (() => {
+    if (meanRtMs == null) return null;
+    // 300..1300ms -> 1..0 (faster is better)
+    return clamp(1 - ((meanRtMs - 300) / 1000), 0, 1);
+  })();
+  const omissions01 = (() => {
+    if (omissionsPct == null) return null;
+    // Lower omissions -> better normalized quality
+    return clamp(1 - (omissionsPct / 100), 0, 1);
+  })();
+  const qc01 = to01(qcScore, 100);
+
+  const emotCogIndex = (valence01 != null && attention01 != null)
+    ? roundTo(((valence01 * 0.5) + (attention01 * 0.5)) * 100, 2)
+    : null;
+  const engagement = (attention01 != null && valence01 != null)
+    ? roundTo(((attention01 * 0.6) + (valence01 * 0.4)) * 100, 2)
+    : null;
+  const stressProxy = (arousal01 != null && valence01 != null)
+    ? roundTo((arousal01 * (1 - valence01)) * 100, 2)
+    : null;
+  const perceptionQuality = (qc01 != null && rtNorm != null && omissions01 != null)
+    ? roundTo(((qc01 * 0.5) + (rtNorm * 0.3) + (omissions01 * 0.2)) * 100, 2)
+    : null;
+
+  const sourceFlags = {
+    has_qc: !!(qcComputed && qcComputed.validity),
+    has_emotion_summary: emotionValence != null || emotionArousal != null,
+    has_attention_metrics: attentionScore != null,
+    has_cognitive_signal: meanRtMs != null || omissionsPct != null,
+    has_biometry_signal: bpmMean != null || rppgSampleCount != null || respiration.respiration_available,
+    has_respiration_summary: respiration.respiration_available,
+    has_blocks: blocks.length > 0,
+  };
+  const sourceCount = Object.values(sourceFlags).filter(Boolean).length;
+  const proxyReady = sourceFlags.has_emotion_summary && sourceFlags.has_attention_metrics && sourceFlags.has_cognitive_signal;
+
+  return {
+    emotion_valence_mean: emotionValence,
+    emotion_arousal_mean: emotionArousal,
+    attention_score: attentionScore,
+    mean_rt_ms: meanRtMs,
+    omissions_pct: omissionsPct,
+    blink_count: blinkCount,
+    bpm_mean: bpmMean,
+    rppg_sample_count: rppgSampleCount,
+    respiration_rate_mean: respiration.respiration_rate_mean,
+    respiration_rate_min: respiration.respiration_rate_min,
+    respiration_rate_max: respiration.respiration_rate_max,
+    respiration_sample_count: respiration.respiration_sample_count,
+    respiration_available: respiration.respiration_available,
+    payload: {
+      emot_cog_index: emotCogIndex,
+      engagement_index: engagement,
+      stress_proxy_index: stressProxy,
+      perception_quality_index: perceptionQuality,
+      qc_score: qcScore,
+      qc_validity: qcComputed ? qcComputed.validity : null,
+      proxy_ready: proxyReady,
+      source_count: sourceCount,
+      source_flags: sourceFlags,
+    },
+    source_payload: {
+      qc_summary: qcSummary && typeof qcSummary === 'object' ? qcSummary : {},
+      qc_computed: qcComputed && typeof qcComputed === 'object' ? qcComputed : {},
+      feature_inputs: {
+        emotion_summary: p.emotion_summary || null,
+        attention_metrics_global: p.attentionMetrics && p.attentionMetrics.global ? p.attentionMetrics.global : null,
+        blocks,
+        cognitive_results_count: cognitiveRows.length,
+        bpm_summary: p.bpm_summary || null,
+        rppg_summary: p.rppg_summary || null,
+        respiration_summary: p.respiration_summary || null,
+      },
+      normalized: {
+        attention_01: attention01,
+        valence_01: valence01,
+        arousal_01: arousal01,
+        rt_norm: rtNorm,
+        omissions_01: omissions01,
+        qc_01: qc01,
+      }
+    },
+  };
+}
+
 function hasValidAuth(req) {
   try {
     const auth = req.headers.authorization;
@@ -133,7 +333,35 @@ async function getInvitationContext(code) {
      WHERE i.code = $1`,
     [code]
   );
-  return inv.rows[0] || null;
+  if (inv.rows[0]) return inv.rows[0];
+
+  const bySlug = await pool.query(
+    `SELECT pr.id AS protocol_id, pr.project_id, pr.definition
+     FROM protocols pr
+     WHERE pr.definition->>'protocolId' = $1
+     ORDER BY pr.updated_at DESC
+     LIMIT 1`,
+    [code]
+  );
+  if (!bySlug.rows[0]) return null;
+
+  const pr = bySlug.rows[0];
+  const upsert = await pool.query(
+    `INSERT INTO invitations (protocol_id, code, max_runs, expires_at)
+     VALUES ($1, $2, NULL, NULL)
+     ON CONFLICT (code) DO UPDATE SET protocol_id = EXCLUDED.protocol_id
+     RETURNING id, code, max_runs, expires_at, protocol_id`,
+    [pr.protocol_id, code]
+  );
+  const row = upsert.rows[0];
+  return {
+    id: row.id,
+    code: row.code,
+    max_runs: row.max_runs,
+    expires_at: row.expires_at,
+    protocol_id: row.protocol_id,
+    project_id: pr.project_id,
+  };
 }
 
 async function invitationRunsUsed(code) {
@@ -164,19 +392,19 @@ router.post(
     body('ids').optional().isObject(),
     body('ids.session').optional().isString(),
     body('ids.participant').optional().isString(),
-    body('meta').optional().isObject(),
-    body('precheck').optional().isObject(),
-    body('qcSummary').optional().isObject(),
-    body('attentionMetrics').optional().isObject(),
-    body('emotion_summary').optional().isObject(),
-    body('experimentMeta').optional().isObject(),
-    body('cognitiveResults').optional().isArray(),
-    body('gazeValidation').optional().isObject(),
-    body('events').optional().isArray(),
-    body('lifecycle').optional().isObject(),
-    body('startTime').optional(),
-    body('testHub').optional().isObject(),
-    body('gazeTests').optional().isObject(),
+    body('meta').optional({ nullable: true }).isObject(),
+    body('precheck').optional({ nullable: true }).isObject(),
+    body('qcSummary').optional({ nullable: true }).isObject(),
+    body('attentionMetrics').optional({ nullable: true }).isObject(),
+    body('emotion_summary').optional({ nullable: true }).isObject(),
+    body('experimentMeta').optional({ nullable: true }).isObject(),
+    body('cognitiveResults').optional({ nullable: true }).isArray(),
+    body('gazeValidation').optional({ nullable: true }).isObject(),
+    body('events').optional({ nullable: true }).isArray(),
+    body('lifecycle').optional({ nullable: true }).isObject(),
+    body('startTime').optional({ nullable: true }),
+    body('testHub').optional({ nullable: true }).isObject(),
+    body('gazeTests').optional({ nullable: true }).isObject(),
   ],
   async (req, res) => {
     try {
@@ -187,7 +415,8 @@ router.post(
       const participantId = (raw.ids && raw.ids.participant) ? String(raw.ids.participant) : null;
       const invitationCode = (raw.ids && raw.ids.invitationCode) ? String(raw.ids.invitationCode) : null;
       const lifecycle = (raw.lifecycle && typeof raw.lifecycle === 'object') ? raw.lifecycle : null;
-      const authenticated = hasValidAuth(req);
+      const participantIngest = !!invitationCode;
+      const authenticated = participantIngest ? false : hasValidAuth(req);
       let invitation = null;
 
       if (!authenticated && !invitationCode) {
@@ -196,7 +425,13 @@ router.post(
       if (!sessionId) return res.status(400).json({ error: 'ids.session required' });
       if (invitationCode) {
         invitation = await getInvitationContext(invitationCode);
-        if (!invitation) return res.status(403).json({ error: 'Invalid invitation code' });
+        if (!invitation) {
+          return res.status(403).json({
+            error: 'Invalid invitation code',
+            code: invitationCode,
+            hint: 'Код не найден в API. Опубликуйте протокол в конструкторе или используйте ссылку /invite/КОД с тем же значением.',
+          });
+        }
         if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
           return res.status(410).json({ error: 'Invitation expired' });
         }
@@ -206,13 +441,9 @@ router.post(
             return res.status(410).json({ error: 'Invitation run limit reached' });
           }
         }
-        if (authenticated) {
-          const allowed = await ensureProjectAccess(invitation.project_id, req.user.sub);
-          if (!allowed) return res.status(403).json({ error: 'Access denied for invitation project' });
-        }
       }
 
-      const payload = normalizeDerivedPayload(sanitizePayload(raw));
+      let payload = normalizeDerivedPayload(sanitizePayload(raw));
 
       const sessionRow = await pool.query(
         `SELECT s.id, s.started_at, s.project_id, s.protocol_id
@@ -229,7 +460,10 @@ router.post(
         const sessionProtocolId = sessionRow.rows[0].protocol_id || null;
         if (invitation) {
           if (sessionProtocolId && sessionProtocolId !== invitation.protocol_id) {
-            return res.status(403).json({ error: 'Session protocol mismatch with invitation' });
+            await pool.query(
+              'UPDATE sessions SET protocol_id = $1, updated_at = current_timestamp WHERE id = $2',
+              [invitation.protocol_id, dbSessionId]
+            );
           }
         } else if (!authenticated) {
           return res.status(403).json({ error: 'Invitation required for unauthenticated ingest' });
@@ -274,24 +508,125 @@ router.post(
         completedAtIso = safeCompletedAt.toISOString();
       }
 
+      let protocolDefinition = null;
+      const protocolIdForRt = sessionRow.rows[0]?.protocol_id
+        ?? (invitation ? invitation.protocol_id : null);
+      if (protocolIdForRt) {
+        try {
+          const pr = await pool.query('SELECT definition FROM protocols WHERE id = $1', [protocolIdForRt]);
+          protocolDefinition = pr.rows[0]?.definition;
+          if (typeof protocolDefinition === 'string') {
+            protocolDefinition = JSON.parse(protocolDefinition);
+          }
+        } catch (_) {
+          protocolDefinition = null;
+        }
+      }
+
+      const rtFeatures = computeSessionRtFeatures(payload, protocolDefinition);
+      if (rtFeatures && rtFeatures.blocks && rtFeatures.blocks.length) {
+        payload = { ...payload, rt_features: rtFeatures };
+      }
+
+      const qcSummary = raw.qcSummary || null;
+      let { validity, qc_score, fail_reasons } = computeQcValidity(qcSummary, payload);
+      ({ validity, qc_score, fail_reasons } = mergeBehavioralRtQc(
+        { validity, qc_score, fail_reasons },
+        rtFeatures,
+        payload,
+      ));
+
       await pool.query(
         `INSERT INTO session_features (session_id, payload) VALUES ($1, $2::jsonb)
          ON CONFLICT (session_id) DO UPDATE SET payload = $2::jsonb, updated_at = current_timestamp`,
         [dbSessionId, JSON.stringify(payload)]
       );
 
-      const qcSummary = raw.qcSummary || null;
-      const { validity, qc_score, fail_reasons } = computeQcValidity(qcSummary, payload);
       await pool.query(
         `INSERT INTO session_qc_summary (session_id, qc_score, validity, fail_reasons, payload) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
          ON CONFLICT (session_id) DO UPDATE SET qc_score = $2, validity = $3, fail_reasons = $4::jsonb, payload = $5::jsonb, updated_at = current_timestamp`,
         [dbSessionId, qc_score, validity, JSON.stringify(fail_reasons || null), JSON.stringify(qcSummary || {})]
       );
 
+      const sessionScope = await pool.query(
+        'SELECT project_id, protocol_id, participant_id FROM sessions WHERE id = $1',
+        [dbSessionId]
+      );
+      let proxy = extractProxyMetrics(payload, qcSummary, { validity, qc_score, fail_reasons });
+      proxy = mergeRtIntoProxyScalars(proxy, rtFeatures);
+      const rtMetricsJson = buildProxyMetricsJson(rtFeatures);
+      const scope = sessionScope.rows[0] || {};
+      await pool.query(
+        `INSERT INTO session_proxy_metrics (
+           session_id, project_id, protocol_id, participant_id, qc_validity,
+           schema_version, status,
+           emotion_valence_mean, emotion_arousal_mean, attention_score, mean_rt_ms,
+           omissions_pct, blink_count, bpm_mean, rppg_sample_count,
+           respiration_rate_mean, respiration_rate_min, respiration_rate_max,
+           respiration_sample_count, respiration_available,
+           payload, source_payload, metrics
+         ) VALUES (
+           $1, $2, $3, $4, $5,
+           'proxy_metrics.v1', 'partial',
+           $6, $7, $8, $9,
+           $10, $11, $12, $13,
+           $14, $15, $16, $17, $18,
+           $19::jsonb, $20::jsonb, $21::jsonb
+         )
+         ON CONFLICT (session_id) DO UPDATE SET
+           project_id = $2,
+           protocol_id = $3,
+           participant_id = $4,
+           qc_validity = $5,
+           schema_version = 'proxy_metrics.v1',
+           status = 'partial',
+           emotion_valence_mean = $6,
+           emotion_arousal_mean = $7,
+           attention_score = $8,
+           mean_rt_ms = $9,
+           omissions_pct = $10,
+           blink_count = $11,
+           bpm_mean = $12,
+           rppg_sample_count = $13,
+           respiration_rate_mean = $14,
+           respiration_rate_min = $15,
+           respiration_rate_max = $16,
+           respiration_sample_count = $17,
+           respiration_available = $18,
+           payload = $19::jsonb,
+           source_payload = $20::jsonb,
+           metrics = COALESCE(session_proxy_metrics.metrics, '{}'::jsonb) || $21::jsonb,
+           updated_at = current_timestamp`,
+        [
+          dbSessionId,
+          scope.project_id || null,
+          scope.protocol_id || null,
+          scope.participant_id || null,
+          validity,
+          proxy.emotion_valence_mean,
+          proxy.emotion_arousal_mean,
+          proxy.attention_score,
+          proxy.mean_rt_ms,
+          proxy.omissions_pct,
+          proxy.blink_count,
+          proxy.bpm_mean,
+          proxy.rppg_sample_count,
+          proxy.respiration_rate_mean,
+          proxy.respiration_rate_min,
+          proxy.respiration_rate_max,
+          proxy.respiration_sample_count,
+          proxy.respiration_available,
+          JSON.stringify(proxy.payload),
+          JSON.stringify(proxy.source_payload),
+          JSON.stringify(rtMetricsJson),
+        ]
+      );
+
       res.status(201).json({
         session_id: sessionId,
         ingested: true,
         qc_validity: validity,
+        proxy_ready: !!proxy.payload.proxy_ready,
         lifecycle_status: completionApplied ? 'completed' : 'in_progress',
         completed_at: completedAtIso
       });

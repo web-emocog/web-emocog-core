@@ -47,6 +47,7 @@ export const state = {
         qcSummary: null,
         bpmSummary: null,
         rppgSummary: null,
+        respirationRuns: [],
         startTime: Date.now()
     },
 
@@ -173,6 +174,10 @@ export function clearTaskContext() {
     };
     return getCurrentTaskContext();
 }
+if (typeof window !== 'undefined') {
+    window.__WECOG_STATE__ = state;
+}
+
 export const ex_state = {
     instruction: {
         container: document.getElementById('cognitiveInstruction'),

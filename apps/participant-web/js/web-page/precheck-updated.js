@@ -3,8 +3,87 @@ import { state, CONSTANTS, BACKEND_CONFIG } from './state.js';
 import { translations } from '../../translations.js';
 import { measureCameraFPS } from './camera.js';
 
+function dbg(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.log(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+function dbgErr(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.error(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+let _precheckFrameLogN = 0;
+
+const PRECHECK_TEXT_FALLBACK = {
+    status_optimal: 'Optimal',
+    status_too_dark: 'Too dark',
+    status_too_bright: 'Too bright',
+    status_too_small: 'Too small',
+    status_too_large: 'Too large',
+    status_out_of_zone: 'Out of zone',
+    status_tilted: 'Tilted',
+    status_stable: 'Stable',
+    status_unstable: 'Unstable',
+    status_off_center: 'Off center',
+    status_no_face: 'No face',
+    status_partial_face: 'Partial face',
+    status_face_visible: 'Face visible',
+    status_face_occluded: 'Face occluded',
+    status_hair_occlusion: 'Hair occlusion',
+    tip_hand_on_face: 'Remove hand from face',
+    status_all_good: 'All checks passed',
+    status_needs_fix: 'Adjust setup',
+    status_checking: 'Checking...'
+};
+
+function tt(key) {
+    const langPack = translations[state.currentLang] || {};
+    const value = langPack[key];
+    if (typeof value !== 'undefined' && value !== null && value !== '') return value;
+    logMissingI18nOnce(key, 'tt');
+    return PRECHECK_TEXT_FALLBACK[key] || key;
+}
+
+function ensurePrecheckLayoutStyles() {
+    if (document.getElementById('precheck-layout-fix-v1')) return;
+    const style = document.createElement('style');
+    style.id = 'precheck-layout-fix-v1';
+    style.textContent = `
+      .precheck-container { display:flex; flex-direction:column; gap:14px; }
+      .camera-preview { position:relative; width:100%; aspect-ratio:4/3; max-height:62vh; border:1px solid var(--stroke, var(--border)); border-radius:16px; overflow:hidden; background:#0a0a0f; }
+      #precheckVideo { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block; }
+      #overlayCanvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+      .face-guide { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:36%; height:54%; border:3px solid rgba(16,185,129,.75); border-radius:10px; pointer-events:none; }
+      .guide-text { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); color:#fff; font-size:13px; text-shadow:0 1px 2px rgba(0,0,0,.7); }
+      .indicators { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+      .indicator { display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid var(--stroke, var(--border)); border-radius:12px; background:var(--card-bg); }
+      .progress-container { width:100%; height:6px; background:rgba(148,163,184,.25); border-radius:99px; overflow:hidden; }
+      .progress-bar { height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent2)); }
+      .status-message { color:var(--text-secondary); }
+      .action-buttons { display:flex; gap:10px; margin-top:8px; }
+      @media (max-width: 800px) { .indicators { grid-template-columns:1fr; } }
+    `;
+    document.head.appendChild(style);
+}
+
+function logMissingI18nOnce(key, context) {
+    if (!state.runtime._missingI18nPrecheck) state.runtime._missingI18nPrecheck = {};
+    if (state.runtime._missingI18nPrecheck[key]) return;
+    const langPack = translations[state.currentLang] || {};
+    if (typeof langPack[key] === 'undefined') {
+        state.runtime._missingI18nPrecheck[key] = true;
+    }
+}
+
 export async function startPreCheck() {
     console.log('Запуск pre-check камеры...');
+    dbg('precheck', 'startPreCheck:clicked', {});
+    ensurePrecheckLayoutStyles();
 
     if (state.flags.isPrecheckRunning) {
         stopPreCheck();
@@ -24,14 +103,17 @@ export async function startPreCheck() {
     precheckStatus.className = 'precheck-status waiting-bg';
 
     try {
-        // Запрос доступа к камере с ЯВНЫМ указанием высокого frameRate
-        state.runtime.cameraStream = await navigator.mediaDevices.getUserMedia({ 
+        const streamConstraints = {
             video: {
                 width: { ideal: 640 },
                 height: { ideal: 480 },
-                frameRate: { ideal: 30, min: 15 }  // Запрашиваем 30 FPS, минимум 15
+                frameRate: { ideal: 30, min: 15 }
             }
-        });
+        };
+        dbg('precheck', 'camera:permission:requested', { constraints: streamConstraints });
+        // Запрос доступа к камере с ЯВНЫМ указанием высокого frameRate
+        state.runtime.cameraStream = await navigator.mediaDevices.getUserMedia(streamConstraints);
+        dbg('precheck', 'camera:permission:granted', {});
         
         const video = document.getElementById('precheckVideo');
         video.srcObject = state.runtime.cameraStream;
@@ -40,6 +122,10 @@ export async function startPreCheck() {
             video.onloadedmetadata = () => {
                 video.play();
                 console.log(`Разрешение видео: ${video.videoWidth}x${video.videoHeight}`);
+                dbg('precheck', 'video:dimensions', {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight
+                });
                 
                 // Получаем реальные настройки камеры
                 const videoTrack = state.runtime.cameraStream.getVideoTracks()[0];
@@ -62,6 +148,12 @@ export async function startPreCheck() {
                 const canvas = document.getElementById('overlayCanvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
+
+                const cameraPreview = document.getElementById('cameraPreview');
+                const faceGuide = document.querySelector('.face-guide');
+                const previewRect = cameraPreview ? cameraPreview.getBoundingClientRect() : null;
+                const guideRect = faceGuide ? faceGuide.getBoundingClientRect() : null;
+                const cs = window.getComputedStyle(video);
                 
                 resolve();
             };
@@ -71,6 +163,11 @@ export async function startPreCheck() {
         console.log('[Camera] Измеряем реальный FPS камеры...');
         const cameraFpsResult = await measureCameraFPS(video, 2000);
         console.log(`[Camera] Измеренный FPS: ${cameraFpsResult.fps} (${cameraFpsResult.frames} кадров за ${cameraFpsResult.duration.toFixed(2)}s)`);
+        dbg('precheck', 'camera:fps:measured', {
+            fps: cameraFpsResult.fps,
+            frames: cameraFpsResult.frames,
+            durationSec: cameraFpsResult.duration
+        });
         
         // Сохраняем измеренный FPS
         state.sessionData.tech.cameraFPS = cameraFpsResult.fps;
@@ -88,6 +185,10 @@ export async function startPreCheck() {
 
     } catch (error) {
         console.error('Ошибка камеры:', error);
+        dbgErr('precheck', 'camera:permission:denied', {
+            message: error?.message,
+            name: error?.name
+        });
         statusMessage.textContent = translations[state.currentLang].precheck_camera_error + error.message;
         precheckStatus.className = 'precheck-status error-bg';
         
@@ -122,11 +223,35 @@ export function startContinuousAnalysis() {
         try {
             // Используем ЛОКАЛЬНЫЙ анализатор вместо бэкенда
             const results = await runLocalPrecheckAnalysis(video);
+
+            _precheckFrameLogN += 1;
+            if (window.WECOG_DEBUG && window.WECOG_DEBUG.enabled && _precheckFrameLogN % 30 === 0) {
+                const failReasons = [];
+                if (state.indicatorsStatus.illumination === 'failed') failReasons.push('illumination');
+                if (state.indicatorsStatus.face === 'failed') failReasons.push('face');
+                if (state.indicatorsStatus.pose === 'failed') failReasons.push('pose');
+                if (state.indicatorsStatus.visibility === 'failed') failReasons.push('visibility');
+                const distanceStatus = getDistanceStatus(results);
+                if (distanceStatus.failed) failReasons.push('distance');
+                dbg('precheck', 'frame:sample', {
+                    frameCount: _precheckFrameLogN,
+                    faceDetected: !!(results?.face?.detected),
+                    illuminationScore: results?.illumination?.score ?? null,
+                    illuminationStatus: results?.illumination?.status ?? null,
+                    poseScore: results?.pose?.score ?? null,
+                    poseStatus: results?.pose?.status ?? null,
+                    visibilityScore: results?.visibility?.score ?? null,
+                    visibilityStatus: results?.visibility?.status ?? null,
+                    pass_fail: state.sessionData?.precheck?.pass_fail ?? null,
+                    failReasons
+                });
+            }
             
             // Обновляем индикаторы с реальными данными
             updateIndicators(results);
             
             state.runtime.precheckData = results;
+            state.runtime.lastPrecheckResult = results;
             
             // Проверяем все индикаторы
             checkAllIndicators();
@@ -249,13 +374,37 @@ export function checkAllIndicators() {
     };
     // Кнопка «Начать калибровку» активна только при pass_fail === true
     if (startCalibBtn) startCalibBtn.disabled = !pass_fail;
+
+    // Логируем только переходы precheck-состояний (без спама каждый кадр).
+    const snapshot = {
+        allPassed,
+        hasFailed,
+        isConsistentSuccess,
+        pass_fail,
+        disabled: !!startCalibBtn?.disabled,
+        successFrames: Number(state.runtime.successFrames || 0),
+        requiredSuccessFrames: Number(CONSTANTS.REQUIRED_SUCCESS_FRAMES || 0),
+        distanceStatus: distanceStatus?.status || null,
+        distanceFailed: !!distanceStatus?.failed
+    };
+    const prev = state.runtime._precheckLogSnapshot;
+    const changed = !prev ||
+        prev.pass_fail !== snapshot.pass_fail ||
+        prev.disabled !== snapshot.disabled ||
+        prev.hasFailed !== snapshot.hasFailed ||
+        prev.allPassed !== snapshot.allPassed ||
+        prev.isConsistentSuccess !== snapshot.isConsistentSuccess ||
+        prev.distanceStatus !== snapshot.distanceStatus;
+    if (changed) {
+        state.runtime._precheckLogSnapshot = snapshot;
+    }
     
     // статусное сообщение
     let statusHTML = '';
     
     if (allPassed && isConsistentSuccess) {
         // Все проверки пройдены стабильно
-        statusHTML = translations[state.currentLang].status_all_good;
+        statusHTML = tt('status_all_good');
         statusMessage.className = 'status-message';
         precheckStatus.className = 'precheck-status success-bg';
         startCalibBtn.disabled = false;
@@ -264,20 +413,20 @@ export function checkAllIndicators() {
         const tips = collectTips();
         if (tips.length > 0) {
             statusHTML = `
-                <div class="status-header">${translations[state.currentLang].status_needs_fix}</div>
+                <div class="status-header">${tt('status_needs_fix')}</div>
                 <ul class="tips-list">
                     ${tips.map(tip => `<li class="tip-item">${tip}</li>`).join('')}
                 </ul>
             `;
         } else {
-            statusHTML = `<div class="status-header">${translations[state.currentLang].status_needs_fix}</div>`;
+            statusHTML = `<div class="status-header">${tt('status_needs_fix')}</div>`;
         }
         statusMessage.className = 'status-message';
         precheckStatus.className = 'precheck-status error-bg';
         startCalibBtn.disabled = true;
     } else {
         // Ожидание стабильности
-        statusHTML = translations[state.currentLang].status_checking;
+        statusHTML = tt('status_checking');
         statusMessage.className = 'status-message';
         precheckStatus.className = 'precheck-status waiting-bg';
         startCalibBtn.disabled = true;
@@ -475,12 +624,12 @@ export function collectTips() {
             
             // рука на лице
             if (issues.includes('hand_on_face')) {
-                tips.push(translations[state.currentLang].tip_hand_on_face);
+                tips.push(tt('tip_hand_on_face'));
             }
         }
     }
     
-    return tips;
+    return tips.filter(Boolean).filter(t => t !== 'undefined');
 }
 
 export function updateIlluminationIndicator(data) {
@@ -502,14 +651,20 @@ export function updateIlluminationIndicator(data) {
     switch(data.status) {
         case 'too_dark':
         case 'too_bright':
-            statusText = data.status === 'too_dark' 
-                ? translations[state.currentLang].status_too_dark 
-                : translations[state.currentLang].status_too_bright;
+            statusText = data.status === 'too_dark'
+                ? tt('status_too_dark')
+                : tt('status_too_bright');
             indicatorClass = 'failed';
             break;
         default: 
-            statusText = translations[state.currentLang].status_optimal;
+            statusText = tt('status_optimal');
             indicatorClass = 'passed';
+    }
+    if (typeof statusText === 'undefined') {
+        const missingKey = data.status === 'too_dark' ? 'status_too_dark'
+            : data.status === 'too_bright' ? 'status_too_bright'
+            : 'status_optimal';
+        logMissingI18nOnce(missingKey, 'updateIlluminationIndicator');
     }
     
     statusEl.textContent = statusText;
@@ -542,23 +697,32 @@ export function updateFaceIndicator(data) {
         switch(data.status) {
             case 'too_small':
             case 'too_large':
-                statusText = data.status === 'too_small' 
-                    ? translations[state.currentLang].status_too_small 
-                    : translations[state.currentLang].status_too_large;
+                statusText = data.status === 'too_small'
+                    ? tt('status_too_small')
+                    : tt('status_too_large');
                 indicatorClass = 'failed';
                 break;
             case 'out_of_zone':
-                statusText = translations[state.currentLang].status_out_of_zone;
+                statusText = tt('status_out_of_zone');
                 indicatorClass = 'failed';
                 break;
             case 'tilted':
-                statusText = translations[state.currentLang].status_tilted;
+                statusText = tt('status_tilted');
                 indicatorClass = 'failed';
                 break;
             default: 
-                statusText = translations[state.currentLang].status_optimal;
+                statusText = tt('status_optimal');
                 indicatorClass = 'passed';
         }
+    }
+    if (typeof statusText === 'undefined') {
+        const keyByStatus = {
+            too_small: 'status_too_small',
+            too_large: 'status_too_large',
+            out_of_zone: 'status_out_of_zone',
+            tilted: 'status_tilted'
+        };
+        logMissingI18nOnce(keyByStatus[data.status] || 'status_optimal', 'updateFaceIndicator');
     }
     
     progressBar.style.width = progressValue + '%';
@@ -585,34 +749,45 @@ export function updatePoseIndicator(data) {
     switch(data.status) {
         case 'no_face':
             progressValue = 0;
-            statusText = translations[state.currentLang].status_no_face;
+            statusText = tt('status_no_face');
             indicatorClass = 'failed';
             break;
         case 'partial_face':
             progressValue = 30;
-            statusText = translations[state.currentLang].status_partial_face;
+            statusText = tt('status_partial_face');
             indicatorClass = 'failed';
             break;
         case 'off_center':
             progressValue = 50;
-            statusText = translations[state.currentLang].status_off_center;
+            statusText = tt('status_off_center');
             indicatorClass = 'failed';
             break;
         case 'tilted':
             progressValue = 60;
-            statusText = translations[state.currentLang].status_tilted;
+            statusText = tt('status_tilted');
             indicatorClass = 'failed';
             break;
         case 'unstable':
             progressValue = 70;
-            statusText = translations[state.currentLang].status_unstable;
+            statusText = tt('status_unstable');
             indicatorClass = 'failed';
             break;
         case 'stable':
         default:
             progressValue = 100;
-            statusText = translations[state.currentLang].status_stable;
+            statusText = tt('status_stable');
             indicatorClass = 'passed';
+    }
+    if (typeof statusText === 'undefined') {
+        const keyByStatus = {
+            no_face: 'status_no_face',
+            partial_face: 'status_partial_face',
+            off_center: 'status_off_center',
+            tilted: 'status_tilted',
+            unstable: 'status_unstable',
+            stable: 'status_stable'
+        };
+        logMissingI18nOnce(keyByStatus[data.status] || 'status_stable', 'updatePoseIndicator');
     }
     
     progressBar.style.width = progressValue + '%';
@@ -651,35 +826,43 @@ export function updateVisibilityIndicator(data) {
     
     if (data.isComplete) {
         // Лицо видно полностью
-        statusText = translations[state.currentLang].status_face_visible;
+        statusText = tt('status_face_visible');
         indicatorClass = 'passed';
     } else if (data.issues && data.issues.length > 0) {
         // Есть проблемы с видимостью
         const issues = data.issues;
         
         if (issues.includes('hair_occlusion') || issues.includes('forehead_occluded')) {
-            statusText = translations[state.currentLang].status_hair_occlusion;
+            statusText = tt('status_hair_occlusion');
             indicatorClass = 'failed';
         } else if (issues.includes('left_side_occluded') || issues.includes('right_side_occluded')) {
-            statusText = translations[state.currentLang].status_face_occluded;
+            statusText = tt('status_face_occluded');
             indicatorClass = 'failed';
         } else if (issues.includes('left_cheek_occluded') || issues.includes('right_cheek_occluded')) {
-            statusText = translations[state.currentLang].status_partial_face;
+            statusText = tt('status_partial_face');
             indicatorClass = 'failed';
         } else if (issues.includes('insufficient_face_visibility') || issues.includes('low_skin_visibility')) {
-            statusText = translations[state.currentLang].status_partial_face;
+            statusText = tt('status_partial_face');
             indicatorClass = 'failed';
         } else if (issues.includes('hand_on_face')) {
-            statusText = translations[state.currentLang].tip_hand_on_face;
+            statusText = tt('tip_hand_on_face');
             indicatorClass = 'failed';
         } else {
-            statusText = translations[state.currentLang].status_face_occluded;
+            statusText = tt('status_face_occluded');
             indicatorClass = 'failed';
         }
     } else {
         // Нет данных или неопределённый статус
         statusText = translations[state.currentLang].status_waiting;
         indicatorClass = '';
+    }
+    if (typeof statusText === 'undefined') {
+        let key = 'status_waiting';
+        if (data.isComplete) key = 'status_face_visible';
+        else if (data.issues && data.issues.includes('hair_occlusion')) key = 'status_hair_occlusion';
+        else if (data.issues && data.issues.includes('hand_on_face')) key = 'tip_hand_on_face';
+        else if (data.issues && data.issues.length > 0) key = 'status_face_occluded';
+        logMissingI18nOnce(key, 'updateVisibilityIndicator');
     }
     
     progressBar.style.width = progressValue + '%';
@@ -760,25 +943,31 @@ export function drawFaceOverlay(faceData) {
 async function runLocalPrecheckAnalysis(videoElement) {
     // Инициализируем анализатор если ещё не создан
     if (!state.runtime.localAnalyzer) {
+        const paReady = !!window.PrecheckAnalyzerReady;
         if (window.PrecheckAnalyzerReady) {
             await window.PrecheckAnalyzerReady;
         }
+        dbg('precheck', 'PrecheckAnalyzerReady:resolved', { hadPromise: paReady });
         state.runtime.localAnalyzer = new PrecheckAnalyzer({
             onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
             onError: (err) => console.error('[PreCheck] Ошибка анализатора:', err)
         });
+        dbg('precheck', 'PrecheckAnalyzer:instance:created', {});
     }
 
     // Инициализируем FaceSegmenter если ещё не создан
     if (!state.runtime.faceSegmenter) {
+        const fsReady = !!window.FaceSegmenterReady;
         if (window.FaceSegmenterReady) {
             await window.FaceSegmenterReady;
         }
+        dbg('precheck', 'FaceSegmenterReady:resolved', { hadPromise: fsReady });
         state.runtime.faceSegmenter = new FaceSegmenter({
             segmentationType: 'selfie_multiclass',
             onInitialized: () => console.log('[PreCheck] FaceSegmenter инициализирован'),
             onError: (err) => console.error('[PreCheck] Ошибка FaceSegmenter:', err)
         });
+        dbg('precheck', 'FaceSegmenter:instance:created', {});
     }
     
     try {

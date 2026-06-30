@@ -15,6 +15,7 @@ import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { shouldAutoPause as qcShouldAutoPause } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
 import { translations } from '../../translations.js';
+import { definitionForCognitiveRunner } from './protocol-invite-utils.js';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -47,6 +48,22 @@ let pendingStimulusTimeoutCallback = null;
 let qcTaskPaused = false;
 let qcPauseStartedPerf = null;
 
+function resolveTrialStimulusObject(stimulusId, meta) {
+    const std = typeof window !== 'undefined' ? window.StandardStimuli : null;
+    if (std) {
+        return std.resolveParticipantStimulus({
+            stimulusId,
+            meta,
+            lang: state.currentLang || 'ru',
+        });
+    }
+    return {
+        type: 'shape',
+        style: { width: '140px', height: '140px', borderRadius: '8px', backgroundColor: '#5C66BD' },
+        stimulusId: stimulusId || undefined,
+    };
+}
+
 function buildDefaultTrials(seed = 'default') {
     return [
         {
@@ -64,6 +81,47 @@ function buildDefaultTrials(seed = 'default') {
     ];
 }
 
+function buildSimpleRtTrials(seed = 'simple_rt', count = 10) {
+    const trials = [];
+    for (let i = 0; i < count; i += 1) {
+        trials.push({
+            id: `trial_${seed}_${i}`,
+            condition: 'target',
+            correctResponse: 'Space',
+            stimulus: {
+                type: 'shape',
+                style: { width: '120px', height: '120px', borderRadius: '8px', backgroundColor: '#020617' },
+                stimulusId: 'std_simple_black_square'
+            }
+        });
+    }
+    return trials;
+}
+
+/** When API cognitive_task has no trials array, derive runnable trials from taskType. */
+function synthesizeInvitationTrials(block, index) {
+    const normalized = normalizeV2Trials(block.trials);
+    if (normalized.length) return normalized;
+
+    const cfg = block.blockConfig || {};
+    const taskType = String(
+        block.taskType || cfg.taskType || block.rt_task || cfg.rt_task || 'other'
+    ).toLowerCase();
+    const useRt = cfg.useRT !== false && block.useRT !== false;
+
+    if (taskType === 'simple_rt' || taskType === 'pvt') {
+        return buildSimpleRtTrials(String(index), 10);
+    }
+    if (taskType === 'go_nogo') {
+        return buildDefaultTrials(String(index));
+    }
+    // Builder often saves RT blocks as taskType "other" with useRT: true
+    if (useRt && taskType === 'other') {
+        return buildSimpleRtTrials(String(index), 10);
+    }
+    return buildDefaultTrials(String(index));
+}
+
 function toInstructionBlock(id, title, text) {
     return {
         id,
@@ -79,11 +137,6 @@ function toInstructionBlock(id, title, text) {
 function toCognitiveBlockFromStimuli(defBlock, index) {
     const params = defBlock?.params || {};
     const stimuliMap = state.runtime?.invitationStimuliMap || {};
-    const resolveStimulusUrl = (meta) => {
-        if (!meta || typeof meta !== 'object') return null;
-        const md = meta.metadata || {};
-        return md.url || md.file_url || md.preview_url || null;
-    };
     const normalizeStimulusId = (id) => {
         const raw = String(id || '');
         if (raw.startsWith('api:')) return raw.slice(4);
@@ -96,16 +149,13 @@ function toCognitiveBlockFromStimuli(defBlock, index) {
                 ? params.stimuli_ids.map((stimulusId, i) => {
                     const normalizedStimulusId = normalizeStimulusId(stimulusId);
                     const row = stimuliMap[normalizedStimulusId] || null;
-                    const stimulusUrl = resolveStimulusUrl(row);
-                    const stimulusType = stimulusUrl ? 'image' : 'shape';
+                    const stimulus = resolveTrialStimulusObject(normalizedStimulusId, row);
                     return {
                     id: `trial_${index}_${i}_${String(stimulusId)}`,
                     condition: 'go',
                     correctResponse: 'Space',
                     stimulus: {
-                        type: stimulusType,
-                        src: stimulusUrl || undefined,
-                        style: { width: '140px', height: '140px', borderRadius: '8px', backgroundColor: '#5C66BD' },
+                        ...stimulus,
                         stimulusId: normalizedStimulusId,
                         stimulusName: row?.name || normalizedStimulusId
                     }
@@ -131,7 +181,144 @@ function toCognitiveBlockFromStimuli(defBlock, index) {
     };
 }
 
+function isResearcherV2Protocol(definition) {
+    const version = String(definition?.version || '');
+    if (version.startsWith('v2')) return true;
+    const blocks = Array.isArray(definition?.blocks) ? definition.blocks : [];
+    return blocks.some((b) => b?.taskType || b?.blockConfig || Array.isArray(b?.trials));
+}
+
+function mapActionToCorrectResponse(action) {
+    if (!action) return null;
+    const a = String(action).toLowerCase();
+    if (a === 'space') return 'Space';
+    if (a === 'mouse_click') return 'Click';
+    if (a.startsWith('arrow_')) {
+        const part = a.replace('arrow_', '');
+        return `Arrow${part.charAt(0).toUpperCase()}${part.slice(1)}`;
+    }
+    return action;
+}
+
+function conditionToIsGo(condition) {
+    if (condition == null) return null;
+    const c = String(condition).toLowerCase();
+    if (c.includes('nogo') || c.includes('no-go') || c === 'nogo') return false;
+    if (c.includes('go') || c === 'target') return true;
+    return null;
+}
+
+function keyFromKeyboardEvent(e) {
+    if (!e || !e.code) return null;
+    if (e.code === 'Space') return 'Space';
+    if (e.code.startsWith('Arrow')) return e.code;
+    return null;
+}
+
+function isAcceptedTaskKey(e, trial) {
+    const key = keyFromKeyboardEvent(e);
+    if (!key) return false;
+    const expected = trial?.correctResponse;
+    if (expected == null) return true;
+    return key === expected;
+}
+
+function normalizeV2Trials(trials) {
+    const stimuliMap = state.runtime?.invitationStimuliMap || {};
+    const list = Array.isArray(trials) ? trials : [];
+    const out = [];
+    list.forEach((t, index) => {
+        const reps = Math.max(1, parseInt(t.repetitions, 10) || 1);
+        for (let r = 0; r < reps; r += 1) {
+            const sid = t.stimulusId || `trial_${index}`;
+            const meta = stimuliMap[String(sid).replace(/^api:/, '')] || null;
+            const stimulus = resolveTrialStimulusObject(sid, meta);
+            out.push({
+                id: `${sid}_${index}_${r}`,
+                condition: t.condition || '',
+                correctResponse: mapActionToCorrectResponse(t.action || t.correctResponse),
+                stimulus: { ...stimulus, stimulusId: sid },
+                duration: t.duration || null
+            });
+        }
+    });
+    return out;
+}
+
+function toCognitiveBlockFromV2(block, index) {
+    const cfg = block.blockConfig || {};
+    const taskType = block.taskType || cfg.taskType || 'other';
+    const isInvite = !!state.runtime?.invitationProtocolDefinition;
+    let trials = normalizeV2Trials(block.trials);
+    if (!trials.length && isInvite) {
+        trials = synthesizeInvitationTrials(block, index);
+    }
+    if (!trials.length) {
+        trials = buildDefaultTrials(String(index));
+    }
+    return {
+        id: block.id || `cognitive_${index}`,
+        type: 'cognitive_task',
+        taskType,
+        rt_task: taskType,
+        selected_metrics: cfg.selected_metrics || block.selected_metrics || null,
+        blockConfig: {
+            fixation: cfg.fixation || { duration: cfg.fixationDuration || 500 },
+            stimulusDuration: cfg.stimulusDuration || 1000,
+            showFeedback: !!(cfg.showFeedback || cfg.feedbackConfig),
+            rtWindow: cfg.rtWindow || 1000,
+            omissionRule: cfg.omissionRule || 'skip',
+            commissionRule: cfg.commissionRule || 'flag',
+            feedbackCorrect: cfg.feedbackConfig?.correctText || null,
+            feedbackIncorrect: cfg.feedbackConfig?.incorrectText || null
+        },
+        trials
+    };
+}
+
 function normalizeProtocolDefinition(definition) {
+    if (isResearcherV2Protocol(definition)) {
+        const blocksIn = Array.isArray(definition?.blocks) ? definition.blocks : [];
+        const outBlocks = [];
+        blocksIn.forEach((block, index) => {
+            const type = String(block?.type || '').toLowerCase();
+            if (type === 'instruction' || type === 'instructions') {
+                outBlocks.push(toInstructionBlock(
+                    block.id || `instruction_${index}`,
+                    block.content?.title || block.label || 'Инструкция',
+                    block.content?.text || ''
+                ));
+                return;
+            }
+            if (type === 'cognitive_task' || type === 'stimuli') {
+                outBlocks.push(toCognitiveBlockFromV2(block, index));
+                return;
+            }
+            if (type === 'finish' || type === 'final') {
+                outBlocks.push(toInstructionBlock(
+                    block.id || `finish_${index}`,
+                    block.content?.title || block.label || 'Эксперимент завершён',
+                    block.content?.text || 'Спасибо за участие!'
+                ));
+                return;
+            }
+            if (type === 'passive' || type === 'rest') {
+                outBlocks.push(toInstructionBlock(
+                    block.id || `${type}_${index}`,
+                    block.label || type,
+                    block.content?.text || ''
+                ));
+            }
+        });
+        if (outBlocks.length) {
+            return {
+                title: definition?.title || definition?.meta?.name || 'Protocol',
+                version: definition?.version || 'v2-runtime',
+                blocks: outBlocks
+            };
+        }
+    }
+
     const blocksIn = Array.isArray(definition?.blocks) ? definition.blocks : [];
     const outBlocks = [];
 
@@ -156,7 +343,8 @@ function normalizeProtocolDefinition(definition) {
         }
     });
 
-    if (!outBlocks.length) {
+    const isInvitationProtocol = !!state.runtime?.invitationProtocolDefinition;
+    if (!outBlocks.length && !isInvitationProtocol) {
         outBlocks.push(toInstructionBlock('instruction_auto', 'Эксперимент', 'Подготовка к когнитивному этапу.'));
         outBlocks.push({
             id: 'task_auto',
@@ -167,7 +355,7 @@ function normalizeProtocolDefinition(definition) {
     }
 
     const hasTask = outBlocks.some((b) => b.type === 'cognitive_task');
-    if (!hasTask) {
+    if (!hasTask && !isInvitationProtocol) {
         outBlocks.push({
             id: 'task_fallback',
             type: 'cognitive_task',
@@ -309,6 +497,15 @@ function renderStimulus(trial) {
 
     if (shapeEl) {
         shapeEl.style.cssText = '';
+        shapeEl.textContent = '';
+        if (stimulusType === 'text') {
+            shapeEl.textContent = stimulus.text || '';
+            if (stimulus.style && typeof stimulus.style === 'object') {
+                Object.assign(shapeEl.style, stimulus.style);
+            }
+            shapeEl.style.display = 'block';
+            return;
+        }
         if (stimulus.style && typeof stimulus.style === 'object') {
             Object.assign(shapeEl.style, stimulus.style);
         }
@@ -348,6 +545,7 @@ async function runCognitiveAnalysisTick() {
         cognitiveLoopLastVideoTime = videoTime;
 
         const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(cognitiveVideo);
+        state.runtime.lastPrecheckResult = precheckResult;
 
         if (precheckResult && precheckResult.pose) {
             state.runtime.lastPoseData = {
@@ -413,17 +611,6 @@ async function runCognitiveAnalysisTick() {
             const v = Number.isFinite(emotionSample.valence) ? emotionSample.valence.toFixed(2) : '?';
             const a = Number.isFinite(emotionSample.arousal) ? emotionSample.arousal.toFixed(2) : '?';
             cogEmoHud.textContent = `${lab}: ${name} (v ${v}, a ${a})`;
-        }
-        if (emotionSample && (emotionSample.dominant || emotionSample.scores)) {
-            state.sessionData.emotionEvents.push({
-                t: Date.now(),
-                tRelMs: getRelativeSessionTimeMs(),
-                phase: state.runtime.currentPhase || null,
-                dominant: emotionSample.dominant || 'neutral',
-                scores: emotionSample.scores || null,
-                valence: Number.isFinite(emotionSample.valence) ? emotionSample.valence : null,
-                arousal: Number.isFinite(emotionSample.arousal) ? emotionSample.arousal : null
-            });
         }
     } catch (e) {
         console.warn('[Cognitive] Ошибка анализа:', e);
@@ -526,7 +713,9 @@ export async function loadAndStartCognitiveTask(options = {}) {
 
     try {
         if (state.runtime?.invitationProtocolDefinition) {
-            experimentProtocol = normalizeProtocolDefinition(state.runtime.invitationProtocolDefinition);
+            experimentProtocol = normalizeProtocolDefinition(
+                definitionForCognitiveRunner(state.runtime.invitationProtocolDefinition)
+            );
         } else {
             const response = await fetch('./experiment.json');
             if (!response.ok) throw new Error('Файл experiment.json не найден');
@@ -568,6 +757,11 @@ export async function loadAndStartCognitiveTask(options = {}) {
 function runNextBlock() {
     if (!experimentProtocol || !Array.isArray(experimentProtocol.blocks)) {
         finishCognitiveTask('error', 'Некорректный формат experiment.json');
+        return;
+    }
+
+    if (!experimentProtocol.blocks.length) {
+        finishCognitiveTask('empty_protocol', 'No experiment blocks in invitation protocol');
         return;
     }
 
@@ -726,9 +920,17 @@ function runTrial() {
         };
 
         setSessionPhase('cognitive_stimulus', { source: 'stimulus_on' });
+        const isGo = conditionToIsGo(trial?.condition);
+        const rtWindowMs = config.rtWindow || config.stimulusDuration || 1000;
         emitTaskEvent('stimulus_on', {
             trialIndex: currentTrialIndex,
-            condition: trial?.condition ?? null
+            trial_id: currentTrialIndex + 1,
+            condition: trial?.condition ?? null,
+            task_id: block?.taskType || block?.rt_task || null,
+            stimulus_type: trial?.condition || stimulusType,
+            expected_response: trial?.correctResponse ?? null,
+            is_go: isGo,
+            timeout_ms: rtWindowMs
         });
 
         let responded = false;
@@ -737,9 +939,9 @@ function runTrial() {
         stimulusTimerStartPerf = performance.now();
         responseHandler = (e) => {
             if (qcTaskPaused) return;
-            if (e.code === 'Space' && !responded) {
+            if (!responded && isAcceptedTaskKey(e, trial)) {
                 responded = true;
-                handleResponse(performance.now() - stimulusOnPerf, 'Space');
+                handleResponse(performance.now() - stimulusOnPerf, keyFromKeyboardEvent(e));
             }
         };
         document.addEventListener('keydown', responseHandler);
@@ -782,6 +984,7 @@ function handleResponse(rt, key) {
         trialId: trial.id,
         block: block.id,
         blockId: block.id,
+        task_id: block?.taskType || block?.rt_task || null,
         stimulusId: trial.id,
         stimulusType: trial?.stimulus?.type || 'shape',
         expectedResponse: trial.correctResponse ?? null,
