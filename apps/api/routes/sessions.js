@@ -5,6 +5,7 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { getSessionProxyMetrics } = require('./proxy_metrics');
 
 const router = express.Router();
 
@@ -140,9 +141,16 @@ router.get(
         SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id, s.started_at, s.stopped_at, s.created_at,
                CASE WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
                s.stopped_at AS completed_at,
-               q.qc_score, q.validity AS qc_validity
+               q.qc_score, q.validity AS qc_validity,
+               q.fail_reasons AS qc_fail_reasons,
+               COALESCE((pm.payload->>'proxy_ready')::boolean, false) AS proxy_ready,
+               pm.attention_score, pm.mean_rt_ms, pm.omissions_pct,
+               pm.emotion_valence_mean, pm.emotion_arousal_mean, pm.bpm_mean, pm.rppg_sample_count,
+               pm.respiration_rate_mean, pm.respiration_sample_count, pm.respiration_available,
+               pm.payload AS proxy_metrics
         FROM sessions s
         LEFT JOIN session_qc_summary q ON q.session_id = s.id
+        LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
         ${scopedJoinAndWhere(1)}
         WHERE 1=1
       `;
@@ -164,6 +172,14 @@ router.get(
 );
 
 router.get(
+  '/:sessionRef/proxy-metrics',
+  requireAuth,
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  [param('sessionRef').trim().notEmpty().isLength({ max: 64 })],
+  getSessionProxyMetrics
+);
+
+router.get(
   '/:id',
   requireAuth,
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
@@ -174,9 +190,15 @@ router.get(
         `SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id, s.started_at, s.stopped_at, s.created_at,
                 CASE WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
                 s.stopped_at AS completed_at,
-                q.qc_score, q.validity AS qc_validity, q.fail_reasons, q.payload AS qc_payload
+                q.qc_score, q.validity AS qc_validity, q.fail_reasons, q.payload AS qc_payload,
+                COALESCE((pm.payload->>'proxy_ready')::boolean, false) AS proxy_ready,
+                pm.attention_score, pm.mean_rt_ms, pm.omissions_pct,
+                pm.emotion_valence_mean, pm.emotion_arousal_mean, pm.bpm_mean, pm.rppg_sample_count,
+                pm.respiration_rate_mean, pm.respiration_sample_count, pm.respiration_available,
+                pm.payload AS proxy_metrics, pm.source_payload AS proxy_source_data
          FROM sessions s
          LEFT JOIN session_qc_summary q ON q.session_id = s.id
+         LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
          LEFT JOIN protocols sp ON sp.id = s.protocol_id
          INNER JOIN projects p_scope ON p_scope.id = COALESCE(s.project_id, sp.project_id)
          INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id

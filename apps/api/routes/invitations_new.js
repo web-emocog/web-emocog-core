@@ -10,13 +10,67 @@ const crypto = require('crypto');
 
 const router = express.Router();
 
+const STAFF_ROLES = new Set(['admin', 'PI', 'developer', 'researcher', 'analyst', 'assistant']);
+
 function hasGlobalInvitationAccess(user) {
-  return !!user && (user.bypass_admin === true || user.role === 'admin' || user.role === 'PI' || user.role === 'developer');
+  return !!user && (user.bypass_admin === true || STAFF_ROLES.has(user.role));
 }
 
 /** Генерация короткого кода приглашения */
 function generateCode() {
   return crypto.randomBytes(8).toString('base64url').replace(/[-_]/g, (c) => (c === '-' ? 'x' : 'y')).slice(0, 12);
+}
+
+/**
+ * Resolve participant code → invitation row + protocol definition.
+ * 1) invitations.code (canonical index)
+ * 2) protocols.definition->>'protocolId' (builder slug); auto-upsert invitation row
+ */
+async function resolveInvitationByCode(code) {
+  const byCode = await pool.query(
+    `SELECT i.id, i.protocol_id, i.code, i.max_runs, i.expires_at,
+            pr.name AS protocol_name, pr.project_id, pr.definition AS protocol_definition
+     FROM invitations i
+     INNER JOIN protocols pr ON pr.id = i.protocol_id
+     WHERE i.code = $1`,
+    [code]
+  );
+  if (byCode.rows[0]) {
+    return { row: byCode.rows[0], resolvedVia: 'invitation_code' };
+  }
+
+  const bySlug = await pool.query(
+    `SELECT id, name, project_id, definition
+     FROM protocols
+     WHERE definition->>'protocolId' = $1
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [code]
+  );
+  if (!bySlug.rows[0]) return null;
+
+  const pr = bySlug.rows[0];
+  const upsert = await pool.query(
+    `INSERT INTO invitations (protocol_id, code, max_runs, expires_at)
+     VALUES ($1, $2, NULL, NULL)
+     ON CONFLICT (code) DO UPDATE SET protocol_id = EXCLUDED.protocol_id
+     RETURNING id, protocol_id, code, max_runs, expires_at`,
+    [pr.id, code]
+  );
+  const inv = upsert.rows[0];
+  return {
+    row: {
+      id: inv.id,
+      protocol_id: inv.protocol_id,
+      code: inv.code,
+      max_runs: inv.max_runs,
+      expires_at: inv.expires_at,
+      protocol_name: pr.name,
+      project_id: pr.project_id,
+      protocol_definition: pr.definition,
+    },
+    resolvedVia: 'protocol_slug',
+  };
 }
 
 /**
@@ -29,16 +83,15 @@ router.get(
   async (req, res) => {
     try {
       const code = req.params.code.trim();
-      const r = await pool.query(
-        `SELECT i.id, i.protocol_id, i.code, i.max_runs, i.expires_at,
-                pr.name AS protocol_name, pr.project_id, pr.definition AS protocol_definition
-         FROM invitations i
-         INNER JOIN protocols pr ON pr.id = i.protocol_id
-         WHERE i.code = $1`,
-        [code]
-      );
-      if (!r.rows[0]) return res.status(404).json({ error: 'Invitation not found' });
-      const inv = r.rows[0];
+      const resolved = await resolveInvitationByCode(code);
+      if (!resolved) {
+        return res.status(404).json({
+          error: 'Invitation not found',
+          code,
+          hint: 'Код приглашения не зарегистрирован в API. В конструкторе нажмите «Сохранить протокол» (нужен вход в API) или создайте приглашение через POST /invitations.',
+        });
+      }
+      const inv = resolved.row;
       if (inv.expires_at && new Date(inv.expires_at) < new Date()) {
         return res.status(410).json({ error: 'Invitation expired' });
       }
@@ -62,7 +115,7 @@ router.get(
         expires_at: inv.expires_at,
         definition: inv.protocol_definition,
         source: {
-          type: 'invitation_code',
+          type: resolved.resolvedVia === 'protocol_slug' ? 'protocol_slug' : 'invitation_code',
           value: inv.code,
         },
       });
@@ -115,9 +168,10 @@ router.get(
 
 router.post(
   '/',
-  requireRole('admin', 'PI', 'researcher', 'developer'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   [
     body('protocol_id').isInt(),
+    body('code').optional().matches(/^[a-zA-Z0-9_-]{1,64}$/),
     body('max_runs').optional().isInt({ min: 1 }),
     body('expires_at').optional().isISO8601(),
   ],
@@ -137,15 +191,30 @@ router.post(
           [protocol_id, req.user.sub]
         );
       if (!check.rows[0]) return res.status(403).json({ error: 'Protocol not found or access denied' });
-      let code = generateCode();
-      let exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
-      while (exists.rows[0]) {
+      let code = req.body.code ? String(req.body.code).trim() : '';
+      if (code) {
+        const taken = await pool.query(
+          'SELECT id, protocol_id FROM invitations WHERE code = $1',
+          [code]
+        );
+        if (taken.rows[0] && parseInt(taken.rows[0].protocol_id, 10) !== parseInt(protocol_id, 10)) {
+          return res.status(409).json({ error: 'Invitation code already used for another protocol' });
+        }
+      } else {
         code = generateCode();
-        exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
+        let exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
+        while (exists.rows[0]) {
+          code = generateCode();
+          exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
+        }
       }
       const r = await pool.query(
         `INSERT INTO invitations (protocol_id, code, max_runs, expires_at)
          VALUES ($1, $2, $3, $4)
+         ON CONFLICT (code) DO UPDATE SET
+           protocol_id = EXCLUDED.protocol_id,
+           max_runs = COALESCE(EXCLUDED.max_runs, invitations.max_runs),
+           expires_at = COALESCE(EXCLUDED.expires_at, invitations.expires_at)
          RETURNING id, protocol_id, code, max_runs, expires_at, created_at`,
         [protocol_id, code, max_runs || null, expires_at || null]
       );

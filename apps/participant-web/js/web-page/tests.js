@@ -1,3 +1,5 @@
+console.warn('[DEPRECATED] js/web-page/tests.js — official flow: tests-updated.js via mvp_with_precheck_1-updated.html');
+
 import {
     state,
     setSessionPhase,

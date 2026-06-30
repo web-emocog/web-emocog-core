@@ -19,6 +19,8 @@ const protocolsRoutes = require('./routes/protocols_new');
 const invitationsRoutes = require('./routes/invitations_new');
 const experimentsRoutes = require('./routes/experiments');
 const stimuliRoutes = require('./routes/stimuli');
+const proxyMetricsRoutes = require('./routes/proxy_metrics');
+const { getRtAnalyzerHealth } = require('./rt/compute');
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -46,9 +48,16 @@ app.use('/protocols', protocolsRoutes);
 app.use('/invitations', invitationsRoutes);
 app.use('/experiments', experimentsRoutes);
 app.use('/stimuli', stimuliRoutes);
+app.use('/proxy-metrics', proxyMetricsRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', phase: 4, node_env: config.nodeEnv, uptime_sec: Math.round(process.uptime()) });
+  res.json({
+    status: 'ok',
+    phase: 4,
+    node_env: config.nodeEnv,
+    uptime_sec: Math.round(process.uptime()),
+    rt_analyzer: getRtAnalyzerHealth(),
+  });
 });
 
 app.get('/ready', async (req, res) => {

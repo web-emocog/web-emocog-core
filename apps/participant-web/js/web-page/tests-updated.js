@@ -10,18 +10,64 @@ import { updateFinalStepWithQC, nextStep } from './ui-updated.js';
 import { stopPreCheck } from './precheck-updated.js';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
 import { loadAndStartCognitiveTask } from './experimental_task-updated.js';
+import {
+    deriveInvitationHubMetrics,
+    getInvitationSessionPlan
+} from './protocol-invite-utils.js';
 import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import { startTestHub } from '../gaze-tracker/gaze-tests/index.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { startBpmTest } from './bpm-test-updated.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
-import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
+import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
-import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
+import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js';
 import { handleSendWithFallback } from './data-sender.js';
 
+function dbg(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.log(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+function dbgErr(scope, event, data) {
+    try {
+        const d = window.WECOG_DEBUG;
+        if (d && d.enabled) d.error(scope, event, data);
+    } catch (_) { /* ignore */ }
+}
+
+let _qcOverlayLogN = 0;
+let _trackingQcLogN = 0;
+
+function summarizeRespirationForDebug(sessionData) {
+    const runs = Array.isArray(sessionData?.respirationRuns) ? sessionData.respirationRuns : [];
+    const bpmRuns = Array.isArray(sessionData?.bpmRuns) ? sessionData.bpmRuns : [];
+    const fromRuns = runs.map((r) => r?.respRateMean).filter(Number.isFinite);
+    const fromBpm = [];
+    bpmRuns.forEach((run) => {
+        const rows = run?.rppgSession?.samples;
+        if (!Array.isArray(rows)) return;
+        rows.forEach((s) => {
+            if (Number.isFinite(s?.resp_rate)) fromBpm.push(s.resp_rate);
+        });
+    });
+    const all = fromRuns.length ? fromRuns : fromBpm;
+    const mean = all.length ? all.reduce((a, v) => a + v, 0) / all.length : null;
+    const min = all.length ? Math.min(...all) : null;
+    const max = all.length ? Math.max(...all) : null;
+    return {
+        resp_rate_mean: mean != null ? Math.round(mean * 10) / 10 : null,
+        resp_rate_min: min != null ? Math.round(min * 10) / 10 : null,
+        resp_rate_max: max != null ? Math.round(max * 10) / 10 : null,
+        resp_sample_count: all.length,
+        resp_available: all.length > 0,
+        source: fromRuns.length ? 'respirationRuns' : (fromBpm.length ? 'bpmRuns.rppgSession.samples' : null)
+    };
+}
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -49,9 +95,28 @@ function isSecureSenderEnabled() {
 }
 
 function getApiBaseForParticipant() {
-    const fromStorage = localStorage.getItem('emocog_api_base');
-    if (fromStorage && fromStorage.trim()) return fromStorage.trim().replace(/\/$/, '');
-    return (window.location.origin + '/api').replace(/\/$/, '');
+    const origin = window.location.origin || '';
+    const defaultBase = (origin + '/api').replace(/\/$/, '');
+    try {
+        const fromStorage = localStorage.getItem('emocog_api_base');
+        if (fromStorage && fromStorage.trim()) {
+            const base = fromStorage.trim().replace(/\/$/, '');
+            const isLocalApi = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(base);
+            const isLocalPage = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(origin);
+            if (isLocalApi && !isLocalPage) return defaultBase;
+            return base;
+        }
+    } catch (_) { /* ignore */ }
+    return defaultBase;
+}
+
+function isUploadNetworkError(error) {
+    if (!error) return true;
+    const msg = String(error.message || error);
+    return (
+        error.name === 'TypeError'
+        && (/failed to fetch|networkerror|load failed/i.test(msg) || msg === 'Failed to fetch')
+    );
 }
 
 function ensureUploadStatusElement() {
@@ -101,14 +166,27 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
         try {
             setUploadStatus(`Загрузка данных: попытка ${attempt}/${retries}...`, 'info');
             recordSessionEvent('upload_attempt', { attempt, retries, endpoint: '/ingest' });
+            let body;
+            try {
+                body = JSON.stringify(payload);
+            } catch (stringifyErr) {
+                throw new Error('Payload too large: ' + (stringifyErr?.message || String(stringifyErr)));
+            }
             const response = await fetch(base + '/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                credentials: 'omit',
+                body
             });
             if (!response.ok) {
                 const errorPayload = await response.json().catch(() => ({}));
-                throw new Error(errorPayload.error || ('HTTP ' + response.status));
+                let detail = errorPayload.error || ('HTTP ' + response.status);
+                if (Array.isArray(errorPayload.errors) && errorPayload.errors.length) {
+                    detail = errorPayload.errors.map((e) => e.msg || e.message || String(e)).join('; ');
+                }
+                const err = new Error(detail);
+                err.httpStatus = response.status;
+                throw err;
             }
             const result = await response.json().catch(() => ({}));
             recordSessionEvent('upload_success', {
@@ -126,7 +204,13 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
             });
             if (attempt < retries) {
                 const delay = backoffMs * Math.pow(2, attempt - 1);
-                setUploadStatus(`Сетевая ошибка. Повтор через ${Math.round(delay / 1000)} c...`, 'error');
+                const sec = Math.round(delay / 1000);
+                const detail = error && error.message ? String(error.message) : 'unknown';
+                if (isUploadNetworkError(error)) {
+                    setUploadStatus(`Сетевая ошибка. Повтор через ${sec} c...`, 'error');
+                } else {
+                    setUploadStatus(`Ошибка отправки: ${detail}. Повтор через ${sec} c...`, 'error');
+                }
                 await waitMs(delay);
             }
         }
@@ -144,7 +228,98 @@ function getVideoTime(videoElement) {
     return Number.isFinite(t) ? t : -1;
 }
 
+function buildTestHubHandlers() {
+    return {
+        runRTTest: () => new Promise(resolve => {
+            const prevPause = getQcPauseConfig().autoPauseStimulus !== false;
+            setAutoPauseStimulus(false);
+            loadAndStartCognitiveTask({
+                autoFinishSession: false,
+                onComplete: (payload) => {
+                    setAutoPauseStimulus(prevPause);
+                    resolve(payload || {
+                        trialResults: state.sessionData.cognitiveResults.length
+                    });
+                }
+            });
+        }),
+        runTrackingTest: () => new Promise(resolve => {
+            startTrackingTest({
+                returnToHub: true,
+                onComplete: (payload) => {
+                    resolve(payload || {
+                        trackingSamples: state.sessionData.trackingTest.length,
+                        averageCameraFps: getAverageCameraFps()
+                    });
+                }
+            });
+        }),
+        runBpmTest: () => new Promise((resolve, reject) => {
+            startBpmTest({
+                onComplete: (payload) => resolve(payload || { sampleCount: 0, bpmMean: null })
+            }).catch(reject);
+        }),
+        finishSession: async () => {
+            await finishSession();
+        }
+    };
+}
+
+export function continueInvitationSessionAfterShell() {
+    const inviteDef = state.runtime?.invitationProtocolDefinition;
+    const invitationCode = state.sessionData?.ids?.invitationCode
+        || state.runtime?.invitationProtocolMeta?.code;
+
+    if (!invitationCode && !inviteDef) {
+        startTestHub(buildTestHubHandlers());
+        return;
+    }
+
+    const plan = inviteDef
+        ? getInvitationSessionPlan(inviteDef)
+        : {
+            hubMetrics: state.runtime?.invitationSelectedMetrics || [],
+            hasHub: Array.isArray(state.runtime?.invitationSelectedMetrics)
+                && state.runtime.invitationSelectedMetrics.length > 0,
+            runProtocolAfterShell: false
+        };
+
+    state.runtime.invitationSelectedMetrics = plan.hubMetrics;
+    state.flags.isRecording = true;
+    document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+    const step6 = document.getElementById('step6');
+    if (step6) step6.classList.add('active');
+    document.querySelector('.container').style.display = 'block';
+    document.querySelector('.top-bar').style.display = 'flex';
+
+    const hubHandlers = buildTestHubHandlers();
+
+    if (plan.runProtocolAfterShell) {
+        recordSessionEvent('invitation_auto_start_cognitive', {
+            protocolId: state.runtime?.invitationProtocolMeta?.protocolId || null,
+            hasHub: plan.hasHub
+        });
+        loadAndStartCognitiveTask({
+            autoFinishSession: !plan.hasHub,
+            onComplete: plan.hasHub ? () => startTestHub(hubHandlers) : undefined
+        });
+        return;
+    }
+
+    if (plan.hasHub) {
+        startTestHub(hubHandlers);
+        return;
+    }
+
+    finishSession();
+}
+
 export async function startCalibration() {
+    const shell = state.runtime?.invitationParticipantShell;
+    if (shell && shell.calibration === false) {
+        continueInvitationSessionAfterShell();
+        return;
+    }
     // Фаза 1.1: gate — не запускать калибровку, если pre-check не пройден
     if (state.sessionData.precheck && state.sessionData.precheck.pass_fail === false) {
         console.warn('[Phase1] Calibration blocked: precheck pass_fail is false');
@@ -173,18 +348,21 @@ export async function startCalibration() {
     // window.QCMetrics будет реальным модульным классом; иначе остаётся inline-fallback.
     if (window.QCMetricsReady) {
         await window.QCMetricsReady;
+        dbg('qc', 'module:ready:QCMetrics', { resolved: true });
     }
     state.runtime.qcMetrics = new QCMetrics({
-        screenWidth: window.screen.width,
-        screenHeight: window.screen.height
+        screenWidth: window.innerWidth,
+        screenHeight: window.innerHeight
     });
     state.runtime.qcMetrics.start();
     state.runtime.sessionStartTime = Date.now();
     console.log('[QC] QCMetrics инициализирован и запущен');
+    dbg('qc', 'QCMetrics:instance:created', {});
 
     // === ИНИЦИАЛИЗАЦИЯ GAZE TRACKER ===
     if (window.GazeTrackerReady) {
         await window.GazeTrackerReady;
+        dbg('gaze', 'module:ready:GazeTracker', { resolved: true });
     }
     state.runtime.gazeTracker = new GazeTracker({
         screenWidth: window.innerWidth,
@@ -199,6 +377,7 @@ export async function startCalibration() {
         }
     });
     console.log('[GazeTracker] Инициализирован');
+    dbg('gaze', 'GazeTracker:instance:created', {});
     
     // Скрываем pre-check интерфейс
     document.getElementById('precheckContainer').style.display = 'none';
@@ -519,6 +698,10 @@ export function startGazeValidation() {
     recordSessionEvent('validation_start', {
         validationPointCount: validationPositions.length
     });
+    dbg('gaze', 'validation:start', {
+        validationPointCount: validationPositions.length,
+        calibrationPointCount: state.sessionData?.gazeCalibration?.points?.length ?? null
+    });
     
     const screenW = window.innerWidth;
     const screenH = window.innerHeight;
@@ -696,6 +879,14 @@ export function startGazeValidation() {
             // LOOCV-оценка обобщающей ошибки коррекции — fit на N-1 целях, проверка на N-й.
             // Защищает от переобучения на тех же сэмплах, по которым коррекция построена.
             const loocv = evaluateAffineCorrectionLOOCV(filteredValidationPoints);
+            dbg('gaze', 'loocv:evaluateAffineCorrectionLOOCV', {
+                available: !!(loocv && loocv.available !== false),
+                loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
+                loocvP95HeldOutPx: loocv?.loocvP95HeldOutPx ?? null,
+                rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
+                targetCount: loocv?.targetCount ?? null,
+                calibrationPointCount: filteredValidationPoints?.length ?? 0
+            });
 
             const shouldApply = shouldApplyValidationCorrection(filteredMetrics, correctedMetrics, loocv);
             const correctionId = generateCorrectionId();
@@ -764,6 +955,28 @@ export function startGazeValidation() {
         });
         
         console.log('[Validation] Результаты:', metrics);
+        dbg('gaze', 'validation:end', {
+            accuracyPct: metrics?.accuracyPct,
+            precisionPct: metrics?.precisionPct,
+            correctionApplied: !!postCalibrationCorrection?.applied,
+            correctionId: postCalibrationCorrection?.correctionId || null
+        });
+        try {
+            const d = window.WECOG_DEBUG;
+            if (d?.setGazeCalibrationDiagnostics) {
+                d.setGazeCalibrationDiagnostics({
+                    postCalibrationApplied: !!postCalibrationCorrection?.applied,
+                    loocvPass: postCalibrationCorrection?.applied === true,
+                    loocvRejectedReason: postCalibrationCorrection && !postCalibrationCorrection.applied
+                        ? 'held_out_or_insufficient_gain'
+                        : null,
+                    accuracyPx: metrics?.accuracyPx ?? null,
+                    validationRmsPx: metrics?.accuracyPx ?? null,
+                    affineStatus: postCalibrationCorrection?.correctionId ? 'fitted' : 'not_fitted',
+                    calibrationStatus: state.runtime.gazeTracker?._isCalibrated ? 'calibrated' : 'unknown'
+                });
+            }
+        } catch (_) { /* ignore */ }
         
         // === Передаём данные валидации в QCMetrics для accuracy/precision checks ===
         if (state.runtime.qcMetrics) {
@@ -779,47 +992,10 @@ export function startGazeValidation() {
         point.style.backgroundColor = '#DC2626';
         point.style.cursor = 'pointer';
         
-        // Переходим к Test Hub после успешной калибровки и валидации
+        // Переходим к протоколу / Test Hub после успешной калибровки
         setTimeout(() => {
             calibScreen.classList.remove('active');
-            state.flags.isRecording = true;
-            document.querySelector('.container').style.display = 'block';
-            document.querySelector('.top-bar').style.display = 'flex';
-
-            startTestHub({
-                runRTTest: () => new Promise(resolve => {
-                    const prevPause = getQcPauseConfig().autoPauseStimulus !== false;
-                    setAutoPauseStimulus(false);
-                    loadAndStartCognitiveTask({
-                        autoFinishSession: false,
-                        onComplete: (payload) => {
-                            setAutoPauseStimulus(prevPause);
-                            resolve(payload || {
-                                trialResults: state.sessionData.cognitiveResults.length
-                            });
-                        }
-                    });
-                }),
-                runTrackingTest: () => new Promise(resolve => {
-                    startTrackingTest({
-                        returnToHub: true,
-                        onComplete: (payload) => {
-                            resolve(payload || {
-                                trackingSamples: state.sessionData.trackingTest.length,
-                                averageCameraFps: getAverageCameraFps()
-                            });
-                        }
-                    });
-                }),
-                runBpmTest: () => new Promise((resolve, reject) => {
-                    startBpmTest({
-                        onComplete: (payload) => resolve(payload || { sampleCount: 0, bpmMean: null })
-                    }).catch(reject);
-                }),
-                finishSession: async () => {
-                    await finishSession();
-                }
-            });
+            continueInvitationSessionAfterShell();
         }, 2000);
     }
     
@@ -1328,6 +1504,8 @@ export function startTrackingTest(options = {}) {
     setSessionPhase('tracking_test', { source: 'startTrackingTest' });
     recordSessionEvent('tracking_test_start');
     clearTaskContext();
+    hideQcOverlay();
+    resetFaceLostTimer();
     if (!state.flags.isRecording) state.flags.isRecording = true;
 
     const testArea = document.getElementById('trackingTestArea');
@@ -1419,6 +1597,7 @@ export function startTrackingTest(options = {}) {
 
             // 1) analyzeFrame — один раз на новый кадр
             const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(video);
+            state.runtime.lastPrecheckResult = precheckResult;
 
             // 2) Pose данные для QC gaze inference
             if (precheckResult && precheckResult.pose) {
@@ -1471,6 +1650,24 @@ export function startTrackingTest(options = {}) {
                 // Фаза 1.2: overlay при низком QC / потере лица
                 const metrics = state.runtime.qcMetrics.getCurrentMetrics();
                 qcOverlayUpdateFromMetrics(metrics, precheckResult);
+                if (window.WECOG_DEBUG && window.WECOG_DEBUG.enabled) {
+                    _trackingQcLogN += 1;
+                    if (_trackingQcLogN % 45 === 0) {
+                        const overlay = window.qcPauseOverlay;
+                        const cfg = overlay?.getConfig?.() || getQcPauseConfig();
+                        dbg('qc', 'overlay:state', {
+                            visible: overlay?.isVisible?.() ?? null,
+                            qcScore: metrics?.qcScore,
+                            illuminationOkPct: metrics?.illuminationOkPct,
+                            faceDetected: precheckResult?.face?.detected,
+                            thresholds: {
+                                qcScoreThreshold: cfg.qcScoreThreshold,
+                                faceLostSec: cfg.faceLostSec
+                            },
+                            frameAcceptable: precheckResult?.face?.detected !== false
+                        });
+                    }
+                }
             }
             // Фаза 1.3: сэмплы эмоций (заглушка valence/arousal)
             const emotionSample = getEmotionSample(precheckResult);
@@ -1562,8 +1759,17 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     stopCameraFpsMonitor();
     if (state.runtime.qcMetrics && state.sessionData.trackingTest && state.sessionData.trackingTest.length > 0) {
         state.runtime.qcMetrics.setTrackingDeviationData(state.sessionData.trackingTest);
+        const summary = state.runtime.qcMetrics.getSummary?.();
+        const td = summary?.trackingDeviation;
+        dbg('gaze', 'gaze_on_target:summary', {
+            totalSamples: td?.sampleCount ?? state.sessionData.trackingTest.length,
+            validSampleCount: td?.validSampleCount ?? null,
+            gazeOnTargetPct: td?.onTargetPct ?? null,
+            deviationPx: td?.deviationPx ?? null
+        });
     }
     hideQcOverlay();
+    dbg('qc', 'overlay:hidden', { source: 'finishTrackingTest' });
     const trackEmoHud = document.getElementById('trackingEmotionHud');
     if (trackEmoHud) trackEmoHud.textContent = '';
 
@@ -1643,6 +1849,8 @@ export async function finishSession() {
         state.runtime.gazeTestsAnalysisInterval = null;
     }
 
+    resetEmotionWiringState();
+
     // === Heatmap + attention analytics (research-only) ===
     try {
         // Передаём validationRmsPx из gazeValidation, чтобы heatmap получил
@@ -1650,10 +1858,17 @@ export async function finishSession() {
         const validationRmsPx = Number.isFinite(state.sessionData?.gazeValidation?.metrics?.accuracyPx)
             ? state.sessionData.gazeValidation.metrics.accuracyPx
             : null;
-        state.sessionData.heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
+        const heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
             gridWidth: 96,
             gridHeight: 54,
             validationRmsPx
+        });
+        state.sessionData.heatmaps = heatmaps;
+        dbg('gaze', 'heatmap:built', {
+            validationRmsPx,
+            qualityWeight: heatmaps?.qualityWeight ?? null,
+            sessionSampleCount: heatmaps?.session?.totalSamples ?? null,
+            onScreenSamples: heatmaps?.session?.onScreenSamples ?? null
         });
     } catch (e) {
         console.warn('[finishSession] Ошибка расчёта heatmaps:', e);
@@ -1684,6 +1899,7 @@ export async function finishSession() {
             const qcSummary = state.runtime.qcMetrics.getSummary();
             state.sessionData.qcSummary = qcSummary;
             console.log('[QC] Summary:', qcSummary);
+            dbg('respiration', 'respiration:summary', summarizeRespirationForDebug(state.sessionData));
             
             // Обновляем UI на основе QC результата
             updateFinalStepWithQC(qcSummary);
@@ -1729,8 +1945,14 @@ export async function finishSession() {
     recordSessionEvent('session_finish_complete');
     setUploadStatus('Подготовка к отправке данных...', 'info');
 
-    const uploadPayload = buildAggregatesPayload(state.sessionData);
+    const uploadPayload = buildAggregatesPayload(state.sessionData, { forIngest: true });
     if (uploadPayload) {
+        if (!uploadPayload.ids.invitationCode) {
+            const code = state.sessionData?.ids?.invitationCode
+                || state.runtime?.invitationProtocolMeta?.code
+                || null;
+            if (code) uploadPayload.ids.invitationCode = code;
+        }
         uploadPayload.lifecycle = {
             status: 'completed',
             completedAt: new Date(completedAt).toISOString()

@@ -1,23 +1,39 @@
-Структура
-```
-├── mvp_with_precheck_1.html  # UI и загрузка MediaPipe)
-├── style.css                 # Стили интерфейса и индикаторов состояния
-├── translations.js           # Словарь для RU/EN
-└── js/
-    ├── app.js                # Инициализация и приём gaze/eye-signal в sessionData
-    ├── state.js              # Конфиг, состояние сессии, фазы и события
-    ├── precheck.js           # Логика pre-check (освещение, поза, видимость лица)
-    ├── tests.js              # Калибровка, валидация, tracking test, завершение сессии
-    ├── experimental_task.js  # Когнитивный контур (instruction/task blocks, trial events)
-    ├── heatmap.js            # Построение heatmap per-stimulus/per-block
-    ├── eye-signal.js         # Извлечение EAR/iris proxy из кадров анализа
-    ├── camera.js             # Работа с видеопотоком, измерение FPS камеры/рендера
-    └── ui.js                 # Навигация по шагам, локализация и вывод QC-отчета
-```
+# Participant web-page modules
 
-Поток после калибровки:
-- После `calibration + validation` запускается Test Hub (меню выбора тестов).
-- RT/Tracking запускаются через существующие модули (`experimental_task.js`, `tests.js`) с callback-возвратом в Hub.
-- Новые gaze-тесты вынесены в `apps/participant-web/js/gaze-tracker/gaze-tests/*`:
-  - `VPC (Felidae)`
-  - `Visuospatial drawing`
+## Official entrypoint
+
+**`mvp_with_precheck_1-updated.html`** — единственный поддерживаемый entrypoint:
+
+- `js/web-page/app-updated.js`
+- `js/web-page/tests-updated.js`
+- `js/web-page/precheck-updated.js`
+- `js/web-page/ui-updated.js`
+- `js/web-page/bpm-test-updated.js`
+- `js/gaze-tracker/gaze-tests/*` (Test Hub)
+
+`mvp_with_precheck_1.html` — **deprecated** (автоматический redirect на `-updated`).
+
+`run_new.html` и `invite.html` уже ведут на `-updated`.
+
+## Debug mode
+
+Включение:
+
+- URL: `?debug=1`
+- или `localStorage.setItem('wecog_debug', '1')`
+
+Компоненты:
+
+- `debug-runtime.js` — structured ring buffer, timelines, gaze/BPM diagnostics, `downloadDebugBundle()`
+- `debug-hud.js` — realtime HUD + кнопка «Download debug bundle»
+
+## Smoke checklist (после stabilization pass)
+
+1. Открыть только `mvp_with_precheck_1-updated.html` (legacy редиректит).
+2. Validation: affine / LOOCV / post-calibration — в HUD и debug bundle.
+3. Tracking: QC overlay не залипает (current-frame gate + debounce hide).
+4. BPM: модуль грузится (`__WECOG_BPM_DIAG__.moduleLoaded`), экран стартует без `runBpmTest handler missing`.
+5. Visuospatial: gaze dot, линии при Space, canvas не 0×0.
+6. Нет `module load failed` / canvas 0×0 в HUD.
+7. Debug bundle скачивается.
+8. HUD показывает realtime diagnostics.

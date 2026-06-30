@@ -160,6 +160,91 @@ function buildBpmSummary(sessionData) {
     };
 }
 
+function collectRespRatesFromSessionJson(sessionJson) {
+    if (!sessionJson || typeof sessionJson !== 'object') return [];
+    const samples = Array.isArray(sessionJson.samples) ? sessionJson.samples : [];
+    return samples.map((s) => s?.resp_rate).filter(Number.isFinite);
+}
+
+function collectRespRates(sessionData) {
+    const rates = [];
+    const addRates = (list) => {
+        for (const rate of list) {
+            if (Number.isFinite(rate)) rates.push(rate);
+        }
+    };
+
+    if (Array.isArray(sessionData?.respirationRuns)) {
+        for (const run of sessionData.respirationRuns) {
+            addRates(collectRespRatesFromSessionJson(run?.rppgSession));
+        }
+    }
+    if (Array.isArray(sessionData?.bpmRuns)) {
+        for (const run of sessionData.bpmRuns) {
+            addRates(collectRespRatesFromSessionJson(run?.rppgSession));
+        }
+    }
+    return rates;
+}
+
+function normalizeRespirationSummaryPayload(summary) {
+    const respSampleCountRaw = summary?.resp_sample_count ?? summary?.validRespSampleCount ?? summary?.sampleCount;
+    const respSampleCount = Number.isFinite(respSampleCountRaw)
+        ? Math.max(0, Math.round(Number(respSampleCountRaw)))
+        : 0;
+    const respRateMean = roundN(
+        Number.isFinite(summary?.resp_rate_mean) ? summary.resp_rate_mean : summary?.respRateMean,
+        2
+    );
+    const respRateMin = roundN(
+        Number.isFinite(summary?.resp_rate_min) ? summary.resp_rate_min : summary?.respRateMin,
+        2
+    );
+    const respRateMax = roundN(
+        Number.isFinite(summary?.resp_rate_max) ? summary.resp_rate_max : summary?.respRateMax,
+        2
+    );
+    const respAvailable = typeof summary?.resp_available === 'boolean'
+        ? summary.resp_available
+        : (typeof summary?.respAvailable === 'boolean'
+            ? summary.respAvailable
+            : respSampleCount > 0);
+
+    return {
+        resp_rate_mean: respRateMean,
+        resp_rate_min: respRateMin,
+        resp_rate_max: respRateMax,
+        resp_sample_count: respSampleCount,
+        resp_available: Boolean(respAvailable)
+    };
+}
+
+function buildRespirationSummary(sessionData) {
+    const provided = sessionData?.respiration_summary ?? sessionData?.respirationSummary ?? null;
+    if (provided && typeof provided === 'object') {
+        return normalizeRespirationSummaryPayload(provided);
+    }
+
+    const respRates = collectRespRates(sessionData);
+    if (!respRates.length) {
+        return {
+            resp_rate_mean: null,
+            resp_rate_min: null,
+            resp_rate_max: null,
+            resp_sample_count: 0,
+            resp_available: false
+        };
+    }
+
+    return {
+        resp_rate_mean: roundN(mean(respRates), 2),
+        resp_rate_min: roundN(Math.min(...respRates), 2),
+        resp_rate_max: roundN(Math.max(...respRates), 2),
+        resp_sample_count: respRates.length,
+        resp_available: true
+    };
+}
+
 function buildRppgSummary(sessionData) {
     const provided = sessionData?.rppg_summary ?? sessionData?.rppgSummary ?? null;
     if (provided && typeof provided === 'object') {
@@ -171,9 +256,17 @@ function buildRppgSummary(sessionData) {
         return { ...rppgRoot };
     }
 
+    const bpmRuns = Array.isArray(sessionData?.bpmRuns) ? sessionData.bpmRuns : [];
+    let sampleCount = 0;
+    for (const run of bpmRuns) {
+        const sessionSamples = run?.rppgSession?.session?.samples;
+        if (Number.isFinite(sessionSamples)) sampleCount += Number(sessionSamples);
+        else if (Number.isFinite(run?.sampleCount)) sampleCount += Number(run.sampleCount);
+    }
+
     return {
-        runs: 0,
-        sampleCount: 0
+        runs: bpmRuns.length,
+        sampleCount
     };
 }
 
@@ -195,8 +288,31 @@ function buildEmotionSummaryPayload(sessionData, emotionSummary) {
     return summary;
 }
 
-export function buildAggregatesPayload(sessionData) {
+const INGEST_EVENT_TYPES = new Set([
+    'block_start',
+    'block_end',
+    'phase_change',
+    'session_finish_complete',
+    'upload_attempt',
+    'upload_success',
+    'upload_failed',
+    'upload_retry',
+    'cognitive_task_start',
+    'cognitive_task_complete',
+    'cognitive_task_error',
+    'invitation_auto_start_cognitive'
+]);
+
+function trimEventsForIngest(events) {
+    const list = Array.isArray(events) ? events : [];
+    const filtered = list.filter((e) => e && INGEST_EVENT_TYPES.has(e.type));
+    const picked = filtered.length ? filtered : list;
+    return picked.length > 250 ? picked.slice(-250) : picked;
+}
+
+export function buildAggregatesPayload(sessionData, options = {}) {
     if (!sessionData || typeof sessionData !== 'object') return null;
+    const forIngest = options.forIngest === true;
     const u = sessionData.user || {};
     const sourceIds = (sessionData.ids && typeof sessionData.ids === 'object') ? sessionData.ids : {};
     const ids = {};
@@ -208,6 +324,7 @@ export function buildAggregatesPayload(sessionData) {
     const blocks = buildBlocksFromSession(sessionData, emotion_summary);
     const bpm_summary = buildBpmSummary(sessionData);
     const rppg_summary = buildRppgSummary(sessionData);
+    const respiration_summary = buildRespirationSummary(sessionData);
     return {
         ids,
         meta: {
@@ -223,10 +340,15 @@ export function buildAggregatesPayload(sessionData) {
         emotion_summary: emotionSummaryPayload,
         bpm_summary,
         rppg_summary,
-        experimentMeta: sessionData.experimentMeta ? { ...sessionData.experimentMeta } : null,
+        respiration_summary,
+        ...(sessionData.experimentMeta && typeof sessionData.experimentMeta === 'object'
+            ? { experimentMeta: { ...sessionData.experimentMeta } }
+            : {}),
         cognitiveResults: Array.isArray(sessionData.cognitiveResults) ? [...sessionData.cognitiveResults] : [],
         gazeValidation: sessionData.gazeValidation ? { ...sessionData.gazeValidation } : null,
-        events: Array.isArray(sessionData.events) ? [...sessionData.events] : [],
+        events: forIngest
+            ? trimEventsForIngest(sessionData.events)
+            : (Array.isArray(sessionData.events) ? [...sessionData.events] : []),
         lifecycle: sessionData.lifecycle ? { ...sessionData.lifecycle } : null,
         startTime: sessionData.startTime ?? null,
         testHub: sessionData.testHub ? { ...sessionData.testHub } : null,

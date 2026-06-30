@@ -33,6 +33,11 @@ let visible = false;
 let config = { ...DEFAULT_CONFIG };
 let faceLostSince = null;
 let getLang = () => 'ru';
+let hideDebounceTimer = null;
+let acceptableFrameStreak = 0;
+const HIDE_DEBOUNCE_MS = 400;
+const ACCEPTABLE_STREAK_TO_HIDE = 3;
+let lastVisibleReason = null;
 
 /**
  * @param {Object} options
@@ -69,21 +74,73 @@ function ensureOverlay() {
 /**
  * @param {'face_lost'|'low_qc'|'low_light'} reason
  */
+function logOverlayTransition(action, reason, extra) {
+    try {
+        const d = typeof window !== 'undefined' ? window.WECOG_DEBUG : null;
+        if (d && d.enabled && d.recordOverlayTransition) {
+            d.recordOverlayTransition(action, reason, extra);
+        } else if (d && d.enabled) {
+            d.mark('qc', 'overlay:' + action, { reason, ...(extra || {}) });
+        }
+    } catch (_) { /* ignore */ }
+}
+
+function clearHideDebounce() {
+    if (hideDebounceTimer) {
+        clearTimeout(hideDebounceTimer);
+        hideDebounceTimer = null;
+    }
+}
+
 export function show(reason) {
     ensureOverlay();
+    clearHideDebounce();
+    acceptableFrameStreak = 0;
     const lang = getLang();
     const messages = REASON_MESSAGES[lang] || REASON_MESSAGES.en;
     const text = messages[reason] || messages.low_qc;
     const msgEl = document.getElementById('qc-pause-overlay-message');
     if (msgEl) msgEl.textContent = text;
+    const wasVisible = visible;
     overlayEl.style.display = 'flex';
     visible = true;
+    lastVisibleReason = reason;
+    if (!wasVisible) logOverlayTransition('show', reason);
 }
 
 export function hide() {
     if (!overlayEl) return;
+    const wasVisible = visible;
     overlayEl.style.display = 'none';
     visible = false;
+    if (wasVisible) logOverlayTransition('hide', lastVisibleReason);
+    lastVisibleReason = null;
+}
+
+/** Сброс таймера потери лица (например, при старте tracking test). */
+export function resetFaceLostTimer() {
+    faceLostSince = null;
+    acceptableFrameStreak = 0;
+    clearHideDebounce();
+}
+
+/**
+ * Текущий кадр приемлем для overlay-гейта (не путать с session-cumulative qcScore).
+ * Совпадает с флагами QCMetrics._computeFlags.
+ */
+export function isCurrentFrameAcceptable(precheckResult) {
+    if (!precheckResult) return true;
+    const pr = precheckResult;
+    if (!pr.face || pr.face.detected !== true) return false;
+    const badStatuses = ['too_small', 'too_large', 'out_of_bounds', 'not_found'];
+    if (badStatuses.includes(pr.face.status)) return false;
+    if (pr.pose) {
+        const poseOk = pr.pose.status === 'stable' ||
+            (pr.pose.isStable === true && pr.pose.isTilted !== true);
+        if (!poseOk) return false;
+    }
+    if (pr.illumination && pr.illumination.status !== 'optimal') return false;
+    return true;
 }
 
 export function isVisible() {
@@ -103,6 +160,8 @@ export function updateFromMetrics(metrics, precheckResult) {
     const faceDetected = precheckResult?.face?.detected !== false;
 
     if (!faceDetected) {
+        acceptableFrameStreak = 0;
+        clearHideDebounce();
         if (faceLostSince == null) faceLostSince = now;
         const lostSec = (now - faceLostSince) / 1000;
         if (lostSec >= config.faceLostSec) {
@@ -115,12 +174,34 @@ export function updateFromMetrics(metrics, precheckResult) {
 
     const qcScore = metrics.qcScore;
     if (typeof qcScore === 'number' && qcScore < config.qcScoreThreshold) {
-        const illumOk = metrics.illuminationOkPct != null && metrics.illuminationOkPct >= 50;
-        show(illumOk ? 'low_qc' : 'low_light');
+        // Session-cumulative qcScore может оставаться низким после калибровки,
+        // даже когда текущий кадр уже нормальный — не «залипаем» на overlay.
+        if (!isCurrentFrameAcceptable(precheckResult)) {
+            acceptableFrameStreak = 0;
+            clearHideDebounce();
+            const illumOk = metrics.illuminationOkPct != null && metrics.illuminationOkPct >= 50;
+            show(illumOk ? 'low_qc' : 'low_light');
+            return;
+        }
+    }
+
+    if (!isCurrentFrameAcceptable(precheckResult)) {
+        acceptableFrameStreak = 0;
+        clearHideDebounce();
         return;
     }
 
-    hide();
+    acceptableFrameStreak += 1;
+    if (!visible) {
+        clearHideDebounce();
+        return;
+    }
+    if (acceptableFrameStreak < ACCEPTABLE_STREAK_TO_HIDE) return;
+    if (hideDebounceTimer) return;
+    hideDebounceTimer = setTimeout(() => {
+        hideDebounceTimer = null;
+        if (acceptableFrameStreak >= ACCEPTABLE_STREAK_TO_HIDE) hide();
+    }, HIDE_DEBOUNCE_MS);
 }
 
 export function getConfig() {
@@ -146,7 +227,9 @@ if (typeof window !== 'undefined') {
         show,
         hide,
         isVisible,
+        isCurrentFrameAcceptable,
         updateFromMetrics,
+        resetFaceLostTimer,
         getConfig,
         shouldAutoPause,
         setAutoPauseStimulus

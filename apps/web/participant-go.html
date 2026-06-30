@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmoCog — переход участника</title>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search || '');
+      var code = (params.get('code') || params.get('id') || '').trim();
+      if (!code) {
+        var hm = (window.location.hash || '').match(/^#\/?participant\/([^/?#]+)/i);
+        if (hm && hm[1]) code = decodeURIComponent(hm[1]).trim();
+      }
+      if (!code || !/^[a-zA-Z0-9_-]+$/.test(code)) {
+        document.title = 'Неверная ссылка';
+        return;
+      }
+      var pathname = window.location.pathname || '';
+      var base = pathname.replace(/\/web\/[^/]*$/, '/participant-web/');
+      if (base === pathname) base = pathname.replace(/\/apps\/web\/[^/]*$/, '/apps/participant-web/');
+      if (base === pathname) base = '/apps/participant-web/';
+      window.location.replace((window.location.origin || '') + base + 'run_new.html?code=' + encodeURIComponent(code));
+    })();
+  </script>
+</head>
+<body>
+  <p>Переход к исследованию…</p>
+</body>
+</html>
