@@ -197,3 +197,66 @@ export function estimateConfidence(landmarks) {
         return 0.3;
     }
 }
+
+// ============================================================================
+// LANDMARK TEMPORAL SMOOTHER — снижает jitter MediaPipe landmarks между кадрами
+// ============================================================================
+
+/** Индексы ключевых landmarks для сглаживания */
+const SMOOTHED_LANDMARK_INDICES = [
+    LANDMARKS.LEFT_IRIS_CENTER, LANDMARKS.RIGHT_IRIS_CENTER,
+    LANDMARKS.LEFT_EYE_INNER, LANDMARKS.LEFT_EYE_OUTER,
+    LANDMARKS.LEFT_EYE_TOP, LANDMARKS.LEFT_EYE_BOTTOM,
+    LANDMARKS.RIGHT_EYE_INNER, LANDMARKS.RIGHT_EYE_OUTER,
+    LANDMARKS.RIGHT_EYE_TOP, LANDMARKS.RIGHT_EYE_BOTTOM,
+    LANDMARKS.NOSE_TIP, LANDMARKS.LEFT_EAR, LANDMARKS.RIGHT_EAR,
+    LANDMARKS.FOREHEAD, LANDMARKS.CHIN
+];
+
+/**
+ * Создаёт landmark smoother (EMA по ключевым landmarks).
+ * Используется ТОЛЬКО при predict(), НЕ при калибровке.
+ *
+ * @param {number} alpha - коэффициент сглаживания (0 = нет, 1 = полностью старое значение)
+ * @returns {{ smooth: (landmarks: Array) => Array, reset: () => void }}
+ */
+export function createLandmarkSmoother(alpha = 0.3) {
+    let prev = null;
+
+    return {
+        smooth(landmarks) {
+            if (!landmarks || landmarks.length < MIN_LANDMARKS) return landmarks;
+
+            if (!prev) {
+                // Первый кадр — запоминаем и возвращаем как есть
+                prev = new Map();
+                for (const idx of SMOOTHED_LANDMARK_INDICES) {
+                    const lm = landmarks[idx];
+                    if (lm) prev.set(idx, { x: lm.x, y: lm.y, z: lm.z ?? 0 });
+                }
+                return landmarks;
+            }
+
+            // Shallow copy массива + замена сглаженных landmarks
+            const result = [...landmarks];
+            for (const idx of SMOOTHED_LANDMARK_INDICES) {
+                const curr = landmarks[idx];
+                const old = prev.get(idx);
+                if (!curr || !old) continue;
+
+                const sx = alpha * old.x + (1 - alpha) * curr.x;
+                const sy = alpha * old.y + (1 - alpha) * curr.y;
+                const sz = alpha * (old.z ?? 0) + (1 - alpha) * (curr.z ?? 0);
+
+                result[idx] = { ...curr, x: sx, y: sy, z: sz };
+                prev.set(idx, { x: sx, y: sy, z: sz });
+            }
+
+            return result;
+        },
+
+        reset() {
+            prev = null;
+        }
+    };
+}
