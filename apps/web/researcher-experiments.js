@@ -132,11 +132,11 @@ function OverviewView(){
           const ini = words.slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'P';
           const d = new Date(p.createdAt);
           const dateStr = isNaN(d) ? '' : d.toLocaleDateString(isEn2?'en-US':'ru-RU',{day:'numeric',month:'short',year:'numeric'});
-          return `<div class="ov-proj-card" data-proj="${p.name.replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;border:1.5px solid rgba(92,102,189,.20);background:rgba(255,255,255,.52);cursor:pointer;transition:all .12s;min-width:200px;flex:1;max-width:280px;">
-            <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#5C66BD,#77A9E8);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;flex-shrink:0;">${ini}</div>
+          return `<div class="ov-proj-card" data-proj="${escapeUiHtml(p.name)}" style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;border:1.5px solid rgba(92,102,189,.20);background:rgba(255,255,255,.52);cursor:pointer;transition:all .12s;min-width:200px;flex:1;max-width:280px;">
+            <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#5C66BD,#77A9E8);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;flex-shrink:0;">${escapeUiHtml(ini)}</div>
             <div style="flex:1;min-width:0;">
-              <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
-              ${dateStr ? `<div style="font-size:11px;color:var(--muted2);">${dateStr}</div>` : ''}
+              <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeUiHtml(p.name)}</div>
+              ${dateStr ? `<div style="font-size:11px;color:var(--muted2);">${escapeUiHtml(dateStr)}</div>` : ''}
             </div>
             <svg fill="none" stroke="var(--muted2)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;opacity:.5;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
           </div>`;
@@ -150,7 +150,10 @@ function OverviewView(){
         if(typeof state !== 'undefined') state.project = card.dataset.proj;
         const sel = document.getElementById('projectSelect');
         if(sel) { for(let i=0;i<sel.options.length;i++){ if(sel.options[i].textContent.trim()===card.dataset.proj){sel.selectedIndex=i;break;} } }
-        navigate('#/experiments');
+        const projectId = typeof getSelectedProjectRouteId === 'function'
+          ? getSelectedProjectRouteId()
+          : null;
+        navigate(projectId ? `#/projects/${projectId}/overview` : '#/experiments');
       });
     });
     root.appendChild(projSection);
@@ -196,22 +199,22 @@ function ExperimentsListView() {
     content.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px; max-width:1200px; margin:0 auto;">
         ${experiments.map(exp => `
-          <div class="card exp-card" data-id="${exp.id}" style="padding:20px;cursor:pointer;transition:transform 0.1s;">
+          <div class="card exp-card" data-id="${escapeUiHtml(exp.id)}" style="padding:20px;cursor:pointer;transition:transform 0.1s;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
-              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${exp.title || 'Без названия'}</div>
+              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${escapeUiHtml(exp.title || (CURRENT_LANG === 'en' ? 'Untitled' : 'Без названия'))}</div>
               <span style="font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;background:${exp.status==='active'?'rgba(16,185,129,.15)':'rgba(92,102,189,.1)'};color:${exp.status==='active'?'var(--good)':'var(--muted)'};">
                 ${exp.status === 'active' ? t('active') : t('draft')}
               </span>
       </div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
-              ${(exp.blocks||[]).length} блоков · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString()}
+              ${(exp.blocks||[]).length} ${CURRENT_LANG === 'en' ? 'blocks' : 'блоков'} · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString(CURRENT_LANG === 'en' ? 'en-US' : 'ru-RU')}
     </div>
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;flex-wrap:wrap;">
-              <button class="quick-btn edit-exp-btn" data-id="${exp.id}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
-              <button class="quick-btn copy-exp-link-btn" data-link="${participantLinkForExperiment(exp)}" style="flex:1;justify-content:center;font-size:12px;background:rgba(92,102,189,.08);border-color:rgba(92,102,189,.24);color:var(--accent);font-weight:700;">
+              <button class="quick-btn edit-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
+              <button class="quick-btn copy-exp-link-btn" data-link="${escapeUiHtml(participantLinkForExperiment(exp))}" style="flex:1;justify-content:center;font-size:12px;background:rgba(92,102,189,.08);border-color:rgba(92,102,189,.24);color:var(--accent);font-weight:700;">
                 ${autoTranslateString('Скопировать ссылку', CURRENT_LANG)}
               </button>
-              <button class="quick-btn del-exp-btn" data-id="${exp.id}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+              <button class="quick-btn del-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
       </div>
     </div>
         `).join('')}
@@ -235,7 +238,7 @@ function ExperimentsListView() {
           document.execCommand('copy');
           document.body.removeChild(temp);
         }
-        toast('Ссылка для участника скопирована');
+        toast(CURRENT_LANG === 'en' ? 'Participant link copied' : 'Ссылка для участника скопирована');
       });
     });
     content.querySelectorAll('.del-exp-btn').forEach(btn => {

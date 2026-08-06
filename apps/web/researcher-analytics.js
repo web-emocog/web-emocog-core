@@ -1,5 +1,11 @@
-// ========== SESSION CARD DASHBOARD DATA ==========
-const SESSION_DATA = {
+// ========== DEV-ONLY SESSION CARD FIXTURE ==========
+// Production analytics never reads this fixture. It is enabled explicitly with
+// window.__EMOCOG_ANALYTICS_DEMO__ = true or ?analyticsDemo=1.
+const ANALYTICS_DEMO_ENABLED = (typeof window !== 'undefined') && (
+  window.__EMOCOG_ANALYTICS_DEMO__ === true
+  || new URLSearchParams(window.location.search || '').get('analyticsDemo') === '1'
+);
+const SESSION_DATA = ANALYTICS_DEMO_ENABLED ? {
   session: {
     id: "S_2026_001_face_recognition",
     participant_id: "P_042",
@@ -90,8 +96,8 @@ const SESSION_DATA = {
     {name: "Block_2", duration_sec: 52, valid_pct: "94%", qc_score: 8.1, reasons: [{label:"Взгляд",value:"94%",severity:"ok"}], tech:{fps_mean:59.5}, kpis:{gaze_on_target_pct:85}, validity_class:"VALID", segmentKey:"baseline"},
     {name: "Block_3", duration_sec: 48, valid_pct: "78%", qc_score: 6.8, reasons: [{label:"Лицо",value:"78%",severity:"warn"}], tech:{fps_mean:58}, kpis:{gaze_on_target_pct:78}, validity_class:"BORDERLINE", segmentKey:"task"}
   ]
-};
-if (typeof window !== 'undefined') window.SESSION_DATA = SESSION_DATA;
+} : null;
+if (typeof window !== 'undefined' && ANALYTICS_DEMO_ENABLED) window.SESSION_DATA = SESSION_DATA;
 
 const METRIC_GROUPS = [
   {key: "emotion", title: "Эмоции", sub: "Facial Expression Analysis"},

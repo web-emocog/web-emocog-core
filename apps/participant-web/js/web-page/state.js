@@ -1,12 +1,8 @@
+import { createSessionEvent } from '../session-runtime/contracts.mjs';
+
 // === КОНСТАНТЫ И КОНФИГУРАЦИЯ ===
-export const BACKEND_CONFIG = {
-    BASE_URL: 'http://localhost:5000', 
-    ENDPOINTS: {
-        ANALYZE_FRAME: '/api/analyze-frame'
-    },
-    SEND_INTERVAL: 300, // отправляем кадры каждые 300мс
-    MAX_FRAME: 60,      // максимум 60 кадров
-    COMPRESSION_QUALITY: 0.7 // качество JPEG
+export const LOCAL_ANALYSIS_CONFIG = {
+    FRAME_INTERVAL_MS: 300
 };
 
 export const CONSTANTS = {
@@ -31,6 +27,14 @@ export const state = {
         gazeValidation: null,
         heatmaps: null,
         attentionMetrics: null,
+        blinkSummary: null,
+        perclosSummary: null,
+        emotionSamples: [],
+        emotionAccumulator: null,
+        emotionSummary: null,
+        bodyPoseSamples: [],
+        bodyPoseAccumulator: null,
+        bodyPoseSummary: null,
         emotionEvents: [],
         testHub: {
             version: '1.0.0',
@@ -47,8 +51,10 @@ export const state = {
         qcSummary: null,
         bpmSummary: null,
         rppgSummary: null,
+        bpmRuns: [],
         respirationRuns: [],
-        startTime: Date.now()
+        // Set when continuous measurement actually starts, after consent/pre-check.
+        startTime: null
     },
 
     // Флаги состояния приложения
@@ -76,6 +82,9 @@ export const state = {
         gazeTestsAnalysisInterval: null, // ID setTimeout для custom gaze tests single-flight цикла
         successFrames: 0,      // Счетчик успешных кадров пречека
         currentGaze: { x: null, y: null }, // Текущие координаты взгляда
+        currentGazePrediction: null, // raw/corrected/display signal for validation
+        lastEmotionSample: null,
+        lastBodyPoseSample: null,
         lastPoseData: null,    // Последние данные позы из анализа (для QC gaze inference)
         lastEyeSignal: null,   // Последний eye-signal sample (EAR/iris proxy)
         currentPhase: 'init',
@@ -93,6 +102,7 @@ export const state = {
         faceMaskCollector: null,
         qcMetrics: null,
         gazeTracker: null,        // GazeTracker instance
+        sessionRuntime: null,      // Единый lifecycle и непрерывные модули сессии
 
         
         // Временные массивы
@@ -138,13 +148,17 @@ export function getCurrentTaskContext() {
 
 export function recordSessionEvent(type, payload = {}) {
     const timestamp = getNowMs();
-    const event = {
+    const taskContext = getCurrentTaskContext();
+    const event = createSessionEvent({
         type,
+        sessionId: state.sessionData?.ids?.session || null,
         phase: state.runtime.currentPhase || null,
         timestamp,
         tRelMs: getRelativeSessionTimeMs(timestamp),
+        blockId: payload.blockId ?? taskContext.blockId ?? null,
+        trialId: payload.trialId ?? taskContext.trialId ?? null,
         ...payload
-    };
+    });
     state.sessionData.events.push(event);
     return event;
 }
@@ -169,6 +183,7 @@ export function clearTaskContext() {
         blockId: null,
         trialId: null,
         stimulusId: null,
+        stimulusName: null,
         stimulusType: null,
         expectedResponse: null
     };

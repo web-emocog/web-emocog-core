@@ -86,17 +86,17 @@ async function loadFeaturesBySessionDbId(sessionDbId) {
   return r.rows[0] ? r.rows[0].payload : null;
 }
 
-async function listProxyForScope({ userId, projectId, protocolId, status, computedFrom, computedTo, metricName, limit, offset }) {
+async function listProxyForScope({ userId, platformScope = false, projectId, protocolId, status, computedFrom, computedTo, metricName, limit, offset }) {
   let sql = `
     SELECT s.id AS session_db_id, s.session_id, s.participant_id, s.project_id, s.protocol_id,
            ${PROXY_SELECT}
     FROM sessions s
     LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
-    ${scopedSessionJoin(1)}
+    ${platformScope ? '' : scopedSessionJoin(1)}
     WHERE 1=1
   `;
-  const params = [userId];
-  let i = 2;
+  const params = platformScope ? [] : [userId];
+  let i = params.length + 1;
 
   if (projectId) {
     params.push(projectId);

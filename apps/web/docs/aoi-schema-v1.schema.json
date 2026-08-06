@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emocog.local/schemas/aoi-v1.schema.json",
+  "title": "Emocog block-scoped AOI schema v1.x",
+  "type": "object",
+  "description": "AOI fields embedded in a protocol blockConfig. Each block owns an independent stimulusId-keyed AOI dictionary.",
+  "required": ["aoiSchemaVersion", "aoiDefinitions"],
+  "properties": {
+    "aoiSchemaVersion": { "enum": ["1.0", "1.1", "1.2"] },
+    "aoiDefinitions": {
+      "type": "object",
+      "description": "AOI arrays keyed by stimulusId for this block only.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/aoi" }
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "aoi": {
+      "type": "object",
+      "required": ["id", "name", "shape", "points", "order", "isTarget", "validityInterval"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "shape": { "enum": ["rectangle", "polygon"] },
+        "order": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Researcher-defined AOI position in the expected gaze sequence. Added in schema version 1.2."
+        },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/point" }
+        },
+        "isTarget": { "type": "boolean" },
+        "validityInterval": {
+          "type": "object",
+          "description": "Milliseconds from stimulus onset; endMs must be greater than startMs.",
+          "required": ["startMs", "endMs"],
+          "properties": {
+            "startMs": { "type": "integer", "minimum": 0 },
+            "endMs": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "shape": { "const": "rectangle" } } },
+          "then": { "properties": { "points": { "minItems": 2, "maxItems": 2 } } }
+        },
+        {
+          "if": { "properties": { "shape": { "const": "polygon" } } },
+          "then": { "properties": { "points": { "minItems": 3 } } }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844" role="img" aria-label="R2 Проекты mobile">
+  <title>R2 Проекты mobile</title>
+  <rect width="390" height="844" fill="#F2F6F4"/>
+  <rect x="0" y="0" width="390" height="68" rx="0" fill="#062D2E"/><circle cx="22" cy="24" r="7" fill="#00A69D"/><text x="38" y="29" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="800" letter-spacing="1">WEC</text><text x="18" y="55" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="16" font-weight="700">Проекты</text><text x="338" y="29" fill="#9BC7C3" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="400" text-anchor="end">R2</text><line x1="354" y1="20" x2="372" y2="20" stroke="#9BC7C3" stroke-width="1.5"/><line x1="354" y1="26" x2="372" y2="26" stroke="#9BC7C3" stroke-width="1.5"/><line x1="354" y1="32" x2="372" y2="32" stroke="#9BC7C3" stroke-width="1.5"/><text x="18" y="92" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="0.6">ПОИСК</text><rect x="18" y="104" width="354" height="52" rx="10" fill="#FFFFFF" stroke="#789692" stroke-width="1.5"/><text x="32" y="136" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="14" font-weight="400">Название или код</text><rect x="18" y="186" width="354" height="112" rx="14" fill="#062D2E" stroke="#062D2E" stroke-width="1"/>
+            <text x="34" y="214" fill="#9BC7C3" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400">WEC-014</text>
+            <text x="34" y="244" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="16" font-weight="700">Шрифтовые пары</text>
+            <text x="34" y="274" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">сбор</text>
+            <text x="356" y="274" fill="#F5C451" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="700" text-anchor="end">0.83</text><rect x="18" y="314" width="354" height="112" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+            <text x="34" y="342" fill="#006B66" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400">WEC-009</text>
+            <text x="34" y="372" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="16" font-weight="700">Чтение новостей</text>
+            <text x="34" y="402" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">черновик</text>
+            <text x="356" y="402" fill="#062D2E" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="700" text-anchor="end">—</text><rect x="18" y="442" width="354" height="112" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+            <text x="34" y="470" fill="#006B66" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400">WEC-004</text>
+            <text x="34" y="500" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="16" font-weight="700">UI-паттерны</text>
+            <text x="34" y="530" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">анализ</text>
+            <text x="356" y="530" fill="#062D2E" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="700" text-anchor="end">0.88</text><rect x="18" y="770" width="354" height="44" rx="10" fill="#006B66" stroke="#006B66" stroke-width="1"/><text x="195" y="798" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="middle">Новый проект</text>
+</svg>

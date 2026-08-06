@@ -57,7 +57,7 @@ def main():
     sub=tk.Label(root,text="← → и SPACE",font=("Arial",14)); sub.pack()
 
     # Состояние текущего испытания
-    state={"idx":-1,"trial_id":None,"expected":None,"is_go":None}
+    state={"idx":-1,"trial_id":None,"stimulus_type":None,"expected":None,"is_go":None}
 
     # Отправка события в логер
     def emit(event_type, **payload):
@@ -80,7 +80,7 @@ def main():
             root.after(1200, root.destroy)
             return
         tid, stim_type, expected, is_go = trials[state["idx"]]
-        state["trial_id"]=tid; state["expected"]=expected; state["is_go"]=is_go
+        state["trial_id"]=tid; state["stimulus_type"]=stim_type; state["expected"]=expected; state["is_go"]=is_go
         emit("trial_start", trial_id=tid)
         label.config(text="+"); sub.config(text=f"{tid}/{len(trials)}")
         # Задержка перед появлением стимула (500-1500 мс)
@@ -89,6 +89,7 @@ def main():
     # Показ стимула на экране и логирование
     def stim_on():
         tid=state["trial_id"]
+        stim_type=state["stimulus_type"]
         # Выбор текста стимула в зависимости от типа задачи
         if args.task=="choice":
             txt="←" if state["expected"]=="left" else "→"; hint="Нажми ← или →"

@@ -1,49 +1,41 @@
 /**
  * Data Ingestion для агрегатов (Фаза 2.5).
  * POST /ingest — приём payload из buildAggregatesPayload.
- * PII (email) не сохраняем в SessionFeatures (Фаза 2.8).
+ * PII and fields outside the typed allowlist are rejected before DB access.
  */
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const jwt = require('jsonwebtoken');
-const config = require('../config');
+const {
+  authenticateBearerHeader,
+  resolveCurrentStaffPrincipal,
+  hasProjectMembership,
+} = require('../security/permissions');
+const {
+  verifyIngestToken,
+  verifyParticipantIngestRequest,
+} = require('../security/ingest-token');
 const { computeQcValidity, mergeBehavioralRtQc } = require('../qc/aggregator');
 const {
   computeSessionRtFeatures,
   mergeRtIntoProxyScalars,
   buildProxyMetricsJson,
 } = require('../rt/compute');
+const {
+  resolveIdempotencyKey,
+  getIngestSuccessStatus,
+  resolveExistingFinish,
+  requireFinishIdempotencyKey,
+} = require('../ingest/idempotency');
+const {
+  findInvitationByCode,
+  reserveInvitationRun,
+} = require('../ingest/invitation-repository');
+const { withTransaction, lockSessionKey } = require('../db/transaction');
+const { HttpError } = require('../security/http-error');
+const { requireSessionFeaturePayload } = require('../security/payload-policy');
 
 const router = express.Router();
-
-function sanitizePayload(payload) {
-  if (!payload || typeof payload !== 'object') return payload;
-  const piiKeyPattern = /(email|e-mail|phone|tel|telegram|whatsapp|first_name|last_name|middle_name|full_name|surname|address|passport)/i;
-  const sanitizeNode = (node) => {
-    if (Array.isArray(node)) return node.map(sanitizeNode);
-    if (!node || typeof node !== 'object') return node;
-    const out = {};
-    for (const [key, value] of Object.entries(node)) {
-      if (piiKeyPattern.test(String(key))) continue;
-      out[key] = sanitizeNode(value);
-    }
-    return out;
-  };
-  const out = sanitizeNode(payload);
-  if (out.meta && out.meta.user && typeof out.meta.user === 'object') {
-    out.meta.user = { ...out.meta.user };
-    delete out.meta.user.email;
-  }
-  if (out.ids && typeof out.ids === 'object') {
-    delete out.ids.email;
-    delete out.ids.mail;
-    delete out.ids.phone;
-    delete out.ids.tel;
-    delete out.ids.full_name;
-  }
-  return out;
-}
 
 function toFiniteNumber(v) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null;
@@ -311,84 +303,57 @@ function extractProxyMetrics(payload, qcSummary, qcComputed) {
   };
 }
 
-function hasValidAuth(req) {
-  try {
-    const auth = req.headers.authorization;
-    const token = auth && auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return false;
-    const payload = jwt.verify(token, config.jwt.secret);
-    req.user = payload;
-    return true;
-  } catch (_) {
-    return false;
+async function ensureProjectAccess(queryable, projectId, user) {
+  return hasProjectMembership(queryable, projectId, user);
+}
+
+function requireIngestCredential(req, res, next) {
+  const ids = req.body?.ids;
+  const invitationCode = typeof ids?.invitationCode === 'string'
+    ? ids.invitationCode.trim()
+    : '';
+  const authorization = req.headers.authorization;
+  if (invitationCode) {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    if (!token) {
+      return res.status(401).json({ error: 'Participant ingest token required' });
+    }
+    try {
+      const claims = verifyIngestToken(token);
+      const sessionId = typeof ids?.session === 'string' ? ids.session : null;
+      if (
+        claims.scope !== 'participant:ingest'
+        || String(claims.invitation_code) !== invitationCode
+        || (sessionId && String(claims.sid) !== sessionId)
+      ) {
+        return res.status(409).json({
+          error: 'Ingest token does not match session or invitation',
+          code: 'ingest_token_mismatch',
+        });
+      }
+      req.participantIngestClaims = claims;
+      return next();
+    } catch (_) {
+      return res.status(401).json({ error: 'Invalid or expired participant ingest token' });
+    }
   }
-}
 
-async function getInvitationContext(code) {
-  if (!code) return null;
-  const inv = await pool.query(
-    `SELECT i.id, i.code, i.max_runs, i.expires_at, i.protocol_id, p.project_id
-     FROM invitations i
-     INNER JOIN protocols p ON p.id = i.protocol_id
-     WHERE i.code = $1`,
-    [code]
-  );
-  if (inv.rows[0]) return inv.rows[0];
-
-  const bySlug = await pool.query(
-    `SELECT pr.id AS protocol_id, pr.project_id, pr.definition
-     FROM protocols pr
-     WHERE pr.definition->>'protocolId' = $1
-     ORDER BY pr.updated_at DESC
-     LIMIT 1`,
-    [code]
-  );
-  if (!bySlug.rows[0]) return null;
-
-  const pr = bySlug.rows[0];
-  const upsert = await pool.query(
-    `INSERT INTO invitations (protocol_id, code, max_runs, expires_at)
-     VALUES ($1, $2, NULL, NULL)
-     ON CONFLICT (code) DO UPDATE SET protocol_id = EXCLUDED.protocol_id
-     RETURNING id, code, max_runs, expires_at, protocol_id`,
-    [pr.protocol_id, code]
-  );
-  const row = upsert.rows[0];
-  return {
-    id: row.id,
-    code: row.code,
-    max_runs: row.max_runs,
-    expires_at: row.expires_at,
-    protocol_id: row.protocol_id,
-    project_id: pr.project_id,
-  };
-}
-
-async function invitationRunsUsed(code) {
-  const r = await pool.query(
-    `SELECT COUNT(*)::int AS n
-     FROM session_features sf
-     WHERE sf.payload->'ids'->>'invitationCode' = $1`,
-    [code]
-  );
-  return r.rows[0] ? r.rows[0].n : 0;
-}
-
-async function ensureProjectAccess(projectId, userId) {
-  if (!projectId) return false;
-  const r = await pool.query(
-    `SELECT 1
-     FROM projects p
-     INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id
-     WHERE p.id = $1 AND uo.user_id = $2`,
-    [projectId, userId]
-  );
-  return !!r.rows[0];
+  const staffClaims = authenticateBearerHeader(authorization);
+  if (!staffClaims) {
+    return res.status(401).json({
+      error: 'Unauthorized ingest: token or ids.invitationCode required',
+    });
+  }
+  req.ingestStaffClaims = staffClaims;
+  return next();
 }
 
 router.post(
   '/',
   [
+    requireIngestCredential,
+    requireSessionFeaturePayload,
+    body('schemaVersion').optional().equals('session_feature.v1'),
     body('ids').optional().isObject(),
     body('ids.session').optional().isString(),
     body('ids.participant').optional().isString(),
@@ -402,9 +367,24 @@ router.post(
     body('gazeValidation').optional({ nullable: true }).isObject(),
     body('events').optional({ nullable: true }).isArray(),
     body('lifecycle').optional({ nullable: true }).isObject(),
+    body('lifecycle.schemaVersion').optional().equals('session_lifecycle.v1'),
+    body('lifecycle.state').optional().isIn([
+      'idle',
+      'starting',
+      'instruction',
+      'running',
+      'paused',
+      'quality_error',
+      'technical_error',
+      'finishing',
+      'completed',
+      'failed',
+    ]),
+    body('events.*.schemaVersion').optional().equals('session_event.v1'),
     body('startTime').optional({ nullable: true }),
     body('testHub').optional({ nullable: true }).isObject(),
     body('gazeTests').optional({ nullable: true }).isObject(),
+    body('gaze_analytics').optional({ nullable: true }).isObject(),
   ],
   async (req, res) => {
     try {
@@ -415,148 +395,288 @@ router.post(
       const participantId = (raw.ids && raw.ids.participant) ? String(raw.ids.participant) : null;
       const invitationCode = (raw.ids && raw.ids.invitationCode) ? String(raw.ids.invitationCode) : null;
       const lifecycle = (raw.lifecycle && typeof raw.lifecycle === 'object') ? raw.lifecycle : null;
+      const idempotency = resolveIdempotencyKey(req.get('Idempotency-Key'), lifecycle);
+      if (!idempotency.ok) {
+        return res.status(idempotency.status).json({ error: idempotency.error });
+      }
+      const finishKeyRequirement = requireFinishIdempotencyKey(lifecycle, idempotency.key);
+      if (!finishKeyRequirement.ok) {
+        return res.status(finishKeyRequirement.status).json({ error: finishKeyRequirement.error });
+      }
       const participantIngest = !!invitationCode;
-      const authenticated = participantIngest ? false : hasValidAuth(req);
-      let invitation = null;
-
+      const staffClaims = participantIngest
+        ? null
+        : (req.ingestStaffClaims || authenticateBearerHeader(req.headers.authorization));
+      const authenticated = Boolean(staffClaims);
+      if (staffClaims) req.user = staffClaims;
       if (!authenticated && !invitationCode) {
         return res.status(401).json({ error: 'Unauthorized ingest: token or ids.invitationCode required' });
       }
       if (!sessionId) return res.status(400).json({ error: 'ids.session required' });
-      if (invitationCode) {
-        invitation = await getInvitationContext(invitationCode);
-        if (!invitation) {
-          return res.status(403).json({
-            error: 'Invalid invitation code',
-            code: invitationCode,
-            hint: 'Код не найден в API. Опубликуйте протокол в конструкторе или используйте ссылку /invite/КОД с тем же значением.',
-          });
-        }
-        if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
-          return res.status(410).json({ error: 'Invitation expired' });
-        }
-        if (invitation.max_runs != null) {
-          const used = await invitationRunsUsed(invitation.code);
-          if (used >= invitation.max_runs) {
-            return res.status(410).json({ error: 'Invitation run limit reached' });
-          }
-        }
-      }
-
-      let payload = normalizeDerivedPayload(sanitizePayload(raw));
-
-      const sessionRow = await pool.query(
-        `SELECT s.id, s.started_at, s.project_id, s.protocol_id
-         FROM sessions s
-         WHERE s.session_id = $1`,
-        [sessionId]
-      );
-      let dbSessionId;
-      let startedAt = null;
-      if (sessionRow.rows[0]) {
-        dbSessionId = sessionRow.rows[0].id;
-        startedAt = sessionRow.rows[0].started_at;
-        const sessionProjectId = sessionRow.rows[0].project_id || null;
-        const sessionProtocolId = sessionRow.rows[0].protocol_id || null;
-        if (invitation) {
-          if (sessionProtocolId && sessionProtocolId !== invitation.protocol_id) {
-            await pool.query(
-              'UPDATE sessions SET protocol_id = $1, updated_at = current_timestamp WHERE id = $2',
-              [invitation.protocol_id, dbSessionId]
+      const result = await withTransaction(pool, async (client) => {
+        await lockSessionKey(client, sessionId);
+        if (staffClaims) {
+          const principal = await resolveCurrentStaffPrincipal(
+            client,
+            req.headers.authorization
+          );
+          if (!principal) {
+            throw new HttpError(
+              401,
+              'Invalid, expired, or revoked staff token',
+              'staff_token_revoked'
             );
           }
-        } else if (!authenticated) {
-          return res.status(403).json({ error: 'Invitation required for unauthenticated ingest' });
+          req.user = principal;
         }
-        if (authenticated && sessionProjectId) {
-          const ok = await ensureProjectAccess(sessionProjectId, req.user.sub);
-          if (!ok) return res.status(403).json({ error: 'Access denied for project' });
-        }
-      } else {
-        const startTime = raw.startTime ? new Date(raw.startTime) : new Date();
-        const protocolId = invitation ? invitation.protocol_id : null;
-        const projectId = invitation ? invitation.project_id : null;
-        if (!authenticated && !invitation) {
-          return res.status(403).json({ error: 'Invitation required to create session' });
-        }
-        if (authenticated && projectId) {
-          const ok = await ensureProjectAccess(projectId, req.user.sub);
-          if (!ok) return res.status(403).json({ error: 'Access denied for project' });
-        }
-        const ins = await pool.query(
-          `INSERT INTO sessions (session_id, participant_id, project_id, protocol_id, started_at)
-           VALUES ($1, $2, $3, $4, $5)
-           RETURNING id`,
-          [sessionId, participantId, projectId, protocolId, startTime]
-        );
-        dbSessionId = ins.rows[0].id;
-        startedAt = startTime;
-      }
 
-      let completionApplied = false;
-      let completedAtIso = null;
-      if (lifecycle && lifecycle.status === 'completed') {
-        const completedAt = lifecycle.completedAt ? new Date(lifecycle.completedAt) : new Date();
-        const safeCompletedAt = Number.isFinite(completedAt.getTime()) ? completedAt : new Date();
-        await pool.query(
-          `UPDATE sessions
-           SET stopped_at = COALESCE(stopped_at, $1), updated_at = current_timestamp
-           WHERE id = $2`,
-          [safeCompletedAt, dbSessionId]
-        );
-        completionApplied = true;
-        completedAtIso = safeCompletedAt.toISOString();
-      }
-
-      let protocolDefinition = null;
-      const protocolIdForRt = sessionRow.rows[0]?.protocol_id
-        ?? (invitation ? invitation.protocol_id : null);
-      if (protocolIdForRt) {
-        try {
-          const pr = await pool.query('SELECT definition FROM protocols WHERE id = $1', [protocolIdForRt]);
-          protocolDefinition = pr.rows[0]?.definition;
-          if (typeof protocolDefinition === 'string') {
-            protocolDefinition = JSON.parse(protocolDefinition);
+        let invitation = null;
+        if (invitationCode) {
+          invitation = await findInvitationByCode(client, invitationCode, { forUpdate: true });
+          if (!invitation) {
+            throw new HttpError(404, 'Invitation not found', 'invitation_not_found');
           }
-        } catch (_) {
-          protocolDefinition = null;
+          if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
+            throw new HttpError(410, 'Invitation expired', 'invitation_expired');
+          }
+          const tokenCheck = verifyParticipantIngestRequest(req, {
+            sessionId,
+            invitationCode,
+            invitation,
+          });
+          if (!tokenCheck.ok) {
+            throw new HttpError(tokenCheck.status, tokenCheck.error, 'ingest_token_mismatch');
+          }
         }
-      }
 
-      const rtFeatures = computeSessionRtFeatures(payload, protocolDefinition);
-      if (rtFeatures && rtFeatures.blocks && rtFeatures.blocks.length) {
-        payload = { ...payload, rt_features: rtFeatures };
-      }
+        let payload = normalizeDerivedPayload(raw);
+        const sessionRow = await client.query(
+          `SELECT s.id, s.participant_id, s.started_at, s.stopped_at, s.project_id,
+                  s.protocol_id, s.invitation_id,
+                  sf.payload->'lifecycle'->>'finishAttemptId' AS stored_finish_attempt_id,
+                  sq.validity AS stored_qc_validity,
+                  sp.payload->>'proxy_ready' AS stored_proxy_ready
+           FROM sessions s
+           LEFT JOIN session_features sf ON sf.session_id = s.id
+           LEFT JOIN session_qc_summary sq ON sq.session_id = s.id
+           LEFT JOIN session_proxy_metrics sp ON sp.session_id = s.id
+           WHERE s.session_id = $1
+           FOR UPDATE OF s`,
+          [sessionId]
+        );
+        const storedSession = sessionRow.rows[0] || null;
+        const existingSession = Boolean(storedSession);
+        const alreadyCompleted = Boolean(storedSession?.stopped_at);
+        let dbSessionId;
+        let scope;
 
-      const qcSummary = raw.qcSummary || null;
-      let { validity, qc_score, fail_reasons } = computeQcValidity(qcSummary, payload);
-      ({ validity, qc_score, fail_reasons } = mergeBehavioralRtQc(
-        { validity, qc_score, fail_reasons },
-        rtFeatures,
-        payload,
-      ));
+        if (storedSession) {
+          dbSessionId = storedSession.id;
+          const sessionProjectId = storedSession.project_id || null;
+          const sessionProtocolId = storedSession.protocol_id || null;
+          if (invitation) {
+            if (
+              Number(storedSession.invitation_id) !== Number(invitation.id)
+              || Number(sessionProtocolId) !== Number(invitation.protocol_id)
+              || Number(sessionProjectId) !== Number(invitation.project_id)
+            ) {
+              throw new HttpError(
+                409,
+                'Session does not match invitation, project, or protocol',
+                'session_invitation_mismatch'
+              );
+            }
+            if (
+              storedSession.participant_id
+              && participantId
+              && String(storedSession.participant_id) !== String(participantId)
+            ) {
+              throw new HttpError(
+                409,
+                'Session participant does not match',
+                'session_participant_mismatch'
+              );
+            }
+          } else if (!authenticated) {
+            throw new HttpError(403, 'Invitation required for participant ingest');
+          }
+          if (authenticated && !sessionProjectId) {
+            throw new HttpError(
+              409,
+              'Staff ingest requires a session bound to a project',
+              'session_scope_missing'
+            );
+          }
+          if (
+            authenticated
+            && !(await ensureProjectAccess(client, sessionProjectId, req.user))
+          ) {
+            throw new HttpError(403, 'Access denied for project', 'project_access_denied');
+          }
+          if (invitation && !storedSession.participant_id && participantId) {
+            await client.query(
+              `UPDATE sessions
+               SET participant_id = $1, updated_at = current_timestamp
+               WHERE id = $2 AND participant_id IS NULL`,
+              [participantId, dbSessionId]
+            );
+          }
+          if (alreadyCompleted) {
+            const existingFinish = resolveExistingFinish(
+              storedSession.stored_finish_attempt_id,
+              idempotency.key
+            );
+            if (existingFinish.action === 'conflict') {
+              throw new HttpError(
+                existingFinish.status,
+                existingFinish.error,
+                'idempotency_conflict'
+              );
+            }
+            if (existingFinish.action === 'replay') {
+              return {
+                status: 200,
+                body: {
+                  session_id: sessionId,
+                  ingested: true,
+                  idempotent: true,
+                  idempotency_key: idempotency.key,
+                  qc_validity: storedSession.stored_qc_validity || null,
+                  proxy_ready: storedSession.stored_proxy_ready === 'true',
+                  lifecycle_status: 'completed',
+                  completed_at: new Date(storedSession.stopped_at).toISOString(),
+                },
+              };
+            }
+          }
+          scope = {
+            project_id: sessionProjectId,
+            protocol_id: sessionProtocolId,
+            participant_id: storedSession.participant_id || participantId || null,
+          };
+        } else {
+          if (!invitation) {
+            throw new HttpError(
+              authenticated ? 409 : 403,
+              authenticated
+                ? 'Staff must create a project-scoped session before ingest'
+                : 'Invitation required to create session',
+              'session_must_be_precreated'
+            );
+          }
+          const reserved = await reserveInvitationRun(client, invitation.id);
+          if (!reserved) {
+            throw new HttpError(
+              410,
+              'Invitation run limit reached',
+              'invitation_run_limit'
+            );
+          }
+          const startCandidate = raw.startTime ? new Date(raw.startTime) : new Date();
+          const startTime = Number.isFinite(startCandidate.getTime())
+            ? startCandidate
+            : new Date();
+          const inserted = await client.query(
+            `INSERT INTO sessions (
+               session_id, participant_id, project_id, protocol_id, invitation_id, started_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, participant_id, project_id, protocol_id`,
+            [
+              sessionId,
+              participantId,
+              invitation.project_id,
+              invitation.protocol_id,
+              invitation.id,
+              startTime,
+            ]
+          );
+          dbSessionId = inserted.rows[0].id;
+          scope = inserted.rows[0];
+        }
 
-      await pool.query(
-        `INSERT INTO session_features (session_id, payload) VALUES ($1, $2::jsonb)
-         ON CONFLICT (session_id) DO UPDATE SET payload = $2::jsonb, updated_at = current_timestamp`,
-        [dbSessionId, JSON.stringify(payload)]
-      );
+        let completionApplied = false;
+        let completedAtIso = null;
+        if (lifecycle && lifecycle.status === 'completed') {
+          const completedCandidate = lifecycle.completedAt
+            ? new Date(lifecycle.completedAt)
+            : new Date();
+          const completedAt = Number.isFinite(completedCandidate.getTime())
+            ? completedCandidate
+            : new Date();
+          await client.query(
+            `UPDATE sessions
+             SET stopped_at = COALESCE(stopped_at, $1), updated_at = current_timestamp
+             WHERE id = $2`,
+            [completedAt, dbSessionId]
+          );
+          completionApplied = true;
+          completedAtIso = completedAt.toISOString();
+        }
 
-      await pool.query(
-        `INSERT INTO session_qc_summary (session_id, qc_score, validity, fail_reasons, payload) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
-         ON CONFLICT (session_id) DO UPDATE SET qc_score = $2, validity = $3, fail_reasons = $4::jsonb, payload = $5::jsonb, updated_at = current_timestamp`,
-        [dbSessionId, qc_score, validity, JSON.stringify(fail_reasons || null), JSON.stringify(qcSummary || {})]
-      );
+        let protocolDefinition = null;
+        if (scope.protocol_id) {
+          const protocol = await client.query(
+            'SELECT definition FROM protocols WHERE id = $1',
+            [scope.protocol_id]
+          );
+          protocolDefinition = protocol.rows[0]?.definition || null;
+          if (typeof protocolDefinition === 'string') {
+            try {
+              protocolDefinition = JSON.parse(protocolDefinition);
+            } catch (_) {
+              protocolDefinition = null;
+            }
+          }
+        }
 
-      const sessionScope = await pool.query(
-        'SELECT project_id, protocol_id, participant_id FROM sessions WHERE id = $1',
-        [dbSessionId]
-      );
-      let proxy = extractProxyMetrics(payload, qcSummary, { validity, qc_score, fail_reasons });
-      proxy = mergeRtIntoProxyScalars(proxy, rtFeatures);
-      const rtMetricsJson = buildProxyMetricsJson(rtFeatures);
-      const scope = sessionScope.rows[0] || {};
-      await pool.query(
+        const rtFeatures = computeSessionRtFeatures(payload, protocolDefinition);
+        if (rtFeatures && rtFeatures.blocks && rtFeatures.blocks.length) {
+          payload = { ...payload, rt_features: rtFeatures };
+        }
+
+        const qcSummary = raw.qcSummary || null;
+        let { validity, qc_score, fail_reasons } = computeQcValidity(qcSummary, payload);
+        ({ validity, qc_score, fail_reasons } = mergeBehavioralRtQc(
+          { validity, qc_score, fail_reasons },
+          rtFeatures,
+          payload,
+        ));
+
+        await client.query(
+          `INSERT INTO session_features (session_id, payload) VALUES ($1, $2::jsonb)
+           ON CONFLICT (session_id) DO UPDATE
+           SET payload = $2::jsonb, updated_at = current_timestamp`,
+          [dbSessionId, JSON.stringify(payload)]
+        );
+
+        await client.query(
+          `INSERT INTO session_qc_summary (
+             session_id, qc_score, validity, fail_reasons, payload
+           ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+           ON CONFLICT (session_id) DO UPDATE SET
+             qc_score = $2,
+             validity = $3,
+             fail_reasons = $4::jsonb,
+             payload = $5::jsonb,
+             updated_at = current_timestamp`,
+          [
+            dbSessionId,
+            qc_score,
+            validity,
+            JSON.stringify(fail_reasons || null),
+            JSON.stringify(qcSummary || {}),
+          ]
+        );
+
+        let proxy = extractProxyMetrics(
+          payload,
+          qcSummary,
+          { validity, qc_score, fail_reasons }
+        );
+        proxy = mergeRtIntoProxyScalars(proxy, rtFeatures);
+        const rtMetricsJson = buildProxyMetricsJson(rtFeatures);
+        await client.query(
         `INSERT INTO session_proxy_metrics (
            session_id, project_id, protocol_id, participant_id, qc_validity,
            schema_version, status,
@@ -620,21 +740,42 @@ router.post(
           JSON.stringify(proxy.source_payload),
           JSON.stringify(rtMetricsJson),
         ]
-      );
+        );
 
-      res.status(201).json({
-        session_id: sessionId,
-        ingested: true,
-        qc_validity: validity,
-        proxy_ready: !!proxy.payload.proxy_ready,
-        lifecycle_status: completionApplied ? 'completed' : 'in_progress',
-        completed_at: completedAtIso
+        return {
+          status: getIngestSuccessStatus(existingSession),
+          body: {
+            session_id: sessionId,
+            ingested: true,
+            idempotent: false,
+            idempotency_key: idempotency.key,
+            qc_validity: validity,
+            proxy_ready: !!proxy.payload.proxy_ready,
+            lifecycle_status: completionApplied ? 'completed' : 'in_progress',
+            completed_at: completedAtIso,
+          },
+        };
       });
+      return res.status(result.status).json(result.body);
     } catch (err) {
+      if (err instanceof HttpError) {
+        return res.status(err.status).json({
+          error: err.message,
+          code: err.code,
+          ...(err.details ? { details: err.details } : {}),
+        });
+      }
+      if (err.code === '23505') {
+        return res.status(409).json({
+          error: 'Session or idempotency conflict',
+          code: 'session_conflict',
+        });
+      }
       console.error(err);
-      res.status(500).json({ error: 'Ingest failed' });
+      return res.status(500).json({ error: 'Ingest failed', code: 'ingest_failed' });
     }
   }
 );
 
 module.exports = router;
+module.exports.requireIngestCredential = requireIngestCredential;

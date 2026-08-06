@@ -1,205 +1,205 @@
 /**
- * GazeTracker — версия ES-модуля
+ * Target-blind browser gaze estimator.
  *
- * Оценка взгляда по радужке с использованием landmarks MediaPipe Face Landmarker
- * и калибровки на основе ridge-регрессии. Функционально эквивалентен
- * production-обёртке gaze-tracker.js v2.3.0.
+ * Signal contract:
+ * - raw: iris-only ridge prediction;
+ * - corrected: optional affine correction, used for analytics;
+ * - display: adaptive low-pass output, used only by the overlay.
  *
- * v2.3.0: Сглаживание 0.10 для сбалансированного профиля задержки/стабильности
- *          (UI-настройки калибровки 5×5 + усреднение задаются вызывающим кодом).
+ * Head pose/translation is never given the calibration target and is not part
+ * of the ridge predictor. It is evaluated independently for confidence/OOD.
  *
- * v2.2.0: Расширен до 17-мерного вектора признаков с терминами взаимодействия iris×head
- *          для лучшей точности в углах и по краям. Требует 32+ калибровочных точек
- *          (сетка 4×4 × 2 клика = 32, переопределённая система для 17 признаков).
- *          λ=0.001, smoothing=0.10, z-score стандартизация.
- *
- * v2.1.1: 13-мерный вектор признаков (без взаимодействий), λ=0.001, smoothing=0.10,
- *          z-score стандартизация, addAveragedCalibrationPoint() для усреднения по нескольким кадрам.
- *
- * @module gaze-tracker/GazeTracker
- * @version 2.3.0
- * @license MIT
+ * @license Apache-2.0
  */
-
 import { LANDMARKS, MIN_LANDMARKS, DEFAULTS } from './constants.js';
-import { extractFeatures, estimateConfidence } from './features.js';
+import { extractFeatureGroups, estimateConfidence } from './features.js';
 import { ridgeRegression, dotProduct } from './ridge.js';
+import {
+    AdaptiveGazeFilter,
+    fitDistribution,
+    distributionDistance,
+    evaluateGazeGate,
+    scalePointBetweenViewports
+} from './signal-processing.mjs';
+
+const IRIS_STD_FLOORS = [0.03, 0.04, 0.03, 0.04, 0.03, 0.04, 0.03, 0.04];
+const HEAD_STD_FLOORS = [0.025, 0.025, 0.018, 0.025, 0.025, 0.025, 0.02];
+
+function averageVectors(vectors) {
+    if (!vectors.length) return null;
+    const width = Array.isArray(vectors[0]) ? vectors[0].length : 0;
+    if (
+        width === 0
+        || !vectors.every(vector =>
+            Array.isArray(vector)
+            && vector.length === width
+            && vector.every(Number.isFinite)
+        )
+    ) return null;
+    const result = new Array(width).fill(0);
+    for (const vector of vectors) {
+        for (let i = 0; i < vector.length; i++) result[i] += vector[i];
+    }
+    for (let i = 0; i < result.length; i++) result[i] /= vectors.length;
+    return result;
+}
 
 export default class GazeTracker {
     constructor(options = {}) {
         this._isCalibrated = false;
         this._isTracking = false;
-
         this._ridgeLambda = options.ridgeLambda ?? DEFAULTS.ridgeLambda;
         this._calibrationData = [];
         this._modelX = null;
         this._modelY = null;
-
-        // Стандартизация признаков (вычисляется при калибровке)
         this._featureMean = null;
         this._featureStd = null;
-
-        this._smoothingFactor = options.smoothingFactor ?? DEFAULTS.smoothingFactor;
-        this._lastPrediction = null;
+        this._irisDistribution = null;
+        this._headDistribution = null;
         this._postCalibrationCorrection = null;
-
-        this._screenW = options.screenWidth || (typeof window !== 'undefined' ? window.innerWidth : 1920);
-        this._screenH = options.screenHeight || (typeof window !== 'undefined' ? window.innerHeight : 1080);
-
+        this._calibrationViewport = null;
+        this._viewport = {
+            width: options.screenWidth || globalThis.window?.innerWidth || 1920,
+            height: options.screenHeight || globalThis.window?.innerHeight || 1080
+        };
+        this._displayFilter = new AdaptiveGazeFilter({
+            minCutoffHz: options.minCutoffHz ?? DEFAULTS.minCutoffHz,
+            maxCutoffHz: options.maxCutoffHz ?? DEFAULTS.maxCutoffHz,
+            velocityGain: options.velocityGain ?? DEFAULTS.velocityGain
+        });
         this.LANDMARKS = LANDMARKS;
-
+        this.onGazeUpdate = options.onGazeUpdate || null;
+        this.onCalibrationComplete = options.onCalibrationComplete || null;
         this._stats = {
             totalPredictions: 0,
+            acceptedPredictions: 0,
+            rejectedPredictions: 0,
             calibrationPoints: 0,
             lastCalibrationTime: null,
             avgFeatureExtractionMs: 0
         };
-
-        this.onGazeUpdate = options.onGazeUpdate || null;
-        this.onCalibrationComplete = options.onCalibrationComplete || null;
-
-        this._trackingTimerId = null;
-        this._trackingAnalyzer = null;
-        this._trackingVideo = null;
     }
-
-    // ========== ПУБЛИЧНЫЙ ИНТЕРФЕЙС ==========
 
     addCalibrationPoint(landmarks, screenX, screenY) {
-        if (!landmarks || landmarks.length < MIN_LANDMARKS) {
-            return false;
-        }
-        const features = extractFeatures(landmarks);
-        if (!features) return false;
-
-        this._calibrationData.push({ features, screenX, screenY, timestamp: Date.now() });
+        const groups = extractFeatureGroups(landmarks);
+        if (!groups || !Number.isFinite(screenX) || !Number.isFinite(screenY)) return false;
+        this._calibrationData.push({
+            irisFeatures: groups.iris,
+            headFeatures: groups.head,
+            screenX,
+            screenY,
+            timestamp: Date.now()
+        });
         this._stats.calibrationPoints = this._calibrationData.length;
         return true;
     }
 
-    /**
-     * Добавляет калибровочную точку из заранее усреднённых признаков нескольких кадров.
-     * Предпочтительный метод — снижает шум детекции радужки.
-     * 
-     * @param {Array<Array>} landmarksArray - массив landmarks из нескольких кадров
-     * @param {number} screenX - X-координата точки на экране (px)
-     * @param {number} screenY - Y-координата точки на экране (px)
-     * @returns {boolean} успешно ли добавлена точка
-     */
     addAveragedCalibrationPoint(landmarksArray, screenX, screenY) {
-        if (!landmarksArray || landmarksArray.length === 0) {
-            return false;
-        }
-
-        const allFeatures = [];
-        for (const landmarks of landmarksArray) {
-            if (!landmarks || landmarks.length < MIN_LANDMARKS) continue;
-            const features = extractFeatures(landmarks);
-            if (features) allFeatures.push(features);
-        }
-
-        if (allFeatures.length === 0) return false;
-
-        // Поэлементное усреднение признаков
-        const d = allFeatures[0].length;
-        const avgFeatures = new Array(d).fill(0);
-        for (const f of allFeatures) {
-            for (let j = 0; j < d; j++) {
-                avgFeatures[j] += f[j];
-            }
-        }
-        for (let j = 0; j < d; j++) {
-            avgFeatures[j] /= allFeatures.length;
-        }
-        // Восстанавливаем bias строго в 1.0
-        avgFeatures[d - 1] = 1.0;
-
-        this._calibrationData.push({ features: avgFeatures, screenX, screenY, timestamp: Date.now() });
+        if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return false;
+        const groups = (landmarksArray || [])
+            .filter(landmarks => Array.isArray(landmarks) && landmarks.length >= MIN_LANDMARKS)
+            .map(extractFeatureGroups)
+            .filter(Boolean);
+        if (!groups.length) return false;
+        const irisFeatures = averageVectors(groups.map(group => group.iris));
+        const headFeatures = averageVectors(groups.map(group => group.head));
+        if (!irisFeatures || !headFeatures) return false;
+        irisFeatures[irisFeatures.length - 1] = 1;
+        this._calibrationData.push({
+            irisFeatures,
+            headFeatures,
+            screenX,
+            screenY,
+            timestamp: Date.now()
+        });
         this._stats.calibrationPoints = this._calibrationData.length;
         return true;
     }
 
-    /**
-     * Обучает модель на собранных калибровочных данных.
-     * 
-     * Конвейер:
-     * 1. Вычислить среднее и std по каждому признаку (z-score стандартизация)
-     * 2. Стандартизовать признаки: z = (x - mean) / std
-     * 3. Добавить bias-столбец (=1) ПОСЛЕ стандартизации
-     * 4. Обучить ridge-регрессию на стандартизованных признаках
-     */
     calibrate() {
-        const n = this._calibrationData.length;
-        if (n < DEFAULTS.minCalibrationPoints) {
-            console.warn(`[GazeTracker] Not enough points: ${n}/${DEFAULTS.minCalibrationPoints}`);
-            return false;
-        }
+        const count = this._calibrationData.length;
+        if (count < DEFAULTS.minCalibrationPoints) return false;
         try {
-            const rawFeatures = this._calibrationData.map(d => d.features);
-            const d = rawFeatures[0].length; // включает bias в конце
-            const dNoBias = d - 1;
-
-            // 1. Вычисляем среднее и std по каждому признаку (без столбца bias)
-            this._featureMean = new Array(dNoBias).fill(0);
-            this._featureStd = new Array(dNoBias).fill(0);
-
-            for (let j = 0; j < dNoBias; j++) {
-                let sum = 0;
-                for (let i = 0; i < n; i++) sum += rawFeatures[i][j];
-                this._featureMean[j] = sum / n;
+            const rawFeatures = this._calibrationData.map(row => row.irisFeatures);
+            const width = rawFeatures[0].length - 1;
+            if (
+                width !== IRIS_STD_FLOORS.length
+                || !rawFeatures.every(row =>
+                    Array.isArray(row)
+                    && row.length === width + 1
+                    && row.every(Number.isFinite)
+                )
+                || !this._calibrationData.every(row =>
+                    Array.isArray(row.headFeatures)
+                    && row.headFeatures.length === HEAD_STD_FLOORS.length
+                    && row.headFeatures.every(Number.isFinite)
+                    && Number.isFinite(row.screenX)
+                    && Number.isFinite(row.screenY)
+                )
+            ) return false;
+            const featureMean = new Array(width).fill(0);
+            const featureStd = new Array(width).fill(0);
+            for (let j = 0; j < width; j++) {
+                featureMean[j] = rawFeatures.reduce((sum, row) => sum + row[j], 0) / count;
+                const variance = rawFeatures.reduce(
+                    (sum, row) => sum + ((row[j] - featureMean[j]) ** 2),
+                    0
+                ) / count;
+                featureStd[j] = Math.max(Math.sqrt(variance), IRIS_STD_FLOORS[j]);
             }
 
-            for (let j = 0; j < dNoBias; j++) {
-                let sumSq = 0;
-                for (let i = 0; i < n; i++) {
-                    const diff = rawFeatures[i][j] - this._featureMean[j];
-                    sumSq += diff * diff;
-                }
-                const std = Math.sqrt(sumSq / n);
-                this._featureStd[j] = std > 1e-8 ? std : 1.0;
-            }
-
-            // 2. Стандартизуем признаки и добавляем bias
-            const X = rawFeatures.map(f => {
-                const z = new Array(dNoBias + 1);
-                for (let j = 0; j < dNoBias; j++) {
-                    z[j] = (f[j] - this._featureMean[j]) / this._featureStd[j];
-                }
-                z[dNoBias] = 1.0; // bias после стандартизации
-                return z;
-            });
-
-            const Yx = this._calibrationData.map(d => d.screenX);
-            const Yy = this._calibrationData.map(d => d.screenY);
-
-            // 3. Ridge-регрессия на стандартизованных признаках
-            this._modelX = ridgeRegression(X, Yx, this._ridgeLambda);
-            this._modelY = ridgeRegression(X, Yy, this._ridgeLambda);
-
+            const matrix = rawFeatures.map(row =>
+                this._standardizeFeatures(row, featureMean, featureStd)
+            );
+            if (!matrix.every(Boolean)) return false;
+            const targetsX = this._calibrationData.map(row => row.screenX);
+            const targetsY = this._calibrationData.map(row => row.screenY);
+            const modelX = ridgeRegression(matrix, targetsX, this._ridgeLambda);
+            const modelY = ridgeRegression(matrix, targetsY, this._ridgeLambda);
+            const irisDistribution = fitDistribution(
+                rawFeatures.map(row => row.slice(0, -1)),
+                IRIS_STD_FLOORS
+            );
+            const headDistribution = fitDistribution(
+                this._calibrationData.map(row => row.headFeatures),
+                HEAD_STD_FLOORS
+            );
+            if (
+                !modelX?.every(Number.isFinite)
+                || !modelY?.every(Number.isFinite)
+                || !irisDistribution
+                || !headDistribution
+            ) return false;
+            this._featureMean = featureMean;
+            this._featureStd = featureStd;
+            this._modelX = modelX;
+            this._modelY = modelY;
+            this._irisDistribution = irisDistribution;
+            this._headDistribution = headDistribution;
             this._isCalibrated = true;
-            this._stats.lastCalibrationTime = Date.now();
-            this._lastPrediction = null;
             this._postCalibrationCorrection = null;
+            this._calibrationViewport = { ...this._viewport };
+            this.resetSmoothingState();
+            this._stats.lastCalibrationTime = Date.now();
 
-            // Диагностика: считаем остатки на обучающей выборке
-            let trainErrorX = 0, trainErrorY = 0;
-            for (let i = 0; i < n; i++) {
-                const predX = dotProduct(X[i], this._modelX);
-                const predY = dotProduct(X[i], this._modelY);
-                trainErrorX += Math.abs(predX - Yx[i]);
-                trainErrorY += Math.abs(predY - Yy[i]);
-            }
-            trainErrorX /= n;
-            trainErrorY /= n;
-
-            console.log(`[GazeTracker] Калибровка завершена (${n} точек), train MAE: X=${trainErrorX.toFixed(1)}px, Y=${trainErrorY.toFixed(1)}px`);
-
-            if (this.onCalibrationComplete) {
-                this.onCalibrationComplete({ points: n, timestamp: Date.now(), trainMAE: { x: trainErrorX, y: trainErrorY } });
-            }
+            const trainErrors = matrix.map((features, index) => ({
+                x: dotProduct(features, this._modelX) - targetsX[index],
+                y: dotProduct(features, this._modelY) - targetsY[index]
+            }));
+            const trainMAE = {
+                x: trainErrors.reduce((sum, row) => sum + Math.abs(row.x), 0) / count,
+                y: trainErrors.reduce((sum, row) => sum + Math.abs(row.y), 0) / count
+            };
+            this.onCalibrationComplete?.({
+                points: count,
+                timestamp: Date.now(),
+                trainMAE,
+                predictor: 'iris_only_ridge',
+                targetBlind: true
+            });
             return true;
-        } catch (e) {
-            console.error('[GazeTracker] Ошибка калибровки:', e);
+        } catch (error) {
+            console.error('[GazeTracker] Calibration failed:', error);
             return false;
         }
     }
@@ -207,224 +207,244 @@ export default class GazeTracker {
     setPostCalibrationCorrection(correction) {
         const matrixX = correction?.matrixX;
         const matrixY = correction?.matrixY;
-        const valid = Array.isArray(matrixX) && matrixX.length === 3 &&
-            Array.isArray(matrixY) && matrixY.length === 3 &&
-            matrixX.every(Number.isFinite) && matrixY.every(Number.isFinite);
-        if (!valid) return false;
-
+        if (
+            !Array.isArray(matrixX) || matrixX.length !== 3
+            || !Array.isArray(matrixY) || matrixY.length !== 3
+            || !matrixX.every(Number.isFinite) || !matrixY.every(Number.isFinite)
+        ) return false;
         this._postCalibrationCorrection = {
             matrixX: [...matrixX],
             matrixY: [...matrixY],
-            source: correction?.source || 'validation_affine',
+            source: correction.source || 'loocv_affine',
+            correctionId: correction.correctionId || null,
+            viewport: { ...this._viewport },
             appliedAt: Date.now()
         };
-        this._lastPrediction = null;
+        this.resetSmoothingState();
         return true;
     }
 
     clearPostCalibrationCorrection() {
         this._postCalibrationCorrection = null;
-        this._lastPrediction = null;
+        this.resetSmoothingState();
     }
 
-    /**
-     * Предсказывает координаты взгляда. Возвращает три уровня:
-     *   - modelX/modelY: сырое предсказание ridge-регрессии до post-correction.
-     *   - correctedX/correctedY: после post-correction, до финального clamp.
-     *     Аналитические координаты для onScreen / AOI / heatmap.
-     *   - x/y: после clamp и smoothing — координаты для отрисовки overlay.
-     *
-     * @returns {{x:number,y:number,correctedX:number,correctedY:number,
-     *            modelX:number,modelY:number,confidence:number,timestamp:number} | null}
-     */
-    predict(landmarks) {
-        if (!this._isCalibrated || !landmarks || landmarks.length < MIN_LANDMARKS) {
+    predict(landmarks, context = {}) {
+        if (!this._isCalibrated || !Array.isArray(landmarks) || landmarks.length < MIN_LANDMARKS) {
             return null;
         }
-        const t0 = performance.now();
-        const rawFeatures = extractFeatures(landmarks);
-        if (!rawFeatures) return null;
-
-        // Применяем ту же стандартизацию, что и при калибровке
-        const features = this._standardizeFeatures(rawFeatures);
-
-        const modelX = dotProduct(features, this._modelX);
-        const modelY = dotProduct(features, this._modelY);
-        let correctedX = modelX;
-        let correctedY = modelY;
-        if (this._postCalibrationCorrection) {
-            const corrected = this._applyPostCalibrationCorrection(correctedX, correctedY);
-            correctedX = corrected.x;
-            correctedY = corrected.y;
+        const started = performance.now();
+        const groups = extractFeatureGroups(landmarks);
+        if (!groups) return null;
+        const standardized = this._standardizeFeatures(groups.iris);
+        if (!standardized) return null;
+        const rawInCalibrationViewport = {
+            x: dotProduct(standardized, this._modelX),
+            y: dotProduct(standardized, this._modelY)
+        };
+        const raw = scalePointBetweenViewports(
+            rawInCalibrationViewport,
+            this._calibrationViewport,
+            this._viewport
+        );
+        const corrected = this._applyCorrection(
+            rawInCalibrationViewport.x,
+            rawInCalibrationViewport.y
+        );
+        const irisDistance = distributionDistance(groups.iris.slice(0, -1), this._irisDistribution);
+        const headDistance = distributionDistance(groups.head, this._headDistribution);
+        let gate = evaluateGazeGate({
+            baseConfidence: estimateConfidence(landmarks),
+            irisDistance,
+            headDistance
+        });
+        if (
+            !raw
+            || !Number.isFinite(raw.x)
+            || !Number.isFinite(raw.y)
+            || !Number.isFinite(corrected?.x)
+            || !Number.isFinite(corrected?.y)
+        ) {
+            gate = {
+                ...gate,
+                accepted: false,
+                confidence: 0,
+                rejectionReason: 'non_finite_prediction'
+            };
         }
+        const monotonicTimestamp = Number.isFinite(context.timestamp)
+            ? context.timestamp
+            : performance.now();
+        const timestamp = Number.isFinite(context.wallTimestamp)
+            ? context.wallTimestamp
+            : Date.now();
+        const onScreen = Number.isFinite(corrected?.x) && Number.isFinite(corrected?.y)
+            && corrected.x >= 0 && corrected.x <= this._viewport.width
+            && corrected.y >= 0 && corrected.y <= this._viewport.height;
 
-        // Широкий clamp только для smoothing-буфера, не для аналитики.
-        const smoothInputX = Math.max(-50, Math.min(this._screenW + 50, correctedX));
-        const smoothInputY = Math.max(-50, Math.min(this._screenH + 50, correctedY));
-
-        let x, y;
-        if (this._lastPrediction && this._smoothingFactor > 0) {
-            const s = this._smoothingFactor;
-            x = s * this._lastPrediction.x + (1 - s) * smoothInputX;
-            y = s * this._lastPrediction.y + (1 - s) * smoothInputY;
+        let display = null;
+        if (gate.accepted && onScreen) {
+            display = this._displayFilter.update(corrected, monotonicTimestamp, this._viewport);
         } else {
-            x = smoothInputX;
-            y = smoothInputY;
+            this._displayFilter.reset();
         }
-
-        // Финальное ограничение координат для отрисовки.
-        x = Math.max(0, Math.min(this._screenW, x));
-        y = Math.max(0, Math.min(this._screenH, y));
-
-        // Честный onScreen считается по correctedX/correctedY ДО финального clamp.
-        const onScreen =
-            correctedX >= 0 && correctedX <= this._screenW &&
-            correctedY >= 0 && correctedY <= this._screenH;
 
         const result = {
-            x: Math.round(x),
-            y: Math.round(y),
-            correctedX: Math.round(correctedX),
-            correctedY: Math.round(correctedY),
-            modelX: Math.round(modelX),
-            modelY: Math.round(modelY),
-            onScreen,
+            // Compatibility aliases: x/y always mean display and can be null.
+            x: display ? Math.round(display.x) : null,
+            y: display ? Math.round(display.y) : null,
+            rawX: Number.isFinite(raw?.x) ? Math.round(raw.x) : null,
+            rawY: Number.isFinite(raw?.y) ? Math.round(raw.y) : null,
+            correctedX: Number.isFinite(corrected?.x) ? Math.round(corrected.x) : null,
+            correctedY: Number.isFinite(corrected?.y) ? Math.round(corrected.y) : null,
+            displayX: display ? Math.round(display.x) : null,
+            displayY: display ? Math.round(display.y) : null,
+            // Deprecated model aliases retained in exported sessions.
+            modelX: Number.isFinite(raw?.x) ? Math.round(raw.x) : null,
+            modelY: Number.isFinite(raw?.y) ? Math.round(raw.y) : null,
+            valid: gate.accepted,
+            targetBlind: true,
+            onScreen: gate.accepted && onScreen,
             clipped: !onScreen,
-            confidence: estimateConfidence(landmarks),
-            timestamp: Date.now()
+            rejectionReason: gate.rejectionReason,
+            confidence: gate.confidence,
+            ood: gate.ood,
+            head: {
+                yawProxy: groups.head[0],
+                pitchProxy: groups.head[1],
+                rollProxy: groups.head[2],
+                translationX: groups.head[3],
+                translationY: groups.head[4],
+                faceScale: groups.head[5]
+            },
+            smoothing: display ? {
+                algorithm: 'velocity_adaptive_ema',
+                alpha: display.alpha,
+                velocityViewportPerSec: display.velocityViewportPerSec
+            } : null,
+            frameTimestamp: monotonicTimestamp,
+            timestamp
         };
-
-        this._lastPrediction = result;
-        this._stats.totalPredictions++;
-        this._stats.avgFeatureExtractionMs =
-            (this._stats.avgFeatureExtractionMs * (this._stats.totalPredictions - 1) +
-            (performance.now() - t0)) / this._stats.totalPredictions;
-
+        this._stats.totalPredictions += 1;
+        if (result.valid) this._stats.acceptedPredictions += 1;
+        else this._stats.rejectedPredictions += 1;
+        this._stats.avgFeatureExtractionMs = (
+            this._stats.avgFeatureExtractionMs * (this._stats.totalPredictions - 1)
+            + (performance.now() - started)
+        ) / this._stats.totalPredictions;
         return result;
     }
 
-    /**
-     * Применяет z-score стандартизацию с использованием статистики калибровки.
-     * @param {number[]} rawFeatures - сырой вектор признаков (последний элемент — bias=1.0)
-     * @returns {number[]} стандартизованные признаки + bias
-     */
-    _standardizeFeatures(rawFeatures) {
-        const dNoBias = rawFeatures.length - 1;
-        const z = new Array(dNoBias + 1);
-        for (let j = 0; j < dNoBias; j++) {
-            z[j] = (rawFeatures[j] - this._featureMean[j]) / this._featureStd[j];
+    _standardizeFeatures(
+        rawFeatures,
+        featureMean = this._featureMean,
+        featureStd = this._featureStd
+    ) {
+        if (
+            !Array.isArray(rawFeatures)
+            || !Array.isArray(featureMean)
+            || !Array.isArray(featureStd)
+            || rawFeatures.length !== featureMean.length + 1
+            || featureStd.length !== featureMean.length
+            || !rawFeatures.every(Number.isFinite)
+        ) return null;
+        const width = rawFeatures.length - 1;
+        const result = new Array(width + 1);
+        for (let j = 0; j < width; j++) {
+            if (!Number.isFinite(featureMean[j]) || !Number.isFinite(featureStd[j])
+                || featureStd[j] <= 0) return null;
+            result[j] = (rawFeatures[j] - featureMean[j]) / featureStd[j];
         }
-        z[dNoBias] = 1.0;
-        return z;
+        result[width] = 1;
+        return result;
     }
 
-    _applyPostCalibrationCorrection(x, y) {
-        if (!this._postCalibrationCorrection) return { x, y };
+    _applyCorrection(x, y) {
+        if (!this._calibrationViewport) return null;
+        if (!this._postCalibrationCorrection) {
+            return scalePointBetweenViewports(
+                { x, y },
+                this._calibrationViewport,
+                this._viewport
+            );
+        }
         const { matrixX, matrixY } = this._postCalibrationCorrection;
-        return {
-            x: matrixX[0] * x + matrixX[1] * y + matrixX[2],
-            y: matrixY[0] * x + matrixY[1] * y + matrixY[2]
+        const correctionViewport = this._postCalibrationCorrection.viewport
+            || this._calibrationViewport;
+        const correctionInput = scalePointBetweenViewports(
+            { x, y },
+            this._calibrationViewport,
+            correctionViewport
+        );
+        if (!correctionInput) return null;
+        const correctionOutput = {
+            x: matrixX[0] * correctionInput.x
+                + matrixX[1] * correctionInput.y
+                + matrixX[2],
+            y: matrixY[0] * correctionInput.x
+                + matrixY[1] * correctionInput.y
+                + matrixY[2]
         };
-    }
-
-    startTracking(analyzer, videoElement, intervalMs = 33) {
-        if (!this._isCalibrated) return false;
-        if (this._isTracking) return false;
-
-        this._isTracking = true;
-        this._trackingAnalyzer = analyzer;
-        this._trackingVideo = videoElement;
-
-        const track = async () => {
-            if (!this._isTracking) return;
-            try {
-                const result = await analyzer.analyzeFrame(videoElement);
-                if (result && result.landmarks) {
-                    const gaze = this.predict(result.landmarks);
-                    if (gaze && this.onGazeUpdate) {
-                        this.onGazeUpdate(gaze);
-                    }
-                }
-            } catch (e) { /* игнорируем ошибки отдельных кадров */ }
-
-            if (this._isTracking) {
-                this._trackingTimerId = setTimeout(track, intervalMs);
-            }
-        };
-
-        track();
-        return true;
-    }
-
-    stopTracking() {
-        this._isTracking = false;
-        if (this._trackingTimerId) {
-            clearTimeout(this._trackingTimerId);
-            this._trackingTimerId = null;
-        }
-        this._trackingAnalyzer = null;
-        this._trackingVideo = null;
+        return scalePointBetweenViewports(
+            correctionOutput,
+            correctionViewport,
+            this._viewport
+        );
     }
 
     updateScreenSize(width, height) {
-        this._screenW = width || window.innerWidth;
-        this._screenH = height || window.innerHeight;
+        const next = {
+            width: Number.isFinite(width) && width > 0 ? width : globalThis.window?.innerWidth || 1,
+            height: Number.isFinite(height) && height > 0 ? height : globalThis.window?.innerHeight || 1
+        };
+        if (
+            Math.abs(next.width - this._viewport.width) < 0.5
+            && Math.abs(next.height - this._viewport.height) < 0.5
+        ) return;
+        this._viewport = next;
+        this.resetSmoothingState();
     }
 
     getStatus() {
         return {
             isCalibrated: this._isCalibrated,
             isTracking: this._isTracking,
-            calibrationPoints: this._stats.calibrationPoints,
-            totalPredictions: this._stats.totalPredictions,
-            lastCalibrationTime: this._stats.lastCalibrationTime,
+            ...this._stats,
             avgFeatureExtractionMs: Math.round(this._stats.avgFeatureExtractionMs * 100) / 100,
-            postCalibrationCorrection: this._postCalibrationCorrection ? {
-                enabled: true,
-                source: this._postCalibrationCorrection.source,
-                appliedAt: this._postCalibrationCorrection.appliedAt
-            } : { enabled: false },
-            screenSize: { width: this._screenW, height: this._screenH }
+            predictor: 'iris_only_ridge',
+            targetBlind: true,
+            confidenceGate: 'iris_head_ood',
+            postCalibrationCorrection: this._postCalibrationCorrection
+                ? { ...this._postCalibrationCorrection, matrixX: undefined, matrixY: undefined }
+                : { enabled: false },
+            screenSize: { ...this._viewport },
+            calibrationScreenSize: this._calibrationViewport
+                ? { ...this._calibrationViewport }
+                : null
         };
     }
 
+    resetSmoothingState() {
+        this._displayFilter.reset();
+    }
+
+    clearCalibrationData() {
+        this._calibrationData = [];
+        this._stats.calibrationPoints = 0;
+    }
+
     reset() {
-        this.stopTracking();
         this._isCalibrated = false;
         this._calibrationData = [];
         this._modelX = null;
         this._modelY = null;
         this._featureMean = null;
         this._featureStd = null;
-        this._lastPrediction = null;
+        this._irisDistribution = null;
+        this._headDistribution = null;
         this._postCalibrationCorrection = null;
-        this._stats = {
-            totalPredictions: 0,
-            calibrationPoints: 0,
-            lastCalibrationTime: null,
-            avgFeatureExtractionMs: 0
-        };
-    }
-
-    /**
-     * Сбрасывает только smoothing-буфер EMA (_lastPrediction), не трогая
-     * калибровку, модель, post-correction и статистику.
-     *
-     * Вызывается между тестами/фазами, чтобы новая фаза начиналась без
-     * инерции от последней точки предыдущей. Особенно важно после теста
-     * рисования глазами, где взгляд часто оказывается у краёв canvas:
-     * без сброса EMA первые ~16 кадров (~480 мс при s=0.25) следующего
-     * теста плывут к этой залипшей точке.
-     *
-     * Идемпотентен. Безопасен при !isCalibrated().
-     */
-    resetSmoothingState() {
-        this._lastPrediction = null;
-    }
-
-    clearCalibrationData() {
-        this._calibrationData = [];
-        this._stats.calibrationPoints = 0;
+        this._calibrationViewport = null;
+        this.resetSmoothingState();
     }
 
     isCalibrated() { return this._isCalibrated; }

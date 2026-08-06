@@ -6,15 +6,15 @@ import {
     nextStep, 
     toggleConsent, 
     generateIdsAndProceed, 
+    generateUniqueId,
     copyIds, 
     checkForm, 
     validateEmailField, 
     collectTechDataAndProceed, 
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
-    downloadData,
-    initSecureSenderToggle
-} from './ui-updated.js';
+    downloadData
+} from './ui-updated.js?v=20260807-1';
 
 import { 
     startPreCheck, 
@@ -33,6 +33,12 @@ import {
 } from './protocol-invite-utils.js';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js';
+import {
+    getContentViewport,
+    contentToLayoutViewport
+} from '../gaze-tracker/viewport-coordinates.mjs';
+import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
 initQcPauseOverlay({ getLang: () => state.currentLang });
 
 if (typeof window !== 'undefined') {
@@ -56,6 +62,40 @@ function dbgErr(scope, event, data) {
 let _gazeDebugSampleN = 0;
 let _eyeTrackingShapeLogged = false;
 
+function currentStimulusContentRect() {
+    if (state.runtime.currentPhase !== 'cognitive_stimulus') return null;
+    const image = document.getElementById('cogImage');
+    const shape = document.getElementById('cogShape');
+    const element = image && getComputedStyle(image).display !== 'none' ? image : shape;
+    if (!element || getComputedStyle(element).display === 'none') return null;
+    const rect = element.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return null;
+    const viewport = getContentViewport();
+    let left = rect.left - viewport.offsetLeft;
+    let top = rect.top - viewport.offsetTop;
+    let width = rect.width;
+    let height = rect.height;
+    const intrinsicWidth = element === image && image.naturalWidth > 0 ? image.naturalWidth : null;
+    const intrinsicHeight = element === image && image.naturalHeight > 0 ? image.naturalHeight : null;
+    if (intrinsicWidth && intrinsicHeight && getComputedStyle(image).objectFit === 'contain') {
+        const scale = Math.min(width / intrinsicWidth, height / intrinsicHeight);
+        const contentWidth = intrinsicWidth * scale;
+        const contentHeight = intrinsicHeight * scale;
+        left += (width - contentWidth) / 2;
+        top += (height - contentHeight) / 2;
+        width = contentWidth;
+        height = contentHeight;
+    }
+    return {
+        left,
+        top,
+        width,
+        height,
+        intrinsicWidth,
+        intrinsicHeight
+    };
+}
+
 window.setLanguage = setLanguage;
 window.nextStep = nextStep;
 window.copyIds = copyIds;
@@ -64,16 +104,23 @@ window.downloadData = downloadData;
 
 export function handleGazeUpdate(gazeData) {
     const customDot = document.getElementById('customGazeDot');
+    state.runtime.currentGazePrediction = gazeData || null;
+    const displayX = Number.isFinite(gazeData?.displayX)
+        ? gazeData.displayX
+        : (Number.isFinite(gazeData?.x) ? gazeData.x : null);
+    const displayY = Number.isFinite(gazeData?.displayY)
+        ? gazeData.displayY
+        : (Number.isFinite(gazeData?.y) ? gazeData.y : null);
     const d = window.WECOG_DEBUG;
     if (d && d.enabled) {
         if (d.recordGazeSample) {
             d.recordGazeSample({
-                onScreen: typeof gazeData.onScreen === 'boolean' ? gazeData.onScreen : null,
-                clipped: typeof gazeData.clipped === 'boolean' ? gazeData.clipped : null,
-                correctedX: gazeData.correctedX,
-                correctedY: gazeData.correctedY,
-                screenWidth: window.innerWidth || 1,
-                screenHeight: window.innerHeight || 1
+                onScreen: typeof gazeData?.onScreen === 'boolean' ? gazeData.onScreen : null,
+                clipped: typeof gazeData?.clipped === 'boolean' ? gazeData.clipped : null,
+                correctedX: gazeData?.correctedX,
+                correctedY: gazeData?.correctedY,
+                screenWidth: getContentViewport().width,
+                screenHeight: getContentViewport().height
             });
         }
         _gazeDebugSampleN += 1;
@@ -95,9 +142,43 @@ export function handleGazeUpdate(gazeData) {
         }
     }
 
-    if (!gazeData || gazeData.x === null || gazeData.y === null) {
+    if (!gazeData || !Number.isFinite(displayX) || !Number.isFinite(displayY)) {
         state.runtime.currentGaze = { x: null, y: null };
         if (customDot) customDot.style.display = 'none';
+
+        if (gazeData && state.flags.isRecording) {
+            const rejectedAt = gazeData.t || gazeData.timestamp || Date.now();
+            const taskContext = getCurrentTaskContext();
+            const viewport = getContentViewport();
+            const stimulusRect = currentStimulusContentRect();
+            state.sessionData.eyeTracking.push({
+                x: null,
+                y: null,
+                displayX: null,
+                displayY: null,
+                rawX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
+                rawY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
+                correctedX: Number.isFinite(gazeData.correctedX) ? gazeData.correctedX : null,
+                correctedY: Number.isFinite(gazeData.correctedY) ? gazeData.correctedY : null,
+                valid: false,
+                rejectionReason: gazeData.rejectionReason || 'no_display_signal',
+                confidence: Number.isFinite(gazeData.confidence) ? gazeData.confidence : null,
+                ood: gazeData.ood || null,
+                onScreen: false,
+                clipped: gazeData.clipped === true,
+                t: rejectedAt,
+                tRelMs: getRelativeSessionTimeMs(rejectedAt),
+                phase: state.runtime.currentPhase || '',
+                blockId: taskContext.blockId ?? null,
+                trialId: taskContext.trialId ?? null,
+                stimulusId: taskContext.stimulusId ?? null,
+                stimulusName: taskContext.stimulusName ?? null,
+                stimulusType: taskContext.stimulusType ?? null,
+                stimulusRect,
+                screenWidth: viewport.width,
+                screenHeight: viewport.height
+            });
+        }
         
         if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
             state.runtime.qcMetrics.addGazePoint(null, state.runtime.lastPoseData);
@@ -105,15 +186,16 @@ export function handleGazeUpdate(gazeData) {
         return;
     }
 
-    const x = Math.round(gazeData.x);
-    const y = Math.round(gazeData.y);
+    const x = Math.round(displayX);
+    const y = Math.round(displayY);
     const t = gazeData.t || gazeData.timestamp || Date.now();
 
     state.runtime.currentGaze = { x, y };
     const phase = state.runtime.currentPhase || '';
     const taskContext = getCurrentTaskContext();
-    const screenWidth = window.innerWidth || 1;
-    const screenHeight = window.innerHeight || 1;
+    const viewport = getContentViewport();
+    const screenWidth = viewport.width;
+    const screenHeight = viewport.height;
     // Берём честный onScreen из gaze-tracker (считается по correctedX/correctedY до clamp).
     // Fallback на boundary-чек по зажатым x/y оставляем ради старых сэмплов / тестов,
     // где трекер мог не выставить флаг.
@@ -122,6 +204,7 @@ export function handleGazeUpdate(gazeData) {
         : (x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight);
     const clipped = typeof gazeData.clipped === 'boolean' ? gazeData.clipped : !onScreen;
     const confidence = Number.isFinite(gazeData.confidence) ? gazeData.confidence : null;
+    const stimulusRect = currentStimulusContentRect();
     const hubLike =
         phase === 'test_hub' ||
         phase === 'bpm_test' ||
@@ -139,9 +222,10 @@ export function handleGazeUpdate(gazeData) {
             state.flags.isValidating);
 
     if (customDot && showGazeDot) {
+        const layoutPoint = contentToLayoutViewport({ x, y });
         customDot.style.display = 'block';
-        customDot.style.left = `${x}px`;
-        customDot.style.top = `${y}px`;
+        customDot.style.left = `${layoutPoint.x}px`;
+        customDot.style.top = `${layoutPoint.y}px`;
     } else if (customDot) {
         customDot.style.display = 'none';
     }
@@ -150,21 +234,32 @@ export function handleGazeUpdate(gazeData) {
         const eyeSample = {
             x,
             y,
+            displayX: x,
+            displayY: y,
             t,
             tRelMs: getRelativeSessionTimeMs(t),
             phase,
             blockId: taskContext.blockId ?? null,
             trialId: taskContext.trialId ?? null,
             stimulusId: taskContext.stimulusId ?? null,
+            stimulusName: taskContext.stimulusName ?? null,
             stimulusType: taskContext.stimulusType ?? null,
+            stimulusRect,
             expectedResponse: taskContext.expectedResponse ?? null,
             onScreen,
             clipped,
             confidence,
+            valid: gazeData.valid !== false,
+            rejectionReason: gazeData.rejectionReason || null,
+            ood: gazeData.ood || null,
+            head: gazeData.head || null,
+            smoothing: gazeData.smoothing || null,
             // Сырое предсказание модели (до post-correction). Полезно для
             // последующего переобучения affine correction на собранных сессиях.
-            modelX: Number.isFinite(gazeData.modelX) ? gazeData.modelX : null,
-            modelY: Number.isFinite(gazeData.modelY) ? gazeData.modelY : null,
+            rawX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
+            rawY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
+            modelX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
+            modelY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
             // После post-correction, до финального clamp. Аналитические координаты —
             // именно по ним нужно считать AOI / heatmap / off-screen.
             correctedX: Number.isFinite(gazeData.correctedX) ? gazeData.correctedX : null,
@@ -204,6 +299,9 @@ export function handleEyeSignalUpdate(signalData) {
     const taskContext = getCurrentTaskContext();
     const sample = {
         t: signalData.t,
+        frameTimestamp: Number.isFinite(signalData.frameTimestamp)
+            ? signalData.frameTimestamp
+            : null,
         tRelMs: getRelativeSessionTimeMs(signalData.t),
         phase,
         blockId: taskContext.blockId ?? null,
@@ -242,30 +340,15 @@ export function getActiveInvitationParticipantShell() {
 
 window.getActiveInvitationParticipantShell = getActiveInvitationParticipantShell;
 
-function getParticipantApiBase() {
-    const origin = window.location.origin || '';
-    const defaultBase = (origin + '/api').replace(/\/$/, '');
-    try {
-        const fromStorage = localStorage.getItem('emocog_api_base');
-        if (fromStorage && fromStorage.trim()) {
-            const base = fromStorage.trim().replace(/\/$/, '');
-            const isLocalApi = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(base);
-            const isLocalPage = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(origin);
-            if (isLocalApi && !isLocalPage) return defaultBase;
-            return base;
-        }
-    } catch (_) {}
-    if (window.PROTOCOL_RUN_API_BASE) return String(window.PROTOCOL_RUN_API_BASE).replace(/\/$/, '');
-    if (window.API_BASE) return String(window.API_BASE).replace(/\/$/, '');
-    return defaultBase;
-}
-
 async function loadInvitationProtocolByCode(code) {
-    const base = getParticipantApiBase();
-    dbg('api', 'invitation:load:start', { code, base });
-    const response = await fetch(base + '/invitations/by-code/' + encodeURIComponent(code));
+    const base = resolveParticipantApiBase();
+    dbg('api', 'invitation:load:start', { base, codePresent: true });
+    const lookupUrl = new URL(base + '/invitations/by-code/' + encodeURIComponent(code));
+    const restoredSessionId = state.sessionData?.ids?.session;
+    if (restoredSessionId) lookupUrl.searchParams.set('session_id', restoredSessionId);
+    const response = await fetch(lookupUrl.toString());
     if (!response.ok) {
-        dbgErr('api', 'invitation:load:error', { code, base, status: response.status });
+        dbgErr('api', 'invitation:load:error', { base, status: response.status });
         throw new Error('Invitation lookup failed: HTTP ' + response.status);
     }
     const payload = await response.json();
@@ -283,18 +366,26 @@ async function loadInvitationProtocolByCode(code) {
         let stimuliMap = {};
         if (payload.project_id && stimulusIds.length) {
             try {
-                const stimuliResp = await fetch(base + '/stimuli?project_id=' + encodeURIComponent(payload.project_id));
+                const stimuliResp = await fetch(
+                    base + '/invitations/by-code/' + encodeURIComponent(code) + '/stimuli'
+                );
                 if (stimuliResp.ok) {
                     const rows = await stimuliResp.json();
                     if (Array.isArray(rows)) {
                         rows.forEach((row) => {
                             const id = String(row?.id);
                             if (stimulusIds.includes(id)) {
+                                const contentUrl = typeof row?.content_url === 'string'
+                                    ? base + row.content_url
+                                    : null;
                                 stimuliMap[id] = {
                                     id,
                                     name: row?.name || id,
                                     mime_type: row?.mime_type || null,
-                                    metadata: row?.metadata || {}
+                                    metadata: {
+                                        ...(row?.metadata || {}),
+                                        ...(contentUrl ? { url: contentUrl } : {})
+                                    }
                                 };
                             }
                         });
@@ -317,7 +408,6 @@ async function loadInvitationProtocolByCode(code) {
         state.sessionData.experimentMeta = {
             ...(state.sessionData.experimentMeta || {}),
             source: 'invitation',
-            invitationCode: payload.code || code,
             protocolId: payload.protocol_id || null,
             projectId: payload.project_id || null,
             protocolName: payload.protocol_name || null,
@@ -332,7 +422,6 @@ async function loadInvitationProtocolByCode(code) {
         state.runtime.invitationSelectedMetrics = plan.hubMetrics;
         state.runtime.invitationSessionPlan = plan;
         dbg('api', 'invitation:load:success', {
-            code,
             protocolId: payload.protocol_id || null,
             projectId: payload.project_id || null,
             blockCount: protocolBlocks.length,
@@ -400,11 +489,10 @@ async function fetchParticipantInviteBypass() {
     try {
         const token = localStorage.getItem('emocog_api_token');
         if (!token) return false;
-        const base = getParticipantApiBase();
+        const base = resolveParticipantApiBase();
         const r = await fetch(`${base}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
         if (!r.ok) return false;
         const me = await r.json();
-        if (me.bypass_admin === true) return true;
         const role = me.role;
         return role === 'developer' || role === 'admin';
     } catch (_) {
@@ -414,8 +502,8 @@ async function fetchParticipantInviteBypass() {
 
 function ensureDeveloperSessionIds() {
     if (state.sessionData.ids.session && state.sessionData.ids.participant) return;
-    const sessionId = 'S-DEV-' + Math.random().toString(36).slice(2, 8).toUpperCase();
-    const participantId = 'P-DEV-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+    const sessionId = `S-DEV-${generateUniqueId()}`;
+    const participantId = `P-DEV-${generateUniqueId()}`;
     state.sessionData.ids.session = sessionId;
     state.sessionData.ids.participant = participantId;
     state.sessionData.user.interfaceLanguage = state.currentLang;
@@ -427,8 +515,9 @@ function ensureDeveloperSessionIds() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    const sessionRuntime = await initSessionRuntime();
     dbg('app', 'app:init:start', { href: window.location.href });
-    dbg('api', 'api:base', { base: getParticipantApiBase() });
+    dbg('api', 'api:base', { base: resolveParticipantApiBase() });
     console.log('App initialized (Phase 0 – privacy & aggregates)');
     try {
         const pendingLang = window.__EMOCOG_PENDING_LANG__;
@@ -443,8 +532,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Код приглашения из URL (ссылка-приглашение ведёт на пречек с ?code=...)
     const params = new URLSearchParams(window.location.search);
-    const invitationCode = params.get('code');
+    const invitationCodeFromUrl = params.get('code');
+    const invitationCode = invitationCodeFromUrl || state.sessionData.ids.invitationCode;
     const developerModule = (params.get('developer_module') || '').trim().toLowerCase();
+    const localDevelopmentBypass = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     let developerAutoPrecheck = false;
     try {
         developerAutoPrecheck = localStorage.getItem('emocog_dev_auto_precheck') === '1';
@@ -455,13 +546,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             await loadInvitationProtocolByCode(invitationCode.trim());
             recordSessionEvent('invitation_protocol_loaded', {
-                invitationCode: invitationCode.trim(),
                 protocolId: state.runtime?.invitationProtocolMeta?.protocolId || null
             });
         } catch (e) {
             console.warn('[Invitation] Failed to load protocol by code:', e);
             recordSessionEvent('invitation_protocol_load_failed', {
-                invitationCode: invitationCode.trim(),
                 message: e?.message || String(e)
             });
             if (inviteHintGlobal) {
@@ -508,7 +597,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (inviteInput) {
                 const raw = (inviteInput.value || '').trim();
                 if (!raw) {
-                    if (!participantInviteBypass && !state.sessionData.ids.invitationCode && !invitationCode) {
+                    if (
+                        !participantInviteBypass
+                        && !localDevelopmentBypass
+                        && !state.sessionData.ids.invitationCode
+                        && !invitationCode
+                    ) {
                         if (hint) {
                             hint.textContent =
                                 'Вставьте ссылку-приглашение или код. Если у вас нет приглашения, попросите исследователя отправить ссылку.';
@@ -563,9 +657,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (consentCheck) consentCheck.addEventListener('change', toggleConsent);
 
     const consentBtn = document.getElementById('consentBtn');
-    if (consentBtn) consentBtn.addEventListener('click', () => {
+    if (consentBtn) consentBtn.addEventListener('click', async () => {
         dbg('ui', 'button:consentBtn', {});
-        generateIdsAndProceed();
+        consentBtn.disabled = true;
+        try {
+            await generateIdsAndProceed();
+        } finally {
+            consentBtn.disabled = false;
+        }
     });
     
     const emailInput = document.getElementById('userEmail');
@@ -576,7 +675,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         step3Btn.addEventListener('click', async (e) => {
             e.preventDefault();
             dbg('ui', 'button:step3NextBtn', {});
-            await collectTechDataAndProceed(5);
+            await collectTechDataAndProceed(4);
         });
     }
 
@@ -645,7 +744,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         setLanguage(window.__EMOCOG_PENDING_LANG__);
         window.__EMOCOG_PENDING_LANG__ = null;
     }
-    initSecureSenderToggle();
     dbg('app', 'app:init:done', {
         invitationCode: state.sessionData.ids.invitationCode || invitationCode || null,
         developerBypass: participantInviteBypass
@@ -654,8 +752,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.WECOG_DEBUG_HUD && window.WECOG_DEBUG?.enabled) {
         window.WECOG_DEBUG_HUD.start();
     }
+
+    if (sessionRuntime?.reloadRecovery) {
+        nextStep(5);
+        const precheckStatus = document.getElementById('precheckStatus');
+        if (precheckStatus) {
+            precheckStatus.textContent = state.currentLang === 'en'
+                ? 'Restart the camera check and calibration before continuing.'
+                : 'Перезапустите проверку камеры и калибровку перед продолжением.';
+        }
+        sessionRuntime.promptReloadRecovery()
+            .catch(error => console.warn('[SessionRuntime] reload recovery prompt failed:', error));
+    }
 });
 
 window.addEventListener('beforeunload', () => {
+    getSessionRuntime()?.saveCheckpoint();
     stopPreCheckOnLeave();
 });

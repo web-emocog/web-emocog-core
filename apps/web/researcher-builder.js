@@ -55,6 +55,32 @@ function ExperimentBuilderView(options = {}) {
     }];
   }
 
+  function stimulusIdsForAoiExport(content, trials) {
+    const ids = (Array.isArray(trials) ? trials : [])
+      .map(trial => trial?.stimulusId ?? trial?.id)
+      .filter(value => value != null && String(value).trim());
+    (Array.isArray(content?.slides) ? content.slides : []).forEach(slide => {
+      const id = typeof slide === 'object' ? (slide?.stimulusId ?? slide?.id) : slide;
+      if (id != null && String(id).trim()) ids.push(id);
+    });
+    if (content?.stimuliSource === 'folder' && content?.stimuliFolder) {
+      const folder = folders.find(item => String(item.id) === String(content.stimuliFolder));
+      if (Array.isArray(folder?.stimuliIds)) ids.push(...folder.stimuliIds);
+    }
+    return ids;
+  }
+
+  function attachBlockAois(blockConfig, content, trials) {
+    if (!content?.useAOI || !globalThis.EmocogAoiProtocol) return;
+    const definitions = globalThis.EmocogAoiProtocol.buildAoiDefinitions(
+      stimuliList,
+      stimulusIdsForAoiExport(content, trials)
+    );
+    if (!Object.keys(definitions).length) return;
+    blockConfig.aoiSchemaVersion = globalThis.EmocogAoiProtocol.AOI_SCHEMA_VERSION;
+    blockConfig.aoiDefinitions = definitions;
+  }
+
   function describeParticipantShellForUi(shell) {
     const parts = [];
     if (shell.consent) parts.push(trb('информированное согласие', 'informed consent'));
@@ -217,31 +243,31 @@ function ExperimentBuilderView(options = {}) {
     }
     return `
       <select class="proto-task-type-sel" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);color:var(--text);width:100%;">
-        ${options.map(opt => `<option value="${opt.value}" ${current === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('')}
+        ${options.map(opt => `<option value="${previewEscape(opt.value)}" ${current === opt.value ? 'selected' : ''}>${previewEscape(opt.label)}</option>`).join('')}
       </select>`;
   }
 
   function buildBlockInlineEditor(block) {
     const c = block.content || {};
     const folderOpts = (folders || []).map(f =>
-      `<option value="${f.id}" ${c.stimuliFolder === f.id ? 'selected' : ''}>${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</option>`).join('');
+      `<option value="${previewEscape(f.id)}" ${c.stimuliFolder === f.id ? 'selected' : ''}>${previewEscape(typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name)}</option>`).join('');
 
     if (block.type === 'instruction') {
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Заголовок', 'Title')}</label>
-          <input class="proto-field" data-field="title" value="${localizedInstructionValue(c, 'title')}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <input class="proto-field" data-field="title" value="${previewEscape(localizedInstructionValue(c, 'title'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст', 'Text')}</label>
-          <textarea class="proto-field" data-field="text" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${localizedInstructionValue(c, 'text')}</textarea>
+          <textarea class="proto-field" data-field="text" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${previewEscape(localizedInstructionValue(c, 'text'))}</textarea>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Кнопка', 'Button')}</label>
-          <input class="proto-field" data-field="buttonText" value="${localizedInstructionValue(c, 'buttonText', 'Далее')}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <input class="proto-field" data-field="buttonText" value="${previewEscape(localizedInstructionValue(c, 'buttonText', 'Далее'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
         </div>`;
     }
     if (block.type === 'rest') {
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст для участника', 'Text for participant')}</label>
-          <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${c.text || trb('Сделайте небольшой перерыв', 'Take a short break')}</textarea>
+          <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${previewEscape(c.text || trb('Сделайте небольшой перерыв', 'Take a short break'))}</textarea>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Длительность (сек)', 'Duration (sec)')}</label>
           <input class="proto-field" data-field="duration" type="number" value="${c.duration || 30}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
         </div>`;
@@ -250,9 +276,9 @@ function ExperimentBuilderView(options = {}) {
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Заголовок', 'Title')}</label>
-          <input class="proto-field" data-field="title" value="${c.title || trb('Эксперимент завершён', 'Experiment completed')}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <input class="proto-field" data-field="title" value="${previewEscape(c.title || trb('Эксперимент завершён', 'Experiment completed'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст', 'Text')}</label>
-          <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${c.text || trb('Спасибо за участие!', 'Thank you for participating!')}</textarea>
+          <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${previewEscape(c.text || trb('Спасибо за участие!', 'Thank you for participating!'))}</textarea>
         </div>`;
     }
     if (block.type === 'cognitive_task' || block.type === 'passive') {
@@ -262,7 +288,7 @@ function ExperimentBuilderView(options = {}) {
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Название блока', 'Block name')}</label>
-          <input class="proto-label-input" value="${localizedBlockLabel(block, block.label)}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <input class="proto-label-input" value="${previewEscape(localizedBlockLabel(block, block.label))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
           ${taskTypeField}
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Откуда брать стимулы?', 'Stimulus source')}</label>
           <select class="proto-field" data-field="stimuliSource" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">
@@ -435,7 +461,7 @@ function ExperimentBuilderView(options = {}) {
   function defaultContent(type) {
     switch(type) {
       case 'instruction':    return { title: trb('Инструкция', 'Instruction'), text:'', buttonText: trb('Далее', 'Next') };
-      case 'cognitive_task': return { taskType:'simple_rt', showFeedback:true, useRT:true, stimulusDuration:1000, trials:[], stimuliSource:'library', stimuliFolder:'' };
+      case 'cognitive_task': return { taskType:'simple_rt', showFeedback:true, useRT:true, responseMode:'keypress', stimulusDuration:1000, trials:[], stimuliSource:'library', stimuliFolder:'' };
       case 'questionnaire':  return { questions:[] };
       case 'passive':        return { slideDuration:5000, slides:[], stimuliSource:'library', stimuliFolder:'' };
       case 'rest':           return { text:trb('Сделайте небольшой перерыв','Take a short break'), duration:30 };
@@ -508,13 +534,16 @@ function ExperimentBuilderView(options = {}) {
     const modal = document.createElement('div');
     modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:26px 24px 20px;width:1120px;max-width:98vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
 
-    const stimuliOptions = stimuliList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    const stimuliOptions = stimuliList.map(s => `<option value="${previewEscape(s.id)}">${previewEscape(s.name)}</option>`).join('');
     const standardFolderId = typeof getStandardFolderId === 'function' ? getStandardFolderId() : 'folder_standard';
     const autoGenDefault = block.content?.stimuliFolder || standardFolderId;
     const folderOptions = folders.map(f => `<option value="${f.id}" ${f.id === autoGenDefault ? 'selected' : ''}>${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</option>`).join('');
     const rtBounds = resolveRtBounds(block.content || {});
     const rtMinVal = block.content?.rtMin != null && block.content.rtMin !== '' ? block.content.rtMin : '';
     const rtMaxVal = block.content?.rtWindow != null && block.content.rtWindow !== '' ? block.content.rtWindow : '';
+    const responseMode = ['keypress', 'click', 'pointer_intent', 'none'].includes(block.content?.responseMode)
+      ? block.content.responseMode
+      : 'keypress';
 
     modal.innerHTML = `
       <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;gap:16px;">
@@ -545,14 +574,23 @@ function ExperimentBuilderView(options = {}) {
               </span>
             </span>
           </label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
-            <input type="checkbox" id="useBpmCb" ${block.content.useBPM ? 'checked' : ''} style="accent-color:var(--accent);">
-            <span style="font-weight:600;">${trb('Расчёт BPM', 'Calculate BPM')}</span>
+          <label style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:5px;">
+            <span>${trb('Способ ответа', 'Response mode')}</span>
+            <select id="responseModeSel" style="padding:6px 8px;font-size:12px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);">
+              <option value="keypress" ${responseMode==='keypress'?'selected':''}>${trb('Клавиша', 'Keypress')}</option>
+              <option value="click" ${responseMode==='click'?'selected':''}>${trb('Клик', 'Click')}</option>
+              <option value="pointer_intent" ${responseMode==='pointer_intent'?'selected':''}>${trb('Намеренное движение мыши', 'Pointer intent')}</option>
+              <option value="none" ${responseMode==='none'?'selected':''}>${trb('Ответ не требуется', 'No response')}</option>
+            </select>
+            <span id="responseModeHint" style="font-size:10px;line-height:1.4;color:var(--muted2);"></span>
           </label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
-            <input type="checkbox" id="trialEmotionCb" ${block.content.useEmotionTracking ? 'checked' : ''} style="accent-color:var(--accent);">
-            <span style="font-weight:600;">${trb('Отслеживание эмоций', 'Emotion tracking')}</span>
-          </label>
+          <div style="padding:9px 10px;border-radius:9px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);font-size:11px;line-height:1.45;color:var(--muted);">
+            <strong style="display:block;color:var(--text);margin-bottom:2px;">${trb('Фоновые сигналы сессии', 'Background session signals')}</strong>
+            ${trb(
+              'Взгляд, моргания, PERCLOS, эмоции, пульс и поза записываются автоматически на протяжении всей измерительной сессии.',
+              'Gaze, blinks, PERCLOS, emotion, pulse and posture are recorded automatically throughout the measurement session.'
+            )}
+          </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
             <input type="checkbox" id="trialAoiCb" ${block.content.useAOI ? 'checked' : ''} style="accent-color:var(--accent);">
             <span style="font-weight:600;">AOI (${trb('области интереса', 'areas of interest')})</span>
@@ -675,6 +713,22 @@ function ExperimentBuilderView(options = {}) {
       if (rtMinInput) rtMinInput.disabled = !on;
       rtWindowInput.disabled = !on;
     });
+    const responseModeSel = modal.querySelector('#responseModeSel');
+    const responseModeHint = modal.querySelector('#responseModeHint');
+    const refreshResponseModeHint = () => {
+      const pointer = responseModeSel?.value === 'pointer_intent';
+      responseModeHint.textContent = pointer
+        ? trb(
+          'Только для aiming/shooter-задач: движение засчитывается после baseline, dead-zone и устойчивого порога скорости/смещения.',
+          'Only for aiming/shooter tasks: movement counts after baseline, dead-zone, and sustained velocity/displacement thresholds.'
+        )
+        : trb(
+          'Для стратегий и меню используйте клик или клавишу.',
+          'Use click or keypress for strategy and menu tasks.'
+        );
+    };
+    responseModeSel?.addEventListener('change', refreshResponseModeHint);
+    refreshResponseModeHint();
     modal.querySelector('#actionHelpBtn')?.addEventListener('click', (e) => {
       e.stopPropagation();
       toast(trb(
@@ -710,12 +764,13 @@ function ExperimentBuilderView(options = {}) {
             </select>
           </td>
           <td style="padding:8px;">
-            <input class="t-input t-condition" value="${trial.condition || ''}" placeholder="${trb('условие', 'condition')}" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+            <input class="t-input t-condition" value="${previewEscape(trial.condition || '')}" placeholder="${trb('условие', 'condition')}" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
           </td>
           <td style="padding:8px;">
             <select class="t-input t-action" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);" ${trial.stimulusId ? '' : 'disabled'}>
               <option value="">— ${trb('не нужно', 'none')} —</option>
               <option value="mouse_click">${trb('Клик мышью', 'Mouse click')}</option>
+              <option value="mouse_intent">${trb('Движение мыши', 'Pointer intent')}</option>
               <option value="space">${trb('Пробел', 'Space')}</option>
               <option value="arrow_up">${trb('Вверх', 'Up')}</option>
               <option value="arrow_down">${trb('Вниз', 'Down')}</option>
@@ -852,23 +907,35 @@ function ExperimentBuilderView(options = {}) {
         return;
       }
 
+      const selectedResponseMode = responseModeSel?.value || 'keypress';
+      const actionMode = action => {
+        if (action === 'mouse_click') return 'click';
+        if (action === 'mouse_intent' || action === 'pointer_intent') return 'pointer_intent';
+        if (!action) return 'none';
+        return 'keypress';
+      };
+      const incompatibleTrial = currentTrials.findIndex(trial => {
+        const mode = actionMode(trial.action || trial.correctResponse || '');
+        if (selectedResponseMode === 'none') return mode !== 'none';
+        return mode !== 'none' && mode !== selectedResponseMode;
+      });
+      if (incompatibleTrial !== -1) {
+        toast(`${trb('Способ ответа не совпадает с действием в строке', 'Response mode does not match the action in row')} ${incompatibleTrial + 1}`);
+        return;
+      }
+
       block.content.trials = currentTrials.map(({ feedbackCorrect, feedbackIncorrect, correctFeedback, incorrectFeedback, feedbackText, feedbackError, ...trial }) => trial);
       block.content.randomize = modal.querySelector('#trialRandomizeCb').checked;
       block.content.useAOI = modal.querySelector('#trialAoiCb').checked;
-      block.content.useEmotionTracking = !!modal.querySelector('#trialEmotionCb')?.checked;
-      if (block.content.useEmotionTracking) {
-        block.content.analytics = { ...(block.content.analytics || {}), webcam: true, mediapipe: true };
-      } else if (block.content.analytics) {
-        const nextAnalytics = { ...block.content.analytics };
-        delete nextAnalytics.mediapipe;
-        block.content.analytics = Object.keys(nextAnalytics).length ? nextAnalytics : null;
-      }
+      delete block.content.useEmotionTracking;
+      delete block.content.useBPM;
       const useRtCalc = modal.querySelector('#useRtCalcCb').checked;
       if (useRtCalc && (parseInt(modal.querySelector('#rtWindowInput').value) || 0) <= 0) {
         toast('Укажите максимальное время ожидаемой реакции > 0 мс');
         return;
       }
       block.content.useRT = useRtCalc;
+      block.content.responseMode = selectedResponseMode;
       if (useRtCalc) {
         const bounds = resolveRtBounds(block.content);
         const minRaw = parseInt(modal.querySelector('#rtMinInput').value);
@@ -885,7 +952,6 @@ function ExperimentBuilderView(options = {}) {
         block.content.rtMin = null;
         block.content.rtWindow = null;
       }
-      block.content.useBPM = !!modal.querySelector('#useBpmCb')?.checked;
       block.content.useFixation = fixCb.checked;
       block.content.fixationDuration = parseInt(fixInput.value) || 500;
 
@@ -944,19 +1010,19 @@ function ExperimentBuilderView(options = {}) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);">
             ${trb('Название эксперимента *','Experiment title *')}
-            <input id="metaTitle" value="${protocolMeta.title || ''}" placeholder="${trb('Например: Внимание и рабочая память','For example: Attention and working memory')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);">
+            <input id="metaTitle" value="${previewEscape(protocolMeta.title || '')}" placeholder="${trb('Например: Внимание и рабочая память','For example: Attention and working memory')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);">
           </label>
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);">
             ${trb('ID протокола *','Protocol ID *')}
-            <input id="metaProtocolId" value="${protocolMeta.protocolId || ''}" placeholder="attention-memory-v1" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);font-family:var(--mono);">
+            <input id="metaProtocolId" value="${previewEscape(protocolMeta.protocolId || '')}" placeholder="attention-memory-v1" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);font-family:var(--mono);">
           </label>
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);">
             ${trb('Приблизительная длительность *','Estimated duration *')}
-            <input id="metaDuration" value="${protocolMeta.estimatedDuration || ''}" placeholder="${trb('Например: 25 минут','For example: 25 minutes')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);">
+            <input id="metaDuration" value="${previewEscape(protocolMeta.estimatedDuration || '')}" placeholder="${trb('Например: 25 минут','For example: 25 minutes')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);">
           </label>
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);grid-column:1/-1;">
             ${trb('Краткое описание','Short description')}
-            <textarea id="metaDescription" rows="5" placeholder="${trb('Кратко опишите цель и структуру эксперимента','Briefly describe the goal and structure of the experiment')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);font-family:inherit;resize:vertical;">${protocolMeta.description || ''}</textarea>
+            <textarea id="metaDescription" rows="5" placeholder="${trb('Кратко опишите цель и структуру эксперимента','Briefly describe the goal and structure of the experiment')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);font-family:inherit;resize:vertical;">${previewEscape(protocolMeta.description || '')}</textarea>
           </label>
         </div>
         <div id="metaError" style="display:none;color:var(--bad);font-size:12px;font-weight:700;"></div>
@@ -1525,7 +1591,7 @@ function ExperimentBuilderView(options = {}) {
       reader.onload = ev => {
         uploadedPsychoPyFile = ev.target.result;
         infoEl.style.display = 'block';
-        infoEl.innerHTML = `<svg fill="none" stroke="var(--good)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+        infoEl.innerHTML = `<svg fill="none" stroke="var(--good)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${previewEscape(file.name)} (${(file.size/1024).toFixed(1)} KB)`;
         if (importedType === 'psyexp') resSec.style.display = 'block';
         startBtn.style.opacity='1'; startBtn.style.pointerEvents='auto';
       };
@@ -1543,7 +1609,7 @@ function ExperimentBuilderView(options = {}) {
       uploadedResources = {};
       resListEl.innerHTML = '';
       Array.from(e.target.files).forEach(f => {
-        resListEl.innerHTML += `<div>📄 ${f.name}</div>`;
+        resListEl.insertAdjacentHTML('beforeend', `<div>📄 ${previewEscape(f.name)}</div>`);
         const r = new FileReader(); r.onload = ev => { uploadedResources[f.name] = ev.target.result; }; r.readAsText(f);
       });
     });
@@ -1588,7 +1654,7 @@ function ExperimentBuilderView(options = {}) {
               <div style="width:20px;height:20px;border-radius:5px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
                 <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
               </div>
-              <div style="font-size:11px;"><b>${b.id}</b> <span style="color:var(--muted);">${b.type}${b.trials?' · '+b.trials.length+' проб':''}</span></div>
+              <div style="font-size:11px;"><b>${previewEscape(b.id)}</b> <span style="color:var(--muted);">${previewEscape(b.type)}${b.trials?' · '+b.trials.length+' проб':''}</span></div>
             </div>`;
           }).join('')}
         `;
@@ -1655,20 +1721,20 @@ function ExperimentBuilderView(options = {}) {
       const canEdit = ['instruction', 'rest', 'finish', 'cognitive_task', 'passive'].includes(b.type);
 
       parts.push(`
-        <div class="proto-card ${sel ? 'proto-card-sel' : ''}" data-id="${b.id}" data-idx="${i}"
+        <div class="proto-card ${sel ? 'proto-card-sel' : ''}" data-id="${previewEscape(b.id)}" data-idx="${i}"
           style="display:flex;flex-direction:column;padding:9px 11px;border-radius:11px;border:1px solid ${sel ? 'var(--accent)' : 'var(--stroke)'};background:${sel ? 'rgba(92,102,189,.07)' : 'var(--card-bg)'};margin-bottom:2px;position:relative;">
           <div style="display:flex;align-items:center;gap:9px;">
             <div class="proto-drag-handle" draggable="true" title="${trb('Перетащите для изменения порядка', 'Drag to reorder')}" style="width:28px;height:28px;border-radius:8px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:grab;touch-action:none;">
               <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
             </div>
             <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${blockLabel}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${previewEscape(blockLabel)}</div>
             </div>
             <div style="display:flex;gap:2px;flex-shrink:0;align-items:center;">
-              ${canEdit ? `<button class="pcbtn edit-btn" data-id="${b.id}" title="${trb('Редактировать', 'Edit')}" style="background:${sel ? 'rgba(92,102,189,.14)' : 'none'};border:none;cursor:pointer;color:${sel ? 'var(--accent)' : 'var(--muted2)'};padding:3px;border-radius:5px;display:flex;align-items:center;">
+              ${canEdit ? `<button class="pcbtn edit-btn" data-id="${previewEscape(b.id)}" title="${trb('Редактировать', 'Edit')}" style="background:${sel ? 'rgba(92,102,189,.14)' : 'none'};border:none;cursor:pointer;color:${sel ? 'var(--accent)' : 'var(--muted2)'};padding:3px;border-radius:5px;display:flex;align-items:center;">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
               </button>` : ''}
-              <button class="pcbtn del-btn" data-id="${b.id}" title="${trb('Удалить', 'Delete')}" style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
+              <button class="pcbtn del-btn" data-id="${previewEscape(b.id)}" title="${trb('Удалить', 'Delete')}" style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
                 <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
@@ -1788,7 +1854,7 @@ function ExperimentBuilderView(options = {}) {
       reader.onload = ev => {
         uploadedPsychoPyFile = ev.target.result;
         infoEl.style.display = 'block';
-        infoEl.innerHTML = `<svg fill="none" stroke="var(--good)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+        infoEl.innerHTML = `<svg fill="none" stroke="var(--good)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${previewEscape(file.name)} (${(file.size/1024).toFixed(1)} KB)`;
         if (importedType === 'psyexp') resSec.style.display = 'block';
         startBtn.style.opacity='1'; startBtn.style.pointerEvents='auto';
       };
@@ -1806,7 +1872,7 @@ function ExperimentBuilderView(options = {}) {
       uploadedResources = {};
       resListEl.innerHTML = '';
       Array.from(e.target.files).forEach(f => {
-        resListEl.innerHTML += `<div>📄 ${f.name}</div>`;
+        resListEl.insertAdjacentHTML('beforeend', `<div>📄 ${previewEscape(f.name)}</div>`);
         const r = new FileReader(); r.onload = ev => { uploadedResources[f.name] = ev.target.result; }; r.readAsText(f);
       });
     });
@@ -1851,7 +1917,7 @@ function ExperimentBuilderView(options = {}) {
               <div style="width:20px;height:20px;border-radius:5px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
                 <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
               </div>
-              <div style="font-size:11px;"><b>${b.id}</b> <span style="color:var(--muted);">${b.type}${b.trials?' · '+b.trials.length+' проб':''}</span></div>
+              <div style="font-size:11px;"><b>${previewEscape(b.id)}</b> <span style="color:var(--muted);">${previewEscape(b.type)}${b.trials?' · '+b.trials.length+' проб':''}</span></div>
             </div>`;
           }).join('')}
         `;
@@ -1925,7 +1991,7 @@ function ExperimentBuilderView(options = {}) {
         const folderName = (() => {
           const f = folders.find(x => x.id === block.content.stimuliFolder);
           if (!f) return `<span>${trb('Не выбрана','Not selected')}</span>`;
-          return typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name;
+          return previewEscape(typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name);
         })();
         const sourceHtml = block.content?.stimuliSource === 'folder'
           ? `<span>${trb('Папка:','Folder:')}</span> <span style="color:var(--text);">${folderName}</span>`
@@ -1940,7 +2006,7 @@ function ExperimentBuilderView(options = {}) {
               <div style="width:26px;height:26px;border-radius:7px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
                 <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
               </div>
-              <div style="font-size:15px;font-weight:700;color:var(--text);">${localizedBlockLabel(block, meta.label)}</div>
+              <div style="font-size:15px;font-weight:700;color:var(--text);">${previewEscape(localizedBlockLabel(block, meta.label))}</div>
             </div>
             <div style="font-size:12px;color:var(--muted);display:flex;gap:12px;align-items:center;">
               <span><b style="color:var(--text);">${trialsCount}</b> <span>проб</span></span>
@@ -2151,8 +2217,8 @@ function ExperimentBuilderView(options = {}) {
     modal.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
         <div>
-          <div style="font-size:17px;font-weight:800;color:var(--text);">${protocolMeta.title || 'Предпросмотр эксперимента'}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px;">Protocol ID: <code>${protocolMeta.protocolId || '—'}</code> · ${experimentBlocks.length} блоков</div>
+          <div style="font-size:17px;font-weight:800;color:var(--text);">${previewEscape(protocolMeta.title || 'Предпросмотр эксперимента')}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">Protocol ID: <code>${previewEscape(protocolMeta.protocolId || '—')}</code> · ${experimentBlocks.length} блоков</div>
         </div>
         <button id="previewCloseBtn" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:22px;">×</button>
       </div>
@@ -2162,8 +2228,8 @@ function ExperimentBuilderView(options = {}) {
           return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:10px;background:var(--card-bg);border:1px solid var(--stroke);">
             <div style="width:24px;height:24px;border-radius:50%;background:rgba(92,102,189,.12);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">${i+1}</div>
             <div style="min-width:0;">
-              <div style="font-size:13px;font-weight:800;color:var(--text);">${b.label || b.type}</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:2px;">${b.type}${b.content?.taskType ? ' · ' + b.content.taskType : ''}${trials ? ' · ' + trials + ' проб' : ''}</div>
+              <div style="font-size:13px;font-weight:800;color:var(--text);">${previewEscape(b.label || b.type)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px;">${previewEscape(b.type)}${b.content?.taskType ? ' · ' + previewEscape(b.content.taskType) : ''}${trials ? ' · ' + trials + ' проб' : ''}</div>
             </div>
           </div>`;
         }).join('')}
@@ -2187,19 +2253,19 @@ function ExperimentBuilderView(options = {}) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div style="padding:14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);">
             <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;">${trb('Эксперимент','Experiment')}</div>
-            <div style="font-size:16px;font-weight:800;color:var(--text);margin-top:6px;">${protocolMeta.title || '—'}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px;">${protocolMeta.estimatedDuration || '—'} · ${experimentBlocks.length} блоков</div>
+            <div style="font-size:16px;font-weight:800;color:var(--text);margin-top:6px;">${previewEscape(protocolMeta.title || '—')}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;">${previewEscape(protocolMeta.estimatedDuration || '—')} · ${experimentBlocks.length} блоков</div>
           </div>
           <div style="padding:14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);">
             <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Protocol ID</div>
-            <code style="display:block;font-size:14px;color:var(--accent);margin-top:8px;word-break:break-all;">${protocolMeta.protocolId || '—'}</code>
+            <code style="display:block;font-size:14px;color:var(--accent);margin-top:8px;word-break:break-all;">${previewEscape(protocolMeta.protocolId || '—')}</code>
           </div>
         </div>
         <div style="padding:14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;">
           <div style="font-size:13px;font-weight:800;color:var(--text);">${trb('Ссылка для участников','Participant link')}</div>
-          <div style="font-size:11px;color:var(--muted);line-height:1.45;">${shellLine}</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.45;">${previewEscape(shellLine)}</div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <input id="participantLinkInput" readonly value="${link}" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.62);font-size:12px;color:var(--text);font-family:var(--mono);">
+            <input id="participantLinkInput" readonly value="${previewEscape(link)}" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.62);font-size:12px;color:var(--text);font-family:var(--mono);">
             <button class="quick-btn" id="copyParticipantLinkBtn" style="font-size:12px;">${trb('Скопировать','Copy')}</button>
           </div>
         </div>
@@ -2942,6 +3008,34 @@ function ExperimentBuilderView(options = {}) {
     setTimeout(() => navigate('#/experiments'), 700);
   }
 
+  let protocolSaveInProgress = false;
+
+  async function runProtocolSave() {
+    if (protocolSaveInProgress) return;
+    protocolSaveInProgress = true;
+    const button = canvasCol.querySelector('#finishSaveProtocolBtn');
+    const originalText = button?.textContent || trb('Сохранить протокол', 'Save protocol');
+    if (button) {
+      button.disabled = true;
+      button.textContent = trb('Сохранение…', 'Saving…');
+    }
+    try {
+      await doSave();
+    } catch (error) {
+      console.error('[ResearcherBuilder] protocol save failed', error);
+      toast(
+        trb('Не удалось сохранить протокол: ', 'Failed to save protocol: ')
+        + (error?.message || String(error))
+      );
+    } finally {
+      protocolSaveInProgress = false;
+      if (button?.isConnected) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+  }
+
   function saveProtocol() {
     const errors = [];
     validateProtocolMeta(protocolMeta).forEach(field => errors.push(trb('Заполните поле: ','Fill in field: ') + field));
@@ -2971,14 +3065,18 @@ function ExperimentBuilderView(options = {}) {
       document.body.appendChild(overlay);
       setTimeout(() => applyAutoI18n(modal), 0);
       modal.querySelector('#valClose').addEventListener('click', () => document.body.removeChild(overlay));
-      modal.querySelector('#valIgnore').addEventListener('click', () => { document.body.removeChild(overlay); doSave(); });
+      modal.querySelector('#valIgnore').addEventListener('click', () => {
+        document.body.removeChild(overlay);
+        runProtocolSave();
+      });
       return;
     }
-    doSave();
+    runProtocolSave();
   }
 
   async function doSave() {
     const srcData = parsedExperimentData?.json || {};
+    const builderKey = experimentId || 'draft';
 
     const expTitle = protocolMeta.title || srcData.title || 'Новый эксперимент';
 
@@ -2998,10 +3096,6 @@ function ExperimentBuilderView(options = {}) {
       }));
     const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
 
-    const hubMetrics = [];
-    userBlocks.forEach((b) => {
-      if (b.content?.useBPM) hubMetrics.push('bpm');
-    });
     const analyticsCfg = typeof getExperimentAnalyticsConfig === 'function'
       ? getExperimentAnalyticsConfig(builderKey)
       : null;
@@ -3012,7 +3106,7 @@ function ExperimentBuilderView(options = {}) {
       estimatedDuration: protocolMeta.estimatedDuration,
       description: protocolMeta.description,
       participantShell: shell,
-      testHubMetrics: [...new Set(hubMetrics)],
+      testHubMetrics: [],
       analyticsConfig: analyticsCfg,
       version: 'v2.0_universal',
       settings: srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' },
@@ -3042,11 +3136,13 @@ function ExperimentBuilderView(options = {}) {
               incorrectText: b.content?.feedbackIncorrect || trb("Ошибка!","Error!")
             } : null,
             useRT: b.content?.useRT !== false,
-            useBPM: !!b.content?.useBPM,
             stimulusDuration: b.content?.stimulusDuration || 1000,
             rtMin: b.content?.rtMin != null && b.content.rtMin !== '' ? b.content.rtMin : rtResolved.rtMin,
             rtWindow: b.content?.rtWindow != null && b.content.rtWindow !== '' ? b.content.rtWindow : rtResolved.rtWindow,
-            responseType: b.content?.responseType || 'keys',
+            responseMode: ['keypress', 'click', 'pointer_intent', 'none'].includes(b.content?.responseMode)
+              ? b.content.responseMode
+              : null,
+            responseType: b.content?.responseType || (b.content?.responseMode === 'click' ? 'click' : 'keys'),
             omissionRule: b.content?.omissionRule || 'skip',
             commissionRule: b.content?.commissionRule || 'flag',
             targetAOI: b.content?.targetAOI || '',
@@ -3054,11 +3150,8 @@ function ExperimentBuilderView(options = {}) {
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
             useAOI: !!b.content?.useAOI,
-            useEmotionTracking: !!b.content?.useEmotionTracking,
             protocolDurationMs: b.content?.protocolDurationMs || null,
-            analytics: b.content?.useEmotionTracking
-              ? { webcam: true, mediapipe: true, ...(b.content?.analytics || {}) }
-              : (b.content?.analytics || null),
+            analytics: b.content?.analytics || null,
           };
           if (b.content?.useFixation) {
             out.blockConfig.fixation = {
@@ -3067,6 +3160,7 @@ function ExperimentBuilderView(options = {}) {
             };
           }
           out.trials = defaultExportTrialsForCognitiveBlock(b.content);
+          attachBlockAois(out.blockConfig, b.content, out.trials);
         } else if (b.type === 'passive') {
           out.blockConfig = {
             slideDuration: b.content?.slideDuration || 5000,
@@ -3084,6 +3178,7 @@ function ExperimentBuilderView(options = {}) {
               duration: b.content?.fixationDuration || 500
             };
           }
+          attachBlockAois(out.blockConfig, b.content, b.content?.slides || []);
         } else if (b.type === 'rest') {
           out.content = { text: b.content?.text || trb('Сделайте небольшой перерыв','Take a short break'), duration: b.content?.duration || 30 };
         } else if (b.type === 'finish') {
@@ -3099,7 +3194,6 @@ function ExperimentBuilderView(options = {}) {
       json.selected_metrics = deriveSelectedMetricsFromBlocks(json.blocks);
     }
 
-    const builderKey = experimentId || 'draft';
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     const id = experimentId || 'exp_' + Date.now();
 

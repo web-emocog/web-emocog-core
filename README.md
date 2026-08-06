@@ -5,7 +5,7 @@
 [![Backend](https://img.shields.io/badge/backend-Express%204-000000.svg)](apps/api)
 [![Database](https://img.shields.io/badge/db-PostgreSQL-336791.svg)](apps/api/migrations)
 
-**EmoCog** — веб-платформа для когнитивных исследований. Она снимает мультимодальные сигналы прямо в браузере участника (взгляд, пульс, эмоции, время реакции, опционально — голос), агрегирует их, прогоняет контроль качества (QC) и сохраняет на сервере, а исследователю даёт конструктор протоколов, приглашения, аналитику и экспорт.
+**EmoCog** — веб-платформа для когнитивных исследований. Она снимает мультимодальные сигналы прямо в браузере участника (взгляд, моргания, пульс, эмоции, поза и время реакции), агрегирует их, прогоняет контроль качества (QC) и сохраняет на сервере, а исследователю даёт конструктор протоколов, приглашения, AOI-аналитику и экспорт.
 
 Вся «тяжёлая» обработка (ML, rPPG, gaze-tracking) выполняется **на клиенте, в браузере**, без выгрузки сырого видео/аудио на сервер — наружу уходят только агрегированные метрики.
 
@@ -18,21 +18,22 @@ https://docs.google.com/spreadsheets/d/1UtDw5Ra3S853evBQ6UfU6VtNPZ5VUmilYZIX2vgj
 ## Содержание
 
 1. [Возможности](#возможности)
-2. [Роли пользователей](#роли-пользователей)
-3. [Архитектура](#архитектура)
-4. [Технологический стек](#технологический-стек)
-5. [Структура репозитория](#структура-репозитория)
-6. [Быстрый старт](#быстрый-старт)
-7. [Конфигурация](#конфигурация)
-8. [REST API](#rest-api)
-9. [База данных и миграции](#база-данных-и-миграции)
-10. [Браузерный ML и сигнальные модули](#браузерный-ml-и-сигнальные-модули)
-11. [Тестирование](#тестирование)
-12. [Деплой](#деплой)
-13. [Безопасность и приватность](#безопасность-и-приватность)
-14. [Документация](#документация)
-15. [Разработка и ветвление](#разработка-и-ветвление)
-16. [Лицензия](#лицензия)
+2. [Нововведения спринтов 1-2](#нововведения-спринтов-1-2)
+3. [Роли пользователей](#роли-пользователей)
+4. [Архитектура](#архитектура)
+5. [Технологический стек](#технологический-стек)
+6. [Структура репозитория](#структура-репозитория)
+7. [Быстрый старт](#быстрый-старт)
+8. [Конфигурация](#конфигурация)
+9. [REST API](#rest-api)
+10. [База данных и миграции](#база-данных-и-миграции)
+11. [Браузерный ML и сигнальные модули](#браузерный-ml-и-сигнальные-модули)
+12. [Тестирование](#тестирование)
+13. [Деплой](#деплой)
+14. [Безопасность и приватность](#безопасность-и-приватность)
+15. [Документация](#документация)
+16. [Разработка и ветвление](#разработка-и-ветвление)
+17. [Лицензия](#лицензия)
 
 ---
 
@@ -41,18 +42,202 @@ https://docs.google.com/spreadsheets/d/1UtDw5Ra3S853evBQ6UfU6VtNPZ5VUmilYZIX2vgj
 - **Конструктор экспериментов** — пошаговый билдер протоколов (блоки, стимулы, метрики, QC, аналитика) с сохранением JSON-определения.
 - **Приглашения по коду** — участник заходит по ссылке `run_new.html?code=...` без регистрации.
 - **Precheck и калибровка** — проверка камеры/освещения/позы перед запуском тестов.
-- **Test Hub** — набор тестов в браузере:
+- **Test Hub** — задания, которые участник проходит явно; gaze, blinks/PERCLOS, rPPG/BPM, emotion и body pose при этом работают фоново всю измерительную сессию:
   | Тест | Что измеряет |
   | --- | --- |
   | **RT** | время реакции (go/no-go) |
   | **Tracking** | слежение взглядом (gaze) |
-  | **BPM** | пульс по rPPG (видеосигнал лица) |
   | **VPC** | visual paired comparison |
   | **Visuospatial** | зрительно-пространственный тест (рисование) |
 - **Контроль качества (QC)** — серверная оценка валидности сессии (`valid` / `borderline` / `invalid`) с причинами брака.
 - **Proxy-метрики** — производные индексы вовлечённости, стресса, качества восприятия, emot-cog.
-- **Аналитика и экспорт** — групповые средние, доверительные интервалы, QC-дашборд, выгрузка в CSV.
+- **Аналитика и экспорт** — session/group AOI-метрики, heatmap, QC, snapshot-based выгрузка в CSV/JSON без demo fallback.
 - **RBAC и мультиарендность** — изоляция данных по организациям, роли `admin / PI / researcher / analyst / assistant / developer / respondent`.
+
+---
+
+## Нововведения спринтов 1-2
+
+Этот release candidate объединяет защищённую серверную ветку с UX и
+frontend-частью AOI/analytics из commit `530d7c2` (`update-from-wec-alfa`).
+Новый дизайн S1-04 намеренно не переносился: сохранены текущая визуальная система
+и пользовательский путь из ветки Ани. Из её commit не переносились отключение
+auth guard, доверие к staff JWT в `localStorage` и demo fallback аналитики.
+
+### Session runtime и typed transport
+
+- Введена единая state machine: `idle -> instructions -> running ->
+  paused/error -> finishing -> completed`.
+- Пауза разрешена только на инструкции и завершается явным действием участника.
+  Во время измерительного задания пауза запрещена.
+- Качественные ошибки (освещение, поза, FPS, окклюзия) отделены от технических
+  (камера, ML-модуль, сеть, ingest). Активные ошибки контролируются всю сессию.
+- Повторяется не весь протокол, а только явно невалидный block/trial. Причина и
+  количество повторов показываются после блока, не прерывая активное испытание.
+- Reload восстанавливает checkpoint; незавершённый в момент reload блок считается
+  невалидным и ставится в очередь повтора.
+- Оставлен один сетевой transport: versioned `session_feature.v1` в `POST /ingest`.
+  Legacy batch transport и автоматические промежуточные выгрузки удалены.
+- `finishSession` идемпотентен. Повтор с тем же `Idempotency-Key` не создаёт
+  features/QC/proxy повторно; активный блок или очередь обязательных повторов
+  не позволяют завершить сессию.
+- На финальном экране останавливаются камера и измерительные модули, после чего
+  выполняется одна итоговая выгрузка.
+
+### RT
+
+- RT работает как явное когнитивное задание; сигнал и его агрегаты передаются
+  через общий typed session transport.
+- Сохранены keyboard/click ответы. Реакция по движению мыши включается только
+  явным режимом `pointer-intent`, а не глобально для всех протоколов.
+- `pointer-intent` использует минимальную амплитуду, dwell/debounce, защиту от
+  micro-tremor и одно событие на trial. Синтетические события не принимаются.
+- Web task IDs нормализуются в contract Python-анализатора; при его недоступности
+  ingest не падает, а возвращает технический статус `analyzer_unavailable`.
+- Спорное решение: движение мыши нельзя считать реакцией в стратегиях или
+  обычных анкетах без явного дизайна задания. Режим выбирается протоколом.
+- До научной приёмки нужен benchmark на реальных мышах и touchpad: latency,
+  false-positive tremor rate, omission rate и согласование click vs pointer.
+
+### Gaze on target
+
+- MediaPipe Face/Iris landmarks используются как открытая браузерная основа;
+  модельные assets хранятся на application origin, без runtime-загрузки с CDN.
+- Калибровочные target coordinates берутся из `getBoundingClientRect()` и
+  `visualViewport`. Панель вкладок/адресная строка не входят в content viewport,
+  поэтому координаты страницы не смешиваются с координатами физического экрана.
+- Signal pipeline разделён на `raw`, `corrected` и `display`. Display smoothing
+  больше не подаётся обратно на вход и не создаёт запаздывающий дубликат траектории.
+- Iris features, head pose и head translation оцениваются отдельно. Естественные
+  движения головы допускаются, а выход из калибровочного распределения блокируется
+  confidence/OOD gate вместо рисования заведомо неверной точки.
+- Prediction target-blind: положение текущей фигуры не используется для
+  подтягивания gaze point к ожидаемой цели.
+- Калибровочная коррекция оценивается LOOCV, а validation остаётся независимой.
+  Сохраняются baseline-versus-new показатели и причины отбраковки.
+- Heatmap строится по фактическим валидным gaze samples отдельно для каждого
+  stimulus/presentation, а не по координатам интерфейсных targets.
+- До научной приёмки обязателен benchmark минимум на 5 участниках и 2 ноутбуках:
+  accuracy в градусах/пикселях, precision/jitter, latency, head-motion robustness,
+  off-screen specificity и baseline comparison.
+
+### Blinks и PERCLOS
+
+- Blink detection работает с начала непрерывного измерения до teardown, а не
+  только во время precheck или калибровки.
+- Сохраняются общее количество, duration, amplitude, opening speed, incomplete
+  blink признаки и PERCLOS по окну наблюдения.
+- Калибровочные samples и whole-session aggregates разделены, чтобы precheck не
+  обнулял итоговые показатели.
+- PERCLOS и blink dynamics являются исследовательскими индикаторами, но не
+  медицинским диагнозом. Нужна проверка относительно размеченного видео при
+  разных очках, освещении, частоте кадров и частичных окклюзиях.
+
+### rPPG / BPM, эмоции и поза
+
+- BPM/rPPG, emotion/FACS, head pose и движение корпуса работают фоново всю
+  измерительную сессию. Они не отображаются как отдельные задания Test Hub.
+- Удалён standalone BPM block, который создавал ложный soft lock и требовал
+  повтор уже успешно завершённого блока.
+- Body posture summary считается по whole-session accumulator даже после
+  ограничения числа хранимых samples.
+- Quality detector использует sustained thresholds: краткое движение головы или
+  единичный FPS drop не бракуют trial; длительная проблема фиксируется с интервалом.
+- Нужна отдельная real-device проверка BPM/emotion/body pose на разных тонах кожи,
+  освещении, камерах, очках и фоновых движениях. Сырые кадры на сервер не уходят.
+
+### AOI и конструктор протоколов
+
+- AOI поддерживает rectangle и polygon в normalized coordinates, versioned schema
+  и привязку к конкретному stimulus/block/presentation.
+- Geometry проверяется на клиенте и сервере: диапазон координат, пустая область,
+  duplicate IDs, self-intersection, интервалы и версия контракта.
+- AOI сериализуется в protocol definition и восстанавливается без потери данных.
+- В конструктор интегрированы AOI editor, stimulus preview, импорт протокола и
+  серверная уникальность имени протокола внутри проекта.
+- До приёмки нужен researcher walkthrough: создать AOI, сохранить, перезагрузить,
+  опубликовать, пройти invitation и увидеть метрики именно этой presentation.
+
+### Analytics, heatmap и export
+
+- Добавлены production endpoints `/analytics/v1/*`: filter options, immutable
+  snapshots, session/group metrics, AOI, heatmap, comparison readiness и export.
+- Group metrics используют participant-equal aggregation; участник с большим
+  числом samples не получает больший вес автоматически.
+- Ноль отделён от отсутствующих данных. QC, missingness и device composition
+  возвращаются явно; confidence interval не создаётся при недостаточном N.
+- CSV/JSON export поддерживает `summary`, `long` и `both`, содержит dictionary,
+  provenance, snapshot/dataset hash и нейтрализацию spreadsheet formulas.
+- Analytics UI из ветки Ани подключён к реальному API. Demo fixture доступна
+  только в явном localhost preview и не подменяет production результаты.
+- Level 2 модели/интерпретации не включаются до утверждения исследовательского
+  метода и минимального размера выборки.
+
+### Stimuli и конвертация PDF/PPT/PPTX
+
+- Реализован `POST /stimuli/convert`, которого не было за frontend-кнопкой Ани.
+- Формат проверяется по расширению и binary signature до запуска конвертера.
+- Размер, число страниц, timeout и concurrency ограничены. Для обработки нужны
+  LibreOffice и Poppler; каждая страница становится server-owned image stimulus.
+- Временные файлы очищаются, `content_path` не принимается от клиента, absolute
+  path и `..` не могут выйти за `UPLOADS_ROOT`.
+- Перед production нужны smoke tests PDF/PPT/PPTX с кириллицей, embedded fonts,
+  прозрачностью, крупными файлами, повреждёнными архивами и timeout конвертера.
+
+### Backend, роли и безопасность
+
+- Browser staff auth переведён на `HttpOnly` cookie + CSRF. Bearer JWT оставлен
+  для внешних API-клиентов и не сохраняется login UI в `localStorage`.
+- Введена матрица `role x operation x own/foreign tenant`. Project/organization
+  memberships обязательны; platform-wide scope доступен только platform-admin.
+- Invitation code после consent обменивается на короткоживущий ingest token,
+  связанный с session + invitation + project + protocol. Mismatch возвращает `409`.
+- Admission атомарно резервирует `used_runs` и создаёт immutable placeholder
+  session. Параллельные запросы не превышают `max_runs`; повтор той же session
+  идемпотентен.
+- Session/features/QC/proxy записываются транзакционно с lock/rollback. Ingest
+  использует allowlist schema, PII/unknown-field rejection, body/depth/array
+  limits, route-specific CORS/rate limits и безопасные server-owned paths.
+- Hard-coded admin bypass удалён; bootstrap platform-admin выполняется отдельной
+  операционной командой `npm run admin:bootstrap`.
+- API/import-derived значения экранируются в researcher/developer UI; закрыты
+  найденные persistent-XSS sinks.
+
+### Принятые спорные решения
+
+| Случай | Текущее решение | Что ещё требуется |
+| --- | --- | --- |
+| Участник дал consent, но закрыл вкладку | Admission учитывается в `used_runs`; автоматического возврата квоты нет, чтобы не допустить oversubscription и поздний двойной ingest | утвердить retention/monitoring abandoned sessions |
+| Invitation в URL | после admission код удаляется через `history.replaceState`; referrer закрыт | для усиления privacy перейти на server-side HttpOnly participant session |
+| Ошибка качества внутри trial | trial завершается, затем показывается причина и назначается точный повтор | UX-приёмка формулировок и порогов QC |
+| Краткое движение головы/FPS drop | не бракует trial без sustained threshold | подобрать thresholds на реальных устройствах |
+| Off-screen/низкая confidence gaze | sample отбрасывается, точка не притягивается к target | измерить specificity и missingness |
+| Недостаточный N в аналитике | CI/сравнение помечается как недоступное, значение не выдумывается | утвердить minimum-N policy |
+
+### Проверено и осталось проверить
+
+Автоматические результаты текущего release candidate:
+
+- API unit/security/contracts: `150/150`.
+- PostgreSQL integration: `14/14`, включая rollback, token mismatch, tenant
+  isolation и 20 параллельных admission requests при `max_runs=5`.
+- Researcher + participant Chromium E2E: `15/15`.
+- Production analytics Chromium E2E: `4/4`.
+- HTTP contracts: `5 passed`, `1 skipped`; privileged path пропущенного сценария
+  покрыт PostgreSQL integration test.
+- Все 14 миграций: чистая БД `up -> down -> up`.
+- PDF/PPTX smoke, JS/MJS/JSON syntax, TypeScript и dependency audit проходят;
+  известных npm vulnerabilities нет.
+
+Автотесты не заменяют следующие release gates:
+
+1. Real-device benchmark gaze, blink, RT, BPM, emotion и body pose.
+2. Load test, multi-instance rate limiter, durable object storage и мониторинг.
+3. Backup/restore drill, incident runbook, secret/SAST/dependency scans в CI.
+4. Независимый DOM-XSS/CSP review legacy researcher UI.
+5. Формальная приёмка ответственного и тимлида после зелёного CI.
+
+Подробный аудит: [docs/reports/2026-08-07-s1-s2-integration.md](docs/reports/2026-08-07-s1-s2-integration.md).
 
 ---
 
@@ -96,7 +281,7 @@ flowchart TB
   FS[uploads/stimuli]
 
   P --> GAZE & RPPG & EMO
-  R -->|Bearer JWT| NG
+  R -->|HttpOnly staff cookie + CSRF| NG
   P -->|invitation code| NG
   D --> NG
   NG -->|/api/*| EX
@@ -116,18 +301,24 @@ sequenceDiagram
 
   Res->>API: POST /protocols (определение)
   Res->>API: POST /invitations (код)
-  Res-->>Part: ссылка run_new.html?code=...
+  Res-->>Part: ссылка /invite/:code
   Part->>API: GET /invitations/by-code/:code
   API-->>Part: определение протокола
   Note over Part: precheck, калибровка, тесты, ML в браузере
-  Part->>API: POST /ingest (агрегаты + ids.invitationCode)
-  API->>API: sanitize PII → QC → proxy-метрики
-  API->>DB: sessions, session_features, session_qc_summary, session_proxy_metrics
-  Res->>API: GET /analytics/group
-  API-->>Res: средние, CI, QC-счётчики
+  Part->>API: POST /invitations/by-code/:code/ingest-token
+  API-->>Part: JWT, bound to session + invitation + project
+  Part->>API: POST /ingest (typed SessionFeature + Bearer token)
+  API->>API: strict schema/PII validation → QC → proxy-метрики
+  API->>DB: одна транзакция: session, features, QC, proxy
+  Res->>API: POST /analytics/v1/snapshots
+  Res->>API: GET /analytics/v1/... + snapshot_id
+  API-->>Res: AOI, heatmap, QC, export
 ```
 
 Подробнее — [docs/architecture.md](docs/architecture.md).
+Lifecycle сессии и версионированные контракты — [docs/api/session-runtime-v1.md](docs/api/session-runtime-v1.md).
+Матрица ролей и tenant scope — [docs/api/authorization-matrix-v1.md](docs/api/authorization-matrix-v1.md).
+Методические основания gaze/blink/body — [docs/research/gaze-blink-body-methods.md](docs/research/gaze-blink-body-methods.md).
 
 ---
 
@@ -135,7 +326,7 @@ sequenceDiagram
 
 | Слой | Технологии |
 | --- | --- |
-| **Backend** | Node.js ≥18, Express 4, PostgreSQL (`pg`, без ORM), JWT (`jsonwebtoken`), `bcryptjs`, `express-validator`, `multer`, `node-pg-migrate`, `cors`, `dotenv` |
+| **Backend** | Node.js ≥18, Express 4, PostgreSQL (`pg`, без ORM), JWT/cookie auth, `bcryptjs`, `express-validator`, `multer`, `node-pg-migrate`, `cors`, `dotenv`; LibreOffice + Poppler для PDF/PPT/PPTX |
 | **Frontend** | статический HTML/JS/CSS, ES-модули, **без сборщика**; конфигурация через `localStorage` |
 | **Браузерный ML** | MediaPipe (Face Mesh / Iris), собственные движки rPPG и emotion/FACS |
 | **Оффлайн-анализ** | Python (`rt_component-` — разбор RT-логов; `Audio_detection` — голосовые биомаркеры) |
@@ -150,10 +341,12 @@ web-emocog-core/
 ├── index.html                 # редирект → apps/web/index.html
 ├── apps/
 │   ├── api/                    # Node.js REST API
-│   │   ├── server.js           #   точка входа (Phase 2) → app.js
-│   │   ├── server_phase4_updated.js  # точка входа (Phase 4, прод) → app_phase4_updated.js
+│   │   ├── server.js           #   каноническая точка входа → app.js
 │   │   ├── config/             #   загрузка env/конфига
-│   │   ├── middleware/         #   auth (JWT + RBAC)
+│   │   ├── middleware/         #   cookie/bearer auth + RBAC
+│   │   ├── analytics/          #   snapshot-based AOI analytics/export
+│   │   ├── security/           #   permissions, schemas, HTTP hardening
+│   │   ├── stimuli/            #   безопасная конвертация документов
 │   │   ├── routes/             #   эндпоинты
 │   │   ├── migrations/         #   node-pg-migrate
 │   │   ├── qc/                 #   агрегатор контроля качества
@@ -193,6 +386,7 @@ web-emocog-core/
 - Node.js ≥ 18
 - PostgreSQL ≥ 13
 - Современный браузер с доступом к камере (для участника)
+- LibreOffice (`soffice`) и Poppler (`pdfinfo`, `pdftoppm`) для конвертации PDF/PPT/PPTX
 
 ### 1. Backend (API)
 
@@ -201,9 +395,9 @@ cd apps/api
 cp .env.example .env          # отредактируйте DATABASE_URL и JWT_SECRET
 npm install
 npm run migrate:up            # применить миграции схемы БД
-npm run start:phase4          # прод-вход (Phase 4), порт из PORT (по умолчанию 3000)
+npm start                     # канонический API, порт из PORT (по умолчанию 3000)
 # или для разработки с авто-перезапуском:
-npm run dev                   # server.js (Phase 2)
+npm run dev
 ```
 
 Проверка живости: `GET /health`, готовность к БД: `GET /ready`.
@@ -221,9 +415,10 @@ python3 -m http.server 8080
 
 Затем откройте:
 - **Исследователь:** `http://localhost:8080/apps/web/researcher.html`
+- **Вход staff:** `http://localhost:8080/apps/web/developer/login.html`
 - **Участник:** `http://localhost:8080/apps/participant-web/run_new.html?code=<КОД_ПРИГЛАШЕНИЯ>`
 
-Адрес API задаётся через `localStorage` (`emocog_api_base`) или `window.API_BASE`; токен — `emocog_api_token`. На проде nginx раздаёт статику и проксирует `/api` на Node (см. [Деплой](#деплой)).
+Адрес API задаётся через `localStorage` (`emocog_api_base`) или `window.API_BASE`. Браузерный staff-вход использует `HttpOnly` cookie и CSRF; bearer JWT сохранён только для внешних API-клиентов и не записывается login-страницей в `localStorage`. На проде nginx раздаёт статику и проксирует `/api` на Node.
 
 > **Важно для ES-модулей:** rPPG-движок в `lib/` подключается как ES-модуль и требует корректного `Content-Type: text/javascript`. Готовый сниппет — [deploy/nginx-snippet-emocog-lib.conf](deploy/nginx-snippet-emocog-lib.conf).
 
@@ -239,18 +434,30 @@ python3 -m http.server 8080
 | `NODE_ENV` | `development` / `production` | `development` |
 | `PORT` | порт API | `3000` |
 | `JWT_SECRET` | секрет подписи JWT. В `production` **обязателен** (≥32 симв.), иначе API не стартует | dev-fallback |
-| `JWT_EXPIRES_IN` | TTL токена | `7d` |
-| `FORCE_HTTPS` | редирект на HTTPS при `x-forwarded-proto != https` | `true` |
-| `PROJECT_LEAD_EMAILS` | lead-почты с правом выдавать роль developer | — |
-| `PROJECT_ADMIN_EMAILS` | почты, получающие роль admin при публичной регистрации | — |
+| `JWT_EXPIRES_IN` | TTL staff-сессии/JWT | `1h` |
+| `STAFF_SESSION_COOKIE` | имя `HttpOnly` cookie staff-сессии | `wecog_staff_session` |
+| `INGEST_TOKEN_EXPIRES_IN` | TTL participant ingest token | `15m` |
+| `FORCE_HTTPS` | отклонить HTTP с `426 https_required` | `true` |
+| `CORS_ORIGINS` | точный allowlist browser origins | `https://wecog.ru` |
+| `TRUST_PROXY_HOPS` | число доверенных reverse proxy; включать только при закрытом прямом доступе к Node | `0` |
+| `AUTH_BODY_LIMIT` / `INGEST_BODY_LIMIT` / `DEFAULT_BODY_LIMIT` | лимиты тела по типу маршрута | `32kb` / `2mb` / `256kb` |
+| `AUTH_RATE_LIMIT_PER_MINUTE` / `INGEST_RATE_LIMIT_PER_MINUTE` / `DEFAULT_RATE_LIMIT_PER_MINUTE` | rate limit по типу маршрута | `20` / `120` / `300` |
+| `UPLOADS_ROOT` | server-owned корень бинарных файлов | `/var/lib/wecog/uploads` |
+| `MAX_UPLOAD_BYTES` | максимальный размер одного файла | `52428800` |
+| `MAX_DOCUMENT_BYTES` / `MAX_DOCUMENT_PAGES` | лимиты документа и страниц | `52428800` / `100` |
+| `DOCUMENT_CONVERSION_TIMEOUT_MS` / `DOCUMENT_CONVERSION_CONCURRENCY` | timeout и параллелизм конвертации | `45000` / `2` |
 
 Сгенерировать секрет: `openssl rand -base64 48`.
+
+Публичная регистрация всегда создаёт `respondent`. Platform-admin создаётся
+отдельной операционной командой `npm run admin:bootstrap`; email-bypass в
+HTTP-коде отсутствует.
 
 ---
 
 ## REST API
 
-Базовый префикс на проде — обычно `/api` (снимается/проксируется nginx). Авторизация: заголовок `Authorization: Bearer <JWT>`. Формат — JSON.
+Базовый префикс на проде — обычно `/api`. Browser staff использует `HttpOnly` cookie и `X-CSRF-Token` для изменяющих запросов; внешние staff-клиенты могут использовать `Authorization: Bearer <JWT>`. Participant получает отдельный server-issued token, связанный с invitation/session/project/protocol.
 
 | Группа | Префикс | Назначение |
 | --- | --- | --- |
@@ -260,12 +467,11 @@ python3 -m http.server 8080
 | Protocols | `/protocols` | JSON-определения сценариев |
 | Invitations | `/invitations` | коды доступа участников (`/by-code/:code` — публичный) |
 | Sessions | `/sessions` | сессии, детали, QC и proxy-метрики |
-| Events | `/events` | сырые события (`/batch`, до 1000 за раз) |
-| Ingest | `/ingest` | агрегированный payload сессии (JWT **или** `ids.invitationCode`) |
+| Ingest | `/ingest` | единый typed `session_feature.v1` transport (staff или participant token) |
 | Export | `/export` | выгрузка CSV |
-| Analytics | `/analytics` | групповые средние, QC-дашборд, feature-строки |
+| Analytics v1 | `/analytics/v1` | filters, immutable snapshots, session/group AOI, heatmap, comparison readiness, CSV/JSON export |
 | Experiments | `/experiments` | сводка экспериментов и недавние сессии |
-| Stimuli | `/stimuli` | библиотека стимулов (загрузка файлов) |
+| Stimuli | `/stimuli` | библиотека, server-owned content paths, `POST /stimuli/convert` для PDF/PPT/PPTX |
 | Proxy-metrics | `/proxy-metrics` | контракт proxy-метрик v1 (`/schema`) |
 | Health | `/health`, `/ready` | проверки живости/готовности (без авторизации) |
 
@@ -284,7 +490,7 @@ npm run migrate:down       # откатить последнюю
 npm run migrate:create -- <name>   # создать новую
 ```
 
-Ключевые таблицы: `users`, `organizations` / `user_organizations`, `projects`, `protocols`, `invitations`, `sessions`, `events`, `session_features`, `session_qc_summary`, `session_proxy_metrics`, `stimulus_folders` / `stimuli`, `developer_access_emails`.
+Ключевые таблицы: `users`, `organizations` / `user_organizations`, `projects` / `user_projects`, `protocols`, `invitations`, `sessions`, `events`, `session_features`, `session_qc_summary`, `session_proxy_metrics`, `analysis_snapshots`, `stimulus_folders` / `stimuli`, `developer_access_emails`.
 
 ```mermaid
 erDiagram
@@ -337,6 +543,14 @@ npx playwright install   # один раз — браузеры
 npm test                 # все сценарии
 npm run test:ui          # интерактивный режим
 npm run test:api         # контракт API
+npx playwright test --config=playwright.analytics.config.ts  # AOI/analytics UI
+```
+
+PostgreSQL security/integration suite запускается только на отдельной тестовой БД:
+
+```bash
+cd apps/api
+S2_TEST_DATABASE_URL=postgres://... node --test tests/s2-postgres.integration.test.js
 ```
 
 Подробнее — [apps/autotests/README.md](apps/autotests/README.md).
@@ -355,7 +569,7 @@ flowchart LR
   NODE --> PG[(PostgreSQL)]
 ```
 
-- Прод-точка входа API: `server_phase4_updated.js` (`npm run start:phase4`).
+- Каноническая точка входа API: `server.js` (`npm start`).
 - ES-модули из `lib/` требуют верного MIME — см. [deploy/nginx-snippet-emocog-lib.conf](deploy/nginx-snippet-emocog-lib.conf).
 - Вход участника: `apps/participant-web/run_new.html?code=...`.
 - Метаданные последнего деплоя фиксируются в [DEPLOY_VERSION.txt](DEPLOY_VERSION.txt).
@@ -364,11 +578,17 @@ flowchart LR
 
 ## Безопасность и приватность
 
-- **JWT + RBAC** — доступ к данным изолирован по организациям; роли проверяются middleware.
-- **Санитизация PII** — перед записью ingest-payload удаляются поля, похожие на email/телефон/имя/адрес.
+- **Cookie/bearer auth + RBAC** — browser staff работает через `HttpOnly` cookie и CSRF; доступ изолирован по organization/project memberships.
+- **Строгая проверка PII** — ingest-payload с PII, неизвестными полями или
+  превышением структурных лимитов отклоняется до записи.
 - **Минимизация данных** — сырое видео/аудио обрабатывается локально и не передаётся на сервер.
-- **HTTPS** — при `FORCE_HTTPS=true` небезопасные запросы редиректятся; не передавайте PII в API.
+- **HTTPS** — при `FORCE_HTTPS=true` небезопасные запросы отклоняются с `426`; API не редиректит POST-body или bearer token.
 - **Секреты** — в `production` `JWT_SECRET` обязателен; не коммитьте `.env`.
+- **Tenant/session integrity** — invitation и session не перепривязываются,
+  participant ingest token проверяется по полному tuple, а ingest выполняется
+  атомарно.
+- **Upload confinement** — клиент не задаёт `content_path`; resolved путь
+  обязан оставаться внутри `UPLOADS_ROOT`.
 
 ---
 

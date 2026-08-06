@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844" role="img" aria-label="Системные состояния mobile">
+  <title>Системные состояния mobile</title>
+  <rect width="390" height="844" fill="#F2F6F4"/>
+  <rect x="0" y="0" width="390" height="68" rx="0" fill="#062D2E"/><circle cx="22" cy="24" r="7" fill="#00A69D"/><text x="38" y="29" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="800" letter-spacing="1">WEC</text><text x="18" y="55" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="16" font-weight="700">Состояния</text><text x="338" y="29" fill="#9BC7C3" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="400" text-anchor="end">SYS</text><line x1="354" y1="20" x2="372" y2="20" stroke="#9BC7C3" stroke-width="1.5"/><line x1="354" y1="26" x2="372" y2="26" stroke="#9BC7C3" stroke-width="1.5"/><line x1="354" y1="32" x2="372" y2="32" stroke="#9BC7C3" stroke-width="1.5"/><rect x="18" y="96" width="354" height="94" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="52" cy="142" r="18" fill="#006B66"/>
+      <text x="52" y="148" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="middle">0</text>
+      <text x="86" y="138" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="15" font-weight="750">Нет данных</text>
+
+      <text x="86" y="163" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="400">техническое состояние</text><rect x="18" y="204" width="354" height="94" rx="14" fill="#FEE4E2" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="52" cy="250" r="18" fill="#B42318"/>
+      <text x="52" y="256" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="middle">!</text>
+      <text x="86" y="246" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="15" font-weight="750">Ошибка</text>
+
+      <text x="86" y="271" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="400">техническое состояние</text><rect x="18" y="312" width="354" height="94" rx="14" fill="#FFF3C4" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="52" cy="358" r="18" fill="#F5C451"/>
+      <text x="52" y="364" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="middle">○</text>
+      <text x="86" y="354" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="15" font-weight="750">Нет доступа</text>
+
+      <text x="86" y="379" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="400">техническое состояние</text><rect x="18" y="420" width="354" height="94" rx="14" fill="#062D2E" stroke="#062D2E" stroke-width="1"/>
+      <circle cx="52" cy="466" r="18" fill="#2563EB"/>
+      <text x="52" y="472" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="middle">≈</text>
+      <text x="86" y="462" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="15" font-weight="750">Low confidence</text>
+
+      <text x="86" y="487" fill="#9BC7C3" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="400">не рисовать точку</text><rect x="18" y="528" width="354" height="94" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="52" cy="574" r="18" fill="#006B66"/>
+      <text x="52" y="580" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="middle">↗</text>
+      <text x="86" y="570" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="15" font-weight="750">Off-screen</text>
+
+      <text x="86" y="595" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="400">техническое состояние</text><rect x="18" y="636" width="354" height="94" rx="14" fill="#FFF3C4" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="52" cy="682" r="18" fill="#F5C451"/>
+      <text x="52" y="688" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="18" font-weight="800" text-anchor="middle">~</text>
+      <text x="86" y="678" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="15" font-weight="750">Degraded</text>
+
+      <text x="86" y="703" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="400">техническое состояние</text>
+</svg>

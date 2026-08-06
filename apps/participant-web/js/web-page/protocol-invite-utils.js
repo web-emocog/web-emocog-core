@@ -19,7 +19,7 @@ const POST_CALIBRATION_BLOCK_TYPES = new Set([
 ]);
 
 /** Test Hub card ids (not RT-registry analytics metric names). */
-const TEST_HUB_METRIC_IDS = new Set(['rt', 'tracking', 'bpm', 'vpc', 'visuospatial']);
+const TEST_HUB_METRIC_IDS = new Set(['rt', 'tracking', 'vpc', 'visuospatial']);
 
 const DEFAULT_PARTICIPANT_SHELL = {
     consent: true,
