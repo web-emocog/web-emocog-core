@@ -68,12 +68,99 @@ function getSampleScreenSize(sample, fallbackW, fallbackH) {
 function createAccumulator(width, height) {
     return {
         bins: createBins(width, height),
+        stimulusBins: createBins(width, height),
+        stimulusPoints: [],
         totalSamples: 0,
         onScreenSamples: 0,
+        validSamples: 0,
+        lowConfidenceSamples: 0,
+        offScreenSamples: 0,
+        outsideStimulusSamples: 0,
+        validObservationDurationMs: 0,
+        confidenceSum: 0,
+        confidenceCount: 0,
         weightedTotalMs: 0,    // суммарный взвешенный вклад (ms × qualityWeight)
         lastT: null,           // для расчёта dtMs внутри аккумулятора
         minT: Infinity,
         maxT: -Infinity
+    };
+}
+
+function detectFixations(points, options = {}) {
+    const dispersionNorm = Number.isFinite(options.dispersionNorm) ? options.dispersionNorm : 0.04;
+    const minDurationMs = Number.isFinite(options.minDurationMs) ? options.minDurationMs : 100;
+    const maxGapMs = Number.isFinite(options.maxGapMs) ? options.maxGapMs : 100;
+    const sorted = (points || []).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+        .slice().sort((a, b) => a.t - b.t);
+    const fixations = [];
+    let group = [];
+
+    function flush() {
+        if (!group.length) return;
+        const durationMs = group.reduce((sum, point) => sum + (Number.isFinite(point.dtMs) ? point.dtMs : 0), 0);
+        if (durationMs >= minDurationMs) {
+            const weight = group.reduce((sum, point) => sum + Math.max(1, point.dtMs || 0), 0);
+            fixations.push({
+                x: group.reduce((sum, point) => sum + point.x * Math.max(1, point.dtMs || 0), 0) / weight,
+                y: group.reduce((sum, point) => sum + point.y * Math.max(1, point.dtMs || 0), 0) / weight,
+                startMs: group[0].tRelMs,
+                durationMs,
+                signalConfidence: meanFinite(group.map(point => point.confidence))
+            });
+        }
+        group = [];
+    }
+
+    for (const point of sorted) {
+        if (!group.length) {
+            group.push(point);
+            continue;
+        }
+        const previous = group[group.length - 1];
+        const cx = group.reduce((sum, item) => sum + item.x, 0) / group.length;
+        const cy = group.reduce((sum, item) => sum + item.y, 0) / group.length;
+        const distance = Math.hypot(point.x - cx, point.y - cy);
+        if (point.t - previous.t <= maxGapMs && distance <= dispersionNorm) group.push(point);
+        else {
+            flush();
+            group.push(point);
+        }
+    }
+    flush();
+    return fixations.slice(0, 500);
+}
+
+function meanFinite(values) {
+    const finite = values.filter(Number.isFinite);
+    return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+}
+
+function flattenRoundedBins(bins) {
+    return bins.flatMap(row => row.map(value => Math.round(value * 1000) / 1000));
+}
+
+function finalizeStimulusEntry(meta, acc, qualityWeight, width, height) {
+    return {
+        ...finalizeEntry(meta, acc, qualityWeight),
+        coordinateSpace: 'stimulus_normalized_0_1',
+        grid: {
+            width,
+            height,
+            values: flattenRoundedBins(acc.stimulusBins)
+        },
+        fixationPoints: detectFixations(acc.stimulusPoints),
+        sampleCountTotal: acc.totalSamples,
+        sampleCountValid: acc.validSamples,
+        lowConfidenceCount: acc.lowConfidenceSamples,
+        offScreenCount: acc.offScreenSamples,
+        outsideStimulusCount: acc.outsideStimulusSamples,
+        validObservationDurationMs: Math.round(acc.validObservationDurationMs),
+        meanConfidence: meanFinite(acc.stimulusPoints.map(point => point.confidence)),
+        algorithm: {
+            id: 'idt-fixation-heatmap',
+            version: '1.0.0',
+            parameters: { dispersionNorm: 0.04, minDurationMs: 100, maxGapMs: 100 }
+        }
     };
 }
 
@@ -158,12 +245,14 @@ export function buildHeatmaps(samples, options = {}) {
     const sessionAcc = createAccumulator(width, height);
 
     for (const sample of samples || []) {
-        if (!Number.isFinite(sample?.x) || !Number.isFinite(sample?.y)) continue;
+        const analysisX = Number.isFinite(sample?.correctedX) ? sample.correctedX : sample?.x;
+        const analysisY = Number.isFinite(sample?.correctedY) ? sample.correctedY : sample?.y;
+        if (!Number.isFinite(analysisX) || !Number.isFinite(analysisY)) continue;
 
         const t = Number.isFinite(sample?.t) ? sample.t : Date.now();
         const { screenWidth, screenHeight } = getSampleScreenSize(sample, fallbackW, fallbackH);
-        const nx = clamp01(sample.x / screenWidth);
-        const ny = clamp01(sample.y / screenHeight);
+        const nx = clamp01(analysisX / screenWidth);
+        const ny = clamp01(analysisY / screenHeight);
         // Phase 3, шаг 1: trust honest onScreen flag from gaze-tracker.
         const onScreen = sample?.onScreen === true;
 
@@ -178,16 +267,29 @@ export function buildHeatmaps(samples, options = {}) {
         }
 
         const blockId = sample?.blockId ?? null;
+        const trialId = sample?.trialId ?? null;
         const stimulusId = sample?.stimulusId ?? null;
         const stimulusType = sample?.stimulusType ?? null;
         const expectedResponse = sample?.expectedResponse ?? null;
         const isStimulusPhase = sample?.phase === 'cognitive_stimulus';
 
         if (isStimulusPhase && blockId != null && stimulusId != null) {
-            const perStimulusKey = `${String(blockId)}::${String(stimulusId)}`;
+            const perStimulusKey = `${String(blockId)}::${String(trialId ?? 'trial')}::${String(stimulusId)}`;
             if (!perStimulusMap.has(perStimulusKey)) {
                 perStimulusMap.set(perStimulusKey, {
-                    meta: { blockId, stimulusId, stimulusType, expectedResponse },
+                    meta: {
+                        blockId,
+                        trialId,
+                        stimulusId,
+                        stimulusName: sample?.stimulusName ?? null,
+                        stimulusType,
+                        expectedResponse,
+                        stimulusVersion: '1',
+                        intrinsicWidth: sample?.stimulusRect?.intrinsicWidth ?? null,
+                        intrinsicHeight: sample?.stimulusRect?.intrinsicHeight ?? null,
+                        presentationStartMs: Number.isFinite(sample?.tRelMs) ? sample.tRelMs : t,
+                        presentationId: `${String(blockId)}:${String(trialId ?? 'trial')}:${String(stimulusId)}`
+                    },
                     acc: createAccumulator(width, height)
                 });
             }
@@ -195,11 +297,45 @@ export function buildHeatmaps(samples, options = {}) {
             const stimDt = nextDtMs(stimulusRef.acc, t);
             stimulusRef.acc.totalSamples++;
             updateTimeRange(stimulusRef.acc, t);
+            if (!onScreen) stimulusRef.acc.offScreenSamples++;
+            if (Number.isFinite(sample?.confidence) && sample.confidence < 0.65) {
+                stimulusRef.acc.lowConfidenceSamples++;
+            }
+            const valid = sample?.valid !== false && onScreen;
+            if (valid) {
+                stimulusRef.acc.validSamples++;
+                stimulusRef.acc.validObservationDurationMs += stimDt;
+            }
             if (onScreen) {
                 stimulusRef.acc.onScreenSamples++;
                 const contribution = stimDt * qualityWeight;
                 stimulusRef.acc.weightedTotalMs += contribution;
                 addPointToBins(stimulusRef.acc.bins, nx, ny, contribution);
+            }
+            const rect = sample?.stimulusRect;
+            const hasRect = rect && Number.isFinite(rect.left) && Number.isFinite(rect.top)
+                && Number.isFinite(rect.width) && rect.width > 0
+                && Number.isFinite(rect.height) && rect.height > 0;
+            if (valid && hasRect) {
+                const stimulusX = (analysisX - rect.left) / rect.width;
+                const stimulusY = (analysisY - rect.top) / rect.height;
+                if (stimulusX >= 0 && stimulusX <= 1 && stimulusY >= 0 && stimulusY <= 1) {
+                    const contribution = stimDt * qualityWeight;
+                    addPointToBins(stimulusRef.acc.stimulusBins, stimulusX, stimulusY, contribution);
+                    stimulusRef.acc.stimulusPoints.push({
+                        x: stimulusX,
+                        y: stimulusY,
+                        t,
+                        tRelMs: Math.max(0, (Number.isFinite(sample?.tRelMs) ? sample.tRelMs : t)
+                            - stimulusRef.meta.presentationStartMs),
+                        dtMs: stimDt,
+                        confidence: Number.isFinite(sample?.confidence) ? sample.confidence : null
+                    });
+                } else {
+                    stimulusRef.acc.outsideStimulusSamples++;
+                }
+            } else if (valid) {
+                stimulusRef.acc.outsideStimulusSamples++;
             }
         }
 
@@ -225,7 +361,7 @@ export function buildHeatmaps(samples, options = {}) {
 
     const perStimulus = [];
     for (const { meta, acc } of perStimulusMap.values()) {
-        perStimulus.push(finalizeEntry(meta, acc, qualityWeight));
+        perStimulus.push(finalizeStimulusEntry(meta, acc, qualityWeight, width, height));
     }
 
     const perBlock = [];

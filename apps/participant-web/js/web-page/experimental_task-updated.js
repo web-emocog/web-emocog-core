@@ -12,10 +12,21 @@ import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
-import { shouldAutoPause as qcShouldAutoPause } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
 import { translations } from '../../translations.js';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js';
+import {
+    getSessionRuntime,
+    isContinuousSessionAnalysisRunning
+} from '../session-runtime/index.js';
+import {
+    buildTrialRepeatPlan,
+    collectTrialQualityIssues
+} from '../session-runtime/trial-quality.mjs';
+import {
+    RtResponseCollector,
+    normalizeResponseMode
+} from '../rt-input/response-policy.mjs';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -25,7 +36,7 @@ let currentBlockIndex = 0;
 let currentTrialIndex = 0;
 let fixationTimeout = null;
 let trialTimeout = null;
-let responseHandler = null;
+let responseCollector = null;
 let activeTrialRuntime = null;
 let cognitiveFinished = false;
 
@@ -45,8 +56,32 @@ let pendingFixationCallback = null;
 let stimulusTimeoutRemainingMs = 0;
 let stimulusTimerStartPerf = null;
 let pendingStimulusTimeoutCallback = null;
-let qcTaskPaused = false;
-let qcPauseStartedPerf = null;
+let currentBlockAttempt = 1;
+let activeBlockTrialPlan = [];
+let activeTrialQualityContext = null;
+const MAX_COGNITIVE_BLOCK_ATTEMPTS = 3;
+
+function buildSessionQualityInstruction() {
+    const english = state.currentLang === 'en';
+    return {
+        id: 'session_quality_policy',
+        type: 'instruction',
+        content: {
+            title: english ? 'Test conditions' : 'Условия проведения',
+            text: english
+                ? 'Do not take the test in a moving vehicle, in darkness, with strong backlight, while lying down, or with your face covered. Brief natural head movements and small lighting changes are allowed. If data quality is insufficient, the affected block will be repeated. Pause is available only on instruction screens.'
+                : 'Не проходите тест в движущемся транспорте, в темноте, при ярком свете за спиной, лёжа или с закрытым лицом. Краткие естественные движения головы и небольшие изменения освещения допустимы. Если качество данных станет недостаточным, затронутый блок будет повторён. Пауза доступна только на экранах инструкции.',
+            buttonText: english ? 'Continue' : 'Продолжить'
+        }
+    };
+}
+
+function ensureSessionQualityInstruction(protocol) {
+    if (!protocol || !Array.isArray(protocol.blocks)) return protocol;
+    if (protocol.blocks.some(block => block?.id === 'session_quality_policy')) return protocol;
+    protocol.blocks.unshift(buildSessionQualityInstruction());
+    return protocol;
+}
 
 function resolveTrialStimulusObject(stimulusId, meta) {
     const std = typeof window !== 'undefined' ? window.StandardStimuli : null;
@@ -175,7 +210,10 @@ function toCognitiveBlockFromStimuli(defBlock, index) {
             stimulusDuration: Number.isFinite(params.stimulus_ms)
                 ? params.stimulus_ms
                 : (Number.isFinite(params.duration_sec) ? Math.round(params.duration_sec * 1000) : 1000),
-            showFeedback: false
+            showFeedback: false,
+            useAOI: params.useAOI === true,
+            aoiSchemaVersion: params.aoiSchemaVersion || null,
+            aoiDefinitions: params.aoiDefinitions || {}
         },
         trials
     };
@@ -193,6 +231,7 @@ function mapActionToCorrectResponse(action) {
     const a = String(action).toLowerCase();
     if (a === 'space') return 'Space';
     if (a === 'mouse_click') return 'Click';
+    if (a === 'mouse_intent' || a === 'pointer_intent') return 'PointerIntent';
     if (a.startsWith('arrow_')) {
         const part = a.replace('arrow_', '');
         return `Arrow${part.charAt(0).toUpperCase()}${part.slice(1)}`;
@@ -237,6 +276,7 @@ function normalizeV2Trials(trials) {
                 id: `${sid}_${index}_${r}`,
                 condition: t.condition || '',
                 correctResponse: mapActionToCorrectResponse(t.action || t.correctResponse),
+                responseMode: t.responseMode || null,
                 stimulus: { ...stimulus, stimulusId: sid },
                 duration: t.duration || null
             });
@@ -263,12 +303,14 @@ function toCognitiveBlockFromV2(block, index) {
         rt_task: taskType,
         selected_metrics: cfg.selected_metrics || block.selected_metrics || null,
         blockConfig: {
+            ...cfg,
             fixation: cfg.fixation || { duration: cfg.fixationDuration || 500 },
             stimulusDuration: cfg.stimulusDuration || 1000,
             showFeedback: !!(cfg.showFeedback || cfg.feedbackConfig),
             rtWindow: cfg.rtWindow || 1000,
             omissionRule: cfg.omissionRule || 'skip',
             commissionRule: cfg.commissionRule || 'flag',
+            responseMode: cfg.responseMode || null,
             feedbackCorrect: cfg.feedbackConfig?.correctText || null,
             feedbackIncorrect: cfg.feedbackConfig?.incorrectText || null
         },
@@ -394,72 +436,18 @@ function emitTaskEvent(type, payload = {}) {
     return recordSessionEvent(type, getTaskPayload(payload));
 }
 
-function pauseTaskExecution(reason = 'qc_degraded') {
-    if (qcTaskPaused) return;
-    qcTaskPaused = true;
-    qcPauseStartedPerf = performance.now();
-
-    if (trialPhase === 'fixation' && fixationTimeout) {
-        clearTimeout(fixationTimeout);
-        fixationTimeout = null;
-        const elapsed = fixationStartPerf != null ? Math.max(0, performance.now() - fixationStartPerf) : 0;
-        fixationRemainingMs = Math.max(0, fixationRemainingMs - elapsed);
-    }
-
-    if (trialPhase === 'stimulus') {
-        if (trialTimeout) {
-            clearTimeout(trialTimeout);
-            trialTimeout = null;
-            const elapsedStim = stimulusTimerStartPerf != null
-                ? Math.max(0, performance.now() - stimulusTimerStartPerf)
-                : 0;
-            stimulusTimeoutRemainingMs = Math.max(0, stimulusTimeoutRemainingMs - elapsedStim);
-        }
-        if (responseHandler) {
-            document.removeEventListener('keydown', responseHandler);
-        }
-    }
-
-    setSessionPhase('paused', { source: 'qc_autopause', reason });
-    emitTaskEvent('task_paused', { reason, phase: trialPhase });
-}
-
-function resumeTaskExecution(reason = 'qc_recovered') {
-    if (!qcTaskPaused) return;
-    const pauseMs = qcPauseStartedPerf != null ? Math.max(0, performance.now() - qcPauseStartedPerf) : 0;
-    qcTaskPaused = false;
-    qcPauseStartedPerf = null;
-
-    if (trialPhase === 'fixation' && typeof pendingFixationCallback === 'function') {
-        fixationStartPerf = performance.now();
-        fixationTimeout = setTimeout(pendingFixationCallback, Math.max(0, fixationRemainingMs));
-    }
-
-    if (trialPhase === 'stimulus') {
-        if (activeTrialRuntime && Number.isFinite(activeTrialRuntime.stimulusOnPerf)) {
-            activeTrialRuntime.stimulusOnPerf += pauseMs;
-        }
-        if (responseHandler) {
-            document.addEventListener('keydown', responseHandler);
-        }
-        if (typeof pendingStimulusTimeoutCallback === 'function') {
-            stimulusTimerStartPerf = performance.now();
-            trialTimeout = setTimeout(pendingStimulusTimeoutCallback, Math.max(0, stimulusTimeoutRemainingMs));
-        }
-    }
-
-    setSessionPhase('cognitive_instruction', { source: 'qc_resume', reason });
-    emitTaskEvent('task_resumed', { reason, phase: trialPhase, pausedMs: Math.round(pauseMs) });
-}
-
 function handleQcPauseState(overlayVisible) {
-    if (!qcShouldAutoPause()) return;
-    if (overlayVisible && !qcTaskPaused) {
-        pauseTaskExecution('qc_degraded');
-        return;
-    }
-    if (!overlayVisible && qcTaskPaused) {
-        resumeTaskExecution('qc_recovered');
+    const runtime = getSessionRuntime();
+    if (!runtime) return;
+    if (overlayVisible) {
+        runtime.reportIssue({
+            kind: 'quality',
+            code: 'qc_degraded',
+            message: 'Качество видеосигнала длительно ниже допустимого уровня.',
+            recoverable: true
+        });
+    } else {
+        runtime.resolveIssue('qc_degraded');
     }
 }
 
@@ -622,6 +610,10 @@ async function runCognitiveAnalysisTick() {
 }
 
 function startCognitiveAnalysisLoop() {
+    if (isContinuousSessionAnalysisRunning()) {
+        console.log('[Cognitive] Используется непрерывный session analysis loop');
+        return;
+    }
     if (state.runtime._cognitiveLoopActive) return;
 
     cognitiveVideo = document.getElementById('precheckVideo');
@@ -660,8 +652,6 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (ex_state.task?.feedback) ex_state.task.feedback.style.display = 'none';
 
     stopCognitiveAnalysisLoop();
-    qcTaskPaused = false;
-    qcPauseStartedPerf = null;
     hideQcOverlay();
     const cogEmoClear = document.getElementById('cognitiveEmotionHud');
     if (cogEmoClear) cogEmoClear.textContent = '';
@@ -713,15 +703,27 @@ export async function loadAndStartCognitiveTask(options = {}) {
 
     try {
         if (state.runtime?.invitationProtocolDefinition) {
-            experimentProtocol = normalizeProtocolDefinition(
+            experimentProtocol = ensureSessionQualityInstruction(normalizeProtocolDefinition(
                 definitionForCognitiveRunner(state.runtime.invitationProtocolDefinition)
-            );
+            ));
         } else {
             const response = await fetch('./experiment.json');
             if (!response.ok) throw new Error('Файл experiment.json не найден');
-            experimentProtocol = await response.json();
+            experimentProtocol = ensureSessionQualityInstruction(await response.json());
         }
-        state.sessionData.cognitiveResults = [];
+        const runtime = getSessionRuntime();
+        const protocolBlocks = Array.isArray(experimentProtocol?.blocks)
+            ? experimentProtocol.blocks
+            : [];
+        const pendingRepeat = runtime?.machine?.snapshot?.().repeatQueue?.find(repeat =>
+            protocolBlocks.some(block => String(block?.id || '') === String(repeat?.blockId || ''))
+        ) || null;
+        const repeatBlockIndex = pendingRepeat
+            ? protocolBlocks.findIndex(block =>
+                String(block?.id || '') === String(pendingRepeat.blockId)
+            )
+            : -1;
+        if (!pendingRepeat) state.sessionData.cognitiveResults = [];
         state.sessionData.experimentMeta = {
             ...(state.sessionData.experimentMeta || {}),
             title: experimentProtocol?.title || null,
@@ -730,7 +732,7 @@ export async function loadAndStartCognitiveTask(options = {}) {
             blockCount: Array.isArray(experimentProtocol?.blocks) ? experimentProtocol.blocks.length : 0
         };
 
-        currentBlockIndex = 0;
+        currentBlockIndex = repeatBlockIndex >= 0 ? repeatBlockIndex : 0;
         currentTrialIndex = 0;
         activeTrialRuntime = null;
 
@@ -741,6 +743,14 @@ export async function loadAndStartCognitiveTask(options = {}) {
             protocolVersion: state.sessionData.experimentMeta.version,
             blockCount: state.sessionData.experimentMeta.blockCount
         });
+        if (pendingRepeat) {
+            await runtime.promptRepeat(pendingRepeat.blockId);
+            recordSessionEvent('cognitive_task_resume_after_reload', {
+                blockId: pendingRepeat.blockId,
+                failedAttempt: pendingRepeat.failedAttempt,
+                blockIndex: currentBlockIndex
+            });
+        }
 
         document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
         document.getElementById('step6').classList.add('active');
@@ -772,6 +782,11 @@ function runNextBlock() {
 
     const block = experimentProtocol.blocks[currentBlockIndex];
     console.log('[Cognitive] Переход к блоку:', block.id, 'Тип:', block.type);
+    getSessionRuntime()?.enterInstruction({
+        source: 'cognitive_block_instruction',
+        blockId: block?.id || null,
+        blockType: block?.type || 'unknown'
+    });
 
     setTaskContext({
         blockId: block?.id ?? null,
@@ -846,14 +861,44 @@ function showInstructions(block) {
     };
 }
 
-function startTaskBlock(block) {
+function buildTrialPlan(block) {
+    const trials = Array.isArray(block?.trials) ? block.trials : [];
+    return trials.map((trial, sourceIndex) => ({
+        trial,
+        sourceIndex,
+        trialId: String(trial?.id || `trial_${sourceIndex + 1}`)
+    }));
+}
+
+function trialQualityIssues(runtime, context) {
+    const blockIssues = runtime?.getCurrentBlock()?.issues || [];
+    const activeNow = runtime?.getActiveIssues?.() || [];
+    return collectTrialQualityIssues({
+        activeAtStart: context?.activeAtStart || [],
+        blockIssues,
+        issueStartIndex: context?.issueStartIndex || 0,
+        activeNow
+    });
+}
+
+function startTaskBlock(block, trialPlan = null) {
     ex_state.instruction.container.style.display = 'none';
     ex_state.task.area.style.display = 'flex';
     currentTrialIndex = 0;
+    activeBlockTrialPlan = Array.isArray(trialPlan) && trialPlan.length
+        ? trialPlan
+        : buildTrialPlan(block);
+    const sessionBlock = getSessionRuntime()?.beginBlock({
+        blockId: block?.id || `cognitive_${currentBlockIndex}`,
+        blockType: block?.type || 'cognitive_task'
+    });
+    currentBlockAttempt = sessionBlock?.attempt || 1;
 
     emitTaskEvent('task_block_ready', {
         blockIndex: currentBlockIndex,
-        trialCount: Array.isArray(block?.trials) ? block.trials.length : 0
+        trialCount: activeBlockTrialPlan.length,
+        totalTrialCount: Array.isArray(block?.trials) ? block.trials.length : 0,
+        attempt: currentBlockAttempt
     });
 
     runTrial();
@@ -861,31 +906,38 @@ function startTaskBlock(block) {
 
 function runTrial() {
     const block = experimentProtocol.blocks[currentBlockIndex];
-    const trials = Array.isArray(block?.trials) ? block.trials : [];
+    const trials = activeBlockTrialPlan;
 
     if (currentTrialIndex >= trials.length) {
         emitTaskEvent('block_end', {
             blockIndex: currentBlockIndex,
             blockType: block?.type || 'cognitive_task',
-            trialCount: trials.length
+            trialCount: trials.length,
+            attempt: currentBlockAttempt
         });
-        currentBlockIndex++;
-        runNextBlock();
+        finishTaskBlockAttempt(block);
         return;
     }
 
-    const trial = trials[currentTrialIndex];
+    const planItem = trials[currentTrialIndex];
+    const trial = planItem.trial;
     const config = block.blockConfig || {};
     const fixationDuration = config.fixation?.duration || 500;
     const stimulusDuration = config.stimulusDuration || 1000;
 
     const stimulusType = trial?.stimulus?.type || 'shape';
-    const trialId = trial?.id || `trial_${currentTrialIndex + 1}`;
+    const trialId = planItem.trialId;
+    const runtime = getSessionRuntime();
+    activeTrialQualityContext = {
+        issueStartIndex: runtime?.getCurrentBlock()?.issues?.length || 0,
+        activeAtStart: runtime?.getActiveIssues?.() || []
+    };
 
     setTaskContext({
         blockId: block?.id ?? null,
         trialId,
-        stimulusId: trialId,
+        stimulusId: trial?.stimulus?.stimulusId ?? trialId,
+        stimulusName: trial?.stimulus?.stimulusName ?? null,
         stimulusType,
         expectedResponse: trial?.correctResponse ?? null
     });
@@ -904,9 +956,14 @@ function runTrial() {
     trialPhase = 'fixation';
     fixationRemainingMs = fixationDuration;
     fixationStartPerf = performance.now();
+    const responseMode = normalizeResponseMode(config, trial);
+    responseCollector = new RtResponseCollector({
+        mode: responseMode,
+        target: document
+    });
+    responseCollector.startBaseline();
 
     pendingFixationCallback = () => {
-        if (qcTaskPaused) return;
         ex_state.task.fixation.style.display = 'none';
         renderStimulus(trial);
 
@@ -916,7 +973,8 @@ function runTrial() {
             stimulusOnEpoch: Date.now(),
             stimulusOff: false,
             blockId: block?.id ?? null,
-            trialId
+            trialId,
+            qualityContext: activeTrialQualityContext
         };
 
         setSessionPhase('cognitive_stimulus', { source: 'stimulus_on' });
@@ -930,27 +988,29 @@ function runTrial() {
             stimulus_type: trial?.condition || stimulusType,
             expected_response: trial?.correctResponse ?? null,
             is_go: isGo,
-            timeout_ms: rtWindowMs
+            timeout_ms: rtWindowMs,
+            response_mode: responseMode
         });
 
         let responded = false;
         trialPhase = 'stimulus';
         stimulusTimeoutRemainingMs = stimulusDuration;
         stimulusTimerStartPerf = performance.now();
-        responseHandler = (e) => {
-            if (qcTaskPaused) return;
-            if (!responded && isAcceptedTaskKey(e, trial)) {
-                responded = true;
-                handleResponse(performance.now() - stimulusOnPerf, keyFromKeyboardEvent(e));
-            }
-        };
-        document.addEventListener('keydown', responseHandler);
+        responseCollector.arm((decision) => {
+            if (responded) return;
+            responded = true;
+            handleResponse(decision.rtMs, decision.response, decision);
+        });
 
         pendingStimulusTimeoutCallback = () => {
-            if (qcTaskPaused) return;
             if (!responded) {
                 responded = true;
-                handleResponse(null, null);
+                handleResponse(null, null, {
+                    responseMode,
+                    inputType: null,
+                    decisionTimestampMs: null,
+                    pointerSummary: responseCollector?.pointerSummary(null) || null
+                });
             }
         };
         trialTimeout = setTimeout(pendingStimulusTimeoutCallback, stimulusDuration);
@@ -959,12 +1019,19 @@ function runTrial() {
     fixationTimeout = setTimeout(pendingFixationCallback, fixationDuration);
 }
 
-function handleResponse(rt, key) {
+function handleResponse(rt, key, decision = {}) {
     cleanupTrial();
 
     const block = experimentProtocol.blocks[currentBlockIndex];
-    const trial = block.trials[currentTrialIndex];
+    const planItem = activeBlockTrialPlan[currentTrialIndex];
+    const trial = planItem.trial;
     const config = block.blockConfig || {};
+    const runtime = getSessionRuntime();
+    const qualityIssues = trialQualityIssues(
+        runtime,
+        activeTrialRuntime?.qualityContext || activeTrialQualityContext
+    );
+    const qualityValid = qualityIssues.length === 0;
 
     const rtMs = Number.isFinite(rt) ? Math.round(rt) : null;
     emitStimulusOffIfNeeded(rtMs, key ? 'response' : 'timeout');
@@ -972,7 +1039,11 @@ function handleResponse(rt, key) {
     emitTaskEvent('response', {
         key: key || null,
         responded: key !== null,
-        rtMs
+        rtMs,
+        response_mode: decision.responseMode || normalizeResponseMode(config, trial),
+        input_type: decision.inputType || null,
+        decision_timestamp_ms: decision.decisionTimestampMs ?? null,
+        pointer_summary: decision.pointerSummary || null
     });
 
     setSessionPhase('cognitive_instruction', { source: 'stimulus_off' });
@@ -981,17 +1052,27 @@ function handleResponse(rt, key) {
     const isCorrect = trial.correctResponse === key;
 
     state.sessionData.cognitiveResults.push({
-        trialId: trial.id,
+        trialId: planItem.trialId,
         block: block.id,
         blockId: block.id,
         task_id: block?.taskType || block?.rt_task || null,
-        stimulusId: trial.id,
+        stimulusId: trial?.stimulus?.stimulusId ?? planItem.trialId,
         stimulusType: trial?.stimulus?.type || 'shape',
         expectedResponse: trial.correctResponse ?? null,
         rt: rtMs,
         condition: trial.condition,
         response: key || null,
+        responseMode: decision.responseMode || normalizeResponseMode(config, trial),
+        inputType: decision.inputType || null,
+        decisionTimestampMs: decision.decisionTimestampMs ?? null,
+        pointerSummary: decision.pointerSummary || null,
         correct: isCorrect,
+        attempt: currentBlockAttempt,
+        qualityValid,
+        qualityIssueCodes: qualityIssues.map(issue => issue.code),
+        qualityIssues,
+        sourceTrialIndex: planItem.sourceIndex,
+        repeatSequenceIndex: currentTrialIndex,
         timestamp: Date.now()
     });
 
@@ -1000,10 +1081,13 @@ function handleResponse(rt, key) {
         condition: trial?.condition ?? null,
         key: key || null,
         rtMs,
-        correct: isCorrect
+        correct: isCorrect,
+        qualityValid,
+        qualityIssueCodes: qualityIssues.map(issue => issue.code)
     });
 
     activeTrialRuntime = null;
+    activeTrialQualityContext = null;
 
     if (config.showFeedback) {
         ex_state.task.feedback.innerText = isCorrect ? '✓ Верно' : '✗ Ошибка';
@@ -1019,22 +1103,63 @@ function handleResponse(rt, key) {
     }
 }
 
-function moveToNextTrial() {
-    setTimeout(() => {
-        if (qcTaskPaused) {
-            moveToNextTrial();
+async function finishTaskBlockAttempt(block) {
+    const runtime = getSessionRuntime();
+    const blockId = String(block?.id || '');
+    const attemptResults = state.sessionData.cognitiveResults.filter(result => (
+        String(result?.blockId || '') === blockId
+        && Number(result?.attempt) === Number(currentBlockAttempt)
+    ));
+    const {
+        invalidResults,
+        repeatTrialPlan,
+        repeatItems
+    } = buildTrialRepeatPlan(activeBlockTrialPlan, attemptResults);
+    const invalidIds = new Set(invalidResults.map(result => String(result.trialId)));
+    const decision = runtime?.completeBlock({
+        success: true,
+        reason: invalidResults.length ? 'trial_quality_issue' : null,
+        repeatItems,
+        repeatItemLabel: 'trial',
+        totalItemCount: Array.isArray(block?.trials) ? block.trials.length : activeBlockTrialPlan.length
+    }) || {
+        repeatRequired: false,
+        block: { attempt: currentBlockAttempt }
+    };
+    const attempt = decision.block?.attempt || currentBlockAttempt;
+
+    if (decision.repeatRequired) {
+        emitTaskEvent('block_repeat_required', {
+            blockIndex: currentBlockIndex,
+            blockType: block?.type || 'cognitive_task',
+            failedAttempt: attempt,
+            invalidTrialCount: invalidResults.length,
+            repeatTrialIds: [...invalidIds]
+        });
+        if (attempt < MAX_COGNITIVE_BLOCK_ATTEMPTS && repeatTrialPlan.length) {
+            await runtime.promptRepeat(blockId);
+            startTaskBlock(block, repeatTrialPlan);
             return;
         }
+        const abandonedRepeat = runtime?.discardRepeat(blockId);
+        if (abandonedRepeat) await runtime.notifyRepeatLimit(abandonedRepeat);
+    }
+
+    activeBlockTrialPlan = [];
+    currentBlockIndex++;
+    runNextBlock();
+}
+
+function moveToNextTrial() {
+    setTimeout(() => {
         currentTrialIndex++;
         runTrial();
     }, 200);
 }
 
 function cleanupTrial() {
-    if (responseHandler) {
-        document.removeEventListener('keydown', responseHandler);
-        responseHandler = null;
-    }
+    responseCollector?.dispose();
+    responseCollector = null;
 
     if (fixationTimeout) {
         clearTimeout(fixationTimeout);
@@ -1053,4 +1178,5 @@ function cleanupTrial() {
     stimulusTimeoutRemainingMs = 0;
     stimulusTimerStartPerf = null;
     pendingStimulusTimeoutCallback = null;
+    activeTrialQualityContext = null;
 }

@@ -1,5 +1,14 @@
 // Utility functions
 const $=s=>document.querySelector(s);
+function escapeUiHtml(value){
+  return String(value == null ? '' : value)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+window.escapeUiHtml = window.escapeUiHtml || escapeUiHtml;
 const state={
   org:'Acme Labs',
   project:'',
@@ -15,7 +24,7 @@ const state={
 // Phase 3: API config and auth (researcher dashboards)
 window.API_BASE = window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api');
 window.API_TOKEN = window.API_TOKEN || localStorage.getItem('emocog_api_token') || '';
-function authHeaders(){ const h = {}; if(window.API_TOKEN) h['Authorization'] = 'Bearer '+window.API_TOKEN; return h; }
+function authHeaders(){ const h = {}; if(window.API_TOKEN) h['Authorization'] = 'Bearer '+window.API_TOKEN; const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
 function apiHeaders(){ const h = {'Content-Type':'application/json'}; if(window.API_TOKEN) h['Authorization'] = 'Bearer '+window.API_TOKEN; return h; }
 async function apiFailError(r){
   let detail = r.statusText || '';
@@ -32,18 +41,19 @@ async function apiFailError(r){
   }catch(_){}
   return new Error(r.status + (detail ? ' — ' + detail : ''));
 }
-async function apiGet(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, {headers: apiHeaders()}); if(!r.ok) throw await apiFailError(r); return r.json(); }
+function apiRequestHeaders(json){ const h=json?apiHeaders():authHeaders(); const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
+async function apiGet(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, {headers: apiRequestHeaders(true),credentials:'include'}); if(!r.ok) throw await apiFailError(r); return r.json(); }
 async function apiPost(path, body){
   const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path;
   const isFormData = (typeof FormData !== 'undefined') && body instanceof FormData;
-  const headers = isFormData ? authHeaders() : apiHeaders();
+  const headers = apiRequestHeaders(!isFormData);
   const payload = isFormData ? body : JSON.stringify(body || {});
-  const r = await fetch(url, { method: 'POST', headers, body: payload });
+  const r = await fetch(url, { method: 'POST', headers, body: payload, credentials:'include' });
   if(!r.ok) throw await apiFailError(r);
   return r.status === 204 ? null : r.json();
 }
-async function apiPatch(path, body){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'PATCH', headers: apiHeaders(), body: JSON.stringify(body || {}) }); if(!r.ok) throw await apiFailError(r); return r.json(); }
-async function apiDelete(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'DELETE', headers: apiHeaders() }); if(!r.ok) throw await apiFailError(r); return r.status === 204 ? null : r.json(); }
+async function apiPatch(path, body){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'PATCH', headers: apiRequestHeaders(true), body: JSON.stringify(body || {}), credentials:'include' }); if(!r.ok) throw await apiFailError(r); return r.json(); }
+async function apiDelete(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'DELETE', headers: apiRequestHeaders(false), credentials:'include' }); if(!r.ok) throw await apiFailError(r); return r.status === 204 ? null : r.json(); }
 
 function getParticipantWebBasePath(){
   var pathname = window.location.pathname || '';
@@ -77,7 +87,7 @@ function getApiBaseForResearcher() {
   return String(window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
 }
 function hasResearcherApiToken() {
-  return !!(window.API_TOKEN || localStorage.getItem('emocog_api_token'));
+  return !!(window.API_TOKEN || localStorage.getItem('emocog_api_token') || localStorage.getItem('emocog_developer_auth'));
 }
 function builderApiStateKey(experimentKey) {
   return 'emocog_builder_api_' + (experimentKey || 'draft');
@@ -124,7 +134,7 @@ async function resolveApiProjectId() {
 async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
   options = options || {};
   if (!hasResearcherApiToken()) {
-    throw new Error('Нужен вход в API (emocog_api_token). Откройте apps/web/developer/login.html');
+    throw new Error('Нужен вход в API. Откройте apps/web/developer/login.html');
   }
   var projectId = options.projectId != null ? parseInt(options.projectId, 10) : await resolveApiProjectId();
   var apiState = loadBuilderApiState(experimentKey);
@@ -154,23 +164,29 @@ async function createInvitationForProtocol(protocolId, options) {
   var pid = parseInt(protocolId, 10);
   if (!Number.isFinite(pid)) throw new Error('Invalid protocol ID');
   var body = { protocol_id: pid };
-  if (options.code) body.code = String(options.code).trim();
   if (options.maxRuns) body.max_runs = parseInt(options.maxRuns, 10);
   if (options.expiresAt) body.expires_at = options.expiresAt;
   return apiPost('/invitations', body);
 }
 async function publishBuilderProtocolAndInvitation(exportJson, experimentKey, protocolSlug) {
   var slug = String(protocolSlug || exportJson.protocolId || '').trim();
-  if (!slug) throw new Error('Укажите Protocol ID (код приглашения)');
+  if (!slug) throw new Error('Укажите Protocol ID');
+  var apiState = loadBuilderApiState(experimentKey);
   var publishOpts = {};
+  var existingInvitation = null;
+  var existingCode = apiState.invitationCode || slug;
   try {
-    var existing = await apiGet('/invitations/by-code/' + encodeURIComponent(slug));
-    if (existing && existing.protocol_id) {
-      publishOpts.forceProtocolId = parseInt(existing.protocol_id, 10);
+    existingInvitation = await apiGet(
+      '/invitations/by-code/' + encodeURIComponent(existingCode)
+    );
+    if (existingInvitation && existingInvitation.protocol_id) {
+      publishOpts.forceProtocolId = parseInt(existingInvitation.protocol_id, 10);
     }
   } catch (_) { /* новый код — создаём протокол как обычно */ }
   var savedProtocol = await persistBuilderProtocolToApi(exportJson, experimentKey, publishOpts);
-  var inv = await createInvitationForProtocol(savedProtocol.id, { code: slug });
+  var inv = existingInvitation && Number(existingInvitation.protocol_id) === Number(savedProtocol.id)
+    ? existingInvitation
+    : await createInvitationForProtocol(savedProtocol.id);
   saveBuilderApiState(experimentKey, {
     apiProtocolId: savedProtocol.id,
     invitationCode: inv.code,
@@ -207,7 +223,16 @@ async function bootstrapAdminAccess(){
   applyAdminNavAccess();
 }
 
-function logoutResearcher() {
+async function logoutResearcher() {
+  try {
+    const base = getApiBaseForResearcher();
+    await fetch(base + '/auth/logout', {
+      method: 'POST',
+      headers: apiRequestHeaders(false),
+      credentials: 'include',
+      keepalive: true
+    });
+  } catch (_) {}
   try {
     if (window.EmocogAuthGuard && typeof window.EmocogAuthGuard.clearAuth === 'function') {
       window.EmocogAuthGuard.clearAuth();
@@ -263,6 +288,28 @@ function toggleSidebar(){
   $('#btnToggleSidebar').classList.toggle('active', state.sidebarCollapsed);
 }
 
+function setMobileNavigation(open){
+  const app = $('#app');
+  const button = $('#mobileNavToggle');
+  if(!app || !button) return;
+  const next = open === true;
+  const iconPath = button.querySelector('path');
+  app.classList.toggle('mobile-nav-open', next);
+  button.setAttribute('aria-expanded', next ? 'true' : 'false');
+  if(iconPath){
+    iconPath.setAttribute(
+      'd',
+      next ? 'M6 18L18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'
+    );
+  }
+  button.setAttribute(
+    'aria-label',
+    next
+      ? (CURRENT_LANG === 'en' ? 'Close navigation' : 'Закрыть навигацию')
+      : (CURRENT_LANG === 'en' ? 'Open navigation' : 'Открыть навигацию')
+  );
+}
+
 // Analytics mode (hide right panel)
 function setAnalyticsMode(enabled){
   $('#app').classList.toggle('analytics-mode', enabled);
@@ -289,6 +336,26 @@ function setExperimentsConstructorMode(enabled){
 
 function setAdminMode(enabled){
   $('#app').classList.toggle('admin-mode', enabled);
+}
+
+function getSelectedProjectRouteId(){
+  const select = $('#projectSelect');
+  const stored = localStorage.getItem('emocog_selected_project_id');
+  const value = stored || select?.value || '';
+  return value ? encodeURIComponent(String(value)) : null;
+}
+
+function updateProjectNavigation(){
+  const wrap = $('#projectNavigationWrap');
+  if(!wrap) return;
+  const projectId = getSelectedProjectRouteId();
+  wrap.style.display = projectId ? '' : 'none';
+  wrap.querySelectorAll('[data-project-section]').forEach(link=>{
+    const section = link.dataset.projectSection;
+    link.href = projectId
+      ? `#/projects/${projectId}/${section}`
+      : '#/experiments';
+  });
 }
 
 // Active navigation highlight
@@ -378,29 +445,52 @@ function render(hashOverride){
   const view=$('#view');
   let routeKey=route;
   const subKey=parts[1]||'';
+  const projectSection = routeKey === 'projects' ? (parts[2] || 'overview') : null;
+  if(routeKey === 'projects' && parts[1] && parts[1] !== 'current'){
+    localStorage.setItem('emocog_selected_project_id', decodeURIComponent(parts[1]));
+  }
+  let viewRoute = routeKey;
+  let viewSubKey = subKey;
+  if(routeKey === 'projects'){
+    const projectRouteMap = {
+      overview: 'overview',
+      protocols: 'experiments',
+      participants: 'sessions',
+      monitoring: 'analytics',
+      results: 'analytics',
+      settings: 'settings'
+    };
+    viewRoute = projectRouteMap[projectSection] || 'overview';
+    viewSubKey = projectSection === 'monitoring'
+      ? 'data-quality'
+      : (projectSection === 'results' ? 'session-card' : '');
+  }
   let rk=routeKey;
-  if(routeKey==='analytics'){
+  if(projectSection){
+    rk = `project-${projectSection}`;
+  } else if(routeKey==='analytics'){
     // For analytics sub-routes, highlight the specific subnav item
     rk = subKey ? `analytics-${subKey}-sub` : 'analytics-session-card';
   }
 
+  updateProjectNavigation();
   setActiveNav(rk);
 
   // Set analytics mode for analytics routes
-  setAnalyticsMode(routeKey === 'analytics');
-  setOverviewMode(routeKey === 'overview');
-  setStimuliMode(routeKey === 'stimuli');
-  setAdminMode(routeKey === 'admin');
-  setSettingsMode(routeKey === 'settings');
+  setAnalyticsMode(viewRoute === 'analytics');
+  setOverviewMode(viewRoute === 'overview');
+  setStimuliMode(viewRoute === 'stimuli');
+  setAdminMode(viewRoute === 'admin');
+  setSettingsMode(viewRoute === 'settings');
   setExperimentsActiveMode(false);
   setExperimentsConstructorMode(false);
 
   // Create new page content
   let node;
 
-  if(routeKey==='overview') node=OverviewView();
+  if(viewRoute==='overview') node=OverviewView();
   //(Аня)
-  else if (routeKey === 'experiments') {
+  else if (viewRoute === 'experiments') {
     if (parts[1] === 'builder') {
       setExperimentsConstructorMode(true);
       const urlParams = new URLSearchParams(window.location.search);
@@ -414,17 +504,17 @@ function render(hashOverride){
       node = ExperimentsListView();
     }
   }
-  else if(routeKey==='stimuli') {
+  else if(viewRoute==='stimuli') {
     // Sub-routes: /stimuli/all, /stimuli/library, /stimuli/upload — handled inside StimuliAOIView via selectedFolder/tab state
     if (subKey === 'all') { selectedFolder = null; currentStimuliFilter = 'all'; }
     node = StimuliAOIView();
   }//конец
-  else if(routeKey==='sessions') node=SessionsView();
-  else if(routeKey==='analytics') node=AnalyticsView(subKey||'session-card');
-  else if(routeKey==='export') node=ExportView();
-  else if(routeKey==='admin') node=AdminView();
-  else if(routeKey==='settings') node=SettingsView();
-  else if(routeKey==='billing') node=BillingView();
+  else if(viewRoute==='sessions') node=SessionsView();
+  else if(viewRoute==='analytics') node=AnalyticsView(viewSubKey||'session-card');
+  else if(viewRoute==='export') node=ExportView();
+  else if(viewRoute==='admin') node=AdminView();
+  else if(viewRoute==='settings') node=SettingsView();
+  else if(viewRoute==='billing') node=BillingView();
   else node=OverviewView();
 
   // Instantly replace content - NO wrapper, NO animation
@@ -448,6 +538,9 @@ function clearExperimentBuilderDraft() {
   localStorage.removeItem('emocog_protocol_blocks');
   localStorage.removeItem('emocog_protocol_meta_draft');
   localStorage.removeItem('emocog_protocol_step_draft');
+  if (window.EmocogAnalyticsPlan && typeof window.EmocogAnalyticsPlan.clearDraft === 'function') {
+    window.EmocogAnalyticsPlan.clearDraft();
+  }
 }
 
 function startNewExperimentBuilder() {
@@ -457,7 +550,21 @@ function startNewExperimentBuilder() {
 
 // Event listeners
 //$('#orgSelect').addEventListener('change',e=>{state.org=e.target.value.replace('Org: ','');render();toast('Org changed');});
-$('#projectSelect').addEventListener('change',e=>{state.project=e.target.value.replace('Project: ','');render();toast('Project changed');});
+$('#projectSelect').addEventListener('change',e=>{
+  const select = e.target;
+  const option = select.options[select.selectedIndex];
+  state.project = option?.textContent || '';
+  if(select.value){
+    localStorage.setItem('emocog_selected_project_id', String(select.value));
+    localStorage.setItem('emocog_selected_workspace_project_id', String(select.value));
+    navigate(`#/projects/${encodeURIComponent(String(select.value))}/overview`);
+  }else{
+    localStorage.removeItem('emocog_selected_project_id');
+    localStorage.removeItem('emocog_selected_workspace_project_id');
+    navigate('#/experiments');
+  }
+  toast(CURRENT_LANG === 'en' ? 'Project changed' : 'Проект выбран');
+});
 // quick export replaced by + Create menu
 
 $('#btnBack').addEventListener('click',()=>history.back());
@@ -469,6 +576,13 @@ $('#btnForward').addEventListener('click',()=>history.forward());
 
 $('#btnFocus').addEventListener('click',()=>{state.focus=!state.focus;applyFocus();});
 $('#btnToggleSidebar').addEventListener('click',toggleSidebar);
+$('#mobileNavToggle')?.addEventListener('click',()=>{
+  setMobileNavigation(!$('#app').classList.contains('mobile-nav-open'));
+});
+$('#mobileNavBackdrop')?.addEventListener('click',()=>setMobileNavigation(false));
+window.addEventListener('resize',()=>{
+  if(window.innerWidth > 900) setMobileNavigation(false);
+});
 
 function updateRoleBadgeLabel(){
   const roleLabelEl = $('#currentUserRoleLabel');
@@ -512,6 +626,7 @@ document.addEventListener('click',(e)=>{
     toast('Locked for demo');
     return;
   }
+  setMobileNavigation(false);
   navigate(href);
 },true);
 
@@ -668,11 +783,11 @@ bootstrapAdminAccess();
     }
 
     container.innerHTML = list.map(p => `
-      <div class="ws-proj-item ${selectedProjectId === p.id ? 'selected' : ''}" data-id="${p.id}" data-name="${p.name.replace(/"/g,'&quot;')}">
-        <div class="ws-proj-dot">${initials(p.name)}</div>
+      <div class="ws-proj-item ${selectedProjectId === p.id ? 'selected' : ''}" data-id="${escapeUiHtml(p.id)}" data-name="${escapeUiHtml(p.name)}">
+        <div class="ws-proj-dot">${escapeUiHtml(initials(p.name))}</div>
         <div class="ws-proj-info">
-          <div class="ws-proj-name">${p.name}</div>
-          <div class="ws-proj-date">${fmtDate(p.createdAt)}</div>
+          <div class="ws-proj-name">${escapeUiHtml(p.name)}</div>
+          <div class="ws-proj-date">${escapeUiHtml(fmtDate(p.createdAt))}</div>
         </div>
         <div class="ws-proj-check">
           ${selectedProjectId === p.id
@@ -798,6 +913,7 @@ bootstrapAdminAccess();
       const list = loadProjects();
       const proj = list.find(p => p.id === selectedProjectId);
       if (proj) {
+        localStorage.setItem('emocog_selected_workspace_project_id', String(proj.id));
         syncProjectToLeftPanel(proj.name);
         if (typeof navigate === 'function') navigate('#/overview');
         // Re-render overview to reflect project

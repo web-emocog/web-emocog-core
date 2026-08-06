@@ -1581,12 +1581,84 @@ body{
 }
 
 @media(max-width:900px){
-  .app{
-    grid-template-columns:1fr;
+  .app,
+  .app.analytics-mode,
+  .app.overview-mode,
+  .app.stimuli-mode,
+  .app.settings-mode,
+  .app.experiments-active-mode,
+  .app.experiments-constructor-mode,
+  .app.admin-mode{
+    grid-template-columns:minmax(0,1fr) !important;
   }
   .panel.left-panel{
-    display:none;
+    display:flex;
+    position:fixed;
+    z-index:1202;
+    inset:12px auto 12px 12px;
+    width:min(280px, calc(100vw - 72px));
+    opacity:0;
+    transform:translateX(calc(-100% - 24px));
+    pointer-events:none;
+    contain:layout style;
   }
+  .app.mobile-nav-open .panel.left-panel{
+    opacity:1 !important;
+    transform:translateX(0) !important;
+    pointer-events:auto !important;
+  }
+  #mobileNavToggle{
+    display:inline-flex;
+  }
+  #mobileNavBackdrop{
+    display:block;
+  }
+  .panel.center{
+    min-width:0;
+  }
+}
+
+#mobileNavToggle{
+  display:none;
+  position:fixed;
+  z-index:1204;
+  left:22px;
+  top:22px;
+  width:42px;
+  height:42px;
+  border:1px solid var(--stroke2);
+  border-radius:14px;
+  background:rgba(255,255,255,.88);
+  box-shadow:var(--shadow2);
+  color:var(--text);
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  backdrop-filter:blur(18px);
+}
+#mobileNavToggle svg{
+  width:20px;
+  height:20px;
+}
+#mobileNavBackdrop{
+  display:none;
+  position:fixed;
+  z-index:1201;
+  inset:0;
+  background:rgba(15,23,42,.28);
+  opacity:0;
+  pointer-events:none;
+}
+.app.mobile-nav-open #mobileNavBackdrop{
+  opacity:1;
+  pointer-events:auto;
+}
+.app.mobile-nav-open #mobileNavToggle{
+  left:min(302px, calc(100vw - 58px));
+}
+@media(max-width:900px){
+  #mobileNavToggle{display:inline-flex;}
+  #mobileNavBackdrop{display:block;}
 }
 
 /* ========== DASHBOARD LIGHT MODE OVERRIDES ========== */
@@ -2726,6 +2798,16 @@ body{
   <script src="auth-guard.js"></script>
   <script>
     (function () {
+      var previewParams = new URLSearchParams(window.location.search);
+      var localAnalyticsPreview = (
+        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        && previewParams.get('analyticsPreview') === '1'
+      );
+      if (localAnalyticsPreview) {
+        document.documentElement.classList.remove('emocog-auth-pending');
+        document.documentElement.style.visibility = '';
+        return;
+      }
       if (!window.EmocogAuthGuard) {
         window.location.replace('developer/login.html');
         return;
@@ -2819,8 +2901,14 @@ body{
   <!-- ===== END WELCOME SCREEN ===== -->
 
   <div class="app" id="app">
+    <button type="button" id="mobileNavToggle" aria-label="Открыть навигацию" aria-controls="mobileNavigationPanel" aria-expanded="false">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+    <div id="mobileNavBackdrop" aria-hidden="true"></div>
     <!-- LEFT PANEL -->
-    <div class="panel left-panel">
+    <div class="panel left-panel" id="mobileNavigationPanel">
       <div class="hdr">
         <div class="brand">
           <div class="logo"></div>
@@ -2872,7 +2960,7 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
 </svg>
               </span>
-              <span>All Experiments</span>
+              <span>Проекты</span>
             </a>
             
             <div class="has-subnav" id="nav-stimuli-parent">
@@ -2882,11 +2970,11 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
 </svg>
               </span>
-                <span>Библиотека стимулов</span>
+                <span>Библиотека</span>
             </a>
             </div>
             
-            <div class="has-subnav" id="nav-analytics-parent">
+            <div class="has-subnav" id="nav-analytics-parent" style="display:none;">
               <a href="#/analytics/session-card" id="nav-analytics-session-card">
                 <span class="icon">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -2912,7 +3000,7 @@ body{
               <span>Admin</span>
             </a>
             
-            <a href="#/settings" id="nav-settings">
+            <a href="#/settings" id="nav-settings" style="display:none;">
               <span class="icon">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -2922,19 +3010,25 @@ body{
               <span>Settings</span>
             </a>
             
-            <a href="#/billing" id="nav-billing" class="disabled" data-disabled="1">
+            <a href="#/billing" id="nav-billing">
               <span class="icon">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
 </svg>
               </span>
-              <span>Billing</span>
-              <span class="lock">
-<svg fill="currentColor" viewBox="0 0 20 20">
-<path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
-</svg>
-              </span>
+              <span>Тариф</span>
             </a>
+          </nav>
+        </div>
+        <div id="projectNavigationWrap" style="display:none;">
+          <div class="section-title">Выбранный проект</div>
+          <nav class="nav" id="projectNavigation">
+            <a href="#/projects/current/overview" id="nav-project-overview" data-project-section="overview"><span>Обзор</span></a>
+            <a href="#/projects/current/protocols" id="nav-project-protocols" data-project-section="protocols"><span>Протоколы</span></a>
+            <a href="#/projects/current/participants" id="nav-project-participants" data-project-section="participants"><span>Участники</span></a>
+            <a href="#/projects/current/monitoring" id="nav-project-monitoring" data-project-section="monitoring"><span>Мониторинг</span></a>
+            <a href="#/projects/current/results" id="nav-project-results" data-project-section="results"><span>Результаты</span></a>
+            <a href="#/projects/current/settings" id="nav-project-settings" data-project-section="settings"><span>Настройки</span></a>
           </nav>
         </div>
         </div>
@@ -3044,12 +3138,26 @@ body{
   <div class="toast" id="toast"></div>
   
   <script src="researcher-i18n.js"></script>
-  <script src="researcher-experiments.js"></script>
-  <script src="researcher-analytics.js"></script>
-  <script src="researcher-admin-settings.js"></script>
-  <script src="researcher-builder.js"></script>
-  <script src="researcher-stimuli.js"></script>
-  <script src="researcher-core.js"></script>
-  <script src="researcher-api-bridge.js"></script>
+  <script src="researcher-experiments.js?v=20260807-3"></script>
+  <script src="researcher-analytics.js?v=20260806-1"></script>
+  <script src="researcher-analytics-config.js?v=20260806-1"></script>
+  <script>
+    // Fictional analytics are opt-in and confined to local visual review.
+    (function () {
+      var localHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      var preview = new URLSearchParams(location.search).get('analyticsPreview') === '1';
+      if (localHost && preview) {
+        document.write('<script src="researcher-analytics-preview-fixture.js?v=20260806-1"><\/script>');
+      }
+    })();
+  </script>
+  <script src="researcher-analytics-production.js?v=20260806-1"></script>
+  <script src="researcher-admin-settings.js?v=20260807-1"></script>
+  <script src="aoi-geometry.js?v=20260806-1"></script>
+  <script src="aoi-protocol.js?v=20260807-1"></script>
+  <script src="researcher-builder.js?v=20260807-2"></script>
+  <script src="researcher-stimuli.js?v=20260807-2"></script>
+  <script src="researcher-core.js?v=20260807-2"></script>
+  <script src="researcher-api-bridge.js?v=20260807-2"></script>
 </body>
 </html>

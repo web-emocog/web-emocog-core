@@ -34,8 +34,9 @@ export const LANDMARKS = {
 // Минимально необходимое число landmarks (478 = полная модель с радужкой)
 export const MIN_LANDMARKS = 478;
 
-// Размер вектора признаков (16 признаков + 1 bias = 17)
-export const FEATURE_SIZE = 17;
+// Iris-only predictor: 8 признаков + bias. Head pose/translation is evaluated
+// independently as a confidence/OOD nuisance channel.
+export const FEATURE_SIZE = 9;
 
 // Конфигурация по умолчанию.
 // minCalibrationPoints = 16 — минимум для well-conditioned ridge-системы
@@ -43,6 +44,8 @@ export const FEATURE_SIZE = 17;
 // даёт 50 точек, так что порог срабатывает только для пустых edge-кейсов.
 export const DEFAULTS = {
     ridgeLambda: 0.001,
-    smoothingFactor: 0.10,
-    minCalibrationPoints: 16
+    minCalibrationPoints: 12,
+    minCutoffHz: 1.35,
+    maxCutoffHz: 12,
+    velocityGain: 5.5
 };

@@ -1,0 +1,71 @@
+{
+  "contractVersion": "1.0",
+  "kind": "analytics_export",
+  "generatedAt": "2026-08-05T08:30:00.000Z",
+  "content": "both",
+  "snapshot": {
+    "id": "snapshot-group-001",
+    "datasetHash": "sha256:example-dataset",
+    "createdAt": "2026-08-05T08:29:00.000Z",
+    "queryEcho": {
+      "schemaVersion": "1.0",
+      "mode": "group",
+      "analysisLevel": "level_1",
+      "projectId": 12,
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "metricIds": ["aoi.dwell_time_ms", "aoi.ttff_ms"],
+      "filters": {
+        "participantIds": [],
+        "sessionIds": [],
+        "groupIds": [],
+        "conditionIds": [],
+        "blockIds": ["main-block"],
+        "stimulusIds": ["stimulus-42"],
+        "aoiIds": ["aoi-target"],
+        "qcMode": "valid_and_borderline",
+        "qcChannels": ["task", "gaze"],
+        "minValidFraction": null,
+        "minSignalConfidence": null,
+        "dateFrom": null,
+        "dateTo": null,
+        "includeIncompleteSessions": false
+      }
+    },
+    "versions": { "protocol": "1.0.0", "aoiSchema": "1.2", "metricsCatalog": "1.0", "qcRules": "qc-rules-1.0.0" },
+    "includedParticipantIds": ["P-001", "P-002"],
+    "includedSessionIds": [201, 202],
+    "excludedSessions": []
+  },
+  "counts": { "participants": 2, "sessions": 2, "observations": 48 },
+  "summary": { "session": null, "group": { "nParticipants": 2, "nSessions": 2, "nObservations": 48 }, "modelResult": null },
+  "longData": [
+    {
+      "metricId": "aoi.dwell_time_ms",
+      "value": 744.2,
+      "unit": "ms",
+      "status": "computed",
+      "reason": null,
+      "numerator": null,
+      "denominator": 42,
+      "nParticipants": 2,
+      "nObservations": 42
+    },
+    {
+      "metricId": "aoi.ttff_ms",
+      "value": null,
+      "unit": "ms",
+      "status": "no_event",
+      "reason": "target_not_reached_before_presentation_end",
+      "numerator": null,
+      "denominator": 6,
+      "nParticipants": 2,
+      "nObservations": 6
+    }
+  ],
+  "dataDictionary": [
+    { "metricId": "aoi.dwell_time_ms", "label": { "ru": "Время в AOI", "en": "AOI dwell time" }, "unit": "ms", "description": null },
+    { "metricId": "aoi.ttff_ms", "label": { "ru": "Время до первой фиксации", "en": "Time to first fixation" }, "unit": "ms", "description": null }
+  ],
+  "provenance": { "frontend": "researcher-web", "exportContract": "1.0", "source": "analysis_snapshot" }
+}

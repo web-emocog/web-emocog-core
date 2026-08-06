@@ -1,6 +1,7 @@
 import { state } from '../../../web-page/state.js';
 import { extractEyeSignalSample } from '../../../web-page/eye-signal.js';
 import { ANALYSIS_LOOP } from '../constants.js';
+import { isContinuousSessionAnalysisRunning } from '../../../session-runtime/index.js';
 
 function getVideoTime(videoElement) {
     if (!videoElement || videoElement.readyState < 2) return -1;
@@ -109,6 +110,7 @@ async function runTick() {
 }
 
 export function startGazeTestsAnalysisLoop() {
+    if (isContinuousSessionAnalysisRunning()) return true;
     if (localState.active) return true;
 
     const video = document.getElementById('precheckVideo');
@@ -135,6 +137,7 @@ export function startGazeTestsAnalysisLoop() {
 }
 
 export function stopGazeTestsAnalysisLoop() {
+    if (isContinuousSessionAnalysisRunning() && !localState.active) return;
     localState.active = false;
     clearLoopTimeout();
     localState.video = null;

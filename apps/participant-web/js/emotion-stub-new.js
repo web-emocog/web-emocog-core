@@ -6,6 +6,7 @@
  */
 
 import {
+    analyzer,
     getEmotionSample as getEmotionSampleFromModule,
     getEmotionSummary,
     appendEmotionSample,
@@ -16,6 +17,16 @@ export { getEmotionSummary, appendEmotionSample };
 
 let lastValence = 0;
 let lastArousal = 0;
+
+export function startEmotionSession(sessionId = null) {
+    lastValence = 0;
+    lastArousal = 0;
+    analyzer.startSession(sessionId);
+}
+
+export function endEmotionSession() {
+    return analyzer.endSession();
+}
 
 /** Сброс hold-state и analyzer buffers (вызывать при finalize сессии). */
 export function resetEmotionWiringState() {

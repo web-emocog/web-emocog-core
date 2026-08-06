@@ -18,7 +18,7 @@
 | 2.1 | Стек: Node/Express, Postgres, node-pg-migrate. Структура: routes, middleware, config, migrations. |
 | 2.2 | Auth: POST /auth/register, POST /auth/login, JWT, роли admin, PI, researcher, analyst, assistant. Middleware requireAuth, requireRole. |
 | 2.3 | Organizations & Projects: CRUD, user_organizations. |
-| 2.4 | Sessions: POST /sessions/start, POST /sessions/stop. POST /events/batch (session_id, participant_id, events[]). |
+| 2.4 | Sessions: POST /sessions/start, POST /sessions/stop. Participant events and results use only typed POST /ingest. |
 | 2.5 | POST /ingest — приём payload из buildAggregatesPayload. Session + SessionFeatures. |
 | 2.6 | QC Aggregator: qc_score, valid/borderline/invalid, fail_reasons. SessionQcSummary. |
 | 2.7 | GET /export — фильтры project_id, protocol_id, date_from, date_to, qc_validity. Ответ: JSON или CSV. |
@@ -35,4 +35,8 @@ npm run migrate:up
 npm start
 ```
 
-Участник может отправлять агрегаты на `POST /ingest` (без авторизации). Для этого в конфиге участника задать UPLOAD_AGGREGATES_URL (например `https://your-api/ingest`).
+Участник отправляет агрегаты на `POST /ingest` только с server-issued ingest
+token. Клиент получает его через
+`POST /invitations/by-code/:code/ingest-token`; token связан с `session_id`,
+invitation, protocol и project. Для отправки в конфиге участника задайте
+`UPLOAD_AGGREGATES_URL` (например `https://your-api/ingest`).

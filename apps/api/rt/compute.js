@@ -12,13 +12,16 @@ const {
 } = require('../../shared/rt-registry');
 const { eventsToRtJsonl } = require('./event_adapter');
 
-const PYTHON = process.env.RT_PYTHON || 'python';
 const ANALYZE_SCRIPT = path.resolve(__dirname, '../../../rt_component-/scripts/analyze_events_json.py');
 const CONFIG_PATH = path.resolve(__dirname, '../../../rt_component-/examples/config_default.json');
 
+function getPythonBin() {
+  return process.env.RT_PYTHON || 'python';
+}
+
 function pythonAvailable() {
   try {
-    const r = spawnSync(PYTHON, ['--version'], { encoding: 'utf8', timeout: 5000 });
+    const r = spawnSync(getPythonBin(), ['--version'], { encoding: 'utf8', timeout: 5000 });
     return r.status === 0;
   } catch (_) {
     return false;
@@ -31,15 +34,16 @@ function getRtAnalyzerHealth() {
   const configExists = fs.existsSync(CONFIG_PATH);
   let pythonVersion = null;
   let pythonOk = false;
+  const python = getPythonBin();
   if (pythonAvailable()) {
-    const r = spawnSync(PYTHON, ['--version'], { encoding: 'utf8', timeout: 5000 });
+    const r = spawnSync(python, ['--version'], { encoding: 'utf8', timeout: 5000 });
     pythonOk = r.status === 0;
     pythonVersion = (r.stdout || r.stderr || '').trim() || null;
   }
   const available = pythonOk && scriptExists && configExists;
   return {
     available,
-    python: PYTHON,
+    python,
     python_version: pythonVersion,
     script_path: ANALYZE_SCRIPT,
     script_exists: scriptExists,
@@ -64,7 +68,7 @@ function runAnalyzer(events, analyzerTask) {
     task: analyzerTask,
     config_path: fs.existsSync(CONFIG_PATH) ? CONFIG_PATH : null,
   });
-  const r = spawnSync(PYTHON, [ANALYZE_SCRIPT], {
+  const r = spawnSync(getPythonBin(), [ANALYZE_SCRIPT], {
     input: stdin,
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
@@ -101,6 +105,9 @@ function projectMetric(metricId, analyzerMetrics) {
   let value = raw;
   if (def && def.to_proxy_percent && def.unit === 'ratio') {
     value = raw * 100;
+  }
+  if (Number.isFinite(value)) {
+    value = Math.round(value * 1e6) / 1e6;
   }
   return { value };
 }

@@ -252,8 +252,6 @@ export async function collectTechDataAndProceed() {
     const errorMsg = document.getElementById('emailError');
     if (errorMsg) errorMsg.remove();
     
-    if (email) state.sessionData.user.email = email; 
-
     state.sessionData.tech.screen = {
         width: window.screen.width,
         height: window.screen.height,
@@ -263,11 +261,8 @@ export async function collectTechDataAndProceed() {
     };
 
     state.sessionData.tech.browser = {
-        userAgent: navigator.userAgent,
-        language: navigator.language,
-        platform: navigator.platform,
-        cores: navigator.hardwareConcurrency || 'unknown',
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        language: navigator.language || null,
+        mobile: /Android|iPhone|iPad|Mobile/i.test(String(navigator.userAgent || ''))
     };
 
     // Измеряем FPS рендеринга (для справки)

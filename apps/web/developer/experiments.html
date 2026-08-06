@@ -127,6 +127,15 @@
         return token ? { Authorization: 'Bearer ' + token } : {};
       }
 
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
       function filtersToQuery() {
         var q = new URLSearchParams();
         var projectId = document.getElementById('projectId').value;
@@ -152,14 +161,14 @@
             r.qc_invalid_count || 0
           ].join(' / ');
           return '<tr>' +
-            '<td>' + (r.experiment_title || '—') + '</td>' +
-            '<td>' + (r.project_id || '—') + '</td>' +
-            '<td>' + (r.protocol_id || '—') + '</td>' +
-            '<td>' + (r.total_sessions || 0) + '</td>' +
-            '<td>' + (r.completed_sessions || 0) + '</td>' +
-            '<td>' + (r.in_progress_sessions || 0) + '</td>' +
-            '<td>' + (r.avg_qc_score != null ? r.avg_qc_score : '—') + '</td>' +
-            '<td>' + qc + '</td>' +
+            '<td>' + escapeHtml(r.experiment_title || '—') + '</td>' +
+            '<td>' + escapeHtml(r.project_id || '—') + '</td>' +
+            '<td>' + escapeHtml(r.protocol_id || '—') + '</td>' +
+            '<td>' + escapeHtml(r.total_sessions || 0) + '</td>' +
+            '<td>' + escapeHtml(r.completed_sessions || 0) + '</td>' +
+            '<td>' + escapeHtml(r.in_progress_sessions || 0) + '</td>' +
+            '<td>' + escapeHtml(r.avg_qc_score != null ? r.avg_qc_score : '—') + '</td>' +
+            '<td>' + escapeHtml(qc) + '</td>' +
           '</tr>';
         }).join('');
       }
@@ -171,13 +180,13 @@
         }
         recentBody.innerHTML = rows.map(function (r) {
           return '<tr>' +
-            '<td class="mono">' + (r.session_id || '—') + '</td>' +
-            '<td>' + (r.experiment_title || '—') + '</td>' +
-            '<td>' + (r.participant_id || '—') + '</td>' +
-            '<td class="mono">' + (r.invitation_code || '—') + '</td>' +
-            '<td>' + (r.session_status || '—') + '</td>' +
-            '<td>' + (r.qc_validity || '—') + (r.qc_score != null ? ' (' + r.qc_score + ')' : '') + '</td>' +
-            '<td>' + (r.started_at ? new Date(r.started_at).toLocaleString() : '—') + '</td>' +
+            '<td class="mono">' + escapeHtml(r.session_id || '—') + '</td>' +
+            '<td>' + escapeHtml(r.experiment_title || '—') + '</td>' +
+            '<td>' + escapeHtml(r.participant_id || '—') + '</td>' +
+            '<td class="mono">' + escapeHtml(r.invitation_code || '—') + '</td>' +
+            '<td>' + escapeHtml(r.session_status || '—') + '</td>' +
+            '<td>' + escapeHtml((r.qc_validity || '—') + (r.qc_score != null ? ' (' + r.qc_score + ')' : '')) + '</td>' +
+            '<td>' + escapeHtml(r.started_at ? new Date(r.started_at).toLocaleString() : '—') + '</td>' +
           '</tr>';
         }).join('');
       }
@@ -186,7 +195,7 @@
         setStatus(overviewStatus, '');
         var q = filtersToQuery();
         try {
-          var r = await fetch(base + '/experiments?' + q.toString(), { headers: headers() });
+          var r = await fetch(base + '/experiments?' + q.toString(), { headers: headers(), credentials: 'include' });
           if (!r.ok) {
             var errPayload = await r.json().catch(function () { return {}; });
             throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
@@ -204,7 +213,7 @@
       async function loadRecent() {
         setStatus(recentStatus, '');
         try {
-          var r = await fetch(base + '/experiments/recent?limit=50', { headers: headers() });
+          var r = await fetch(base + '/experiments/recent?limit=50', { headers: headers(), credentials: 'include' });
           if (!r.ok) {
             var errPayload = await r.json().catch(function () { return {}; });
             throw new Error(errPayload.error || (r.status + ' ' + r.statusText));

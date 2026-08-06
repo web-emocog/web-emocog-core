@@ -4,41 +4,46 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const {
+  requireAuth,
+  requireRole,
+  requireOperation,
+  OPERATIONS,
+  isPlatformAdmin,
+  hasProjectMembership,
+  hasSessionMembership,
+} = require('../middleware/auth');
 const { getSessionProxyMetrics } = require('./proxy_metrics');
+const { withTransaction, lockSessionKey } = require('../db/transaction');
+const { HttpError } = require('../security/http-error');
 
 const router = express.Router();
 
-async function ensureProjectAccess(projectId, userId) {
-  if (!projectId) return false;
-  const r = await pool.query(
-    `SELECT 1
-     FROM projects p
-     INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id
-     WHERE p.id = $1 AND uo.user_id = $2`,
-    [projectId, userId]
-  );
-  return !!r.rows[0];
+async function ensureProjectAccess(queryable, projectId, user) {
+  return hasProjectMembership(queryable, projectId, user);
 }
 
-async function getProtocolProjectId(protocolId) {
+async function getProtocolProjectId(queryable, protocolId) {
   if (!protocolId) return null;
-  const r = await pool.query('SELECT project_id FROM protocols WHERE id = $1', [protocolId]);
+  const r = await queryable.query('SELECT project_id FROM protocols WHERE id = $1', [protocolId]);
   return r.rows[0] ? r.rows[0].project_id : null;
 }
 
-function scopedJoinAndWhere(userParamIdx) {
+function scopedJoinAndWhere(userParamIdx, user) {
+  if (isPlatformAdmin(user)) return '';
   return `
     LEFT JOIN protocols sp ON sp.id = s.protocol_id
     INNER JOIN projects p_scope ON p_scope.id = COALESCE(s.project_id, sp.project_id)
     INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id AND uo_scope.user_id = $${userParamIdx}
+    INNER JOIN user_projects up_scope ON up_scope.project_id = p_scope.id AND up_scope.user_id = uo_scope.user_id
   `;
 }
 
 router.post(
   '/start',
   requireAuth,
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.SESSION_WRITE),
   [
     body('session_id').trim().notEmpty().isLength({ max: 64 }),
     body('participant_id').optional().trim().isLength({ max: 64 }),
@@ -49,38 +54,101 @@ router.post(
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-      const { session_id, participant_id } = req.body;
-      let project_id = req.body.project_id ? parseInt(req.body.project_id, 10) : null;
-      const protocol_id = req.body.protocol_id ? parseInt(req.body.protocol_id, 10) : null;
-      if (protocol_id) {
-        const protocolProjectId = await getProtocolProjectId(protocol_id);
-        if (!protocolProjectId) return res.status(400).json({ error: 'Protocol not found' });
-        if (project_id && project_id !== protocolProjectId) {
-          return res.status(400).json({ error: 'project_id does not match protocol project' });
+      const result = await withTransaction(pool, async (client) => {
+        const { session_id, participant_id } = req.body;
+        await lockSessionKey(client, session_id);
+        let projectId = req.body.project_id ? parseInt(req.body.project_id, 10) : null;
+        const protocolId = req.body.protocol_id ? parseInt(req.body.protocol_id, 10) : null;
+        if (protocolId) {
+          const protocolProjectId = await getProtocolProjectId(client, protocolId);
+          if (!protocolProjectId) throw new HttpError(400, 'Protocol not found');
+          if (projectId && projectId !== protocolProjectId) {
+            throw new HttpError(400, 'project_id does not match protocol project');
+          }
+          projectId = protocolProjectId;
         }
-        project_id = protocolProjectId;
-      }
-      if (project_id) {
-        const allowed = await ensureProjectAccess(project_id, req.user.sub);
-        if (!allowed) return res.status(403).json({ error: 'Access denied for project' });
-      }
-      const now = new Date();
-      const r = await pool.query(
-        `INSERT INTO sessions (session_id, participant_id, project_id, protocol_id, started_at)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (session_id) DO UPDATE SET started_at = $5, updated_at = current_timestamp
-         RETURNING id, session_id, participant_id, project_id, protocol_id, started_at, stopped_at, created_at`,
-        [session_id, participant_id || null, project_id || null, protocol_id || null, now]
-      );
-      const row = r.rows[0];
-      res.status(201).json({
-        ...row,
-        session_status: row.stopped_at ? 'completed' : 'in_progress',
-        completed_at: row.stopped_at || null
+        if (!projectId) {
+          throw new HttpError(400, 'project_id or protocol_id is required');
+        }
+        if (!(await ensureProjectAccess(client, projectId, req.user))) {
+          throw new HttpError(403, 'Access denied for project');
+        }
+
+        const existing = await client.query(
+          `SELECT id, session_id, participant_id, project_id, protocol_id,
+                  invitation_id, started_at, stopped_at, created_at
+           FROM sessions
+           WHERE session_id = $1
+           FOR UPDATE`,
+          [session_id]
+        );
+        if (existing.rows[0]) {
+          const row = existing.rows[0];
+          if (!(await hasSessionMembership(client, session_id, req.user))) {
+            throw new HttpError(
+              409,
+              'session_id already belongs to another project',
+              'foreign_session_conflict'
+            );
+          }
+          if (
+            Number(row.project_id) !== Number(projectId)
+            || Number(row.protocol_id || 0) !== Number(protocolId || 0)
+          ) {
+            throw new HttpError(409, 'session_id scope mismatch', 'session_scope_mismatch');
+          }
+          if (
+            row.participant_id
+            && participant_id
+            && String(row.participant_id) !== String(participant_id)
+          ) {
+            throw new HttpError(
+              409,
+              'session_id participant mismatch',
+              'session_participant_mismatch'
+            );
+          }
+          return {
+            status: 200,
+            body: {
+              ...row,
+              idempotent: true,
+              session_status: row.stopped_at ? 'completed' : 'in_progress',
+              completed_at: row.stopped_at || null,
+            },
+          };
+        }
+
+        const inserted = await client.query(
+          `INSERT INTO sessions (
+             session_id, participant_id, project_id, protocol_id, started_at
+           )
+           VALUES ($1, $2, $3, $4, current_timestamp)
+           RETURNING id, session_id, participant_id, project_id, protocol_id,
+                     invitation_id, started_at, stopped_at, created_at`,
+          [session_id, participant_id || null, projectId, protocolId]
+        );
+        const row = inserted.rows[0];
+        return {
+          status: 201,
+          body: {
+            ...row,
+            idempotent: false,
+            session_status: 'in_progress',
+            completed_at: null,
+          },
+        };
       });
+      return res.status(result.status).json(result.body);
     } catch (err) {
+      if (err instanceof HttpError) {
+        return res.status(err.status).json({
+          error: err.message,
+          code: err.code || 'session_start_rejected',
+        });
+      }
       console.error(err);
-      res.status(500).json({ error: 'Start session failed' });
+      return res.status(500).json({ error: 'Start session failed' });
     }
   }
 );
@@ -88,23 +156,16 @@ router.post(
 router.post(
   '/stop',
   requireAuth,
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.SESSION_WRITE),
   [body('session_id').trim().notEmpty().isLength({ max: 64 })],
   async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const now = new Date();
-      const access = await pool.query(
-        `SELECT s.id
-         FROM sessions s
-         LEFT JOIN protocols sp ON sp.id = s.protocol_id
-         INNER JOIN projects p_scope ON p_scope.id = COALESCE(s.project_id, sp.project_id)
-         INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id
-         WHERE s.session_id = $1 AND uo_scope.user_id = $2`,
-        [req.body.session_id, req.user.sub]
-      );
-      if (!access.rows[0]) return res.status(404).json({ error: 'Session not found or access denied' });
+      const allowed = await hasSessionMembership(pool, req.body.session_id, req.user);
+      if (!allowed) return res.status(404).json({ error: 'Session not found or access denied' });
       const r = await pool.query(
         `UPDATE sessions SET stopped_at = $1, updated_at = current_timestamp
          WHERE session_id = $2 RETURNING id, session_id, started_at, stopped_at`,
@@ -127,7 +188,8 @@ router.post(
 router.get(
   '/',
   requireAuth,
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.SESSION_READ),
   [
     query('project_id').optional().isInt(),
     query('protocol_id').optional().isInt(),
@@ -151,11 +213,11 @@ router.get(
         FROM sessions s
         LEFT JOIN session_qc_summary q ON q.session_id = s.id
         LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
-        ${scopedJoinAndWhere(1)}
+        ${scopedJoinAndWhere(1, req.user)}
         WHERE 1=1
       `;
-      const params = [req.user.sub];
-      let i = 2;
+      const params = isPlatformAdmin(req.user) ? [] : [req.user.sub];
+      let i = params.length + 1;
       if (req.query.project_id) { params.push(req.query.project_id); sql += ` AND s.project_id = $${i++}`; }
       if (req.query.protocol_id) { params.push(req.query.protocol_id); sql += ` AND s.protocol_id = $${i++}`; }
       if (req.query.date_from) { params.push(req.query.date_from); sql += ` AND s.started_at >= $${i++}`; }
@@ -174,7 +236,8 @@ router.get(
 router.get(
   '/:sessionRef/proxy-metrics',
   requireAuth,
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'developer'),
+  requireOperation(OPERATIONS.ANALYTICS_READ),
   [param('sessionRef').trim().notEmpty().isLength({ max: 64 })],
   getSessionProxyMetrics
 );
@@ -182,10 +245,13 @@ router.get(
 router.get(
   '/:id',
   requireAuth,
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.SESSION_READ),
   [param('id').isInt()],
   async (req, res) => {
     try {
+      const allowed = await hasSessionMembership(pool, req.params.id, req.user);
+      if (!allowed) return res.status(404).json({ error: 'Not found' });
       const r = await pool.query(
         `SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id, s.started_at, s.stopped_at, s.created_at,
                 CASE WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
@@ -199,11 +265,8 @@ router.get(
          FROM sessions s
          LEFT JOIN session_qc_summary q ON q.session_id = s.id
          LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
-         LEFT JOIN protocols sp ON sp.id = s.protocol_id
-         INNER JOIN projects p_scope ON p_scope.id = COALESCE(s.project_id, sp.project_id)
-         INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id
-         WHERE s.id = $1 AND uo_scope.user_id = $2`,
-        [req.params.id, req.user.sub]
+         WHERE s.id = $1`,
+        [req.params.id]
       );
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       const session = r.rows[0];

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session_lifecycle.v1",
+  "title": "Participant session lifecycle",
+  "type": "object",
+  "required": ["schemaVersion", "state", "status"],
+  "properties": {
+    "schemaVersion": { "const": "session_lifecycle.v1" },
+    "state": {
+      "enum": [
+        "idle",
+        "starting",
+        "instruction",
+        "running",
+        "paused",
+        "quality_error",
+        "technical_error",
+        "finishing",
+        "completed",
+        "failed"
+      ]
+    },
+    "status": { "enum": ["in_progress", "completed", "failed"] },
+    "startedAt": { "type": ["number", "string", "null"] },
+    "lastTransitionAt": { "type": ["number", "string", "null"] },
+    "completedAt": { "type": ["number", "string", "null"] },
+    "finishAttemptId": { "type": ["string", "null"], "maxLength": 128 },
+    "currentBlock": { "type": ["object", "null"] },
+    "repeatQueue": { "type": "array", "items": { "type": "object" } },
+    "activeIssues": { "type": "array", "items": { "type": "object" } },
+    "modules": {
+      "type": "object",
+      "properties": {
+        "gaze": { "type": "string" },
+        "blinks": { "type": "string" },
+        "rt": { "type": "string" },
+        "bpm": { "type": "string" },
+        "emotion": { "type": "string" },
+        "bodyPose": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "state": { "const": "completed" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": { "status": { "const": "completed" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "failed" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": { "status": { "const": "failed" } }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "idle",
+              "starting",
+              "instruction",
+              "running",
+              "paused",
+              "quality_error",
+              "technical_error",
+              "finishing"
+            ]
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": { "status": { "const": "in_progress" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "completed" } },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["finishAttemptId", "completedAt"]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

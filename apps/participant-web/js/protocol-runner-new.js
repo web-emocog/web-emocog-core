@@ -18,10 +18,7 @@
   };
 
   function getApiBase() {
-    if (window.PROTOCOL_RUN_API_BASE) return window.PROTOCOL_RUN_API_BASE;
-    if (window.API_BASE) return window.API_BASE;
     if (window.location && window.location.origin) {
-      // Прод: API обычно проксируется как /api
       return window.location.origin + '/api';
     }
     return '';

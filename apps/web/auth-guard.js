@@ -36,6 +36,7 @@
       localStorage.removeItem('emocog_developer_auth');
       localStorage.removeItem('emocog_api_token');
       localStorage.removeItem('emocog_api_user');
+      sessionStorage.removeItem('emocog_csrf_token');
     } catch (_) {}
   }
 
@@ -61,11 +62,12 @@
   }
 
   async function fetchCurrentUser(token) {
-    if (!token) return null;
     var apiBase = getApiBase();
+    var headers = token ? { Authorization: 'Bearer ' + token } : {};
     var response = await fetch(apiBase + '/auth/me', {
       method: 'GET',
-      headers: { Authorization: 'Bearer ' + token }
+      headers: headers,
+      credentials: 'include'
     });
     if (!response.ok) {
       var e = new Error('Auth check failed: ' + response.status);
@@ -73,6 +75,11 @@
       throw e;
     }
     var payload = await response.json();
+    if (payload && payload.csrf_token) {
+      try {
+        sessionStorage.setItem('emocog_csrf_token', payload.csrf_token);
+      } catch (_) {}
+    }
     if (payload && payload.user) {
       try {
         localStorage.setItem('emocog_api_user', JSON.stringify(payload.user));
@@ -81,9 +88,11 @@
     }
     if (payload && payload.id && payload.email) {
       try {
-        localStorage.setItem('emocog_api_user', JSON.stringify(payload));
+        var safeUser = Object.assign({}, payload);
+        delete safeUser.csrf_token;
+        localStorage.setItem('emocog_api_user', JSON.stringify(safeUser));
       } catch (_) {}
-      return payload;
+      return safeUser;
     }
     return null;
   }
@@ -125,38 +134,11 @@
     var token = getToken();
     var user = getCachedUser();
 
-    if (needsRoleGate && !tokenOptional && !token) {
-      clearAuth();
-      revealPageAfterAuth();
-      redirectToLogin(loginPath);
-      return { ok: false };
-    }
-
-    if (token) {
+    if (!tokenOptional || token) {
       try {
         user = await fetchCurrentUser(token);
       } catch (err) {
-        // Сеть/API временно недоступны — не сбрасываем сессию при перезагрузке
-        var status = err && err.status;
-        var isUnauthorized = status === 401 || status === 403;
-        if (!isUnauthorized && user && user.email) {
-          revealPageAfterAuth();
-          return {
-            ok: true,
-            token: token || '',
-            user: user || null,
-            apiBase: getApiBase()
-          };
-        }
-        if (!isUnauthorized && !user) {
-          revealPageAfterAuth();
-          return {
-            ok: true,
-            token: token || '',
-            user: null,
-            apiBase: getApiBase()
-          };
-        }
+        // Protected pages fail closed when the server cannot verify current role/token version.
         clearAuth();
         revealPageAfterAuth();
         redirectToLogin(loginPath);

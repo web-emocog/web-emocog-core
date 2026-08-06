@@ -14,6 +14,7 @@ import {
     stopGazeTestsAnalysisLoop,
     isGazeTestsAnalysisLoopRunning
 } from './common/analysis-loop.js';
+import { getSessionRuntime } from '../../session-runtime/index.js';
 
 let hubBusy = false;
 let hubEmotionTimer = null;
@@ -52,8 +53,15 @@ function startHubEmotionPreview() {
     hubEmotionTimer = setInterval(async () => {
         try {
             if (!video.srcObject || video.readyState < 2) return;
-            const result = await analyzer.analyzeFrame(video);
-            const sample = getEmotionSample(result);
+            const centralAnalysis = getSessionRuntime()?.isAnalysisRunning();
+            const result = centralAnalysis
+                ? state.runtime.lastPrecheckResult
+                : await analyzer.analyzeFrame(video);
+            if (!result) return;
+            const sample = centralAnalysis
+                ? state.runtime.lastEmotionSample
+                : getEmotionSample(result);
+            if (!sample) return;
             const name = emotionDisplayName(sample.dominant);
             const vl = Number.isFinite(sample.valence) ? sample.valence.toFixed(2) : '?';
             const ar = Number.isFinite(sample.arousal) ? sample.arousal.toFixed(2) : '?';
@@ -98,7 +106,6 @@ function applyInvitationHubVisibility() {
     const map = {
         rt: 'hubRunRtBtn',
         tracking: 'hubRunTrackingBtn',
-        bpm: 'hubRunBpmBtn',
         vpc: 'hubRunVpcBtn',
         visuospatial: 'hubRunVisuospatialBtn'
     };
@@ -116,7 +123,6 @@ function setHubButtonsDisabled(disabled) {
     const ids = [
         'hubRunRtBtn',
         'hubRunTrackingBtn',
-        'hubRunBpmBtn',
         'hubRunVpcBtn',
         'hubRunVisuospatialBtn',
         'hubFinishSessionBtn'
@@ -134,7 +140,6 @@ function showHubContainers() {
     const gazeContainer = document.getElementById('gazeTestsContainer');
     const vpc = document.getElementById('vpcTestScreen');
     const visuospatial = document.getElementById('visuospatialTestScreen');
-    const bpm = document.getElementById('bpmTestScreen');
 
     setActiveStep('step6');
     show(document.querySelector('.container'), 'block');
@@ -145,7 +150,6 @@ function showHubContainers() {
     hide(gazeContainer);
     hide(vpc);
     hide(visuospatial);
-    hide(bpm);
     startHubEmotionPreview();
 }
 
@@ -155,7 +159,6 @@ function showRTContainers() {
     const gazeContainer = document.getElementById('gazeTestsContainer');
     const vpc = document.getElementById('vpcTestScreen');
     const visuospatial = document.getElementById('visuospatialTestScreen');
-    const bpm = document.getElementById('bpmTestScreen');
 
     setActiveStep('step6');
     show(document.querySelector('.container'), 'block');
@@ -166,7 +169,6 @@ function showRTContainers() {
     hide(gazeContainer);
     hide(vpc);
     hide(visuospatial);
-    hide(bpm);
     stopHubEmotionPreview();
 }
 
@@ -175,7 +177,6 @@ function renderHubTexts() {
     const finishBtn = document.getElementById('hubFinishSessionBtn');
     const runRt = document.getElementById('hubRunRtBtn');
     const runTracking = document.getElementById('hubRunTrackingBtn');
-    const runBpm = document.getElementById('hubRunBpmBtn');
     const runVpc = document.getElementById('hubRunVpcBtn');
     const runVis = document.getElementById('hubRunVisuospatialBtn');
 
@@ -183,7 +184,6 @@ function renderHubTexts() {
     if (finishBtn) finishBtn.textContent = t('test_hub_finish', 'Завершить сессию');
     if (runRt) runRt.textContent = t('test_card_rt_title', 'RT test (Go/NoGo)');
     if (runTracking) runTracking.textContent = t('test_card_tracking_title', 'Tracking test');
-    if (runBpm) runBpm.textContent = t('test_card_bpm_title', 'BPM test (rPPG)');
     if (runVpc) runVpc.textContent = t('test_card_vpc_title', 'VPC (Felidae)');
     if (runVis) runVis.textContent = t('test_card_visuospatial_title', 'Visuospatial drawing');
 }
@@ -202,6 +202,17 @@ function buildSelectionRecord(testId) {
     };
 }
 
+function testIdForPendingRepeat(repeat) {
+    const blockId = String(repeat?.blockId || '');
+    const blockType = String(repeat?.blockType || '');
+    const directId = blockId.startsWith('test_') ? blockId.slice(5) : blockType;
+    if (Object.values(TEST_IDS).includes(directId)) return directId;
+    if (blockType === 'cognitive_task') {
+        return TEST_IDS.RT;
+    }
+    return null;
+}
+
 function summarizeRunForHub(testId, payload) {
     if (!payload) return `${testId}: no payload`;
 
@@ -217,10 +228,6 @@ function summarizeRunForHub(testId, payload) {
 
     if (testId === TEST_IDS.TRACKING) {
         return `Tracking: samples=${payload.trackingSamples || 0}, avgCameraFps=${payload.averageCameraFps ?? 'n/a'}`;
-    }
-
-    if (testId === TEST_IDS.BPM) {
-        return `BPM: samples=${payload.sampleCount || 0}, mean=${payload.bpmMean ?? 'n/a'}`;
     }
 
     if (testId === TEST_IDS.RT) {
@@ -254,6 +261,11 @@ async function runSelectedTest(testId, handlers) {
         clearTaskContext();
         state.flags.isRecording = true;
         renderHubStatus(t('test_hub_running', 'Тест выполняется...'));
+        const runtime = getSessionRuntime();
+        const usesInternalBlocks = testId === TEST_IDS.RT;
+        const sessionBlock = usesInternalBlocks
+            ? null
+            : runtime?.beginBlock({ blockId: `test_${testId}`, blockType: testId });
 
         let runPayload = null;
 
@@ -265,10 +277,6 @@ async function runSelectedTest(testId, handlers) {
             if (typeof handlers.runTrackingTest !== 'function') throw new Error('runTrackingTest handler missing');
             hide(hub);
             runPayload = await handlers.runTrackingTest();
-        } else if (testId === TEST_IDS.BPM) {
-            if (typeof handlers.runBpmTest !== 'function') throw new Error('runBpmTest handler missing');
-            hide(hub);
-            runPayload = await handlers.runBpmTest();
         } else if (testId === TEST_IDS.VPC) {
             hide(hub);
             if (!isGazeTestsAnalysisLoopRunning()) {
@@ -293,6 +301,26 @@ async function runSelectedTest(testId, handlers) {
             throw new Error(`Unsupported testId: ${testId}`);
         }
 
+        const blockDecision = usesInternalBlocks
+            ? { repeatRequired: false }
+            : (runtime?.completeBlock({ success: true }) || { repeatRequired: false });
+        if (blockDecision.repeatRequired) {
+            showHubContainers();
+            const attempt = blockDecision.block?.attempt || 1;
+            if (attempt < 3) {
+                await runtime.promptRepeat(`test_${testId}`);
+                hubBusy = false;
+                setHubButtonsDisabled(false);
+                return runSelectedTest(testId, handlers);
+            }
+            const abandonedRepeat = runtime?.discardRepeat(`test_${testId}`);
+            if (abandonedRepeat) await runtime.notifyRepeatLimit(abandonedRepeat);
+            if (runPayload && typeof runPayload === 'object') {
+                runPayload.qualityValid = false;
+                runPayload.qualityRetryLimitReached = true;
+            }
+        }
+
         const runSummaryText = summarizeRunForHub(testId, runPayload);
         pushHubRun(state.sessionData, {
             testId,
@@ -311,6 +339,17 @@ async function runSelectedTest(testId, handlers) {
         setSessionPhase(TEST_PHASES.HUB, { source: 'test_hub_return' });
         renderHubStatus(`${t('test_hub_last_result', 'Последний результат')}: ${runSummaryText}`);
     } catch (error) {
+        const runtime = getSessionRuntime();
+        const issue = runtime?.reportIssue({
+            kind: 'technical',
+            code: `module_run_failed_${testId}`,
+            message: `Тест ${testId} завершился технической ошибкой: ${error?.message || String(error)}`,
+            recoverable: true
+        });
+        const current = runtime?.getCurrentBlock();
+        const decision = current
+            ? runtime.completeBlock({ success: false, reason: issue?.code || 'module_error' })
+            : { repeatRequired: false, block: null };
         stopGazeTestsAnalysisLoop();
         showHubContainers();
         setSessionPhase(TEST_PHASES.HUB, { source: 'test_hub_error_return' });
@@ -321,13 +360,24 @@ async function runSelectedTest(testId, handlers) {
             message
         });
         renderHubStatus(`${t('test_hub_error', 'Ошибка теста')}: ${message}`);
+        if (decision.repeatRequired && (decision.block?.attempt || 1) < 3) {
+            await runtime.promptRepeat(decision.block.blockId);
+            runtime.resolveIssue(issue.code);
+            hubBusy = false;
+            setHubButtonsDisabled(false);
+            return runSelectedTest(testId, handlers);
+        }
+        if (decision.repeatRequired && decision.block?.blockId) {
+            runtime.discardRepeat(decision.block.blockId);
+        }
+        if (issue?.code) runtime.resolveIssue(issue.code);
     } finally {
         hubBusy = false;
         setHubButtonsDisabled(false);
     }
 }
 
-export function startTestHub(handlers = {}) {
+export async function startTestHub(handlers = {}) {
     ensureTestHubSessionFields(state.sessionData);
 
     stopGazeTestsAnalysisLoop();
@@ -337,17 +387,20 @@ export function startTestHub(handlers = {}) {
     renderHubTexts();
     applyInvitationHubVisibility();
     showHubContainers();
+    setHubButtonsDisabled(true);
 
     setSessionPhase(TEST_PHASES.HUB, { source: 'start_test_hub' });
+    getSessionRuntime()?.enterInstruction({ source: 'test_hub' });
     recordSessionEvent('test_hub_open', {
-        availableTests: [TEST_IDS.RT, TEST_IDS.TRACKING, TEST_IDS.BPM, TEST_IDS.VPC, TEST_IDS.VISUOSPATIAL]
+        availableTests: [TEST_IDS.RT, TEST_IDS.TRACKING, TEST_IDS.VPC, TEST_IDS.VISUOSPATIAL]
     });
 
     renderHubStatus(t('test_hub_ready', 'Выберите тест, который хотите пройти.'));
+    await getSessionRuntime()?.requireQualityInstruction();
+    setHubButtonsDisabled(false);
 
     const rtBtn = document.getElementById('hubRunRtBtn');
     const trackingBtn = document.getElementById('hubRunTrackingBtn');
-    const bpmBtn = document.getElementById('hubRunBpmBtn');
     const vpcBtn = document.getElementById('hubRunVpcBtn');
     const visBtn = document.getElementById('hubRunVisuospatialBtn');
     const finishBtn = document.getElementById('hubFinishSessionBtn');
@@ -362,12 +415,6 @@ export function startTestHub(handlers = {}) {
         trackingBtn.onclick = () => {
             dbg('ui', 'button:hubRunTrackingBtn', { testId: TEST_IDS.TRACKING });
             runSelectedTest(TEST_IDS.TRACKING, handlers);
-        };
-    }
-    if (bpmBtn) {
-        bpmBtn.onclick = () => {
-            dbg('ui', 'button:hubRunBpmBtn', { testId: TEST_IDS.BPM });
-            runSelectedTest(TEST_IDS.BPM, handlers);
         };
     }
     if (vpcBtn) {
@@ -398,5 +445,20 @@ export function startTestHub(handlers = {}) {
                 await handlers.finishSession();
             }
         };
+    }
+
+    const runtime = getSessionRuntime();
+    const pendingRepeat = runtime?.machine?.snapshot?.().repeatQueue?.[0] || null;
+    const repeatTestId = testIdForPendingRepeat(pendingRepeat);
+    if (pendingRepeat && repeatTestId) {
+        renderHubStatus(
+            state.currentLang === 'en'
+                ? 'The interrupted test will now be repeated.'
+                : 'Сейчас будет повторён прерванный тест.'
+        );
+        if (repeatTestId !== TEST_IDS.RT) {
+            await runtime.promptRepeat(pendingRepeat.blockId);
+        }
+        return runSelectedTest(repeatTestId, handlers);
     }
 }

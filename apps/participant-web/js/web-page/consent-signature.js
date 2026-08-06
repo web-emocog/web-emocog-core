@@ -88,10 +88,9 @@ async function loadDocumentAndHash(documentUrl) {
  * @param {string} documentType - Тип документа ('informed_consent' или 'privacy_policy')
  * @param {Object} documentData - Данные документа { hash, version, url }
  * @param {string} participantId - UUID участника
- * @param {Object} options - Дополнительные опции { includeIP: boolean }
  * @returns {Promise<Object>} - Объект подписи
  */
-async function createConsentSignature(documentType, documentData, participantId, options = {}) {
+async function createConsentSignature(documentType, documentData, participantId) {
     try {
         const signature = {
             documentType: documentType,
@@ -100,23 +99,10 @@ async function createConsentSignature(documentType, documentData, participantId,
             documentUrl: documentData.url,
             participantId: participantId,
             signedAt: new Date().toISOString(),
-            userAgent: navigator.userAgent,
             language: navigator.language || 'unknown'
         };
-        
-        // Опционально: добавляем IP-адрес (если нужно для юридических целей)
-        if (options.includeIP) {
-            try {
-                const ipResponse = await fetch('https://api.ipify.org?format=json');
-                const ipData = await ipResponse.json();
-                signature.ipAddress = ipData.ip;
-            } catch (error) {
-                console.warn('[ConsentSignature] IP fetch failed:', error);
-                signature.ipAddress = null;
-            }
-        }
-        
-        console.log('[ConsentSignature] Signature created:', signature);
+
+        console.log('[ConsentSignature] Signature created');
         return signature;
         
     } catch (error) {
@@ -156,10 +142,9 @@ function saveConsentSignature(signature, state) {
  * @param {string} documentUrl - Путь к HTML-файлу
  * @param {string} participantId - UUID участника
  * @param {Object} state - Глобальный state приложения
- * @param {Object} options - Опции { includeIP: boolean }
  * @returns {Promise<boolean>} - true если успешно, false если ошибка
  */
-async function signDocument(documentType, documentUrl, participantId, state, options = {}) {
+async function signDocument(documentType, documentUrl, participantId, state) {
     try {
         console.log(`[ConsentSignature] Starting signature process for ${documentType}...`);
         
@@ -175,8 +160,7 @@ async function signDocument(documentType, documentUrl, participantId, state, opt
         const signature = await createConsentSignature(
             documentType,
             documentData,
-            participantId,
-            options
+            participantId
         );
         
         if (!signature) {

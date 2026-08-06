@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="Системные состояния desktop">
+  <title>Системные состояния desktop</title>
+  <rect width="1440" height="900" fill="#F2F6F4"/>
+  <rect x="0" y="0" width="76" height="900" rx="0" fill="#062D2E"/><circle cx="38" cy="38" r="12" fill="#00A69D"/><circle cx="38" cy="38" r="4" fill="#FFFFFF"/><g color="#7FA09D"><path d="M30 155 L38 147 L46 155 V163 H41 V157 H35 V163 H30 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></g><g color="#7FA09D"><path d="M29 206 H36 L39 209 H47 V220 H29 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></g><g color="#7FA09D"><path d="M29 262 H34 V278 H29 Z M36 265 H41 V278 H36 Z M43 261 H48 V278 H43 Z" fill="none" stroke="currentColor" stroke-width="1.6"/></g><g color="#7FA09D"><path d="M29 336 V329 M36 336 V324 M43 336 V319 M28 336 H48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></g><g color="#7FA09D"><circle cx="38" cy="386" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="38" cy="386" r="2.5" fill="currentColor"/></g><rect x="12" y="422" width="52" height="44" rx="12" fill="#006B66"/><g color="#FFFFFF"><rect x="29" y="437" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M29 442 H47" stroke="currentColor" stroke-width="1.8"/></g><line x1="20" y1="488" x2="56" y2="488" stroke="#315657" stroke-width="1"/><circle cx="38" cy="862" r="15" fill="#FFFFFF"/><text x="38" y="866" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="11" font-weight="800" text-anchor="middle">В</text><text x="116" y="44" fill="#006B66" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="700" letter-spacing="1">SYS</text><text x="154" y="44" fill="#4F6B6A" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="700" letter-spacing="0.8">АККАУНТ</text><text x="116" y="82" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="30" font-weight="750">Системные состояния</text><line x1="116" y1="106" x2="1392" y2="106" stroke="#B7CCC7" stroke-width="1"/><rect x="116" y="136" width="404" height="220" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="158" cy="186" r="22" fill="#006B66"/>
+      <text x="158" y="193" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="22" font-weight="800" text-anchor="middle">0</text>
+      <text x="140" y="240" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="20" font-weight="750">Нет данных</text>
+      <text x="140" y="278" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Явное техническое состояние</text>
+      <rect x="552" y="136" width="404" height="220" rx="14" fill="#FEE4E2" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="594" cy="186" r="22" fill="#B42318"/>
+      <text x="594" y="193" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="22" font-weight="800" text-anchor="middle">!</text>
+      <text x="576" y="240" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="20" font-weight="750">Ошибка</text>
+      <text x="576" y="278" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Явное техническое состояние</text>
+      <rect x="988" y="136" width="404" height="220" rx="14" fill="#FFF3C4" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="1030" cy="186" r="22" fill="#F5C451"/>
+      <text x="1030" y="193" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="22" font-weight="800" text-anchor="middle">○</text>
+      <text x="1012" y="240" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="20" font-weight="750">Нет доступа</text>
+      <text x="1012" y="278" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Явное техническое состояние</text>
+      <rect x="116" y="382" width="404" height="220" rx="14" fill="#062D2E" stroke="#062D2E" stroke-width="1"/>
+      <circle cx="158" cy="432" r="22" fill="#2563EB"/>
+      <text x="158" y="439" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="22" font-weight="800" text-anchor="middle">≈</text>
+      <text x="140" y="486" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="20" font-weight="750">Low confidence</text>
+      <text x="140" y="524" fill="#9BC7C3" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Точка не отображается</text>
+      <rect x="552" y="382" width="404" height="220" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="594" cy="432" r="22" fill="#006B66"/>
+      <text x="594" y="439" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="22" font-weight="800" text-anchor="middle">↗</text>
+      <text x="576" y="486" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="20" font-weight="750">Off-screen</text>
+      <text x="576" y="524" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Координаты не clamp-ятся</text>
+      <rect x="988" y="382" width="404" height="220" rx="14" fill="#FFF3C4" stroke="#B7CCC7" stroke-width="1"/>
+      <circle cx="1030" cy="432" r="22" fill="#F5C451"/>
+      <text x="1030" y="439" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="22" font-weight="800" text-anchor="middle">~</text>
+      <text x="1012" y="486" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="20" font-weight="750">Degraded</text>
+      <text x="1012" y="524" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Явное техническое состояние</text>
+
+</svg>

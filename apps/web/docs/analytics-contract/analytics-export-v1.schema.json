@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emocog.dev/schemas/analytics-export-v1.schema.json",
+  "title": "Emocog analytics export v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "kind", "generatedAt", "content", "snapshot", "counts", "summary", "longData", "dataDictionary", "provenance"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "kind": { "const": "analytics_export" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "content": { "enum": ["summary", "long", "both"] },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "datasetHash", "queryEcho", "versions", "includedParticipantIds", "includedSessionIds", "excludedSessions"],
+      "properties": {
+        "id": { "type": ["string", "integer"] },
+        "datasetHash": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": ["string", "null"], "format": "date-time" },
+        "queryEcho": { "$ref": "analytics-query-v1.schema.json" },
+        "versions": { "type": "object" },
+        "includedParticipantIds": { "type": "array", "items": { "type": ["string", "integer"] } },
+        "includedSessionIds": { "type": "array", "items": { "type": ["string", "integer"] } },
+        "excludedSessions": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participants", "sessions", "observations"],
+      "properties": {
+        "participants": { "type": "integer", "minimum": 0 },
+        "sessions": { "type": "integer", "minimum": 0 },
+        "observations": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "summary": { "type": ["object", "null"] },
+    "longData": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["metricId", "value", "unit", "status", "reason", "numerator", "denominator", "nParticipants", "nObservations"],
+        "properties": {
+          "metricId": { "type": "string", "minLength": 1 },
+          "value": { "type": ["number", "integer", "boolean", "string", "null"] },
+          "unit": { "type": ["string", "null"] },
+          "status": { "type": "string", "minLength": 1 },
+          "reason": { "type": ["string", "null"] },
+          "numerator": { "type": ["number", "integer", "null"] },
+          "denominator": { "type": ["number", "integer", "null"] },
+          "nParticipants": { "type": ["integer", "null"], "minimum": 0 },
+          "nObservations": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "dataDictionary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metricId", "label", "unit", "description"],
+        "properties": {
+          "metricId": { "type": "string" },
+          "label": { "type": ["object", "null"] },
+          "unit": { "type": ["string", "null"] },
+          "description": { "type": ["object", "string", "null"] }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["frontend", "exportContract", "source"]
+    }
+  }
+}

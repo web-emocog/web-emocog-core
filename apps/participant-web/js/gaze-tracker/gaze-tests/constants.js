@@ -3,7 +3,6 @@ export const TEST_HUB_VERSION = '1.0.0';
 export const TEST_IDS = Object.freeze({
     RT: 'rt_gonogo',
     TRACKING: 'tracking_shapes',
-    BPM: 'bpm_rppg',
     VPC: 'vpc_felidae',
     VISUOSPATIAL: 'visuospatial_drawing'
 });

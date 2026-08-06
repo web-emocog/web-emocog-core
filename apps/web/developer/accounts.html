@@ -61,7 +61,7 @@
       <div class="row">
         <div>
           <label for="password">Пароль</label>
-          <input id="password" type="password" placeholder="Минимум 8 символов" autocomplete="new-password">
+          <input id="password" type="password" placeholder="Минимум 12 символов" autocomplete="new-password">
         </div>
         <div>
           <label for="role">Роль</label>
@@ -80,8 +80,10 @@
       <input id="displayName" type="text" placeholder="Например: Demo Researcher" autocomplete="off">
       <label for="orgs">Org IDs через запятую (опционально)</label>
       <input id="orgs" type="text" placeholder="1,2,5" autocomplete="off">
+      <label for="projects">Project IDs через запятую (обязательно для staff-ролей)</label>
+      <input id="projects" type="text" placeholder="1,2,5" autocomplete="off">
       <button type="button" id="createBtn">Создать аккаунт</button>
-      <p class="hint">Используется `POST /auth/users` (если есть права) либо `POST /auth/register` как fallback.</p>
+      <p class="hint">Используется только защищённый `POST /auth/users`; публичная регистрация не выдаёт staff-роли.</p>
       <p id="createStatus" class="status"></p>
     </section>
 
@@ -114,7 +116,6 @@
 
   <script>
     (function () {
-      var token = localStorage.getItem('emocog_api_token') || '';
       var base = (localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
       var gridEl = document.querySelector('.grid');
       var createStatus = document.getElementById('createStatus');
@@ -126,9 +127,19 @@
         el.className = 'status ' + (text ? (isErr ? 'err' : 'ok') : '');
       }
 
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
       function jsonHeaders() {
         var headers = { 'Content-Type': 'application/json' };
-        if (token) headers.Authorization = 'Bearer ' + token;
+        var csrf = sessionStorage.getItem('emocog_csrf_token') || '';
+        if (csrf) headers['X-CSRF-Token'] = csrf;
         return headers;
       }
 
@@ -146,7 +157,8 @@
           password: (document.getElementById('password').value || '').trim(),
           role: document.getElementById('role').value,
           display_name: (document.getElementById('displayName').value || '').trim() || null,
-          organization_ids: parseOrgIds(document.getElementById('orgs').value)
+          organization_ids: parseOrgIds(document.getElementById('orgs').value),
+          project_ids: parseOrgIds(document.getElementById('projects').value)
         };
         if (!payload.email || !payload.password) {
           setStatus(createStatus, 'Укажите email и пароль.', true);
@@ -154,10 +166,7 @@
         }
         try {
           var path = '/auth/users';
-          var r = await fetch(base + path, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload) });
-          if (!r.ok && (r.status === 403 || r.status === 404)) {
-            r = await fetch(base + '/auth/register', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload) });
-          }
+          var r = await fetch(base + path, { method: 'POST', headers: jsonHeaders(), credentials: 'include', body: JSON.stringify(payload) });
           if (!r.ok) {
             var errorPayload = await r.json().catch(function () { return {}; });
             throw new Error(errorPayload.error || (r.status + ' ' + r.statusText));
@@ -184,11 +193,11 @@
             .join('');
           var orgs = Array.isArray(u.organization_ids) ? u.organization_ids.join(',') : '';
           return (
-            '<tr data-id="' + u.id + '">' +
-              '<td>' + u.id + '</td>' +
-              '<td>' + (u.email || '—') + '</td>' +
+            '<tr data-id="' + escapeHtml(u.id) + '">' +
+              '<td>' + escapeHtml(u.id) + '</td>' +
+              '<td>' + escapeHtml(u.email || '—') + '</td>' +
               '<td><select class="user-role">' + roleOptions + '</select></td>' +
-              '<td>' + (orgs || '—') + '</td>' +
+              '<td>' + escapeHtml(orgs || '—') + '</td>' +
               '<td><button type="button" class="save-user" style="margin-top:0;padding:6px 10px;">Save</button></td>' +
             '</tr>'
           );
@@ -203,6 +212,7 @@
               var r = await fetch(base + '/auth/users/' + encodeURIComponent(userId), {
                 method: 'PATCH',
                 headers: jsonHeaders(),
+                credentials: 'include',
                 body: JSON.stringify({ role: role })
               });
               if (!r.ok) {
@@ -225,7 +235,7 @@
         if (role) q.set('role', role);
         if (search) q.set('q', search);
         try {
-          var r = await fetch(base + '/auth/users?' + q.toString(), { headers: jsonHeaders() });
+          var r = await fetch(base + '/auth/users?' + q.toString(), { headers: jsonHeaders(), credentials: 'include' });
           if (!r.ok) {
             var errPayload = await r.json().catch(function () { return {}; });
             throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
@@ -248,7 +258,7 @@
         }
       }
 
-      fetch(base + '/auth/permissions', { headers: jsonHeaders() })
+      fetch(base + '/auth/permissions', { headers: jsonHeaders(), credentials: 'include' })
         .then(function (r) {
           if (!r.ok) throw new Error('permissions');
           return r.json();

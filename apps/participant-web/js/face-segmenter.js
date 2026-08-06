@@ -60,11 +60,11 @@ class FaceSegmenterInline {
                 throw new Error('MediaPipe Vision не загружен.');
             }
             const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+                "js/vendor/mediapipe/wasm"
             );
             const modelPath = this.segmentationType === 'selfie_multiclass'
-                ? "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"
-                : "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite";
+                ? "js/vendor/mediapipe/models/selfie_multiclass_256x256.tflite"
+                : "js/vendor/mediapipe/models/selfie_segmenter.tflite";
             this.imageSegmenter = await ImageSegmenter.createFromOptions(vision, {
                 baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
                 runningMode: this.runningMode,

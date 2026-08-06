@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session_event.v1",
+  "title": "Typed participant session event",
+  "type": "object",
+  "required": ["schemaVersion", "eventId", "type", "category", "severity", "timestamp"],
+  "properties": {
+    "schemaVersion": { "const": "session_event.v1" },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sessionId": { "type": ["string", "null"], "maxLength": 64 },
+    "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "category": {
+      "enum": ["lifecycle", "quality", "technical", "block", "input", "upload", "module"]
+    },
+    "severity": { "enum": ["info", "warning", "error", "fatal"] },
+    "phase": { "type": ["string", "null"], "maxLength": 128 },
+    "timestamp": { "type": "number" },
+    "tRelMs": { "type": ["number", "null"], "minimum": 0 },
+    "blockId": { "type": ["string", "number", "null"] },
+    "trialId": { "type": ["string", "number", "null"] }
+  },
+  "additionalProperties": true
+}

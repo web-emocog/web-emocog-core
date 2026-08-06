@@ -6,7 +6,7 @@ import {
     getRelativeSessionTimeMs
 } from './state.js';
 import { translations } from '../../translations.js';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260807-1';
 import { stopPreCheck } from './precheck-updated.js';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
 import { loadAndStartCognitiveTask } from './experimental_task-updated.js';
@@ -18,13 +18,20 @@ import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import { startTestHub } from '../gaze-tracker/gaze-tests/index.js';
 import { extractEyeSignalSample } from './eye-signal.js';
-import { startBpmTest } from './bpm-test-updated.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js';
-import { handleSendWithFallback } from './data-sender.js';
+import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
+import {
+    getContentViewport,
+    targetCenterInContentViewport
+} from '../gaze-tracker/viewport-coordinates.mjs';
+import {
+    getSessionRuntime,
+    isContinuousSessionAnalysisRunning
+} from '../session-runtime/index.js';
 
 function dbg(scope, event, data) {
     try {
@@ -83,42 +90,6 @@ function formatEmotionHudLine(sample) {
     const a = Number.isFinite(sample.arousal) ? sample.arousal.toFixed(2) : '?';
     return `${label}: ${name} (v ${v}, a ${a})`;
 }
-const DEFAULT_UPLOAD_RETRIES = 4;
-const DEFAULT_UPLOAD_BACKOFF_MS = 1500;
-
-function isSecureSenderEnabled() {
-    if (window.__EMOCOG_USE_SECURE_SENDER__ === true) return true;
-    const fromStorage = localStorage.getItem('emocog_use_secure_sender');
-    if (fromStorage === '1' || fromStorage === 'true') return true;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('secure_sender') === '1';
-}
-
-function getApiBaseForParticipant() {
-    const origin = window.location.origin || '';
-    const defaultBase = (origin + '/api').replace(/\/$/, '');
-    try {
-        const fromStorage = localStorage.getItem('emocog_api_base');
-        if (fromStorage && fromStorage.trim()) {
-            const base = fromStorage.trim().replace(/\/$/, '');
-            const isLocalApi = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(base);
-            const isLocalPage = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(origin);
-            if (isLocalApi && !isLocalPage) return defaultBase;
-            return base;
-        }
-    } catch (_) { /* ignore */ }
-    return defaultBase;
-}
-
-function isUploadNetworkError(error) {
-    if (!error) return true;
-    const msg = String(error.message || error);
-    return (
-        error.name === 'TypeError'
-        && (/failed to fetch|networkerror|load failed/i.test(msg) || msg === 'Failed to fetch')
-    );
-}
-
 function ensureUploadStatusElement() {
     const finalStep = document.getElementById('step7');
     if (!finalStep) return null;
@@ -152,74 +123,30 @@ function setUploadStatus(message, tone) {
     }
 }
 
-function waitMs(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 async function uploadAggregatesWithRetry(payload, options = {}) {
-    const retries = Number.isFinite(options.retries) ? options.retries : DEFAULT_UPLOAD_RETRIES;
-    const backoffMs = Number.isFinite(options.backoffMs) ? options.backoffMs : DEFAULT_UPLOAD_BACKOFF_MS;
-    const base = getApiBaseForParticipant();
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
+    return sendSessionFeature(payload, {
+        ...options,
+        onAttempt: ({ attempt, retries }) => {
             setUploadStatus(`Загрузка данных: попытка ${attempt}/${retries}...`, 'info');
             recordSessionEvent('upload_attempt', { attempt, retries, endpoint: '/ingest' });
-            let body;
-            try {
-                body = JSON.stringify(payload);
-            } catch (stringifyErr) {
-                throw new Error('Payload too large: ' + (stringifyErr?.message || String(stringifyErr)));
-            }
-            const response = await fetch(base + '/ingest', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'omit',
-                body
-            });
-            if (!response.ok) {
-                const errorPayload = await response.json().catch(() => ({}));
-                let detail = errorPayload.error || ('HTTP ' + response.status);
-                if (Array.isArray(errorPayload.errors) && errorPayload.errors.length) {
-                    detail = errorPayload.errors.map((e) => e.msg || e.message || String(e)).join('; ');
-                }
-                const err = new Error(detail);
-                err.httpStatus = response.status;
-                throw err;
-            }
-            const result = await response.json().catch(() => ({}));
-            recordSessionEvent('upload_success', {
-                attempt,
-                status: response.status
-            });
-            setUploadStatus('Данные успешно загружены на сервер.', 'success');
-            return { ok: true, attempt, result };
-        } catch (error) {
-            lastError = error;
+        },
+        onRetry: ({ attempt, retries, delayMs, error }) => {
             recordSessionEvent('upload_retry', {
                 attempt,
                 retries,
-                message: error && error.message ? error.message : String(error)
+                message: error?.message || String(error)
             });
-            if (attempt < retries) {
-                const delay = backoffMs * Math.pow(2, attempt - 1);
-                const sec = Math.round(delay / 1000);
-                const detail = error && error.message ? String(error.message) : 'unknown';
-                if (isUploadNetworkError(error)) {
-                    setUploadStatus(`Сетевая ошибка. Повтор через ${sec} c...`, 'error');
-                } else {
-                    setUploadStatus(`Ошибка отправки: ${detail}. Повтор через ${sec} c...`, 'error');
-                }
-                await waitMs(delay);
-            }
+            setUploadStatus(`Ошибка отправки. Повтор через ${Math.round(delayMs / 1000)} c...`, 'error');
+        },
+        onSuccess: ({ attempt, status }) => {
+            recordSessionEvent('upload_success', { attempt, status });
+            setUploadStatus('Данные успешно загружены на сервер.', 'success');
+        },
+        onFailure: error => {
+            recordSessionEvent('upload_failed', { message: error?.message || String(error) });
+            setUploadStatus('Не удалось загрузить данные автоматически. Проверьте сеть и сохраните JSON локально.', 'error');
         }
-    }
-
-    const message = (lastError && lastError.message) ? lastError.message : 'Upload failed';
-    recordSessionEvent('upload_failed', { message });
-    setUploadStatus('Не удалось загрузить данные автоматически. Проверьте сеть и сохраните JSON локально.', 'error');
-    return { ok: false, error: message };
+    });
 }
 
 function getVideoTime(videoElement) {
@@ -254,21 +181,18 @@ function buildTestHubHandlers() {
                 }
             });
         }),
-        runBpmTest: () => new Promise((resolve, reject) => {
-            startBpmTest({
-                onComplete: (payload) => resolve(payload || { sampleCount: 0, bpmMean: null })
-            }).catch(reject);
-        }),
         finishSession: async () => {
             await finishSession();
         }
     };
 }
 
-export function continueInvitationSessionAfterShell() {
+export async function continueInvitationSessionAfterShell() {
     const inviteDef = state.runtime?.invitationProtocolDefinition;
     const invitationCode = state.sessionData?.ids?.invitationCode
         || state.runtime?.invitationProtocolMeta?.code;
+    state.flags.isRecording = true;
+    await getSessionRuntime()?.startContinuousModules();
 
     if (!invitationCode && !inviteDef) {
         startTestHub(buildTestHubHandlers());
@@ -285,7 +209,6 @@ export function continueInvitationSessionAfterShell() {
         };
 
     state.runtime.invitationSelectedMetrics = plan.hubMetrics;
-    state.flags.isRecording = true;
     document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
     const step6 = document.getElementById('step6');
     if (step6) step6.classList.add('active');
@@ -350,9 +273,10 @@ export async function startCalibration() {
         await window.QCMetricsReady;
         dbg('qc', 'module:ready:QCMetrics', { resolved: true });
     }
+    const sessionViewport = getContentViewport();
     state.runtime.qcMetrics = new QCMetrics({
-        screenWidth: window.innerWidth,
-        screenHeight: window.innerHeight
+        screenWidth: sessionViewport.width,
+        screenHeight: sessionViewport.height
     });
     state.runtime.qcMetrics.start();
     state.runtime.sessionStartTime = Date.now();
@@ -364,11 +288,10 @@ export async function startCalibration() {
         await window.GazeTrackerReady;
         dbg('gaze', 'module:ready:GazeTracker', { resolved: true });
     }
+    const contentViewport = sessionViewport;
     state.runtime.gazeTracker = new GazeTracker({
-        screenWidth: window.innerWidth,
-        screenHeight: window.innerHeight,
-        // Сбалансированный профиль: ниже инерция, но без заметного роста шума.
-        smoothingFactor: 0.25,
+        screenWidth: contentViewport.width,
+        screenHeight: contentViewport.height,
         onGazeUpdate: (gazeData) => {
             // Передаём данные взгляда в единую точку входа
             if (window.handleGazeUpdate) {
@@ -378,7 +301,7 @@ export async function startCalibration() {
     });
     console.log('[GazeTracker] Инициализирован');
     dbg('gaze', 'GazeTracker:instance:created', {});
-    
+
     // Скрываем pre-check интерфейс
     document.getElementById('precheckContainer').style.display = 'none';
     document.getElementById('startPrecheckBtn').style.display = 'none';
@@ -387,6 +310,11 @@ export async function startCalibration() {
     if (state.flags.isPrecheckRunning) {
         stopPreCheck();
     }
+
+    // С этого момента один frame pipeline ведёт gaze/blinks/emotion/BPM/body
+    // без параллельных analyzeFrame loops. До камеры/пречека измерений нет.
+    state.flags.isRecording = true;
+    await getSessionRuntime()?.startContinuousModules();
     
     // Показываем fullscreen калибровку
     const calibScreen = document.getElementById('fullscreenCalibration');
@@ -429,7 +357,7 @@ export async function startCalibration() {
         `points=${positions.length}, clicksPerPoint=${CLICKS_PER_POINT}`
     );
     let clicksOnCurrentPoint = 0;
-    const screenDiag = Math.sqrt(window.innerWidth * window.innerWidth + window.innerHeight * window.innerHeight);
+    const screenDiag = Math.hypot(contentViewport.width, contentViewport.height);
     let previousTarget = null;
     const pointFailureCounts = new Array(positions.length).fill(0);
     
@@ -449,8 +377,10 @@ export async function startCalibration() {
             // === GAZE CALIBRATION: собираем iris features с усреднением ===
             if (state.runtime.gazeTracker && state.runtime.localAnalyzer && video) {
                 const currentPos = positions[i];
-                const screenX = (currentPos.x / 100) * window.innerWidth;
-                const screenY = (currentPos.y / 100) * window.innerHeight;
+                const target = targetCenterInContentViewport(point);
+                if (!target) throw new Error('Calibration target has no viewport bounds');
+                const screenX = target.x;
+                const screenY = target.y;
                 const failedClicksForPoint = pointFailureCounts[i] || 0;
                 const relaxedLevel = Math.min(2, failedClicksForPoint);
                 
@@ -485,6 +415,7 @@ export async function startCalibration() {
                 const posePitchLimit = 12 + relaxedLevel * 5 + (isBottomBand ? 8 : (isTopBand ? 4 : 0));
                 const collectedLandmarks = [];
                 let lastSampledVideoTime = -1;
+                let lastResultTimestamp = -1;
                 let attempts = 0;
                 let repeatedSameFrameCount = 0;
                 
@@ -509,7 +440,18 @@ export async function startCalibration() {
                         }
 
                         try {
-                            const result = await state.runtime.localAnalyzer.analyzeFrame(video);
+                            const result = isContinuousSessionAnalysisRunning()
+                                ? state.runtime.lastPrecheckResult
+                                : await state.runtime.localAnalyzer.analyzeFrame(video);
+                            if (
+                                isContinuousSessionAnalysisRunning()
+                                && Number.isFinite(result?.timestamp)
+                                && result.timestamp === lastResultTimestamp
+                            ) {
+                                await new Promise(r => setTimeout(r, SAME_FRAME_RETRY_MS));
+                                continue;
+                            }
+                            if (Number.isFinite(result?.timestamp)) lastResultTimestamp = result.timestamp;
                             const hasLandmarks = !!(result && result.landmarks);
                             const bothOpen = result?.eyes?.bothOpen;
                             const leftOpen = result?.eyes?.left?.isOpen;
@@ -526,7 +468,7 @@ export async function startCalibration() {
                             let poseOk = !pose || pose.status !== 'error';
                             if (poseOk && pose?.status === 'off_center') {
                                 // На нижних/повторных кликах не блокируем точку только из-за off_center:
-                                // head-position фичи уже учитываются моделью.
+                                // iris нормализован относительно глаз, а head pose проверяется отдельным OOD gate.
                                 poseOk = isBottomBand || relaxedLevel > 0;
                             }
                             if (poseOk && hasPose) {
@@ -638,7 +580,7 @@ export async function startCalibration() {
             progressText.innerText = '';
             point.style.display = 'none';
             
-            setTimeout(() => {
+            setTimeout(async () => {
                 // После калибровки запускаем валидацию точности
                 startGazeValidation();
             }, 1500);
@@ -684,7 +626,7 @@ export function startGazeValidation() {
     // 9 точек валидации (сетка 3×3, другие позиции чем калибровка)
     // v2.2.0: расширено с 5 до 9 точек, позиции 15%/50%/85% — 
     // ближе к краям для оценки угловой точности, но не совпадают с калибровочными
-    const validationPositions = [
+    const correctionPositions = [
         { x: 15, y: 15 },   // верх-лево
         { x: 50, y: 15 },   // верх-центр
         { x: 85, y: 15 },   // верх-право
@@ -695,20 +637,40 @@ export function startGazeValidation() {
         { x: 50, y: 85 },   // низ-центр
         { x: 85, y: 85 }    // низ-право
     ];
+    // Independent targets are never used to fit or select the correction.
+    const benchmarkPositions = [
+        { x: 30, y: 22 },
+        { x: 70, y: 22 },
+        { x: 22, y: 70 },
+        { x: 78, y: 70 },
+        { x: 50, y: 63 }
+    ];
     recordSessionEvent('validation_start', {
-        validationPointCount: validationPositions.length
+        correctionPointCount: correctionPositions.length,
+        benchmarkPointCount: benchmarkPositions.length
     });
     dbg('gaze', 'validation:start', {
-        validationPointCount: validationPositions.length,
+        correctionPointCount: correctionPositions.length,
+        benchmarkPointCount: benchmarkPositions.length,
         calibrationPointCount: state.sessionData?.gazeCalibration?.points?.length ?? null
     });
     
-    const screenW = window.innerWidth;
-    const screenH = window.innerHeight;
+    const validationViewport = getContentViewport();
+    const screenW = validationViewport.width;
+    const screenH = validationViewport.height;
     
     let currentPoint = 0;
+    let validationStage = 'correction';
+    let activePositions = correctionPositions;
+    let postCalibrationCorrection = {
+        fitted: false,
+        applied: false
+    };
+    let correctionStageResult = null;
     state.runtime.validationPoints = []; // Сброс
+    state.runtime.validationBenchmarkPoints = [];
     state.flags.isValidating = true;
+    state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
     
     const SAMPLES_PER_POINT = 30; // ~1 секунда при 30 FPS
     const SAMPLE_INTERVAL = 33; // ~30 FPS
@@ -774,7 +736,8 @@ export function startGazeValidation() {
         scheduleValidationPrediction(nextDelay);
     }
 
-    if (state.runtime.gazeTracker && state.runtime.gazeTracker.isCalibrated() 
+    if (!isContinuousSessionAnalysisRunning()
+        && state.runtime.gazeTracker && state.runtime.gazeTracker.isCalibrated()
         && state.runtime.localAnalyzer && video && video.srcObject) {
         state.runtime._validationLoopActive = true;
         scheduleValidationPrediction(0);
@@ -782,21 +745,25 @@ export function startGazeValidation() {
     }
     
     function showNextPoint() {
-        if (currentPoint >= validationPositions.length) {
-            // Останавливаем gaze prediction
-            stopValidationPredictionLoop();
-            finishValidation();
+        if (currentPoint >= activePositions.length) {
+            if (validationStage === 'correction') {
+                finishCorrectionStage();
+            } else {
+                stopValidationPredictionLoop();
+                finishValidation();
+            }
             return;
         }
         
-        const pos = validationPositions[currentPoint];
-        const targetX = (pos.x / 100) * screenW;
-        const targetY = (pos.y / 100) * screenH;
-        
+        const pos = activePositions[currentPoint];
         point.style.left = pos.x + '%';
         point.style.top = pos.y + '%';
+        const target = targetCenterInContentViewport(point);
+        const targetX = target?.x ?? (pos.x / 100) * screenW;
+        const targetY = target?.y ?? (pos.y / 100) * screenH;
         
-        progressText.innerText = `${translations[state.currentLang].calib_progress} ${currentPoint + 1} ${translations[state.currentLang].point_of} ${validationPositions.length}`;
+        const stageName = validationStage === 'correction' ? 'LOOCV' : 'benchmark';
+        progressText.innerText = `${stageName}: ${currentPoint + 1} ${translations[state.currentLang].point_of} ${activePositions.length}`;
         
         // Сброс семплов
         currentSamples = [];
@@ -806,10 +773,29 @@ export function startGazeValidation() {
         setTimeout(() => {
             // Начинаем сбор семплов
             samplingInterval = setInterval(() => {
-                if (state.runtime.currentGaze.x !== null && state.runtime.currentGaze.y !== null) {
+                const prediction = state.runtime.currentGazePrediction;
+                const signalX = validationStage === 'correction'
+                    ? prediction?.rawX
+                    : prediction?.correctedX;
+                const signalY = validationStage === 'correction'
+                    ? prediction?.rawY
+                    : prediction?.correctedY;
+                if (
+                    prediction?.valid !== false
+                    && Number.isFinite(signalX)
+                    && Number.isFinite(signalY)
+                ) {
                     currentSamples.push({
-                        gazeX: state.runtime.currentGaze.x,
-                        gazeY: state.runtime.currentGaze.y,
+                        gazeX: signalX,
+                        gazeY: signalY,
+                        rawX: Number.isFinite(prediction.rawX) ? prediction.rawX : null,
+                        rawY: Number.isFinite(prediction.rawY) ? prediction.rawY : null,
+                        correctedX: Number.isFinite(prediction.correctedX) ? prediction.correctedX : null,
+                        correctedY: Number.isFinite(prediction.correctedY) ? prediction.correctedY : null,
+                        displayX: Number.isFinite(prediction.displayX) ? prediction.displayX : null,
+                        displayY: Number.isFinite(prediction.displayY) ? prediction.displayY : null,
+                        confidence: Number.isFinite(prediction.confidence) ? prediction.confidence : null,
+                        ood: prediction.ood || null,
                         targetX: targetX,
                         targetY: targetY,
                         t: Date.now()
@@ -822,8 +808,12 @@ export function startGazeValidation() {
                     state.runtime.validationSamplingInterval = null;
                     
                     // Сохраняем результаты для этой точки
-                    state.runtime.validationPoints.push({
+                    const targetCollection = validationStage === 'correction'
+                        ? state.runtime.validationPoints
+                        : state.runtime.validationBenchmarkPoints;
+                    targetCollection.push({
                         pointIndex: currentPoint,
+                        stage: validationStage,
                         targetX: targetX,
                         targetY: targetY,
                         samples: currentSamples,
@@ -838,59 +828,42 @@ export function startGazeValidation() {
         }, 500); // 500ms задержка перед сбором
     }
 
-    function finishValidation() {
-        state.flags.isValidating = false;
-        if (state.runtime.validationSamplingInterval) {
-            clearInterval(state.runtime.validationSamplingInterval);
-            state.runtime.validationSamplingInterval = null;
-        }
-        
-        // Очищаем ссылку на interval из state
-        stopValidationPredictionLoop();
-        state.runtime._validationGazeInterval = null;
-        
+    function finishCorrectionStage() {
         const rawValidationPoints = state.runtime.validationPoints;
-        const rawMetrics = calculateValidationMetrics(rawValidationPoints);
-
-        // Убираем наиболее шумные сэмплы внутри каждой validation-точки (саккады/микроблинки/переходы)
-        // для более устойчивой оценки precision.
+        const rawMetrics = calculateValidationMetrics(rawValidationPoints, validationViewport);
         const filteredValidation = filterValidationPointsForMetrics(rawValidationPoints, 0.8);
         const filteredValidationPoints = filteredValidation.points;
-        const filteredMetrics = calculateValidationMetrics(filteredValidationPoints);
-
-        let metrics = filteredMetrics;
-        let qcValidationSamples = flattenValidationSamples(filteredValidationPoints);
-        let postCalibrationCorrection = {
+        const filteredMetrics = calculateValidationMetrics(
+            filteredValidationPoints,
+            validationViewport
+        );
+        postCalibrationCorrection = {
             fitted: false,
             applied: false,
             sampleFilter: filteredValidation.stats
         };
 
-        // Пост-калибровочная коррекция по данным валидации (лечит системный bias, напр. стабильный сдвиг вправо)
-        if (state.runtime.gazeTracker && typeof state.runtime.gazeTracker.clearPostCalibrationCorrection === 'function') {
-            state.runtime.gazeTracker.clearPostCalibrationCorrection();
-        }
-
-        const fittedCorrection = fitValidationAffineCorrection(filteredValidationPoints, screenW, screenH);
+        const fittedCorrection = fitValidationAffineCorrection(
+            filteredValidationPoints,
+            screenW,
+            screenH
+        );
         if (fittedCorrection) {
-            const correctedPoints = applyValidationAffineCorrection(filteredValidationPoints, fittedCorrection);
-            const correctedMetrics = calculateValidationMetrics(correctedPoints);
-
-            // LOOCV-оценка обобщающей ошибки коррекции — fit на N-1 целях, проверка на N-й.
-            // Защищает от переобучения на тех же сэмплах, по которым коррекция построена.
+            const correctedPoints = applyValidationAffineCorrection(
+                filteredValidationPoints,
+                fittedCorrection
+            );
+            const correctedMetrics = calculateValidationMetrics(
+                correctedPoints,
+                validationViewport
+            );
             const loocv = evaluateAffineCorrectionLOOCV(filteredValidationPoints);
-            dbg('gaze', 'loocv:evaluateAffineCorrectionLOOCV', {
-                available: !!(loocv && loocv.available !== false),
-                loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
-                loocvP95HeldOutPx: loocv?.loocvP95HeldOutPx ?? null,
-                rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
-                targetCount: loocv?.targetCount ?? null,
-                calibrationPointCount: filteredValidationPoints?.length ?? 0
-            });
-
-            const shouldApply = shouldApplyValidationCorrection(filteredMetrics, correctedMetrics, loocv);
+            const shouldApply = shouldApplyValidationCorrection(
+                filteredMetrics,
+                correctedMetrics,
+                loocv
+            );
             const correctionId = generateCorrectionId();
-
             postCalibrationCorrection = {
                 correctionId,
                 fitted: true,
@@ -899,51 +872,108 @@ export function startGazeValidation() {
                 sampleCount: fittedCorrection.sampleCount,
                 matrixX: fittedCorrection.matrixX.map(v => Math.round(v * 1e6) / 1e6),
                 matrixY: fittedCorrection.matrixY.map(v => Math.round(v * 1e6) / 1e6),
-                rawMetrics: {
-                    accuracyPct: rawMetrics.accuracyPct,
-                    precisionPct: rawMetrics.precisionPct,
-                    biasXPct: rawMetrics.biasXPct,
-                    biasYPct: rawMetrics.biasYPct
-                },
-                filteredMetrics: {
-                    accuracyPct: filteredMetrics.accuracyPct,
-                    precisionPct: filteredMetrics.precisionPct,
-                    biasXPct: filteredMetrics.biasXPct,
-                    biasYPct: filteredMetrics.biasYPct
-                },
-                correctedMetrics: {
-                    accuracyPct: correctedMetrics.accuracyPct,
-                    precisionPct: correctedMetrics.precisionPct,
-                    biasXPct: correctedMetrics.biasXPct,
-                    biasYPct: correctedMetrics.biasYPct
-                },
+                rawMetrics,
+                filteredMetrics,
+                correctedInSampleMetrics: correctedMetrics,
                 loocv: loocv || { available: false }
             };
-
             if (shouldApply) {
-                if (typeof state.runtime.gazeTracker.setPostCalibrationCorrection === 'function') {
-                    state.runtime.gazeTracker.setPostCalibrationCorrection({
-                        ...fittedCorrection,
-                        correctionId
-                    });
-                }
-                metrics = correctedMetrics;
-                qcValidationSamples = flattenValidationSamples(correctedPoints);
-                console.log('[Validation] Применена post-calibration коррекция:', postCalibrationCorrection);
-            } else {
-                console.log('[Validation] Коррекция рассчитана, но не применена (улучшение недостаточное или held-out регрессия):', postCalibrationCorrection);
+                state.runtime.gazeTracker?.setPostCalibrationCorrection?.({
+                    ...fittedCorrection,
+                    correctionId
+                });
             }
-        } else {
-            console.log('[Validation] Affine-коррекция не рассчитана (недостаточно или некачественные данные)');
+            dbg('gaze', 'loocv:evaluateAffineCorrectionLOOCV', {
+                applied: shouldApply,
+                loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
+                rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
+                targetCount: loocv?.targetCount ?? null
+            });
         }
-        
-        // Сохраняем в sessionData
+
+        correctionStageResult = {
+            pointCount: rawValidationPoints.length,
+            points: rawValidationPoints,
+            rawMetrics,
+            filteredMetrics,
+            postCalibrationCorrection
+        };
+        recordSessionEvent('validation_correction_stage_complete', {
+            correctionApplied: postCalibrationCorrection.applied,
+            loocvRmsHeldOutPx:
+                postCalibrationCorrection.loocv?.loocvRmsHeldOutPx ?? null
+        });
+        validationStage = 'benchmark';
+        activePositions = benchmarkPositions;
+        currentPoint = 0;
+        currentSamples = [];
+        sampleCount = 0;
+        instructionText.innerText =
+            translations[state.currentLang].validation_look_instruction;
+        setTimeout(showNextPoint, 500);
+    }
+
+    function pointsForSignal(points, xKey, yKey) {
+        return (points || []).map(pointData => ({
+            ...pointData,
+            samples: (pointData.samples || []).map(sample => ({
+                ...sample,
+                gazeX: Number.isFinite(sample?.[xKey]) ? sample[xKey] : null,
+                gazeY: Number.isFinite(sample?.[yKey]) ? sample[yKey] : null
+            }))
+        }));
+    }
+
+    function finishValidation() {
+        state.flags.isValidating = false;
+        if (state.runtime.validationSamplingInterval) {
+            clearInterval(state.runtime.validationSamplingInterval);
+            state.runtime.validationSamplingInterval = null;
+        }
+        stopValidationPredictionLoop();
+        state.runtime._validationGazeInterval = null;
+
+        const benchmarkPoints = state.runtime.validationBenchmarkPoints;
+        const filteredBenchmark = filterValidationPointsForMetrics(benchmarkPoints, 0.8);
+        const correctedPoints = filteredBenchmark.points;
+        const baselinePoints = pointsForSignal(correctedPoints, 'rawX', 'rawY');
+        const displayPoints = pointsForSignal(correctedPoints, 'displayX', 'displayY');
+        const metrics = calculateValidationMetrics(correctedPoints, validationViewport);
+        const rawMetrics = calculateValidationMetrics(baselinePoints, validationViewport);
+        const displayMetrics = calculateValidationMetrics(displayPoints, validationViewport);
+        const qcValidationSamples = flattenValidationSamples(correctedPoints);
+        const baselineVsNew = {
+            independent: true,
+            targetsUsedForFit: 0,
+            targetCount: correctedPoints.length,
+            sampleFilter: filteredBenchmark.stats,
+            baselineRaw: rawMetrics,
+            newCorrected: metrics,
+            displayOnly: displayMetrics,
+            improvement: {
+                accuracyPx: Number.isFinite(rawMetrics.accuracyPx)
+                    ? rawMetrics.accuracyPx - metrics.accuracyPx
+                    : null,
+                precisionPx: Number.isFinite(rawMetrics.precisionPx)
+                    ? rawMetrics.precisionPx - metrics.precisionPx
+                    : null,
+                accuracyPct: Number.isFinite(rawMetrics.accuracyPct)
+                    ? rawMetrics.accuracyPct - metrics.accuracyPct
+                    : null
+            }
+        };
+
         state.sessionData.gazeValidation = {
             timestamp: Date.now(),
-            points: rawValidationPoints,
-            metrics: metrics,
-            rawMetrics: rawMetrics,
-            filteredMetrics: filteredMetrics,
+            coordinateSpace: 'content_viewport',
+            targetBlindPrediction: true,
+            correctionSet: correctionStageResult,
+            benchmarkPoints,
+            points: benchmarkPoints,
+            metrics,
+            rawMetrics,
+            displayMetrics,
+            baselineVsNew,
             postCalibrationCorrection
         };
         recordSessionEvent('validation_complete', {
@@ -951,7 +981,9 @@ export function startGazeValidation() {
             accuracyPct: metrics.accuracyPct,
             precisionPct: metrics.precisionPct,
             biasXPct: metrics.biasXPct,
-            biasYPct: metrics.biasYPct
+            biasYPct: metrics.biasYPct,
+            baselineAccuracyPct: rawMetrics.accuracyPct,
+            correctionApplied: postCalibrationCorrection.applied
         });
         
         console.log('[Validation] Результаты:', metrics);
@@ -1011,7 +1043,7 @@ export function startGazeValidation() {
  * невозможно точно вычислить без калибровки расстояния.
  * % диагонали — универсальная метрика, не зависящая от разрешения.
  */
-export function calculateValidationMetrics(points) {
+export function calculateValidationMetrics(points, viewport = getContentViewport()) {
     if (!points || points.length === 0) {
         return {
             accuracyPx: Infinity,
@@ -1028,8 +1060,8 @@ export function calculateValidationMetrics(points) {
     }
     
     // Диагональ экрана в px — универсальный нормализатор
-    const screenW = window.innerWidth;
-    const screenH = window.innerHeight;
+    const screenW = viewport.width;
+    const screenH = viewport.height;
     const screenDiag = Math.sqrt(screenW * screenW + screenH * screenH);
     
     let allErrors = [];
@@ -1043,7 +1075,7 @@ export function calculateValidationMetrics(points) {
         totalSamples += samples.length;
         
         samples.forEach(s => {
-            if (s.gazeX !== null && s.gazeY !== null) {
+            if (Number.isFinite(s.gazeX) && Number.isFinite(s.gazeY)) {
                 validSamples++;
                 const errorX = s.gazeX - s.targetX;
                 const errorY = s.gazeY - s.targetY;
@@ -1439,13 +1471,10 @@ function evaluateAffineCorrectionLOOCV(filteredValidationPoints) {
 /**
  * Решение, применять ли affine-коррекцию.
  *
- * Базовое условие — улучшение accuracy/precision на отфильтрованных сэмплах
- * (в самой выборке, по которой фитили) ≥ 0.6 п.п. без серьёзной регрессии,
- * либо переход через «общий gate» (precision_corr ≤ 6%, accuracy_corr ≤ 12%).
- *
- * Дополнительный гейт — LOOCV (если рассчитан): не применять коррекцию,
- * если held-out RMS обобщающей ошибки регрессирует относительно raw target RMS
- * больше чем на TOLERANCE px. Это страхует от переобучения на validation-сэмплах.
+ * In-sample improvement is only a preliminary gate. Correction is selected
+ * only when LOOCV has at least five targets and its held-out RMS improves over
+ * the raw target RMS by at least max(3 px, 2%). This prevents validation data
+ * used for fitting from being reported as independent accuracy evidence.
  *
  * @param {Object} rawMetrics - метрики на отфильтрованных сэмплах ДО коррекции
  * @param {Object} correctedMetrics - метрики ПОСЛЕ применения коррекции (in-sample)
@@ -1475,16 +1504,15 @@ function shouldApplyValidationCorrection(rawMetrics, correctedMetrics, loocv = n
     const baseDecision = (significant && noSeriousRegression) || crossesCommonGate;
     if (!baseDecision) return false;
 
-    // Held-out гейт: не применять, если LOOCV RMS заметно хуже raw target RMS.
-    // Допускаем небольшое регрессионное проседание (5px) — для шума и малой выборки.
-    if (loocv && Number.isFinite(loocv.loocvRmsHeldOutPx) && Number.isFinite(loocv.rawTargetRmsPx)) {
-        const HOLD_OUT_REGRESSION_TOLERANCE_PX = 5;
-        if (loocv.loocvRmsHeldOutPx > loocv.rawTargetRmsPx + HOLD_OUT_REGRESSION_TOLERANCE_PX) {
-            return false;
-        }
-    }
-
-    return true;
+    // Correction is never selected on in-sample metrics alone.
+    if (
+        !loocv
+        || loocv.targetCount < 5
+        || !Number.isFinite(loocv.loocvRmsHeldOutPx)
+        || !Number.isFinite(loocv.rawTargetRmsPx)
+    ) return false;
+    const requiredHeldOutGain = Math.max(3, loocv.rawTargetRmsPx * 0.02);
+    return loocv.loocvRmsHeldOutPx <= loocv.rawTargetRmsPx - requiredHeldOutGain;
 }
 
 /**
@@ -1683,7 +1711,7 @@ export function startTrackingTest(options = {}) {
         scheduleTrackingAnalysisTick(nextDelay);
     }
 
-    if (video && video.srcObject && state.runtime.localAnalyzer) {
+    if (!isContinuousSessionAnalysisRunning() && video && video.srcObject && state.runtime.localAnalyzer) {
         state.runtime._analysisLoopActive = true;
         const trackHud = document.getElementById('trackingEmotionHud');
         if (trackHud) trackHud.textContent = '';
@@ -1809,10 +1837,158 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     }, 1500);
 }
 
-export async function finishSession() {
+let finishSessionPromise = null;
+
+function stopSessionMediaResources() {
+    const stream = state.runtime.cameraStream;
+    state.runtime.cameraStream = null;
+    for (const track of stream?.getTracks?.() || []) {
+        try { track.stop(); } catch (_) {}
+    }
+    for (const videoId of ['precheckVideo', 'bpmVideo']) {
+        const video = document.getElementById(videoId);
+        if (!video) continue;
+        try { video.pause(); } catch (_) {}
+        try { video.srcObject = null; } catch (_) {}
+    }
+    if (state.runtime.faceSegmenter?.dispose) {
+        try { state.runtime.faceSegmenter.dispose(); } catch (_) {}
+    }
+    state.runtime.faceSegmenter = null;
+    if (state.runtime.localAnalyzer?.dispose) {
+        try { state.runtime.localAnalyzer.dispose(); } catch (_) {}
+    }
+    state.runtime.localAnalyzer = null;
+}
+
+export function finishSession() {
+    if (finishSessionPromise) return finishSessionPromise;
+    const runtime = getSessionRuntime();
+    if (runtime?.machine?.state === 'completed') {
+        if (state.sessionData.upload?.ok === true) {
+            return Promise.resolve({ ...state.sessionData.upload, idempotent: true });
+        }
+        finishSessionPromise = retryFinalUpload(runtime);
+    } else {
+        finishSessionPromise = finishSessionOnce();
+    }
+    finishSessionPromise = finishSessionPromise
+        .then(result => {
+            // Keep only in-flight calls deduplicated. Later calls must execute the
+            // explicit completed/idempotent branch without another network write.
+            finishSessionPromise = null;
+            return result;
+        })
+        .catch(error => {
+            stopSessionMediaResources();
+            runtime?.failFinish(error);
+            finishSessionPromise = null;
+            throw error;
+        });
+    return finishSessionPromise;
+}
+
+function prepareFinalUploadPayload(finishAttemptId, completedAt) {
+    const uploadPayload = buildAggregatesPayload(state.sessionData, { forIngest: true });
+    if (!uploadPayload) return null;
+    if (!uploadPayload.ids.invitationCode) {
+        const code = state.sessionData?.ids?.invitationCode
+            || state.runtime?.invitationProtocolMeta?.code
+            || null;
+        if (code) uploadPayload.ids.invitationCode = code;
+    }
+    uploadPayload.lifecycle = {
+        ...(state.sessionData.lifecycle || {}),
+        schemaVersion: 'session_lifecycle.v1',
+        state: 'completed',
+        status: 'completed',
+        completedAt,
+        finishAttemptId
+    };
+    return uploadPayload;
+}
+
+async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
+    const uploadPayload = prepareFinalUploadPayload(finishAttemptId, completedAt);
+    if (!uploadPayload) {
+        const result = {
+            ok: false,
+            attempt: null,
+            error: 'final_payload_build_failed',
+            updatedAt: Date.now()
+        };
+        state.sessionData.upload = result;
+        setUploadStatus('Не удалось подготовить payload для отправки.', 'error');
+        await runtime?.persistCompletedCheckpoint();
+        return result;
+    }
+
+    const uploadResult = await uploadAggregatesWithRetry(uploadPayload, {
+        idempotencyKey: finishAttemptId
+    });
+    state.sessionData.upload = {
+        ...(state.sessionData.upload || {}),
+        ok: uploadResult.ok,
+        attempt: uploadResult.attempt || null,
+        error: uploadResult.error || null,
+        updatedAt: Date.now()
+    };
+    recordSessionEvent(uploadResult.ok ? 'session_final_upload_complete' : 'session_final_upload_failed', {
+        category: uploadResult.ok ? 'upload' : 'technical',
+        severity: uploadResult.ok ? 'info' : 'error',
+        finishAttemptId,
+        attempt: uploadResult.attempt || null,
+        error: uploadResult.error || null
+    });
+    if (uploadResult.ok) {
+        await runtime?.clearCompletedCheckpoint();
+    } else {
+        await runtime?.persistCompletedCheckpoint();
+    }
+    return state.sessionData.upload;
+}
+
+async function retryFinalUpload(runtime) {
+    nextStep(7);
+    setUploadStatus('Повторная отправка итоговых данных...', 'info');
+    const finishAttemptId = state.sessionData.lifecycle?.finishAttemptId;
+    const completedAt = state.sessionData.lifecycle?.completedAt || new Date().toISOString();
+    if (!finishAttemptId) {
+        const result = {
+            ok: false,
+            error: 'finish_attempt_id_missing',
+            updatedAt: Date.now()
+        };
+        state.sessionData.upload = result;
+        await runtime?.persistCompletedCheckpoint();
+        return result;
+    }
+    return uploadFinalPayload(runtime, finishAttemptId, completedAt);
+}
+
+async function finishSessionOnce() {
+    const runtime = getSessionRuntime();
+    const finish = runtime?.beginFinish() || {
+        accepted: true,
+        finishAttemptId: `finish-${state.sessionData?.ids?.session || Date.now()}`
+    };
+    if (!finish.accepted && runtime?.machine?.state === 'completed') {
+        return state.sessionData.upload || { ok: true, idempotent: true };
+    }
+    if (!finish.accepted && runtime?.machine?.state !== 'finishing') {
+        throw new Error('Session finish rejected while a test block is active');
+    }
     setSessionPhase('final', { source: 'finishSession' });
-    recordSessionEvent('session_finish_start');
+    recordSessionEvent('session_finish_start', {
+        finishAttemptId: finish.finishAttemptId
+    });
     state.flags.isRecording = false;
+    try {
+        runtime?.stopContinuousModules('session_finish');
+    } finally {
+        // Teardown does not depend on analytics or final-screen DOM succeeding.
+        stopSessionMediaResources();
+    }
     
     const customDot = document.getElementById('customGazeDot');
     if (customDot) {
@@ -1859,8 +2035,8 @@ export async function finishSession() {
             ? state.sessionData.gazeValidation.metrics.accuracyPx
             : null;
         const heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
-            gridWidth: 96,
-            gridHeight: 54,
+            gridWidth: 32,
+            gridHeight: 18,
             validationRmsPx
         });
         state.sessionData.heatmaps = heatmaps;
@@ -1877,9 +2053,15 @@ export async function finishSession() {
 
     try {
         state.sessionData.attentionMetrics = buildAttentionMetrics(state.sessionData);
+        state.sessionData.blinkSummary =
+            state.sessionData.attentionMetrics?.global?.blinkDynamics || null;
+        state.sessionData.perclosSummary =
+            state.sessionData.attentionMetrics?.global?.perclos || null;
     } catch (e) {
         console.warn('[finishSession] Ошибка расчёта attention metrics:', e);
         state.sessionData.attentionMetrics = null;
+        state.sessionData.blinkSummary = null;
+        state.sessionData.perclosSummary = null;
     }
     
     // === GAZE TRACKER: сброс ===
@@ -1894,16 +2076,15 @@ export async function finishSession() {
     clearTaskContext();
     
     // === QC METRICS: получаем итоговый отчёт ===
+    let finalQcSummary = state.sessionData.qcSummary || null;
     if (state.runtime.qcMetrics) {
         try {
             const qcSummary = state.runtime.qcMetrics.getSummary();
+            finalQcSummary = qcSummary;
             state.sessionData.qcSummary = qcSummary;
             console.log('[QC] Summary:', qcSummary);
             dbg('respiration', 'respiration:summary', summarizeRespirationForDebug(state.sessionData));
-            
-            // Обновляем UI на основе QC результата
-            updateFinalStepWithQC(qcSummary);
-            
+
             // Останавливаем QCMetrics
             state.runtime.qcMetrics.stop();
             console.log('[QC] QCMetrics остановлен');
@@ -1911,97 +2092,50 @@ export async function finishSession() {
             console.warn('[finishSession] Ошибка QC metrics:', e);
         }
     }
+    // The aggregate cards (blinks, PERCLOS, emotion, body pose) do not depend
+    // on QCMetrics and must be rendered for every completed session.
+    updateFinalStepWithQC(finalQcSummary);
     hideQcOverlay();
-    
-    // === CAMERA: останавливаем поток ===
-    if (state.runtime.cameraStream) {
-        state.runtime.cameraStream.getTracks().forEach(track => track.stop());
-        state.runtime.cameraStream = null;
-        console.log('[Camera] Поток камеры остановлен');
-    }
-    
-    // Останавливаем видео элемент
-    const video = document.getElementById('precheckVideo');
-    if (video) {
-        video.srcObject = null;
-    }
     
     // Убираем класс active со step5 до вызова nextStep,
     // чтобы stopPreCheckOnLeave() не вызывался повторно
-    document.getElementById('step5').classList.remove('active');
+    document.getElementById('step5')?.classList.remove('active');
     
     // Показываем интерфейс
-    document.querySelector('.container').style.display = 'block';
-    document.querySelector('.top-bar').style.display = 'flex';
+    const container = document.querySelector('.container');
+    const topBar = document.querySelector('.top-bar');
+    if (container) container.style.display = 'block';
+    if (topBar) topBar.style.display = 'flex';
     
     const completedAt = Date.now();
-    state.sessionData.lifecycle = {
-        status: 'completed',
-        completedAt: completedAt
-    };
+    if (runtime) {
+        // Keep a completed checkpoint until the final ingest confirms receipt.
+        await runtime.completeFinish({ source: 'finishSession' }, { clearCheckpoint: false });
+    } else {
+        state.sessionData.lifecycle = {
+            schemaVersion: 'session_lifecycle.v1',
+            state: 'completed',
+            status: 'completed',
+            finishAttemptId: finish.finishAttemptId,
+            completedAt: new Date(completedAt).toISOString()
+        };
+    }
 
     // Переходим на финальный шаг
     nextStep(7);
     recordSessionEvent('session_finish_complete');
     setUploadStatus('Подготовка к отправке данных...', 'info');
 
-    const uploadPayload = buildAggregatesPayload(state.sessionData, { forIngest: true });
-    if (uploadPayload) {
-        if (!uploadPayload.ids.invitationCode) {
-            const code = state.sessionData?.ids?.invitationCode
-                || state.runtime?.invitationProtocolMeta?.code
-                || null;
-            if (code) uploadPayload.ids.invitationCode = code;
-        }
-        uploadPayload.lifecycle = {
-            status: 'completed',
-            completedAt: new Date(completedAt).toISOString()
-        };
-        const uploadResult = await uploadAggregatesWithRetry(uploadPayload);
-        state.sessionData.upload = {
-            ok: uploadResult.ok,
-            attempt: uploadResult.attempt || null,
-            error: uploadResult.error || null,
-            updatedAt: Date.now()
-        };
-    } else {
-        setUploadStatus('Не удалось подготовить payload для отправки.', 'error');
-    }
+    await uploadFinalPayload(
+        runtime,
+        finish.finishAttemptId,
+        state.sessionData.lifecycle?.completedAt || new Date(completedAt).toISOString()
+    );
 
-    // Дополнительный транспорт (feature-flag): security2 data-sender.
-    // Основной ingest-путь выше остается источником истины.
-    if (isSecureSenderEnabled()) {
-        try {
-            setUploadStatus('Дополнительная защищенная отправка данных...', 'info');
-            const secureResult = await handleSendWithFallback(state.sessionData, {
-                onSending: () => {},
-                onSuccess: () => setUploadStatus('Данные отправлены (основной + защищенный путь).', 'success'),
-                onFallback: () => setUploadStatus('Основной путь выполнен. Защищенный путь недоступен, сохранена локальная копия.', 'error')
-            });
-            state.sessionData.upload = {
-                ...(state.sessionData.upload || {}),
-                secureSender: {
-                    enabled: true,
-                    sent: secureResult.sent === true,
-                    downloaded: secureResult.downloaded === true,
-                    attempts: secureResult.attempts || null,
-                    updatedAt: Date.now()
-                }
-            };
-        } catch (e) {
-            console.warn('[finishSession] Ошибка security2 data-sender:', e);
-            state.sessionData.upload = {
-                ...(state.sessionData.upload || {}),
-                secureSender: {
-                    enabled: true,
-                    sent: false,
-                    downloaded: false,
-                    error: e?.message || String(e),
-                    updatedAt: Date.now()
-                }
-            };
-        }
+    if (state.sessionData.upload?.ok !== true) {
+        await runtime?.persistCompletedCheckpoint();
     }
 
     console.log('[finishSession] Сессия завершена, показан step7, upload flow выполнен');
+    return state.sessionData.upload || { ok: false };
 }

@@ -91,11 +91,11 @@
     </form>
     <div class="sep"></div>
     <form id="registerForm">
-      <label for="regEmail">Регистрация исследователя</label>
+      <label for="regEmail">Регистрация участника</label>
       <input type="email" id="regEmail" autocomplete="off" placeholder="new-user@example.com">
       <label for="regPassword">Пароль</label>
-      <input type="password" id="regPassword" autocomplete="new-password" placeholder="Минимум 8 символов">
-      <p style="font-size:12px;color:#94a3b8;margin-bottom:12px;line-height:1.35;">Публичная регистрация создаёт роль <strong>исследователя</strong>. Роли разработчика и администратора выдаёт только администратор платформы.</p>
+      <input type="password" id="regPassword" autocomplete="new-password" placeholder="Минимум 12 символов">
+      <p style="font-size:12px;color:#94a3b8;margin-bottom:12px;line-height:1.35;">Публичная регистрация создаёт роль <strong>участника</strong>. Доступ исследователя, разработчика и администратора выдаёт администратор проекта или платформы.</p>
       <button type="submit">Создать аккаунт</button>
     </form>
     <a href="../index.html" class="back">← На главную</a>
@@ -142,7 +142,8 @@
         var base = (getApiBase() || '').replace(/\/$/, '');
         fetch(base + '/auth/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Transport': 'cookie' },
+          credentials: 'include',
           body: JSON.stringify({ email: login, password: password })
         })
           .then(function (r) {
@@ -154,10 +155,19 @@
             return r.json();
           })
           .then(function (result) {
+            if (!result || !result.user || result.user.role === 'respondent') {
+              return fetch(base + '/auth/logout', {
+                method: 'POST',
+                credentials: 'include'
+              }).then(function () {
+                throw new Error('Саморегистрация создаёт только аккаунт участника. Доступ исследователя выдаёт администратор проекта.');
+              });
+            }
             try {
               sessionStorage.setItem('emocog_developer_auth', '1');
               localStorage.setItem('emocog_developer_auth', '1');
-              if (result && result.token) localStorage.setItem('emocog_api_token', result.token);
+              localStorage.removeItem('emocog_api_token');
+              if (result && result.csrf_token) sessionStorage.setItem('emocog_csrf_token', result.csrf_token);
               if (result && result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
               localStorage.setItem('emocog_api_base', base);
             } catch (_) {}
@@ -191,7 +201,8 @@
         var base = (getApiBase() || '').replace(/\/$/, '');
         fetch(base + '/auth/register', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Transport': 'cookie' },
+          credentials: 'include',
           body: JSON.stringify({ email: email, password: password })
         })
           .then(function (r) {
@@ -203,24 +214,29 @@
             return r.json();
           })
           .then(function (result) {
-            try {
-              document.getElementById('regEmail').value = '';
-              document.getElementById('regPassword').value = '';
-            } catch (_) {}
-            try {
-              sessionStorage.setItem('emocog_developer_auth', '1');
-              localStorage.setItem('emocog_developer_auth', '1');
-              if (result && result.token) localStorage.setItem('emocog_api_token', result.token);
-              if (result && result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
-              localStorage.setItem('emocog_api_base', base);
-            } catch (_) {}
-            errEl.textContent = 'Аккаунт исследователя создан. Переход в кабинет…';
-            errEl.classList.remove('visible');
-            errEl.style.color = '#10B981';
-            errEl.classList.add('visible');
-            document.getElementById('login').value = email;
-            document.getElementById('password').value = '';
-            window.location.href = '../researcher.html';
+            // Public registration intentionally creates respondent-only accounts.
+            // Do not send them into a staff-only page or retain a staff auth flag.
+            return fetch(base + '/auth/logout', {
+              method: 'POST',
+              credentials: 'include'
+            }).catch(function () {}).then(function () {
+              try {
+                document.getElementById('regEmail').value = '';
+                document.getElementById('regPassword').value = '';
+                sessionStorage.removeItem('emocog_developer_auth');
+                localStorage.removeItem('emocog_developer_auth');
+                localStorage.removeItem('emocog_api_token');
+                localStorage.removeItem('emocog_api_user');
+                sessionStorage.removeItem('emocog_csrf_token');
+                localStorage.setItem('emocog_api_base', base);
+              } catch (_) {}
+              errEl.textContent = 'Аккаунт участника создан. Для прохождения исследования используйте ссылку-приглашение. Доступ исследователя выдаёт администратор проекта.';
+              errEl.classList.remove('visible');
+              errEl.style.color = '#10B981';
+              errEl.classList.add('visible');
+              document.getElementById('login').value = email;
+              document.getElementById('password').value = '';
+            });
           })
           .catch(function (err) {
             errEl.textContent = 'Ошибка регистрации: ' + (err.message || err);

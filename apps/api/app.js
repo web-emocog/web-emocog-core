@@ -11,7 +11,6 @@ const authRoutes = require('./routes/auth');
 const organizationsRoutes = require('./routes/organizations');
 const projectsRoutes = require('./routes/projects');
 const sessionsRoutes = require('./routes/sessions');
-const eventsRoutes = require('./routes/events');
 const ingestRoutes = require('./routes/ingest');
 const exportRoutes = require('./routes/export');
 const analyticsRoutes = require('./routes/analytics_new');
@@ -20,27 +19,34 @@ const invitationsRoutes = require('./routes/invitations_new');
 const experimentsRoutes = require('./routes/experiments');
 const stimuliRoutes = require('./routes/stimuli');
 const proxyMetricsRoutes = require('./routes/proxy_metrics');
+const contractsRoutes = require('./routes/contracts');
 const { getRtAnalyzerHealth } = require('./rt/compute');
+const {
+  buildCorsOptions,
+  createSecurityHeaders,
+  createRouteAwareJsonParser,
+  createRouteRateLimiter,
+  requireSecureTransport,
+} = require('./security/http-security');
 
 const app = express();
-app.use(cors({ origin: true, credentials: true }));
-app.use(cookieParser());
-app.use(express.json({ limit: '10mb' }));
-
-if (config.forceHttps) {
-  app.use((req, res, next) => {
-    if (req.headers['x-forwarded-proto'] !== 'https') {
-      return res.redirect(301, 'https://' + req.headers.host + req.url);
-    }
-    next();
-  });
+app.disable('x-powered-by');
+if (config.http.trustProxyHops > 0) {
+  app.set('trust proxy', config.http.trustProxyHops);
 }
+app.use(createSecurityHeaders());
+if (config.forceHttps) {
+  app.use(requireSecureTransport);
+}
+app.use(cors(buildCorsOptions(config.http.corsOrigins)));
+app.use(cookieParser());
+app.use(createRouteRateLimiter(config.http.rateLimits));
+app.use(createRouteAwareJsonParser(config.http.bodyLimits));
 
 app.use('/auth', authRoutes);
 app.use('/organizations', organizationsRoutes);
 app.use('/projects', projectsRoutes);
 app.use('/sessions', sessionsRoutes);
-app.use('/events', eventsRoutes);
 app.use('/ingest', ingestRoutes);
 app.use('/export', exportRoutes);
 app.use('/analytics', analyticsRoutes);
@@ -49,6 +55,7 @@ app.use('/invitations', invitationsRoutes);
 app.use('/experiments', experimentsRoutes);
 app.use('/stimuli', stimuliRoutes);
 app.use('/proxy-metrics', proxyMetricsRoutes);
+app.use('/contracts', contractsRoutes);
 
 app.get('/health', (req, res) => {
   res.json({
@@ -71,6 +78,45 @@ app.get('/ready', async (req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err);
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Request body is too large',
+      code: 'payload_too_large',
+    });
+  }
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      error: 'Uploaded file is too large',
+      code: 'upload_too_large',
+    });
+  }
+  if (err?.name === 'MulterError') {
+    return res.status(400).json({
+      error: 'Invalid multipart upload',
+      code: 'invalid_upload',
+    });
+  }
+  if (err?.code === 'UNSUPPORTED_STIMULUS_MEDIA_TYPE') {
+    return res.status(415).json({
+      error: err.message,
+      code: 'unsupported_stimulus_media_type',
+    });
+  }
+  if (err?.name === 'ConversionError' && Number.isInteger(err.status)) {
+    return res.status(err.status).json({
+      error: err.message,
+      code: err.code || 'document_conversion_failed',
+    });
+  }
+  if (err?.code === 'cors_origin_denied') {
+    return res.status(403).json({
+      error: 'Origin is not allowed',
+      code: err.code,
+    });
+  }
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON', code: 'invalid_json' });
+  }
   res.status(500).json({ error: 'Internal server error' });
 });
 

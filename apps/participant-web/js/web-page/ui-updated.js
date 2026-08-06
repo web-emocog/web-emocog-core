@@ -11,6 +11,7 @@ import { measureRenderFPS } from './camera.js';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { getParticipantShell } from './protocol-invite-utils.js';
+import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
 
 const MVP_STEP = {
     INTRO: 1,
@@ -142,31 +143,6 @@ export function setLanguage(lang) {
 
 window.setLanguage = setLanguage;
 
-// ── initSecureSenderToggle ───────────────────────────────────────────────────
-
-export function initSecureSenderToggle() {
-    const checkbox = document.getElementById('secureSenderCheckbox');
-    if (!checkbox) return;
-
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery   = params.get('secure_sender');
-    const fromStorage = localStorage.getItem('emocog_use_secure_sender');
-    const initialEnabled =
-        window.__EMOCOG_USE_SECURE_SENDER__ === true ||
-        fromQuery   === '1' ||
-        fromStorage === '1' ||
-        fromStorage === 'true';
-
-    checkbox.checked = initialEnabled;
-    window.__EMOCOG_USE_SECURE_SENDER__ = initialEnabled;
-
-    checkbox.addEventListener('change', () => {
-        const enabled = checkbox.checked;
-        window.__EMOCOG_USE_SECURE_SENDER__ = enabled;
-        localStorage.setItem('emocog_use_secure_sender', enabled ? '1' : '0');
-    });
-}
-
 // ── nextStep ─────────────────────────────────────────────────────────────────
 
 function resolveStepNumber(stepNumber, fallback = 5) {
@@ -258,21 +234,31 @@ window.toggleConsent = toggleConsent;
 
 // ── generateIdsAndProceed ────────────────────────────────────────────────────
 
-function generateUniqueId() {
-    if (crypto.randomUUID) {
-        return crypto.randomUUID();
+export function generateUniqueId() {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
     }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+    if (!globalThis.crypto?.getRandomValues) {
+        throw new Error('Secure random ID generation is unavailable');
+    }
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0'));
+    return [
+        hex.slice(0, 4).join(''),
+        hex.slice(4, 6).join(''),
+        hex.slice(6, 8).join(''),
+        hex.slice(8, 10).join(''),
+        hex.slice(10, 16).join('')
+    ].join('-');
 }
 
-export function generateIdsAndProceed() {
+export async function generateIdsAndProceed() {
     dbg('ui', 'button:consentBtn', { action: 'generateIdsAndProceed' });
-    const sessionId     = generateUniqueId();
-    const participantId = generateUniqueId();
+    const sessionId = state.sessionData.ids.session || generateUniqueId();
+    const participantId = state.sessionData.ids.participant || generateUniqueId();
 
     state.sessionData.ids.session     = sessionId;
     state.sessionData.ids.participant = participantId;
@@ -293,7 +279,34 @@ export function generateIdsAndProceed() {
         idDisplay.innerText = `ID: ${participantId.substring(0, 8)}...`;
     }
 
+    try {
+        await primeParticipantSession({
+            sessionId,
+            invitationCode: state.sessionData.ids.invitationCode || null
+        });
+        await state.runtime?.sessionRuntime?.saveCheckpoint?.();
+        const currentUrl = new URL(window.location.href);
+        if (currentUrl.searchParams.has('code')) {
+            currentUrl.searchParams.delete('code');
+            window.history.replaceState(
+                window.history.state,
+                '',
+                currentUrl.pathname + currentUrl.search + currentUrl.hash
+            );
+        }
+    } catch (error) {
+        const consentError = document.getElementById('consentError');
+        if (consentError) {
+            consentError.style.display = 'block';
+            consentError.textContent = state.currentLang === 'en'
+                ? `The session could not be reserved: ${error.message}`
+                : `Не удалось зарезервировать сессию: ${error.message}`;
+        }
+        return false;
+    }
+
     nextStep(3);
+    return true;
 }
 
 window.generateIdsAndProceed = generateIdsAndProceed;
@@ -320,7 +333,6 @@ export function submitEmail() {
 
     if (errorEl) errorEl.style.display = 'none';
 
-    state.sessionData.user.email = email;
     generateIdsAndProceed();
 }
 
@@ -332,7 +344,8 @@ export function submitForm() {
     const lang = state.currentLang;
     const t = translations[lang];
 
-    const age    = parseInt(document.getElementById('age')?.value ?? document.getElementById('ageInput')?.value);
+    const ageRaw = document.getElementById('age')?.value ?? document.getElementById('ageInput')?.value ?? '';
+    const age    = Number(ageRaw);
     const gender = document.getElementById('gender')?.value ?? document.getElementById('genderSelect')?.value;
 
     const ageError = document.getElementById('ageError');
@@ -411,11 +424,19 @@ export function checkForm() {
     const lang = state.currentLang || 'ru';
     const t    = translations[lang];
 
-    const age    = parseInt(document.getElementById('age')?.value ?? document.getElementById('ageInput')?.value);
+    const ageRaw = String(
+        document.getElementById('age')?.value
+        ?? document.getElementById('ageInput')?.value
+        ?? ''
+    );
+    const age    = Number(ageRaw);
     const gender = document.getElementById('gender')?.value ?? document.getElementById('genderSelect')?.value;
     const edu    = document.getElementById('education')?.value ?? document.getElementById('eduSelect')?.value;
 
-    const ageValid  = !isNaN(age) && age >= 18 && age <= 99;
+    const ageValid  = ageRaw.trim() !== ''
+        && Number.isInteger(age)
+        && age >= 18
+        && age <= 99;
     const allFilled = ageValid
         && gender && gender !== ''
         && edu    && edu    !== '';
@@ -524,8 +545,6 @@ export async function collectTechDataAndProceed(nextStepNumber = MVP_STEP.QUESTI
         const errorMsg = document.getElementById('emailError');
         if (errorMsg) errorMsg.style.display = 'none';
     }
-    if (email) state.sessionData.user.email = email;
-
     state.sessionData.tech.screen = {
         width: window.screen.width,
         height: window.screen.height,
@@ -534,12 +553,22 @@ export async function collectTechDataAndProceed(nextStepNumber = MVP_STEP.QUESTI
         pixelRatio: window.devicePixelRatio || 1
     };
 
+    const ua = String(navigator.userAgent || '');
+    const browserFamily = /Firefox\//.test(ua)
+        ? 'firefox'
+        : (/Edg\//.test(ua)
+            ? 'edge'
+            : (/Chrome\//.test(ua)
+                ? 'chromium'
+                : (/Safari\//.test(ua) ? 'safari' : 'other')));
+    const cores = Number(navigator.hardwareConcurrency);
     state.sessionData.tech.browser = {
-        userAgent: navigator.userAgent,
-        language: navigator.language,
-        platform: navigator.platform,
-        cores: navigator.hardwareConcurrency || 'unknown',
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        family: browserFamily,
+        language: navigator.language || null,
+        mobile: /Android|iPhone|iPad|Mobile/i.test(ua),
+        coresBucket: Number.isFinite(cores)
+            ? (cores <= 2 ? '1-2' : (cores <= 4 ? '3-4' : (cores <= 8 ? '5-8' : '9+')))
+            : 'unknown'
     };
 
     try {
@@ -565,10 +594,18 @@ function renderFinalQcMetrics(payload, lang) {
     }
     const t = translations[lang] || {};
     const attention = payload.attentionMetrics || {};
-    const emotion = payload.emotionMetrics || {};
-    const hasMetrics = attention.averageAttention != null
-        || emotion.averageValence != null
-        || emotion.averageArousal != null;
+    const emotion = payload.emotion_summary || {};
+    const blinkCount = payload.blink_summary?.blinkCount;
+    const perclos = payload.perclos_summary?.windows?.['60s']?.meanPct
+        ?? payload.perclos_summary?.windows?.['30s']?.meanPct;
+    const attentionAverage = Number.isFinite(attention.averageAttention)
+        ? attention.averageAttention
+        : (Number.isFinite(perclos) ? Math.max(0, 1 - perclos / 100) : null);
+    const hasMetrics = attentionAverage != null
+        || emotion.valence_mean != null
+        || emotion.arousal_mean != null
+        || blinkCount != null
+        || perclos != null;
     if (!hasMetrics) {
         container.innerHTML = '';
         return;
@@ -576,15 +613,23 @@ function renderFinalQcMetrics(payload, lang) {
     container.innerHTML = `
         <div class="qc-metric">
             <span class="qc-label">${t.qc_attention_label || 'Внимание'}</span>
-            <span class="qc-value">${Math.round((attention.averageAttention || 0) * 100)}%</span>
+            <span class="qc-value">${Number.isFinite(attentionAverage) ? `${Math.round(attentionAverage * 100)}%` : '—'}</span>
+        </div>
+        <div class="qc-metric">
+            <span class="qc-label">${t.qc_blinks_label || 'Моргания'}</span>
+            <span class="qc-value">${Number.isFinite(blinkCount) ? Math.round(blinkCount) : '—'}</span>
+        </div>
+        <div class="qc-metric">
+            <span class="qc-label">PERCLOS</span>
+            <span class="qc-value">${Number.isFinite(perclos) ? `${Number(perclos).toFixed(1)}%` : '—'}</span>
         </div>
         <div class="qc-metric">
             <span class="qc-label">${t.qc_valence_label || 'Валентность'}</span>
-            <span class="qc-value">${(emotion.averageValence || 0).toFixed(2)}</span>
+            <span class="qc-value">${Number.isFinite(emotion.valence_mean) ? emotion.valence_mean.toFixed(2) : '—'}</span>
         </div>
         <div class="qc-metric">
             <span class="qc-label">${t.qc_arousal_label || 'Возбуждение'}</span>
-            <span class="qc-value">${(emotion.averageArousal || 0).toFixed(2)}</span>
+            <span class="qc-value">${Number.isFinite(emotion.arousal_mean) ? emotion.arousal_mean.toFixed(2) : '—'}</span>
         </div>
     `;
 }

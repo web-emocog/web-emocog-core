@@ -17,7 +17,8 @@ export const EMOTION_CONFIG = {
 
     // ── Лимиты памяти ────────────────────────────────────────────────────
     maxEvents:              1000,
-    maxEmotionSamples:      500,
+    // 5 Hz runtime sampling: keeps one hour without truncating the summary.
+    maxEmotionSamples:      18000,
 
     // ── AU-экстрактор ────────────────────────────────────────────────────
     au: {

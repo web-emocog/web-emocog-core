@@ -1,6 +1,7 @@
 /**
  * Temporary participant-web debug runtime (diagnostics only).
- * Enable: localStorage.setItem('wecog_debug', '1') or ?debug=1
+ * Enable only in an explicitly debug-enabled build:
+ * window.WECOG_ALLOW_DEBUG = true + localStorage wecog_debug=1 or ?debug=1
  * Does not change algorithms, payloads, or server behavior.
  */
 (function initWecogDebugRuntime(global) {
@@ -11,10 +12,13 @@
     const PAGE_LOAD_MS = (typeof performance !== 'undefined' && performance.timeOrigin)
         ? performance.timeOrigin
         : Date.now();
-    const SENSITIVE_KEYS = /^(landmarks|imageData|video|canvas|srcObject|stream|pixels|frame|buffer|rawPath|samples|rppgSession)$/i;
+    const SENSITIVE_KEYS = /^(landmarks|imageData|video|canvas|srcObject|stream|pixels|frame|buffer|rawPath|samples|rppgSession|email|phone|phoneNumber|ip|ipAddress|userAgent|authorization|accessToken|refreshToken|ingestToken|cookie|invitationCode)$/i;
     const LANDMARK_KEYS = /landmark/i;
+    const EMAIL_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+    const BEARER_VALUE = /\bBearer\s+[A-Za-z0-9._~-]+/i;
 
     function isEnabled() {
+        if (global.WECOG_ALLOW_DEBUG !== true) return false;
         try {
             if (global.localStorage && global.localStorage.getItem('wecog_debug') === '1') return true;
         } catch (_) { /* ignore */ }
@@ -91,6 +95,9 @@
         if (depth > 8) return '[MaxDepth]';
         if (value === null || value === undefined) return value;
         if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+            if (typeof value === 'string' && (EMAIL_VALUE.test(value) || BEARER_VALUE.test(value))) {
+                return '[Redacted]';
+            }
             if (typeof value === 'string' && value.length > 500) {
                 return value.slice(0, 500) + '…[truncated]';
             }
@@ -342,8 +349,7 @@
             enabled: isEnabled(),
             exportedAt: new Date().toISOString(),
             relMs: relMs(),
-            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
-            href: typeof location !== 'undefined' ? location.href : null,
+            page: typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : null,
             count: buffer.length,
             events: buffer.slice()
         };
@@ -352,7 +358,11 @@
     function exportDebugBundle() {
         const sessionEvents = (() => {
             try {
-                return global.__WECOG_STATE__?.sessionData?.events?.slice(-200) || null;
+                return sanitize(
+                    global.__WECOG_STATE__?.sessionData?.events?.slice(-200) || null,
+                    0,
+                    'sessionEvents'
+                );
             } catch (_) {
                 return null;
             }
@@ -370,23 +380,28 @@
                 keys: timelines.keys.slice()
             },
             gazeDiagnostics: getGazeDiagnostics(),
-            bpmDiagnostics: global.__WECOG_BPM_DIAG__ || null,
-            visuospatialDiagnostics: global.__WECOG_VIS_DIAG__ || null,
-            runtime: lastRuntimeSnapshot,
+            bpmDiagnostics: sanitize(global.__WECOG_BPM_DIAG__ || null, 0, 'bpmDiagnostics'),
+            visuospatialDiagnostics: sanitize(global.__WECOG_VIS_DIAG__ || null, 0, 'visuospatialDiagnostics'),
+            runtime: sanitize(lastRuntimeSnapshot, 0, 'runtime'),
             sessionEvents,
             overlayTransitions: timelines.overlay.slice(),
             calibrationMetrics: {
-                gazeValidation: global.__WECOG_STATE__?.sessionData?.gazeValidation || null
+                gazeValidation: sanitize(
+                    global.__WECOG_STATE__?.sessionData?.gazeValidation || null,
+                    0,
+                    'gazeValidation'
+                )
             },
             browser: {
-                userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
                 language: typeof navigator !== 'undefined' ? navigator.language : null,
-                platform: typeof navigator !== 'undefined' ? navigator.platform : null,
-                deviceMemory: typeof navigator !== 'undefined' ? navigator.deviceMemory : null,
-                hardwareConcurrency: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : null,
-                screen: typeof screen !== 'undefined'
-                    ? { width: screen.width, height: screen.height, pixelRatio: global.devicePixelRatio }
-                    : null
+                mobile: typeof navigator !== 'undefined'
+                    ? /Android|iPhone|iPad|Mobile/i.test(String(navigator.userAgent || ''))
+                    : null,
+                viewport: {
+                    width: global.innerWidth || null,
+                    height: global.innerHeight || null,
+                    pixelRatio: global.devicePixelRatio || null
+                }
             },
             flags: {
                 eventLossCount,
@@ -442,7 +457,7 @@
     global.WECOG_DEBUG = api;
 
     try {
-        console.info('[WECOG_DEBUG] runtime loaded; enabled=%s (localStorage.wecog_debug=1 or ?debug=1)', isEnabled());
+        console.info('[WECOG_DEBUG] runtime loaded; enabled=%s', isEnabled());
     } catch (_) { /* ignore */ }
 
     if (isEnabled()) {

@@ -1,3 +1,12 @@
+function escapeAdminHtml(value){
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function ExportView(){
   document.getElementById('pageTitle').textContent='Export';
   setChips(['Data','Reports']);
@@ -96,8 +105,8 @@ function AdminView(){
     items.forEach((x)=>allowedDeveloperEmails.add(String(x.email || '').toLowerCase()));
     devEmailsListEl.innerHTML = items.map((x)=>(
       '<div class="card" style="padding:10px;margin-bottom:8px;border:1px solid var(--stroke);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
-      '<div><div style="font-weight:700;">' + (x.email || '—') + '</div><div style="font-size:12px;color:var(--muted);">Added: ' + (x.created_at ? new Date(x.created_at).toLocaleString() : '—') + '</div></div>' +
-      '<button type="button" class="admin-dev-email-remove" data-id="' + x.id + '" style="padding:6px 12px;border-radius:8px;border:1px solid var(--bad);background:rgba(239,68,68,.1);color:var(--bad);cursor:pointer;">Remove</button>' +
+      '<div><div style="font-weight:700;">' + escapeAdminHtml(x.email || '—') + '</div><div style="font-size:12px;color:var(--muted);">Added: ' + escapeAdminHtml(x.created_at ? new Date(x.created_at).toLocaleString() : '—') + '</div></div>' +
+      '<button type="button" class="admin-dev-email-remove" data-id="' + escapeAdminHtml(x.id) + '" style="padding:6px 12px;border-radius:8px;border:1px solid var(--bad);background:rgba(239,68,68,.1);color:var(--bad);cursor:pointer;">Remove</button>' +
       '</div>'
     )).join('');
     devEmailsListEl.querySelectorAll('.admin-dev-email-remove').forEach(btn=>{
@@ -128,12 +137,12 @@ function AdminView(){
       return '<div class="card" style="padding:10px;margin-bottom:8px;border:1px solid var(--stroke);">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
           '<div>' +
-            '<div style="font-weight:700;">' + (u.email || '—') + '</div>' +
-            '<div style="font-size:12px;color:var(--muted);margin-top:3px;">Role: ' + (u.role || '—') + ' · Name: ' + (u.display_name || '—') + '</div>' +
+            '<div style="font-weight:700;">' + escapeAdminHtml(u.email || '—') + '</div>' +
+            '<div style="font-size:12px;color:var(--muted);margin-top:3px;">Role: ' + escapeAdminHtml(u.role || '—') + ' · Name: ' + escapeAdminHtml(u.display_name || '—') + '</div>' +
           '</div>' +
           '<div>' +
             (canGrant
-              ? '<button type="button" class="admin-grant-dev-btn" data-email="' + (u.email || '') + '" style="padding:6px 12px;border-radius:8px;border:1px solid var(--good);background:rgba(16,185,129,.12);color:var(--good);cursor:pointer;">Grant developer</button>'
+              ? '<button type="button" class="admin-grant-dev-btn" data-email="' + escapeAdminHtml(u.email || '') + '" style="padding:6px 12px;border-radius:8px;border:1px solid var(--good);background:rgba(16,185,129,.12);color:var(--good);cursor:pointer;">Grant developer</button>'
               : (isDeveloper
                 ? '<span style="font-size:12px;color:var(--good);font-weight:600;">Developer</span>'
                 : '<span style="font-size:12px;color:var(--warn);">Email not in allowlist</span>')) +
