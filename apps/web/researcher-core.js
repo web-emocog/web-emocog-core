@@ -448,6 +448,9 @@ function clearExperimentBuilderDraft() {
   localStorage.removeItem('emocog_protocol_blocks');
   localStorage.removeItem('emocog_protocol_meta_draft');
   localStorage.removeItem('emocog_protocol_step_draft');
+  if (window.EmocogAnalyticsPlan && typeof window.EmocogAnalyticsPlan.clearDraft === 'function') {
+    window.EmocogAnalyticsPlan.clearDraft();
+  }
 }
 
 function startNewExperimentBuilder() {
@@ -457,7 +460,16 @@ function startNewExperimentBuilder() {
 
 // Event listeners
 //$('#orgSelect').addEventListener('change',e=>{state.org=e.target.value.replace('Org: ','');render();toast('Org changed');});
-$('#projectSelect').addEventListener('change',e=>{state.project=e.target.value.replace('Project: ','');render();toast('Project changed');});
+$('#projectSelect').addEventListener('change',e=>{
+  state.project=e.target.value.replace('Project: ','');
+  try {
+    const workspaceProjects = JSON.parse(localStorage.getItem('emocog_ws_projects')) || [];
+    const workspaceProject = workspaceProjects.find(project => project.name === state.project || String(project.id) === String(e.target.value));
+    if (workspaceProject) localStorage.setItem('emocog_selected_workspace_project_id', String(workspaceProject.id));
+  } catch (_) { /* keep the previously selected project id */ }
+  render();
+  toast(CURRENT_LANG === 'en' ? 'Project changed' : 'Проект изменён');
+});
 // quick export replaced by + Create menu
 
 $('#btnBack').addEventListener('click',()=>history.back());
@@ -798,6 +810,7 @@ bootstrapAdminAccess();
       const list = loadProjects();
       const proj = list.find(p => p.id === selectedProjectId);
       if (proj) {
+        localStorage.setItem('emocog_selected_workspace_project_id', String(proj.id));
         syncProjectToLeftPanel(proj.name);
         if (typeof navigate === 'function') navigate('#/overview');
         // Re-render overview to reflect project
