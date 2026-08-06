@@ -1584,6 +1584,10 @@ body{
   .app{
     grid-template-columns:1fr;
   }
+  .app.analytics-mode,
+  .app.sidebar-collapsed.analytics-mode{
+    grid-template-columns:minmax(0,1fr);
+  }
   .panel.left-panel{
     display:none;
   }
@@ -2723,7 +2727,7 @@ body{
       window.location.replace((window.location.origin || '') + base + 'run_new.html?code=' + encodeURIComponent(code));
     })();
   </script>
-  <script src="auth-guard.js"></script>
+  <!-- <script src="auth-guard.js"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -2741,10 +2745,10 @@ body{
         } catch (_) {}
       });
     })();
-  </script>
+  </script> -->
   
   
-  <!-- <script>
+  <script>
     /* запуск страницы исследователя без логина и API */
     (function () {
       try {
@@ -2752,7 +2756,7 @@ body{
         document.documentElement.style.visibility = '';
       } catch (_) {}
     })();
-  </script> -->
+  </script>
  
   <script src="cognitive-task-protocols.js"></script>
   <script src="../shared/rt-registry.js"></script>
@@ -3044,12 +3048,15 @@ body{
   <div class="toast" id="toast"></div>
   
   <script src="researcher-i18n.js"></script>
-  <script src="researcher-experiments.js"></script>
-  <script src="researcher-analytics.js"></script>
+  <script src="researcher-experiments.js?v=20260805-10"></script>
+  <script src="researcher-analytics.js?v=20260805-2"></script>
+  <script src="researcher-analytics-config.js?v=20260805-2"></script>
+  <script src="researcher-analytics-preview-fixture.js?v=20260805-9"></script>
+  <script src="researcher-analytics-production.js?v=20260805-10"></script>
   <script src="researcher-admin-settings.js"></script>
-  <script src="researcher-builder.js"></script>
-  <script src="researcher-stimuli.js"></script>
-  <script src="researcher-core.js"></script>
-  <script src="researcher-api-bridge.js"></script>
+  <script src="researcher-builder.js?v=20260805-10"></script>
+  <script src="researcher-stimuli.js?v=20260805-10"></script>
+  <script src="researcher-core.js?v=20260805-10"></script>
+  <script src="researcher-api-bridge.js?v=20260805-10"></script>
 </body>
 </html>

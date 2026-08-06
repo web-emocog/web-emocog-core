@@ -198,13 +198,13 @@ function ExperimentsListView() {
         ${experiments.map(exp => `
           <div class="card exp-card" data-id="${exp.id}" style="padding:20px;cursor:pointer;transition:transform 0.1s;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
-              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${exp.title || 'Без названия'}</div>
+              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${exp.title || (CURRENT_LANG === 'en' ? 'Untitled' : 'Без названия')}</div>
               <span style="font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;background:${exp.status==='active'?'rgba(16,185,129,.15)':'rgba(92,102,189,.1)'};color:${exp.status==='active'?'var(--good)':'var(--muted)'};">
                 ${exp.status === 'active' ? t('active') : t('draft')}
               </span>
       </div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
-              ${(exp.blocks||[]).length} блоков · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString()}
+              ${(exp.blocks||[]).length} ${CURRENT_LANG === 'en' ? 'blocks' : 'блоков'} · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString(CURRENT_LANG === 'en' ? 'en-US' : 'ru-RU')}
     </div>
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;flex-wrap:wrap;">
               <button class="quick-btn edit-exp-btn" data-id="${exp.id}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
@@ -235,7 +235,7 @@ function ExperimentsListView() {
           document.execCommand('copy');
           document.body.removeChild(temp);
         }
-        toast('Ссылка для участника скопирована');
+        toast(CURRENT_LANG === 'en' ? 'Participant link copied' : 'Ссылка для участника скопирована');
       });
     });
     content.querySelectorAll('.del-exp-btn').forEach(btn => {

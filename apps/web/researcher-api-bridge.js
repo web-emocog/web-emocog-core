@@ -1,7 +1,7 @@
 /**
  * Researcher UI ↔ platform API adapter (PR25 layer).
  * Does not modify participant flow, ingest schema, or metric naming on the server.
- * Falls back to PR25 demo/mock data when API is unavailable.
+ * Never falls back to demo/mock analytics in the production route.
  */
 (function (global) {
   'use strict';
@@ -348,7 +348,7 @@
         picker.innerHTML = '';
         if (!rows.length) {
           picker.innerHTML = '<option value="">No sessions</option>';
-          hint.textContent = 'API: 0 sessions (demo data below)';
+          hint.textContent = 'API: 0 sessions';
           return;
         }
         rows.forEach((r) => {
@@ -363,7 +363,7 @@
         hint.textContent = `API: ${rows.length} session(s)`;
         if (picker.value) await loadAndApply(picker.value);
       } catch (e) {
-        hint.textContent = 'API error — using demo';
+        hint.textContent = 'API error — no data shown';
         console.warn('[researcher-api-bridge] sessions list', e);
       } finally {
         picker.disabled = false;
@@ -540,8 +540,10 @@
 
   function patchExportView() {
     if (typeof global.ExportView !== 'function' || global.ExportView.__bridgePatched) return;
-    const orig = global.ExportView;
     global.ExportView = function () {
+      if (global.EmocogAnalyticsProduction && typeof global.EmocogAnalyticsProduction.exportView === 'function') {
+        return global.EmocogAnalyticsProduction.exportView();
+      }
       if (hasLiveApi()) {
         if (typeof global.document !== 'undefined') {
           const pageTitle = global.document.getElementById('pageTitle');
@@ -550,7 +552,10 @@
         if (typeof global.setChips === 'function') global.setChips(['Export', 'API']);
         return buildExportViewLive();
       }
-      return orig();
+      const root = document.createElement('div');
+      root.className = 'grid';
+      root.innerHTML = '<div class="card" style="grid-column:span 12;padding:24px;"><h3>Authorization required</h3><p style="margin-top:8px;color:var(--muted);">Sign in as a researcher to export API data. No demo export is generated.</p></div>';
+      return root;
     };
     global.ExportView.__bridgePatched = true;
   }
@@ -563,7 +568,7 @@
       root.innerHTML = `
         <div class="card" style="grid-column:span 12">
           <h3>Sessions</h3>
-          <p>Sign in to load sessions from API. Demo analytics remain on Session Card.</p>
+          <p>Sign in to load sessions from API. No demo session data is shown.</p>
         </div>
       `;
       return root;
@@ -573,7 +578,9 @@
   function init() {
     installSessionsView();
     patchExportView();
-    patchRender();
+    // The production analytics route owns its API/store/view lifecycle explicitly.
+    // Keep the legacy injection only for pages that do not load that module.
+    if (!global.EmocogAnalyticsProduction) patchRender();
     syncProjectsFromApi();
     if (hasLiveApi() && typeof global.toast === 'function') {
       global.toast('Researcher API connected');

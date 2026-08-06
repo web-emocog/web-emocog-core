@@ -1,3 +1,80 @@
+function absoluteStimulusApiUrl(pathValue) {
+  const value = String(pathValue || '').trim();
+  if (!value) return '';
+  if (/^(https?:|blob:|data:)/i.test(value)) return value;
+  const base = String(window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+  return base + (value.startsWith('/') ? value : '/' + value);
+}
+
+async function hydrateApiStimulusPreview(stimulus) {
+  if (!stimulus?.apiContentUrl || typeof fetch !== 'function') return stimulus;
+  const url = absoluteStimulusApiUrl(stimulus.apiContentUrl);
+  if (!url) return stimulus;
+  const response = await fetch(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {} });
+  if (!response.ok) throw typeof apiFailError === 'function' ? await apiFailError(response) : new Error(String(response.status));
+  const blob = await response.blob();
+  if (stimulus.url && String(stimulus.url).startsWith('blob:')) URL.revokeObjectURL(stimulus.url);
+  stimulus.url = URL.createObjectURL(blob);
+  return stimulus;
+}
+
+function convertedStimulusFromApi(row, sourceFile, index, count) {
+  const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  const id = String(row?.id || `converted_${Date.now()}_${index + 1}`);
+  const apiContentUrl = row?.content_url || row?.preview_url || metadata.content_url || metadata.preview_url || `/stimuli/${encodeURIComponent(id)}/content`;
+  return {
+    id,
+    name: row?.name || `${sourceFile.name.replace(/\.[^.]+$/, '')}_${index + 1}.jpg`,
+    type: 'image',
+    info: `${CURRENT_LANG === 'en' ? 'Page' : 'Страница'} ${index + 1}/${count}`,
+    url: absoluteStimulusApiUrl(apiContentUrl),
+    apiContentUrl,
+    apiStimulusId: row?.id || null,
+    mimeType: row?.mime_type || 'image/jpeg',
+    sourceDocumentName: sourceFile.name,
+    sourcePage: metadata.source_page || index + 1,
+    createdAt: row?.created_at || new Date().toISOString()
+  };
+}
+
+function isConvertibleStimulusDocument(file) {
+  return /\.(pdf|ppt|pptx)$/i.test(String(file?.name || ''));
+}
+
+async function convertDocumentToStimuli(file) {
+  if (!isConvertibleStimulusDocument(file)) {
+    throw new Error(CURRENT_LANG === 'en' ? 'Only PDF, PPT, and PPTX files are supported.' : 'Поддерживаются только файлы PDF, PPT и PPTX.');
+  }
+  if (Number(file?.size) > 200 * 1024 * 1024) {
+    throw new Error(CURRENT_LANG === 'en' ? 'The document exceeds the 200 MB limit.' : 'Документ превышает ограничение 200 МБ.');
+  }
+  if (typeof apiPost !== 'function' || typeof resolveApiProjectId !== 'function' || typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken()) {
+    throw new Error(CURRENT_LANG === 'en'
+      ? 'Document conversion requires the backend API and researcher sign-in.'
+      : 'Для конвертации документов нужен backend API и вход исследователя.');
+  }
+  const projectId = await resolveApiProjectId();
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('project_id', String(projectId));
+  const result = await apiPost('/stimuli/convert', formData);
+  const rows = Array.isArray(result?.stimuli)
+    ? result.stimuli
+    : Array.isArray(result?.images)
+      ? result.images
+      : Array.isArray(result?.slides)
+        ? result.slides
+        : [];
+  if (!rows.length) {
+    throw new Error(CURRENT_LANG === 'en'
+      ? 'The conversion service returned no images.'
+      : 'Сервис конвертации не вернул изображения.');
+  }
+  const converted = rows.map((row, index) => convertedStimulusFromApi(row, file, index, rows.length));
+  await Promise.allSettled(converted.map(stimulus => hydrateApiStimulusPreview(stimulus)));
+  return converted;
+}
+
 function StimuliAOIView() {
   document.getElementById('pageTitle').textContent = t('StimuliLibrary');
   setChips([t('Library'), t('Upload')]);
@@ -82,12 +159,6 @@ function StimuliAOIView() {
       <button class="type-pill" data-val="text">${t('text')}</button>
       <button class="type-pill" data-val="slides">${t('slides')}</button>
     </div>
-    <button id="createAoiBtn" style="flex-shrink:0; display:flex; align-items:center; gap:5px; padding:5px 10px; border-radius:8px; border:1px solid var(--stroke); background:rgba(255,255,255,.4); color:var(--muted); font-size:11px; font-weight:500; cursor:pointer; white-space:nowrap;" title="${t('createAoiTemplate')}">
-      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-      </svg>
-      AOI
-    </button>
   `;
   root.appendChild(filterRow);
 
@@ -102,8 +173,8 @@ function StimuliAOIView() {
   uploadArea.innerHTML = `
     <div style="max-width:800px; margin:0 auto; width:100%; display:flex; flex-direction:column; gap:24px;">
       <div style="text-align:center;">
-        <div style="font-size:18px; font-weight:700; color:var(--text); margin-bottom:6px;">Загрузка стимулов</div>
-        <div style="font-size:13px; color:var(--muted);">Выберите тип контента для добавления</div>
+        <div style="font-size:18px; font-weight:700; color:var(--text); margin-bottom:6px;">${CURRENT_LANG === 'en' ? 'Upload stimuli' : 'Загрузка стимулов'}</div>
+        <div style="font-size:13px; color:var(--muted);">${CURRENT_LANG === 'en' ? 'Select the type of content to add' : 'Выберите тип контента для добавления'}</div>
       </div>
 
       <div style="display:flex; gap:20px; flex-wrap:wrap;">
@@ -111,8 +182,8 @@ function StimuliAOIView() {
           <div style="width:54px; height:54px; border-radius:14px; background:var(--accent); color:white; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           </div>
-          <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">Медиафайлы</div>
-          <div style="font-size:12px; color:var(--muted); line-height:1.4;">Картинки, Видео, Аудио, Текст</div>
+          <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">${CURRENT_LANG === 'en' ? 'Media files' : 'Медиафайлы'}</div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4;">${CURRENT_LANG === 'en' ? 'Images, video, audio, text' : 'Картинки, Видео, Аудио, Текст'}</div>
           <input type="file" id="input_media" accept="image/*,video/*,audio/*,text/plain" multiple style="display:none;">
         </div>
 
@@ -120,8 +191,9 @@ function StimuliAOIView() {
           <div style="width:54px; height:54px; border-radius:14px; background:var(--warn); color:white; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
           </div>
-          <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">Презентации и PDF</div>
-          <div style="font-size:12px; color:var(--muted); line-height:1.4;">Автоматически конвертируются в картинки-стимулы</div>
+          <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">${CURRENT_LANG === 'en' ? 'Presentations and PDFs' : 'Презентации и PDF'}</div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4;">${CURRENT_LANG === 'en' ? 'Automatically converted into image stimuli' : 'Автоматически конвертируются в картинки-стимулы'}</div>
+          <div style="font-size:10px;color:var(--muted2);line-height:1.4;margin-top:7px;">${CURRENT_LANG === 'en' ? 'Requires a connection to the conversion API' : 'Требуется подключение к API конвертации'}</div>
           <input type="file" id="input_docs" accept=".pdf,.ppt,.pptx" multiple style="display:none;">
         </div>
       </div>
@@ -133,29 +205,35 @@ function StimuliAOIView() {
   uploadArea.querySelector('#dropzone_docs').onclick = () => uploadArea.querySelector('#input_docs').click();
 
   uploadArea.querySelector('#input_docs').addEventListener('change', async (e) => {
-    const files = e.target.files;
+    const files = Array.from(e.target.files || []);
     if (!files.length) return;
-
-    toast(`Отправка ${files[0].name} на конвертацию`);
-
-    // объект FormData для отправки pptx / pdf по api
-    const formData = new FormData();
-    formData.append('file', files[0]);
-
+    const dropzone = uploadArea.querySelector('#dropzone_docs');
+    dropzone.style.pointerEvents = 'none';
+    dropzone.style.opacity = '.55';
+    let convertedCount = 0;
     try {
-      // const response = await fetch('https://api.pypypy/convert-document', {
-      //   method: 'POST',
-      //   body: formData
-      // });
-      // const result = await response.json();
-
-      setTimeout(() => {
-        toast('Успешно, картинки добавлены в библиотеку.');
-        showTab('library');
-      }, 2000);
-
+      for (const file of files) {
+        toast(CURRENT_LANG === 'en' ? `Converting ${file.name}…` : `Конвертация ${file.name}…`);
+        const converted = await convertDocumentToStimuli(file);
+        stimuliList.unshift(...converted);
+        convertedCount += converted.length;
+        localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+      }
+      renderStimuliGallery(gallery);
+      showTab('library');
+      toast(CURRENT_LANG === 'en'
+        ? `${convertedCount} image stimuli added.`
+        : `Добавлено изображений-стимулов: ${convertedCount}.`);
     } catch (error) {
-      toast('Ошибка при конвертации', 'error');
+      const unavailable = /\b404\b/.test(String(error?.message || ''));
+      const prefix = unavailable
+        ? (CURRENT_LANG === 'en' ? 'The server conversion endpoint is not implemented.' : 'Endpoint конвертации на сервере не реализован.')
+        : (CURRENT_LANG === 'en' ? 'Conversion failed.' : 'Ошибка при конвертации.');
+      toast(`${prefix} ${error?.message || ''}`.trim(), 'error');
+    } finally {
+      dropzone.style.pointerEvents = '';
+      dropzone.style.opacity = '';
+      e.target.value = '';
     }
   });
 
@@ -267,7 +345,7 @@ function StimuliAOIView() {
     const available = stimuliList.filter(s => !(folder.stimuliIds || []).includes(String(s.id)));
 
     const cardsHtml = available.length === 0
-      ? `<div style="grid-column:1/-1;color:var(--muted);font-size:14px;padding:24px 0;text-align:center;">Все стимулы уже добавлены в эту папку</div>`
+      ? `<div style="grid-column:1/-1;color:var(--muted);font-size:14px;padding:24px 0;text-align:center;">${CURRENT_LANG === 'en' ? 'All stimuli have already been added to this folder' : 'Все стимулы уже добавлены в эту папку'}</div>`
       : available.map(s => {
           const thumb = (s.type === 'image' && s.url)
             ? `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#eee;">
@@ -287,7 +365,7 @@ function StimuliAOIView() {
 
     modal.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-        <div style="font-size:18px;font-weight:700;color:var(--text);">Добавить из библиотеки</div>
+        <div style="font-size:18px;font-weight:700;color:var(--text);">${CURRENT_LANG === 'en' ? 'Add from library' : 'Добавить из библиотеки'}</div>
         <button id="modalCloseBtn" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="22" height="22"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -337,6 +415,11 @@ function StimuliAOIView() {
     if (selectedFolder) showTab('folder');
 
     wireStimuliChips();
+    const remoteStimuli = stimuliList.filter(stimulus => stimulus?.apiContentUrl);
+    if (remoteStimuli.length) {
+      Promise.allSettled(remoteStimuli.map(stimulus => hydrateApiStimulusPreview(stimulus)))
+        .then(() => renderStimuliGallery(gallery));
+    }
   }, 0);
 
   filterRow.querySelectorAll('.type-pill').forEach(pill => {
@@ -374,30 +457,45 @@ function StimuliAOIView() {
     }
 
     setTimeout(() => {
-      toast('Медиафайлы добавлены!');
+      toast(CURRENT_LANG === 'en' ? 'Media files added!' : 'Медиафайлы добавлены!');
       showTab('library');
     }, 500);
     this.value = '';
   });
 
 
-  folderView.querySelector('#folderUploadFileInput').addEventListener('change', function(e) {
+  folderView.querySelector('#folderUploadFileInput').addEventListener('change', async function(e) {
     const folder = folders.find(f => f.id === selectedFolder);
     if (!folder) return;
-    const newIds = handleFileUpload(Array.from(e.target.files));
-    folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...newIds.map(String)])];
+    const files = Array.from(e.target.files || []);
+    const documents = files.filter(isConvertibleStimulusDocument);
+    const mediaFiles = files.filter(file => !isConvertibleStimulusDocument(file));
+    const newIds = mediaFiles.length ? handleFileUpload(mediaFiles).map(String) : [];
+    folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...newIds])];
     localStorage.setItem('emocog_folders', JSON.stringify(folders));
-    renderFolderView();
-    this.value = '';
+    try {
+      for (const file of documents) {
+        toast(CURRENT_LANG === 'en' ? `Converting ${file.name}…` : `Конвертация ${file.name}…`);
+        const converted = await convertDocumentToStimuli(file);
+        stimuliList.unshift(...converted);
+        const convertedIds = converted.map(stimulus => String(stimulus.id));
+        folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...convertedIds])];
+        localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+        localStorage.setItem('emocog_folders', JSON.stringify(folders));
+      }
+      renderFolderView();
+      if (documents.length) toast(CURRENT_LANG === 'en' ? 'Document pages added to the folder.' : 'Страницы документов добавлены в папку.');
+    } catch (error) {
+      renderFolderView();
+      toast(`${CURRENT_LANG === 'en' ? 'Conversion failed.' : 'Ошибка при конвертации.'} ${error?.message || ''}`.trim(), 'error');
+    } finally {
+      this.value = '';
+    }
   });
 
   folderView.querySelector('#folderAddLibraryBtn').addEventListener('click', showAddFromLibraryModal);
   folderView.querySelector('#folderUploadBtn').addEventListener('click', () => {
     folderView.querySelector('#folderUploadFileInput').click();
-  });
-
-  filterRow.querySelector('#createAoiBtn').addEventListener('click', () => {
-    toast('AOI template creation – coming soon');
   });
 
   return root;
@@ -493,10 +591,10 @@ function renderStimuliGallery(container) {
     filtered = stimuliList.filter(s => s.type === currentStimuliFilter);
   }
   container.innerHTML = filtered.length === 0
-    ? `<div style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:24px 0;">Нет стимулов. Загрузите файлы через вкладку «Загрузка».</div>`
+    ? `<div style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:24px 0;">${CURRENT_LANG === 'en' ? 'No stimuli. Upload files using the Upload tab.' : 'Нет стимулов. Загрузите файлы через вкладку «Загрузка».'}</div>`
     : filtered.map(s => `
     <div class="stimulus-card ${String(s.id) === String(selectedStimulusId) ? 'selected' : ''}" data-id="${s.id}" style="position:relative;">
-      <button class="stim-delete-btn" data-id="${s.id}" title="Удалить" onclick="event.stopPropagation();deleteStimulusFromLibrary('${s.id}')">
+      <button class="stim-delete-btn" data-id="${s.id}" title="${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}" onclick="event.stopPropagation();deleteStimulusFromLibrary('${s.id}')">
         <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
@@ -523,7 +621,7 @@ function deleteStimulusFromLibrary(id) {
   if (String(selectedStimulusId) === String(id)) selectedStimulusId = null;
   const gallery = document.getElementById('stimuliGallery');
   if (gallery) renderStimuliGallery(gallery);
-  toast('Стимул удалён');
+  toast(CURRENT_LANG === 'en' ? 'Stimulus deleted' : 'Стимул удалён');
 }
 
 function getIconForType(type) {
@@ -546,27 +644,541 @@ function selectStimulus(id) {
   const card = document.querySelector(`.stimulus-card[data-id="${id}"]`);
   if (card) card.classList.add('selected');
 
-  const aoiHtml = `
-    <div class="insp-section">
-      <h4 style="margin-bottom:10px;">${stimulus.name}</h4>
-      <div style="margin-bottom:12px;">
-        ${stimulus.type === 'image' && stimulus.url
-          ? `<img src="${stimulus.url}" style="max-width:100%; border-radius:8px; border:1px solid var(--stroke);">`
-          : `<div style="background:var(--card-bg2,#f0f0f0);border-radius:8px;padding:24px;text-align:center;color:var(--muted);font-size:12px;">${stimulus.type}</div>`}
-      </div>
-      <div class="insp-row" style="margin-bottom:8px;">
-        <span class="label" style="font-size:11px;color:var(--muted);">Тип</span>
-        <span class="value" style="font-size:11px;">${stimulus.type}</span>
-      </div>
-      <div class="insp-row" style="margin-bottom:12px;">
-        <span class="label" style="font-size:11px;color:var(--muted);">Размер</span>
-        <span class="value" style="font-size:11px;">${stimulus.info}</span>
-      </div>
-      <button class="quick-btn" onclick="toast('AOI editor coming soon')" style="width:100%;">${t('createAoiTemplate')}</button>
-    </div>
-  `;
 }
 
 function renderFoldersList() { updateStimuliSubnav(); }
+
+const AOI_SCHEMA_VERSION = '1.2';
+
+function aoiEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+}
+
+function clampAoiCoordinate(value) {
+  const number = Number(value);
+  return Math.round(Math.min(1, Math.max(0, Number.isFinite(number) ? number : 0)) * 10000) / 10000;
+}
+
+function normalizeAoi(aoi, stimulusId, fallbackOrder = 1) {
+  if (!aoi || (aoi.shape !== 'rectangle' && aoi.shape !== 'polygon')) return null;
+  const points = (Array.isArray(aoi.points) ? aoi.points : []).map(point => ({
+    x: clampAoiCoordinate(point?.x),
+    y: clampAoiCoordinate(point?.y)
+  }));
+  if (aoi.shape === 'rectangle' && points.length !== 2) return null;
+  if (aoi.shape === 'polygon' && points.length < 3) return null;
+  if (aoi.shape === 'rectangle') {
+    points.sort((left, right) => left.x - right.x || left.y - right.y);
+    const minX = Math.min(points[0].x, points[1].x);
+    const minY = Math.min(points[0].y, points[1].y);
+    const maxX = Math.max(points[0].x, points[1].x);
+    const maxY = Math.max(points[0].y, points[1].y);
+    points[0] = { x: minX, y: minY };
+    points[1] = { x: maxX, y: maxY };
+  }
+  const startMs = Math.max(0, parseInt(aoi.validityInterval?.startMs, 10) || 0);
+  const endRaw = parseInt(aoi.validityInterval?.endMs, 10);
+  const endMs = Number.isFinite(endRaw) && endRaw > startMs ? endRaw : Math.max(startMs + 1, 1000);
+  const orderRaw = parseInt(aoi.order, 10);
+  return {
+    id: String(aoi.id || `aoi-${Date.now()}`),
+    name: String(aoi.name || (aoi.shape === 'rectangle'
+      ? (CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI')
+      : (CURRENT_LANG === 'en' ? 'Polygon AOI' : 'Полигон AOI'))),
+    shape: aoi.shape,
+    points,
+    order: Number.isFinite(orderRaw) && orderRaw > 0 ? orderRaw : fallbackOrder,
+    isTarget: aoi.isTarget === true,
+    validityInterval: { startMs, endMs }
+  };
+}
+
+function persistStimulusAois(stimulus, aois) {
+  stimulus.aois = (aois || []).map((aoi, index) => normalizeAoi(aoi, stimulus.id, index + 1)).filter(Boolean);
+  stimulus.aoiSchemaVersion = AOI_SCHEMA_VERSION;
+  localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+}
+
+// Legacy import only: new protocols keep AOIs in each blockConfig.aoiDefinitions.
+function applyStimuliDefinitionsToLibrary(definitions) {
+  if (!definitions || typeof definitions !== 'object') return;
+  let changed = false;
+  Object.entries(definitions).forEach(([stimulusId, definition]) => {
+    if (!definition || typeof definition !== 'object') return;
+    let stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
+    if (!stimulus) {
+      stimulus = { id: stimulusId, name: stimulusId, type: definition.type || 'unknown', info: CURRENT_LANG === 'en' ? 'Protocol stimulus' : 'Стимул протокола' };
+      stimuliList.push(stimulus);
+    }
+    stimulus.type = definition.type || stimulus.type;
+    stimulus.aoiSchemaVersion = definition.schemaVersion || AOI_SCHEMA_VERSION;
+    stimulus.aois = (definition.aois || []).map((aoi, index) => normalizeAoi(aoi, stimulusId, index + 1)).filter(Boolean);
+    changed = true;
+  });
+  if (changed) localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+}
+
+function openAoiEditor(stimulusId, options = {}) {
+  const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
+  if (!stimulus) return;
+
+  const hasScopedAois = Object.prototype.hasOwnProperty.call(options, 'initialAois');
+  let aois = (hasScopedAois ? options.initialAois : stimulus.aois || [])
+    .map((aoi, index) => normalizeAoi(aoi, stimulus.id, index + 1))
+    .filter(Boolean)
+    .sort((left, right) => left.order - right.order);
+  aois.forEach((aoi, index) => { aoi.order = index + 1; });
+  let selectedId = aois[0]?.id || null;
+  let drawMode = null;
+  let rectangleStart = null;
+  let rectangleCurrent = null;
+  let draftPoints = [];
+  let polygonCursor = null;
+  let dragging = null;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,.65);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'width:min(1180px,98vw);height:min(760px,94vh);background:rgba(255,255,255,.97);border:1px solid rgba(92,102,189,.22);border-radius:20px;box-shadow:0 28px 72px rgba(10,15,35,.30);display:flex;flex-direction:column;overflow:hidden;';
+  modal.innerHTML = `
+    <div style="padding:14px 18px;border-bottom:1px solid var(--stroke);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <div><div style="font-size:16px;font-weight:800;color:var(--text);">AOI · ${aoiEscape(stimulus.name)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">${aoiEscape(stimulus.id)} · ${CURRENT_LANG === 'en' ? 'schema' : 'схема'} ${AOI_SCHEMA_VERSION}</div></div>
+      <button id="aoiClose" class="quick-btn" aria-label="${CURRENT_LANG === 'en' ? 'Close' : 'Закрыть'}">✕</button>
+    </div>
+    <div style="padding:10px 14px;border-bottom:1px solid var(--stroke);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <button id="aoiRect" class="quick-btn">▭ ${CURRENT_LANG === 'en' ? 'Rectangle' : 'Прямоугольник'}</button>
+      <button id="aoiPoly" class="quick-btn">⬠ ${CURRENT_LANG === 'en' ? 'Polygon' : 'Полигон'}</button>
+      <button id="aoiFinishPoly" class="quick-btn" style="display:none;background:rgba(16,185,129,.12);color:var(--good);">✓ ${CURRENT_LANG === 'en' ? 'Finish' : 'Завершить'}</button>
+      <button id="aoiCancelDraw" class="quick-btn" style="display:none;">${CURRENT_LANG === 'en' ? 'Cancel drawing' : 'Отменить рисование'}</button>
+      <span id="aoiHint" style="font-size:11px;color:var(--muted);margin-left:auto;">${CURRENT_LANG === 'en' ? 'Drag an AOI to move; use corner handles to resize' : 'Тяните AOI для перемещения, угловые маркеры — для масштаба'}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 310px;flex:1;min-height:0;">
+      <div id="aoiViewport" style="padding:18px;display:flex;align-items:center;justify-content:center;background:rgba(241,245,249,.82);min-width:0;min-height:0;overflow:hidden;">
+        <div id="aoiStage" style="position:relative;width:100%;aspect-ratio:16/9;background:#fff;border:1px solid #d8deea;border-radius:12px;box-shadow:0 8px 24px rgba(30,41,59,.10);overflow:hidden;user-select:none;touch-action:none;flex:none;">
+          ${stimulus.type === 'image' && stimulus.url
+            ? `<img id="aoiMedia" src="${aoiEscape(stimulus.url)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
+            : stimulus.type === 'video' && stimulus.url
+              ? `<video id="aoiMedia" src="${aoiEscape(stimulus.url)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`
+              : options.previewHtml
+                ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;">${options.previewHtml}</div>`
+                : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#111827;font-size:42px;font-weight:800;">${aoiEscape(stimulus.text || stimulus.name)}</div>`}
+          <svg id="aoiSvg" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;"></svg>
+        </div>
+      </div>
+      <aside style="border-left:1px solid var(--stroke);padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;">
+        <div><div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:7px;">AOI</div><div id="aoiList" style="display:flex;flex-direction:column;gap:6px;"></div></div>
+        <div id="aoiForm" style="display:none;border-top:1px solid var(--stroke);padding-top:12px;flex-direction:column;gap:9px;">
+          <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Name' : 'Название'}<input id="aoiName" type="text" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px;border:1px solid var(--stroke);border-radius:8px;"></label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);"><input id="aoiTarget" type="checkbox"> ${CURRENT_LANG === 'en' ? 'Target area' : 'Целевая зона'}</label>
+          <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Gaze sequence number' : 'Номер в последовательности взгляда'}<select id="aoiOrder" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;background:#fff;"></select></label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <label style="font-size:11px;color:var(--muted);">startMs<input id="aoiStart" type="number" min="0" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
+            <label style="font-size:11px;color:var(--muted);">endMs<input id="aoiEnd" type="number" min="1" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
+          </div>
+          <div id="aoiCoordinates" style="font:10px/1.45 var(--mono,monospace);color:var(--muted);background:rgba(92,102,189,.06);padding:8px;border-radius:8px;word-break:break-all;"></div>
+          <div style="display:flex;gap:7px;"><button id="aoiSave" class="quick-btn" style="flex:1;background:var(--accent);color:white;border-color:var(--accent);">${CURRENT_LANG === 'en' ? 'Save changes' : 'Сохранить изменения'}</button><button id="aoiDelete" class="quick-btn" style="color:var(--bad);">${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}</button></div>
+        </div>
+      </aside>
+    </div>`;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const svg = modal.querySelector('#aoiSvg');
+  const stage = modal.querySelector('#aoiStage');
+  const viewport = modal.querySelector('#aoiViewport');
+  const list = modal.querySelector('#aoiList');
+  const form = modal.querySelector('#aoiForm');
+  const finishButton = modal.querySelector('#aoiFinishPoly');
+  const cancelButton = modal.querySelector('#aoiCancelDraw');
+  const hint = modal.querySelector('#aoiHint');
+  const pointFromEvent = event => {
+    const rect = stage.getBoundingClientRect();
+    return { x: clampAoiCoordinate((event.clientX - rect.left) / rect.width), y: clampAoiCoordinate((event.clientY - rect.top) / rect.height) };
+  };
+  const newId = shape => {
+    const prefix = `aoi-${shape === 'rectangle' ? 'rect' : 'poly'}-`;
+    let index = aois.length + 1;
+    while (aois.some(aoi => aoi.id === prefix + index)) index += 1;
+    return prefix + index;
+  };
+  const selectedAoi = () => aois.find(aoi => aoi.id === selectedId) || null;
+  let stimulusAspectRatio = 16 / 9;
+  function fitStage() {
+    const bounds = viewport.getBoundingClientRect();
+    const availableWidth = Math.max(1, bounds.width - 36);
+    const availableHeight = Math.max(1, bounds.height - 36);
+    let width = availableWidth;
+    let height = width / stimulusAspectRatio;
+    if (height > availableHeight) {
+      height = availableHeight;
+      width = height * stimulusAspectRatio;
+    }
+    stage.style.width = `${width}px`;
+    stage.style.height = `${height}px`;
+    stage.style.aspectRatio = 'auto';
+  }
+  const media = modal.querySelector('#aoiMedia');
+  const useMediaRatio = () => {
+    const width = media?.naturalWidth || media?.videoWidth;
+    const height = media?.naturalHeight || media?.videoHeight;
+    if (width > 0 && height > 0) stimulusAspectRatio = width / height;
+    fitStage();
+  };
+  if (media) {
+    media.addEventListener(stimulus.type === 'video' ? 'loadedmetadata' : 'load', useMediaRatio, { once: true });
+    if (media.complete || media.readyState >= 1) useMediaRatio();
+  }
+  window.addEventListener('resize', fitStage);
+  requestAnimationFrame(fitStage);
+
+  function saveAll() {
+    aois = aois
+      .map((aoi, index) => normalizeAoi(aoi, stimulus.id, index + 1))
+      .filter(Boolean)
+      .sort((left, right) => left.order - right.order);
+    aois.forEach((aoi, index) => { aoi.order = index + 1; });
+    if (hasScopedAois && typeof options.onPersist === 'function') {
+      options.onPersist(aois);
+    } else {
+      persistStimulusAois(stimulus, aois);
+    }
+    const gallery = document.getElementById('stimuliGallery');
+    if (gallery) renderStimuliGallery(gallery);
+    if (typeof options.onChange === 'function') options.onChange(stimulus, aois);
+  }
+  function captureSelectedFormDraft() {
+    const aoi = selectedAoi();
+    if (!aoi || form.style.display === 'none') return;
+    const name = modal.querySelector('#aoiName').value.trim();
+    const startMs = parseInt(modal.querySelector('#aoiStart').value, 10);
+    const endMs = parseInt(modal.querySelector('#aoiEnd').value, 10);
+    if (name) aoi.name = name;
+    aoi.isTarget = modal.querySelector('#aoiTarget').checked;
+    if (Number.isFinite(startMs) && startMs >= 0 && Number.isFinite(endMs) && endMs > startMs) {
+      aoi.validityInterval = { startMs, endMs };
+    }
+  }
+  function moveAoiToOrder(aoiId, requestedOrder) {
+    captureSelectedFormDraft();
+    const fromIndex = aois.findIndex(aoi => aoi.id === aoiId);
+    const toIndex = Math.max(0, Math.min(aois.length - 1, requestedOrder - 1));
+    if (fromIndex < 0 || fromIndex === toIndex) return false;
+    const [moved] = aois.splice(fromIndex, 1);
+    aois.splice(toIndex, 0, moved);
+    aois.forEach((aoi, index) => { aoi.order = index + 1; });
+    saveAll();
+    renderAll();
+    return true;
+  }
+  function moveAoiRelative(aoiId, targetId, placeAfter) {
+    captureSelectedFormDraft();
+    const fromIndex = aois.findIndex(aoi => aoi.id === aoiId);
+    if (fromIndex < 0 || aoiId === targetId) return false;
+    const [moved] = aois.splice(fromIndex, 1);
+    const targetIndex = aois.findIndex(aoi => aoi.id === targetId);
+    if (targetIndex < 0) {
+      aois.splice(fromIndex, 0, moved);
+      return false;
+    }
+    aois.splice(targetIndex + (placeAfter ? 1 : 0), 0, moved);
+    aois.forEach((aoi, index) => { aoi.order = index + 1; });
+    saveAll();
+    renderAll();
+    return true;
+  }
+  function clearDropIndicators() {
+    list.querySelectorAll('.aoi-list-row').forEach(row => {
+      row.style.borderTopColor = 'transparent';
+      row.style.borderBottomColor = 'transparent';
+      row.style.opacity = '1';
+    });
+  }
+  function renderList() {
+    list.innerHTML = aois.length ? aois.map(aoi => `<div class="aoi-list-row" data-id="${aoiEscape(aoi.id)}" style="display:flex;align-items:stretch;gap:4px;border-top:2px solid transparent;border-bottom:2px solid transparent;transition:border-color .12s ease,opacity .12s ease;">
+      <span class="aoi-drag-handle" draggable="true" data-id="${aoiEscape(aoi.id)}" title="${CURRENT_LANG === 'en' ? 'Drag to change order' : 'Перетащите, чтобы изменить порядок'}" aria-label="${CURRENT_LANG === 'en' ? 'Drag to change order' : 'Перетащите, чтобы изменить порядок'}" style="width:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;letter-spacing:-4px;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>
+      <button class="aoi-list-item quick-btn" data-id="${aoiEscape(aoi.id)}" style="min-width:0;flex:1;justify-content:flex-start;text-align:left;${aoi.id === selectedId ? 'border-color:rgba(92,102,189,.45);background:rgba(92,102,189,.07);box-shadow:0 2px 8px rgba(92,102,189,.08);' : ''}"><span style="width:18px;height:18px;border-radius:6px;background:${aoi.isTarget ? 'rgba(16,185,129,.12)' : 'rgba(92,102,189,.10)'};color:${aoi.isTarget ? 'var(--good)' : 'var(--accent)'};border:1px solid ${aoi.isTarget ? 'rgba(16,185,129,.24)' : 'rgba(92,102,189,.20)'};display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">${aoi.order}</span><span style="color:${aoi.isTarget ? 'var(--good)' : 'var(--muted)'};font-size:11px;">${aoi.shape === 'rectangle' ? '▭' : '⬠'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${aoiEscape(aoi.name)}</span></button>
+    </div>`).join('') : `<div style="font-size:11px;color:var(--muted);padding:8px 0;">${CURRENT_LANG === 'en' ? 'No AOIs yet' : 'AOI пока нет'}</div>`;
+    list.querySelectorAll('.aoi-list-item').forEach(button => button.addEventListener('click', () => { selectedId = button.dataset.id; renderAll(); }));
+    list.querySelectorAll('.aoi-drag-handle').forEach(handle => {
+      handle.addEventListener('dragstart', event => {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', handle.dataset.id);
+        requestAnimationFrame(() => { handle.closest('.aoi-list-row').style.opacity = '.45'; });
+      });
+      handle.addEventListener('dragend', clearDropIndicators);
+    });
+    list.querySelectorAll('.aoi-list-row').forEach(row => {
+      row.addEventListener('dragover', event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        clearDropIndicators();
+        const placeAfter = event.clientY >= row.getBoundingClientRect().top + row.offsetHeight / 2;
+        row.dataset.dropPosition = placeAfter ? 'after' : 'before';
+        row.style[placeAfter ? 'borderBottomColor' : 'borderTopColor'] = 'var(--accent)';
+      });
+      row.addEventListener('drop', event => {
+        event.preventDefault();
+        const aoiId = event.dataTransfer.getData('text/plain');
+        const placeAfter = row.dataset.dropPosition === 'after';
+        clearDropIndicators();
+        if (moveAoiRelative(aoiId, row.dataset.id, placeAfter)) {
+          toast(CURRENT_LANG === 'en' ? 'AOI order updated' : 'Порядок AOI обновлён');
+        }
+      });
+    });
+  }
+  function renderForm() {
+    const aoi = selectedAoi();
+    form.style.display = aoi ? 'flex' : 'none';
+    if (!aoi) return;
+    modal.querySelector('#aoiName').value = aoi.name;
+    modal.querySelector('#aoiTarget').checked = aoi.isTarget;
+    modal.querySelector('#aoiOrder').innerHTML = aois.map((item, index) => `<option value="${index + 1}" ${aoi.order === index + 1 ? 'selected' : ''}>${index + 1}</option>`).join('');
+    modal.querySelector('#aoiStart').value = aoi.validityInterval.startMs;
+    modal.querySelector('#aoiEnd').value = aoi.validityInterval.endMs;
+    modal.querySelector('#aoiCoordinates').textContent = aoi.points.map(point => `(${point.x.toFixed(4)}, ${point.y.toFixed(4)})`).join(' · ');
+  }
+  function shapeMarkup(aoi) {
+    const selected = aoi.id === selectedId;
+    const color = aoi.isTarget ? '#10b981' : '#5c66bd';
+    const points = aoi.points.map(point => `${point.x * 1000},${point.y * 1000}`).join(' ');
+    const minX = Math.min(...aoi.points.map(point => point.x)) * 1000;
+    const minY = Math.min(...aoi.points.map(point => point.y)) * 1000;
+    const maxX = Math.max(...aoi.points.map(point => point.x)) * 1000;
+    const maxY = Math.max(...aoi.points.map(point => point.y)) * 1000;
+    let markup = aoi.shape === 'rectangle'
+      ? `<rect data-select="${aoiEscape(aoi.id)}" x="${aoi.points[0].x * 1000}" y="${aoi.points[0].y * 1000}" width="${(aoi.points[1].x - aoi.points[0].x) * 1000}" height="${(aoi.points[1].y - aoi.points[0].y) * 1000}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`
+      : `<polygon data-select="${aoiEscape(aoi.id)}" points="${points}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`;
+    const labelX = aoi.points.reduce((sum, point) => sum + point.x, 0) / aoi.points.length * 1000;
+    const labelY = aoi.points.reduce((sum, point) => sum + point.y, 0) / aoi.points.length * 1000;
+    markup += `<text x="${labelX}" y="${labelY + 7}" text-anchor="middle" font-size="22" font-weight="500" fill="${color}" stroke="#ffffff" stroke-width="4" paint-order="stroke" pointer-events="none">${aoi.order}</text>`;
+    if (selected && !drawMode) {
+      markup += `<rect x="${minX}" y="${minY}" width="${maxX - minX}" height="${maxY - minY}" fill="none" stroke="${color}" stroke-opacity=".55" stroke-width="2" stroke-dasharray="8 7" pointer-events="none"/>`;
+      const scaleHandles = [
+        ['nw', minX, minY, 'nwse-resize'], ['ne', maxX, minY, 'nesw-resize'],
+        ['se', maxX, maxY, 'nwse-resize'], ['sw', minX, maxY, 'nesw-resize']
+      ];
+      if (aoi.shape === 'polygon') markup += aoi.points.map((point, index) => `<circle data-handle="${index}" cx="${point.x * 1000}" cy="${point.y * 1000}" r="6" fill="#fff" stroke="${color}" stroke-width="3" style="cursor:grab;"><title>${CURRENT_LANG === 'en' ? 'Move vertex' : 'Переместить вершину'}</title></circle>`).join('');
+      markup += scaleHandles.map(([corner, x, y, cursor]) => `<rect data-scale-handle="${corner}" x="${x - 8}" y="${y - 8}" width="16" height="16" rx="3" fill="#fff" stroke="${color}" stroke-width="3" style="cursor:${cursor};"><title>${CURRENT_LANG === 'en' ? 'Resize AOI' : 'Изменить размер AOI'}</title></rect>`).join('');
+    }
+    return markup;
+  }
+  function renderSvg() {
+    let markup = aois.map(shapeMarkup).join('');
+    if (drawMode === 'rectangle' && rectangleStart && rectangleCurrent) {
+      const x = Math.min(rectangleStart.x, rectangleCurrent.x) * 1000;
+      const y = Math.min(rectangleStart.y, rectangleCurrent.y) * 1000;
+      const width = Math.abs(rectangleCurrent.x - rectangleStart.x) * 1000;
+      const height = Math.abs(rectangleCurrent.y - rectangleStart.y) * 1000;
+      markup += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f97316" fill-opacity=".10" stroke="#ffffff" stroke-opacity=".9" stroke-width="8" stroke-dasharray="15 10" pointer-events="none"/>`;
+      markup += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="none" stroke="#f97316" stroke-width="4" stroke-dasharray="15 10" pointer-events="none"/>`;
+    }
+    if (drawMode === 'polygon' && draftPoints.length) {
+      const previewPoints = polygonCursor ? [...draftPoints, polygonCursor] : draftPoints;
+      const points = previewPoints.map(point => `${point.x * 1000},${point.y * 1000}`).join(' ');
+      markup += `<polyline points="${points}" fill="none" stroke="#ffffff" stroke-opacity=".9" stroke-width="8" stroke-dasharray="15 10" pointer-events="none"/>`;
+      markup += `<polyline points="${points}" fill="none" stroke="#f97316" stroke-width="4" stroke-dasharray="15 10" pointer-events="none"/>`;
+      markup += draftPoints.map(point => `<circle cx="${point.x * 1000}" cy="${point.y * 1000}" r="7" fill="#ffffff" stroke="#f97316" stroke-width="3.5" pointer-events="none"/>`).join('');
+    }
+    svg.innerHTML = markup;
+  }
+  function renderAll() { renderList(); renderForm(); renderSvg(); }
+  function setDrawMode(mode) {
+    drawMode = mode;
+    rectangleStart = null;
+    rectangleCurrent = null;
+    draftPoints = [];
+    polygonCursor = null;
+    finishButton.style.display = mode === 'polygon' ? '' : 'none';
+    cancelButton.style.display = mode ? '' : 'none';
+    hint.textContent = mode === 'rectangle'
+      ? (CURRENT_LANG === 'en' ? 'Drag across the preview' : 'Протяните мышью по preview')
+      : mode === 'polygon'
+        ? (CURRENT_LANG === 'en' ? 'Click at least 3 vertices' : 'Поставьте минимум 3 вершины')
+        : (CURRENT_LANG === 'en' ? 'Drag the AOI to move it; use corner handles to resize' : 'Перетаскивайте AOI для перемещения, угловые маркеры — для масштаба');
+    renderSvg();
+  }
+  function finishPolygon() {
+    if (draftPoints.length < 3) return toast(CURRENT_LANG === 'en' ? 'Polygon needs at least 3 points' : 'Полигону нужно минимум 3 точки');
+    const aoi = normalizeAoi({ id: newId('polygon'), name: CURRENT_LANG === 'en' ? 'Polygon AOI' : 'Полигон AOI', shape: 'polygon', points: draftPoints, order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false, validityInterval: { startMs: 0, endMs: 1000 } }, stimulus.id, aois.length + 1);
+    aois.push(aoi); selectedId = aoi.id; setDrawMode(null); saveAll(); renderAll();
+  }
+
+  modal.querySelector('#aoiRect').addEventListener('click', () => setDrawMode('rectangle'));
+  modal.querySelector('#aoiPoly').addEventListener('click', () => setDrawMode('polygon'));
+  finishButton.addEventListener('click', finishPolygon);
+  cancelButton.addEventListener('click', () => setDrawMode(null));
+  svg.addEventListener('pointerdown', event => {
+    const scaleHandle = event.target.closest('[data-scale-handle]');
+    const handle = event.target.closest('[data-handle]');
+    const select = event.target.closest('[data-select]');
+    if (!drawMode && scaleHandle && selectedAoi()) {
+      const originalPoints = selectedAoi().points.map(point => ({ ...point }));
+      dragging = {
+        type: 'scale',
+        corner: scaleHandle.dataset.scaleHandle,
+        originalPoints,
+        bounds: {
+          minX: Math.min(...originalPoints.map(point => point.x)),
+          minY: Math.min(...originalPoints.map(point => point.y)),
+          maxX: Math.max(...originalPoints.map(point => point.x)),
+          maxY: Math.max(...originalPoints.map(point => point.y))
+        },
+        pointerId: event.pointerId
+      };
+      svg.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (!drawMode && handle && selectedAoi()) {
+      dragging = { type: 'vertex', index: parseInt(handle.dataset.handle, 10), pointerId: event.pointerId };
+      svg.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (!drawMode && select) {
+      selectedId = select.dataset.select;
+      const aoi = selectedAoi();
+      dragging = {
+        type: 'move',
+        start: pointFromEvent(event),
+        originalPoints: aoi.points.map(point => ({ ...point })),
+        pointerId: event.pointerId
+      };
+      svg.setPointerCapture(event.pointerId);
+      renderAll();
+      return;
+    }
+    if (drawMode === 'rectangle') {
+      rectangleStart = pointFromEvent(event);
+      rectangleCurrent = rectangleStart;
+      svg.setPointerCapture(event.pointerId);
+      renderSvg();
+    } else if (drawMode === 'polygon') {
+      draftPoints.push(pointFromEvent(event));
+      polygonCursor = pointFromEvent(event);
+      renderSvg();
+    }
+  });
+  svg.addEventListener('pointermove', event => {
+    if (dragging && selectedAoi()) {
+      const aoi = selectedAoi();
+      const current = pointFromEvent(event);
+      if (dragging.type === 'vertex') {
+        aoi.points[dragging.index] = current;
+      } else if (dragging.type === 'move') {
+        const minX = Math.min(...dragging.originalPoints.map(point => point.x));
+        const minY = Math.min(...dragging.originalPoints.map(point => point.y));
+        const maxX = Math.max(...dragging.originalPoints.map(point => point.x));
+        const maxY = Math.max(...dragging.originalPoints.map(point => point.y));
+        const dx = Math.max(-minX, Math.min(1 - maxX, current.x - dragging.start.x));
+        const dy = Math.max(-minY, Math.min(1 - maxY, current.y - dragging.start.y));
+        aoi.points = dragging.originalPoints.map(point => ({
+          x: clampAoiCoordinate(point.x + dx),
+          y: clampAoiCoordinate(point.y + dy)
+        }));
+      } else if (dragging.type === 'scale') {
+        const bounds = dragging.bounds;
+        const west = dragging.corner.includes('w');
+        const north = dragging.corner.includes('n');
+        const newMinX = west ? Math.min(current.x, bounds.maxX - 0.005) : bounds.minX;
+        const newMaxX = west ? bounds.maxX : Math.max(current.x, bounds.minX + 0.005);
+        const newMinY = north ? Math.min(current.y, bounds.maxY - 0.005) : bounds.minY;
+        const newMaxY = north ? bounds.maxY : Math.max(current.y, bounds.minY + 0.005);
+        const sourceWidth = Math.max(0.0001, bounds.maxX - bounds.minX);
+        const sourceHeight = Math.max(0.0001, bounds.maxY - bounds.minY);
+        aoi.points = dragging.originalPoints.map(point => ({
+          x: clampAoiCoordinate(newMinX + ((point.x - bounds.minX) / sourceWidth) * (newMaxX - newMinX)),
+          y: clampAoiCoordinate(newMinY + ((point.y - bounds.minY) / sourceHeight) * (newMaxY - newMinY))
+        }));
+      }
+      if (selectedAoi().shape === 'rectangle') {
+        const normalized = normalizeAoi(selectedAoi(), stimulus.id);
+        selectedAoi().points = normalized.points;
+      }
+      renderForm(); renderSvg();
+      return;
+    }
+    if (drawMode === 'rectangle' && rectangleStart) {
+      rectangleCurrent = pointFromEvent(event);
+      renderSvg();
+      return;
+    }
+    if (drawMode === 'polygon') {
+      polygonCursor = pointFromEvent(event);
+      renderSvg();
+    }
+  });
+  svg.addEventListener('pointerup', event => {
+    if (dragging) { dragging = null; saveAll(); renderAll(); return; }
+    if (drawMode !== 'rectangle' || !rectangleStart) return;
+    const end = rectangleCurrent || pointFromEvent(event);
+    if (Math.abs(end.x - rectangleStart.x) < 0.005 || Math.abs(end.y - rectangleStart.y) < 0.005) {
+      rectangleStart = null;
+      rectangleCurrent = null;
+      renderSvg();
+      return toast(CURRENT_LANG === 'en' ? 'Draw a larger rectangle' : 'Нарисуйте прямоугольник большего размера');
+    }
+    const aoi = normalizeAoi({ id: newId('rectangle'), name: CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI', shape: 'rectangle', points: [rectangleStart, end], order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false, validityInterval: { startMs: 0, endMs: 1000 } }, stimulus.id, aois.length + 1);
+    aois.push(aoi); selectedId = aoi.id; setDrawMode(null); saveAll(); renderAll();
+  });
+  svg.addEventListener('pointercancel', () => {
+    if (dragging) {
+      dragging = null;
+      saveAll();
+      renderAll();
+      return;
+    }
+    rectangleStart = null;
+    rectangleCurrent = null;
+    renderSvg();
+  });
+  modal.querySelector('#aoiName').addEventListener('input', event => {
+    const aoi = selectedAoi();
+    if (!aoi) return;
+    aoi.name = event.target.value;
+    renderList();
+    if (event.target.value.trim()) saveAll();
+  });
+  modal.querySelector('#aoiOrder').addEventListener('change', event => {
+    const aoi = selectedAoi();
+    const order = parseInt(event.target.value, 10);
+    if (!aoi || !Number.isFinite(order)) return;
+    if (moveAoiToOrder(aoi.id, order)) {
+      toast(CURRENT_LANG === 'en' ? 'AOI order updated' : 'Порядок AOI обновлён');
+    }
+  });
+  modal.querySelector('#aoiSave').addEventListener('click', () => {
+    const aoi = selectedAoi();
+    if (!aoi) return;
+    const name = modal.querySelector('#aoiName').value.trim();
+    const order = parseInt(modal.querySelector('#aoiOrder').value, 10);
+    const startMs = Math.max(0, parseInt(modal.querySelector('#aoiStart').value, 10) || 0);
+    const endMs = parseInt(modal.querySelector('#aoiEnd').value, 10);
+    if (!name) return toast(CURRENT_LANG === 'en' ? 'Enter an AOI name' : 'Введите название AOI');
+    if (!Number.isFinite(order) || order < 1 || order > aois.length) return toast(CURRENT_LANG === 'en' ? `Order must be from 1 to ${aois.length}` : `Номер должен быть от 1 до ${aois.length}`);
+    if (!Number.isFinite(endMs) || endMs <= startMs) return toast(CURRENT_LANG === 'en' ? 'endMs must be greater than startMs' : 'endMs должен быть больше startMs');
+    const previousOrder = aoi.order;
+    const occupied = aois.find(item => item.id !== aoi.id && item.order === order);
+    if (occupied) occupied.order = previousOrder;
+    aoi.name = name; aoi.order = order; aoi.isTarget = modal.querySelector('#aoiTarget').checked; aoi.validityInterval = { startMs, endMs };
+    saveAll(); renderAll(); toast(CURRENT_LANG === 'en' ? 'AOI saved' : 'AOI сохранена');
+  });
+  modal.querySelector('#aoiDelete').addEventListener('click', () => {
+    if (!selectedId) return;
+    aois = aois.filter(aoi => aoi.id !== selectedId);
+    selectedId = aois[0]?.id || null;
+    saveAll(); renderAll();
+  });
+  const close = () => {
+    window.removeEventListener('resize', fitStage);
+    if (document.body.contains(overlay)) document.body.removeChild(overlay);
+    if (typeof options.onClose === 'function') options.onClose(stimulus, aois);
+  };
+  modal.querySelector('#aoiClose').addEventListener('click', close);
+  overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+  modal.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+  renderAll();
+}
 
 //~

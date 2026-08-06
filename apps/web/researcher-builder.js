@@ -136,6 +136,9 @@ function ExperimentBuilderView(options = {}) {
   document.getElementById('pageTitle').textContent = (CURRENT_LANG === 'en' ? I18N.en : I18N.ru).protocolBuilder;
 
   if (typeof ensureStandardStimuli === 'function') ensureStandardStimuli();
+  if (editingExp && typeof applyStimuliDefinitionsToLibrary === 'function') {
+    applyStimuliDefinitionsToLibrary(editingExp.stimuliDefinitions || editingExp.definition?.stimuliDefinitions);
+  }
 
   const trb = (ru, en) => CURRENT_LANG === 'en'
     ? (en || (typeof autoTranslateString === 'function' ? autoTranslateString(ru, 'en') : ru))
@@ -811,11 +814,11 @@ function ExperimentBuilderView(options = {}) {
 
     modal.querySelector('#autoGenBtn').addEventListener('click', () => {
       const folderId = modal.querySelector('#autoGenFolder').value;
-      if (!folderId) return toast('Пожалуйста, выберите папку из списка', 'error');
+        if (!folderId) return toast(trb('Пожалуйста, выберите папку из списка','Please select a folder from the list'), 'error');
 
       const folder = folders.find(f => f.id === folderId);
       if (!folder || !folder.stimuliIds || folder.stimuliIds.length === 0) {
-        return toast('Выбранная папка пуста!', 'error');
+          return toast(trb('Выбранная папка пуста!','The selected folder is empty!'), 'error');
       }
 
       folder.stimuliIds.forEach(stimId => {
@@ -832,7 +835,7 @@ function ExperimentBuilderView(options = {}) {
       renderRows();
       const scrollWrap = modal.querySelector('#trialsContainer');
       setTimeout(() => { if (scrollWrap) scrollWrap.scrollTop = scrollWrap.scrollHeight; }, 50);
-      toast(`Успешно добавлено ${folder.stimuliIds.length} проб!`);
+        toast(trb(`Успешно добавлено ${folder.stimuliIds.length} проб!`,`${folder.stimuliIds.length} trials added successfully!`));
     });
 
     const close = () => document.body.removeChild(overlay);
@@ -842,7 +845,7 @@ function ExperimentBuilderView(options = {}) {
     modal.querySelector('#trialSaveBtn').addEventListener('click', () => {
       if (!currentTrials.length) {
         highlightInvalidRows();
-        toast('Добавьте хотя бы одну пробу со стимулом');
+        toast(trb('Добавьте хотя бы одну пробу со стимулом','Add at least one trial with a stimulus'));
         return;
       }
       const invalidIdx = currentTrials.findIndex(t => !t.stimulusId || (parseInt(t.duration) || 0) <= 0 || (parseInt(t.repetitions) || 0) <= 0);
@@ -865,7 +868,7 @@ function ExperimentBuilderView(options = {}) {
       }
       const useRtCalc = modal.querySelector('#useRtCalcCb').checked;
       if (useRtCalc && (parseInt(modal.querySelector('#rtWindowInput').value) || 0) <= 0) {
-        toast('Укажите максимальное время ожидаемой реакции > 0 мс');
+        toast(trb('Укажите максимальное время ожидаемой реакции > 0 мс','Set the maximum expected response time to more than 0 ms'));
         return;
       }
       block.content.useRT = useRtCalc;
@@ -901,7 +904,7 @@ function ExperimentBuilderView(options = {}) {
 
       localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
       close();
-      toast('Настройки логики сохранены ✓');
+      toast(trb('Настройки логики сохранены ✓','Logic settings saved ✓'));
 
       if (onSaveCallback) onSaveCallback();
     });
@@ -915,6 +918,7 @@ function ExperimentBuilderView(options = {}) {
     else if (currentStep === 1) renderStep0();
     else if (currentStep === 2) renderStep1();
     else if (currentStep === 3) renderStep2Stimuli();
+    else if (currentStep === 4) renderStep4Aoi();
     else renderPlaceholder(currentStep);
 
     setTimeout(() => applyAutoI18n(), 0);
@@ -927,6 +931,95 @@ function ExperimentBuilderView(options = {}) {
       estimatedDuration: (canvasCol.querySelector('#metaDuration')?.value || '').trim(),
       description: (canvasCol.querySelector('#metaDescription')?.value || '').trim()
     };
+  }
+
+  function currentWorkspaceProjectId() {
+    if (editingExp?.workspaceProjectId) return String(editingExp.workspaceProjectId);
+    const storedId = localStorage.getItem('emocog_selected_workspace_project_id');
+    if (storedId) return String(storedId);
+    if (typeof state !== 'undefined' && state.project) return `name:${String(state.project).trim().toLocaleLowerCase()}`;
+    return '__default_project__';
+  }
+
+  function normalizeExperimentTitle(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  }
+
+  function experimentIsInCurrentProject(experiment, projectId) {
+    const savedProjectId = experiment?.workspaceProjectId || experiment?.metadata?.workspaceProjectId;
+    return savedProjectId ? String(savedProjectId) === String(projectId) : true;
+  }
+
+  function hasDuplicateExperimentTitle(title) {
+    const normalizedTitle = normalizeExperimentTitle(title);
+    if (!normalizedTitle) return false;
+    const projectId = currentWorkspaceProjectId();
+    let experiments = [];
+    try { experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || []; } catch (_) { experiments = []; }
+    return experiments.some(experiment => (
+      String(experiment?.id) !== String(experimentId || '')
+      && experimentIsInCurrentProject(experiment, projectId)
+      && normalizeExperimentTitle(experiment?.metadata?.title || experiment?.title) === normalizedTitle
+    ));
+  }
+
+  async function hasDuplicateApiExperimentTitle(title) {
+    if (typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken() || typeof apiGet !== 'function') return false;
+    const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(experimentId || 'draft') : {};
+    const projectId = apiState?.projectId || localStorage.getItem('emocog_selected_project_id');
+    if (!projectId) return false;
+    try {
+      const protocols = await apiGet(`/protocols?project_id=${encodeURIComponent(projectId)}`);
+      const protocolRows = Array.isArray(protocols)
+        ? protocols
+        : (Array.isArray(protocols?.items) ? protocols.items
+          : Array.isArray(protocols?.results) ? protocols.results
+            : Array.isArray(protocols?.data) ? protocols.data
+              : Array.isArray(protocols?.protocols) ? protocols.protocols : []);
+      const currentApiProtocolId = apiState?.apiProtocolId;
+      const normalizedTitle = normalizeExperimentTitle(title);
+      return protocolRows.some(protocol => (
+        String(protocol?.id) !== String(currentApiProtocolId || '')
+        && normalizeExperimentTitle(protocol?.name || protocol?.title || protocol?.definition?.title) === normalizedTitle
+      ));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function showDuplicateTitleError(show = true) {
+    const input = canvasCol.querySelector('#metaTitle');
+    const error = canvasCol.querySelector('#metaTitleError');
+    if (input) {
+      input.style.borderColor = show ? 'var(--bad)' : 'var(--stroke)';
+      input.style.boxShadow = show ? '0 0 0 3px rgba(239,68,68,.10)' : 'none';
+      input.setAttribute('aria-invalid', show ? 'true' : 'false');
+    }
+    if (error) {
+      error.style.display = show ? 'block' : 'none';
+      error.textContent = trb('Эксперимент с таким именем уже существует.','An experiment with this name already exists.');
+    }
+  }
+
+  function requireUniqueExperimentTitle(title) {
+    if (!hasDuplicateExperimentTitle(title)) return true;
+    currentStep = 0;
+    renderStepper();
+    renderCanvas();
+    showDuplicateTitleError(true);
+    canvasCol.querySelector('#metaTitle')?.focus();
+    return false;
+  }
+
+  async function requireUniqueExperimentTitleAsync(title) {
+    if (!requireUniqueExperimentTitle(title)) return false;
+    if (!(await hasDuplicateApiExperimentTitle(title))) return true;
+    currentStep = 0;
+    renderStepper();
+    renderCanvas();
+    showDuplicateTitleError(true);
+    canvasCol.querySelector('#metaTitle')?.focus();
+    return false;
   }
 
   function validateProtocolMeta(meta = protocolMeta) {
@@ -945,6 +1038,7 @@ function ExperimentBuilderView(options = {}) {
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);">
             ${trb('Название эксперимента *','Experiment title *')}
             <input id="metaTitle" value="${protocolMeta.title || ''}" placeholder="${trb('Например: Внимание и рабочая память','For example: Attention and working memory')}" style="padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:var(--card-bg);font-size:14px;color:var(--text);">
+            <span id="metaTitleError" role="alert" style="display:none;color:var(--bad);font-size:11px;font-weight:600;"></span>
           </label>
           <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);">
             ${trb('ID протокола *','Protocol ID *')}
@@ -961,11 +1055,19 @@ function ExperimentBuilderView(options = {}) {
         </div>
         <div id="metaError" style="display:none;color:var(--bad);font-size:12px;font-weight:700;"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:auto;padding-top:12px;border-top:1px solid var(--stroke);">
-          <button class="quick-btn" id="metaNextBtn" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:700;font-size:13px;">Далее →</button>
+          <button class="quick-btn" id="metaNextBtn" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:700;font-size:13px;">${trb('Далее','Next')} →</button>
         </div>
       </div>
     `;
-    canvasCol.querySelector('#metaNextBtn').addEventListener('click', () => {
+    const titleInput = canvasCol.querySelector('#metaTitle');
+    titleInput.addEventListener('input', () => showDuplicateTitleError(hasDuplicateExperimentTitle(titleInput.value)));
+    titleInput.addEventListener('blur', async () => {
+      const checkedTitle = titleInput.value;
+      if (hasDuplicateExperimentTitle(checkedTitle)) return;
+      const duplicateInApi = await hasDuplicateApiExperimentTitle(checkedTitle);
+      if (titleInput.value === checkedTitle) showDuplicateTitleError(duplicateInApi);
+    });
+    canvasCol.querySelector('#metaNextBtn').addEventListener('click', async () => {
       protocolMeta = getProtocolMetaFromForm();
       const missing = validateProtocolMeta(protocolMeta);
       const err = canvasCol.querySelector('#metaError');
@@ -974,6 +1076,7 @@ function ExperimentBuilderView(options = {}) {
         err.textContent = autoTranslateString(trb('Заполните обязательные поля: ','Fill in required fields: ') + missing.join(', '), CURRENT_LANG);
         return;
       }
+      if (!(await requireUniqueExperimentTitleAsync(protocolMeta.title))) return;
       localStorage.setItem('emocog_protocol_meta_draft', JSON.stringify(protocolMeta));
       currentStep = 1;
       renderStepper();
@@ -1520,7 +1623,7 @@ function ExperimentBuilderView(options = {}) {
       const n = file.name.toLowerCase();
       if (n.endsWith('.json')) importedType = 'json';
       else if (n.endsWith('.psyexp')) importedType = 'psyexp';
-      else { toast('Неподдерживаемый формат'); return; }
+        else { toast(trb('Неподдерживаемый формат','Unsupported format')); return; }
       const reader = new FileReader();
       reader.onload = ev => {
         uploadedPsychoPyFile = ev.target.result;
@@ -1554,8 +1657,8 @@ function ExperimentBuilderView(options = {}) {
       progArea.style.display='block'; resultDiv.style.display='none';
       const setP = async (pct, txt) => { progBar.style.width=pct+'%'; progTxt.textContent=txt; await new Promise(r=>setTimeout(r,280)); };
       try {
-        await setP(15,'Чтение файла…');
-        await setP(35,'Парсинг структуры…');
+        await setP(15,trb('Чтение файла…','Reading file…'));
+        await setP(35,trb('Парсинг структуры…','Parsing structure…'));
         let result;
         if (importedType === 'json') {
           const json = JSON.parse(uploadedPsychoPyFile);
@@ -1563,9 +1666,9 @@ function ExperimentBuilderView(options = {}) {
         } else {
           result = parsePsyExp(uploadedPsychoPyFile, uploadedResources);
         }
-        await setP(70,'Конвертация…');
-        await setP(95,'Валидация…');
-        await setP(100,'Готово ✓');
+        await setP(70,trb('Конвертация…','Converting…'));
+        await setP(95,trb('Валидация…','Validating…'));
+        await setP(100,trb('Готово ✓','Done ✓'));
         parsedExperimentData = result;
         const { json, stats } = result;
         resultDiv.style.display = 'block';
@@ -1594,7 +1697,7 @@ function ExperimentBuilderView(options = {}) {
         `;
         openBtn.style.display = 'block';
       } catch(err) {
-        await setP(100,'Ошибка: '+err.message);
+        await setP(100,trb('Ошибка: ','Error: ')+err.message);
         progBar.style.background='var(--bad)';
       }
     });
@@ -1783,7 +1886,7 @@ function ExperimentBuilderView(options = {}) {
       const n = file.name.toLowerCase();
       if (n.endsWith('.json')) importedType = 'json';
       else if (n.endsWith('.psyexp')) importedType = 'psyexp';
-      else { toast('Неподдерживаемый формат'); return; }
+        else { toast(trb('Неподдерживаемый формат','Unsupported format')); return; }
       const reader = new FileReader();
       reader.onload = ev => {
         uploadedPsychoPyFile = ev.target.result;
@@ -1817,8 +1920,8 @@ function ExperimentBuilderView(options = {}) {
       progArea.style.display='block'; resultDiv.style.display='none';
       const setP = async (pct, txt) => { progBar.style.width=pct+'%'; progTxt.textContent=txt; await new Promise(r=>setTimeout(r,280)); };
       try {
-        await setP(15,'Чтение файла…');
-        await setP(35,'Парсинг структуры…');
+        await setP(15,trb('Чтение файла…','Reading file…'));
+        await setP(35,trb('Парсинг структуры…','Parsing structure…'));
         let result;
         if (importedType === 'json') {
           const json = JSON.parse(uploadedPsychoPyFile);
@@ -1826,9 +1929,9 @@ function ExperimentBuilderView(options = {}) {
         } else {
           result = parsePsyExp(uploadedPsychoPyFile, uploadedResources);
         }
-        await setP(70,'Конвертация…');
-        await setP(95,'Валидация…');
-        await setP(100,'Готово ✓');
+        await setP(70,trb('Конвертация…','Converting…'));
+        await setP(95,trb('Валидация…','Validating…'));
+        await setP(100,trb('Готово ✓','Done ✓'));
         parsedExperimentData = result;
         const { json, stats } = result;
         resultDiv.style.display = 'block';
@@ -1857,7 +1960,7 @@ function ExperimentBuilderView(options = {}) {
         `;
         openBtn.style.display = 'block';
       } catch(err) {
-        await setP(100,'Ошибка: '+err.message);
+        await setP(100,trb('Ошибка: ','Error: ')+err.message);
         progBar.style.background='var(--bad)';
       }
     });
@@ -2075,6 +2178,146 @@ function ExperimentBuilderView(options = {}) {
       uploadBuilderStimuli(e.dataTransfer.files);
     });
     setTimeout(() => applyAutoI18n(wrapper), 0);
+  }
+
+  function aoiStimulusIdsForBlock(block) {
+    const ids = [];
+    const add = value => {
+      const id = String(value || '').trim();
+      if (id && !ids.includes(id)) ids.push(id);
+    };
+    const content = block?.content || {};
+    let trials = Array.isArray(content.trials) ? content.trials : [];
+    if (!trials.length && block?.type === 'cognitive_task') {
+      trials = defaultExportTrialsForCognitiveBlock(content);
+    }
+    trials.forEach(trial => add(trial?.stimulusId));
+    (content.stimuliIds || []).forEach(add);
+    (content.slides || []).forEach(slide => add(typeof slide === 'object' ? (slide?.stimulusId || slide?.id) : slide));
+    if (!ids.length && content.stimuliFolder) {
+      const folder = folders.find(item => String(item.id) === String(content.stimuliFolder));
+      (folder?.stimuliIds || []).forEach(add);
+    }
+    if (!ids.length && content.stimuliSource === 'library' && block?.type === 'passive') {
+      stimuliList.forEach(stimulus => add(stimulus.id));
+    }
+    return ids;
+  }
+
+  function syncProtocolAoiFlags() {
+    experimentBlocks.forEach(block => {
+      if (block.type !== 'cognitive_task' && block.type !== 'passive') return;
+      block.content = block.content || {};
+      block.content.useAOI = aoiStimulusIdsForBlock(block).some(stimulusId => {
+        return Array.isArray(block.content.aoiDefinitions?.[stimulusId])
+          && block.content.aoiDefinitions[stimulusId].length > 0;
+      });
+      if (block.content.useAOI) {
+        block.content.aoiSchemaVersion = typeof AOI_SCHEMA_VERSION !== 'undefined' ? AOI_SCHEMA_VERSION : '1.2';
+      } else {
+        delete block.content.aoiSchemaVersion;
+      }
+    });
+    localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+  }
+
+  function renderAoiStimulusThumbnail(stimulus, stimulusId) {
+    if (stimulus?.type === 'image' && stimulus.url) {
+      return `<img src="${previewEscape(stimulus.url)}" alt="${previewEscape(stimulus.name || stimulusId)}" style="width:100%;height:100%;object-fit:contain;">`;
+    }
+    if (stimulus?.type === 'video' && stimulus.url) {
+      return `<video src="${previewEscape(stimulus.url)}" muted style="width:100%;height:100%;object-fit:contain;"></video>`;
+    }
+    return `<div style="transform:scale(.34);transform-origin:center;display:flex;align-items:center;justify-content:center;min-width:360px;min-height:240px;">${renderPreviewStimulus(stimulus, { stimulusId })}</div>`;
+  }
+
+  function renderStep4Aoi() {
+    const blockRows = experimentBlocks
+      .map((block, blockIndex) => ({ block, blockIndex, stimulusIds: aoiStimulusIdsForBlock(block) }))
+      .filter(row => row.block.type === 'cognitive_task' || row.block.type === 'passive');
+    const uniqueStimulusIds = [...new Set(blockRows.flatMap(row => row.stimulusIds))];
+    const configuredCount = blockRows.reduce((count, row) => count + row.stimulusIds.filter(stimulusId => (
+      Array.isArray(row.block.content?.aoiDefinitions?.[stimulusId])
+      && row.block.content.aoiDefinitions[stimulusId].length > 0
+    )).length, 0);
+
+    canvasCol.innerHTML = `
+      <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:12px;overflow:hidden;">
+        ${builderStepHeader(4, `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <span style="font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;background:rgba(92,102,189,.10);color:var(--accent);">${uniqueStimulusIds.length} ${trb('стимулов в протоколе','protocol stimuli')}</span>
+            <span style="font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;background:rgba(16,185,129,.10);color:var(--good);">${configuredCount} ${trb('настроек AOI для блоков','block AOI configurations')}</span>
+          </div>`)}
+        <div style="font-size:12px;color:var(--muted);padding:10px 12px;border:1px solid rgba(92,102,189,.18);border-radius:10px;background:rgba(92,102,189,.05);">
+          ${trb('Здесь показаны только стимулы, выбранные в таблицах проб на предыдущем шаге. AOI настраиваются независимо для каждого блока, даже если блоки используют один stimulusId. Если у стимула создана хотя бы одна AOI, сбор AOI для соответствующего блока включается автоматически.','Only stimuli selected in trial tables on the previous step are shown here. AOIs are configured independently for each block, even when blocks share the same stimulusId. Creating at least one AOI automatically enables AOI collection for the corresponding block.')}
+        </div>
+        <div id="builderAoiBlocks" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:2px 2px 8px;">
+          ${blockRows.length ? blockRows.map(row => {
+            const block = row.block;
+            const meta = getMeta(block.type);
+            return `<section style="border:1px solid var(--stroke);border-radius:14px;background:var(--card-bg);padding:14px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+                <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+                  <div style="width:28px;height:28px;border-radius:8px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg></div>
+                  <div><div style="font-size:13px;font-weight:800;color:var(--text);">${previewEscape(localizedBlockLabel(block, meta.label))}</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">${row.stimulusIds.length} ${trb('выбранных стимулов','selected stimuli')}</div></div>
+                </div>
+                <span style="font-size:10px;font-weight:700;padding:4px 8px;border-radius:999px;background:${block.content?.useAOI ? 'rgba(16,185,129,.10)' : 'rgba(148,163,184,.12)'};color:${block.content?.useAOI ? 'var(--good)' : 'var(--muted)'};">AOI ${block.content?.useAOI ? 'ON' : 'OFF'}</span>
+              </div>
+              ${row.stimulusIds.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;">
+                ${row.stimulusIds.map(stimulusId => {
+                  const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
+                  const aois = block.content?.aoiDefinitions?.[stimulusId] || [];
+                  const targets = aois.filter(aoi => aoi.isTarget).length;
+                  return `<article style="border:1px solid ${aois.length ? 'rgba(16,185,129,.32)' : 'var(--stroke)'};border-radius:12px;overflow:hidden;background:rgba(255,255,255,.38);display:flex;flex-direction:column;min-width:0;">
+                    <div style="height:112px;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden;border-bottom:1px solid var(--stroke);">${renderAoiStimulusThumbnail(stimulus, stimulusId)}</div>
+                    <div style="padding:10px;display:flex;flex-direction:column;gap:7px;flex:1;">
+                      <div style="font-size:12px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${previewEscape(stimulus?.name || stimulusId)}">${previewEscape(stimulus?.name || stimulusId)}</div>
+                      <code style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${previewEscape(stimulusId)}</code>
+                      <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:9px;font-weight:700;"><span style="padding:3px 6px;border-radius:999px;background:rgba(92,102,189,.09);color:var(--accent);">AOI ${aois.length}</span>${targets ? `<span style="padding:3px 6px;border-radius:999px;background:rgba(16,185,129,.10);color:var(--good);">${trb('целей','targets')} ${targets}</span>` : ''}</div>
+                      <button class="quick-btn builder-aoi-edit" data-block-index="${row.blockIndex}" data-stimulus-id="${previewEscape(stimulusId)}" style="margin-top:auto;width:100%;justify-content:center;background:${aois.length ? 'rgba(16,185,129,.10)' : 'rgba(92,102,189,.10)'};border-color:${aois.length ? 'rgba(16,185,129,.28)' : 'rgba(92,102,189,.28)'};color:${aois.length ? 'var(--good)' : 'var(--accent)'};font-size:11px;font-weight:800;" ${stimulus ? '' : 'disabled'}>${aois.length ? trb('Редактировать AOI','Edit AOIs') : trb('Создать AOI','Create AOI')}</button>
+                    </div>
+                  </article>`;
+                }).join('')}
+              </div>` : `<div style="font-size:12px;color:var(--muted);padding:18px;border:1px dashed var(--stroke);border-radius:10px;text-align:center;">${trb('Для этого блока ещё не выбраны стимулы. Вернитесь на шаг «Стимулы / Слайды» и заполните таблицу проб.','No stimuli have been selected for this block. Return to “Stimuli / Slides” and fill in the trial table.')}</div>`}
+            </section>`;
+          }).join('') : `<div style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);border:1px dashed var(--stroke);border-radius:14px;padding:28px;">${trb('В протоколе нет задач со стимулами. Добавьте cognitive task или passive block на шаге «Протокол».','The protocol has no stimulus-based tasks. Add a cognitive task or passive block on the Protocol step.')}</div>`}
+        </div>
+        <div style="display:flex;justify-content:space-between;flex-shrink:0;padding-top:10px;border-top:1px solid var(--stroke);">
+          <button class="quick-btn" id="aoiStepBack" style="font-size:12px;">← ${trb('Назад','Back')}</button>
+          <button class="quick-btn" id="aoiStepNext" style="background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:700;font-size:12px;">${trb('Далее','Next')} →</button>
+        </div>
+      </div>`;
+
+    canvasCol.querySelectorAll('.builder-aoi-edit').forEach(button => {
+      button.addEventListener('click', () => {
+        const stimulusId = button.dataset.stimulusId;
+        const block = experimentBlocks[parseInt(button.dataset.blockIndex, 10)];
+        if (!block) return;
+        block.content = block.content || {};
+        block.content.aoiDefinitions = block.content.aoiDefinitions || {};
+        if (typeof openAoiEditor !== 'function') {
+          toast(trb('Редактор AOI недоступен','AOI editor is unavailable'));
+          return;
+        }
+        openAoiEditor(stimulusId, {
+          previewHtml: renderPreviewStimulus(previewStimulusById(stimulusId), { stimulusId }),
+          initialAois: block.content.aoiDefinitions[stimulusId] || [],
+          onPersist: aois => {
+            if (aois.length) block.content.aoiDefinitions[stimulusId] = JSON.parse(JSON.stringify(aois));
+            else delete block.content.aoiDefinitions[stimulusId];
+            syncProtocolAoiFlags();
+          },
+          onChange: () => syncProtocolAoiFlags(),
+          onClose: () => {
+            syncProtocolAoiFlags();
+            if (currentStep === 4) renderStep4Aoi();
+          }
+        });
+      });
+    });
+    canvasCol.querySelector('#aoiStepBack').addEventListener('click', () => { currentStep = 3; renderStepper(); renderCanvas(); });
+    canvasCol.querySelector('#aoiStepNext').addEventListener('click', () => { syncProtocolAoiFlags(); currentStep = 5; renderStepper(); renderCanvas(); });
+    setTimeout(() => applyAutoI18n(canvasCol), 0);
   }
 
   function renderPlaceholder(stepIdx) {
@@ -2829,48 +3072,51 @@ function ExperimentBuilderView(options = {}) {
     wrap.querySelector('#qcNext').addEventListener('click', () => { saveQC(); currentStep++; renderStepper(); renderCanvas(); });
   }
 
+  function getBuilderAnalyticsPlan() {
+    const analyticsApi = typeof window !== 'undefined' ? window.EmocogAnalyticsPlan : null;
+    if (!analyticsApi) return null;
+    return analyticsApi.load(experimentId || 'draft', experimentBlocks, [
+      editingExp?.analyticsPlan,
+      editingExp?.definition?.analyticsPlan,
+      parsedExperimentData?.json?.analyticsPlan,
+      editingExp?.analyticsConfig,
+      editingExp?.definition?.analyticsConfig
+    ]);
+  }
+
   function renderAnalyticsStep() {
-    const analyticsKey = 'emocog_analytics_config_' + (experimentId || 'draft');
-    const cfg = typeof getExperimentAnalyticsConfig === 'function'
-      ? getExperimentAnalyticsConfig(experimentId || 'draft')
-      : { tabs: { 'session-card': true, 'group-comparison': true, 'data-quality': true, 'connectedness': true } };
-    const tabDefs = [
-      { key: 'session-card', icon: '📋', color: '#5c66bd', title: trb('Карточка сессии', 'Session Card'), desc: trb('QC, метрики и таймлайн одной сессии.', 'QC, metrics, and timeline for a single session.') },
-      { key: 'group-comparison', icon: '👥', color: '#0ea5e9', title: trb('Групповое сравнение', 'Group Comparison'), desc: trb('Сравнение групп по протоколам и метрикам.', 'Compare groups across protocols and metrics.') },
-      { key: 'data-quality', icon: '✓', color: '#22c55e', title: trb('Качество данных', 'Data Quality'), desc: trb('Валидность записи и QC-показатели.', 'Recording validity and QC indicators.') },
-      { key: 'connectedness', icon: '🔗', color: '#f59e0b', title: trb('Связанность метрик', 'Connectedness'), desc: trb('Корреляции между метриками эксперимента.', 'Correlations between experiment metrics.') }
-    ];
-    const selectedCount = tabDefs.filter(t => cfg.tabs[t.key] !== false).length;
+    const analyticsApi = typeof window !== 'undefined' ? window.EmocogAnalyticsPlan : null;
+    if (!analyticsApi) {
+      canvasCol.innerHTML = `<div style="padding:${BUILDER_CANVAS_PAD};"><div class="card" style="padding:18px;color:var(--bad);">${trb('Конфигурация аналитики недоступна.','Analytics configuration is unavailable.')}</div></div>`;
+      return;
+    }
+    const builderKey = experimentId || 'draft';
+    let plan = getBuilderAnalyticsPlan();
+    let metricsOpen = false;
+    let overridesOpen = false;
+    const analyzableBlocks = experimentBlocks.filter(block => block && (block.type === 'cognitive_task' || block.type === 'passive'));
+    const lang = CURRENT_LANG === 'en' ? 'en' : 'ru';
+    const esc = value => String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const labelFor = def => def?.label?.[lang] || def?.label?.ru || def?.id || '';
+    const descriptionFor = def => def?.description?.[lang] || def?.description?.ru || '';
+
+    function persistPlan() {
+      plan = analyticsApi.save(builderKey, plan, experimentBlocks);
+      return plan;
+    }
+
+    function selectedPackageCount() {
+      return plan.defaultPackages.filter(id => id !== 'data_quality').length + 1;
+    }
+
     const analyticsHeaderExtra = `
-      <div id="analyticsSelectedSummary" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid rgba(92,102,189,.16);font-size:12px;font-weight:600;color:var(--accent);">
-        ${selectedCount} ${trb('из', 'of')} ${tabDefs.length} ${trb('инструментов выбрано', 'tools selected')}
-      </div>`;
+      <div id="analyticsSelectedSummary" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.62);border:1px solid rgba(92,102,189,.16);font-size:12px;font-weight:600;color:var(--accent);"></div>`;
     canvasCol.innerHTML = `
       <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:16px;overflow-y:auto;">
         ${builderStepHeader(7, analyticsHeaderExtra)}
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;">
-          ${tabDefs.map(tab => {
-            const on = cfg.tabs[tab.key] !== false;
-            return `
-            <label class="an-tab-card" data-tab="${tab.key}" style="display:flex;flex-direction:column;gap:10px;padding:16px;border:2px solid ${on ? tab.color : 'var(--stroke)'};border-radius:14px;background:${on ? `linear-gradient(180deg,${tab.color}12,transparent)` : 'var(--card-bg)'};cursor:pointer;transition:border-color .15s, box-shadow .15s, background .15s;box-shadow:${on ? `0 8px 24px ${tab.color}22` : 'none'};">
-              <div style="display:flex;align-items:flex-start;gap:12px;">
-                <div style="width:40px;height:40px;border-radius:12px;background:${tab.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">${tab.icon}</div>
-                <div style="flex:1;min-width:0;">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                    <div style="font-size:14px;font-weight:700;color:var(--text);">${tab.title}</div>
-                    <input type="checkbox" class="an-tab-cb" data-tab="${tab.key}" ${on ? 'checked' : ''} style="accent-color:${tab.color};width:16px;height:16px;flex-shrink:0;">
-                  </div>
-                  <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px;">${tab.desc}</div>
-                </div>
-              </div>
-            </label>`;
-          }).join('')}
-        </div>
-
-        <div style="font-size:12px;color:var(--muted);padding:12px 14px;border-radius:12px;background:rgba(92,102,189,.05);border:1px dashed rgba(92,102,189,.18);line-height:1.5;">
-          ${trb('Выбранные инструменты появятся во вкладках раздела «Инструменты аналитики» после сохранения протокола.', 'Selected tools will appear as tabs in Analytics Tools after you save the protocol.')}
-        </div>
+        <div id="analyticsPlanContent"></div>
 
         <div style="display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid var(--stroke);margin-top:auto;">
           <button class="quick-btn" id="analyticsBackBtn" style="font-size:12px;">← ${trb('Назад', 'Back')}</button>
@@ -2879,52 +3125,280 @@ function ExperimentBuilderView(options = {}) {
       </div>
     `;
 
-    function refreshAnalyticsCards() {
-      const tabs = {};
-      canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
-      const count = Object.values(tabs).filter(Boolean).length;
+    function packageCardsHtml(packageIds, capabilities, scope, blockId) {
+      return analyticsApi.packages.map(pkg => {
+        const available = analyticsApi.isPackageAvailable(pkg.id, capabilities);
+        const enabled = packageIds.includes(pkg.id);
+        const locked = pkg.mandatory === true;
+        const unavailableReason = pkg.availability === 'aoi'
+          ? trb('Сначала добавьте AOI в этот протокол/блок.', 'Add an AOI to this protocol/block first.')
+          : pkg.availability === 'task'
+            ? trb('Доступно для блоков с оцениваемой задачей.', 'Available for blocks with a scorable task.')
+            : '';
+        return `
+          <label style="display:flex;gap:12px;padding:14px;border:1.5px solid ${enabled ? pkg.color : 'var(--stroke)'};border-radius:14px;background:${enabled ? pkg.color + '0D' : 'var(--card-bg)'};opacity:${available ? '1' : '.56'};cursor:${locked || !available ? 'default' : 'pointer'};transition:.15s;">
+            <div style="width:36px;height:36px;border-radius:11px;background:${pkg.color}18;color:${pkg.color};display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;">${pkg.icon}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+                <div>
+                  <div style="font-size:13px;font-weight:750;color:var(--text);">${esc(labelFor(pkg))}</div>
+                  ${locked ? `<span style="display:inline-block;margin-top:4px;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${pkg.color};">${trb('Обязательно','Required')}</span>` : ''}
+                </div>
+                <input type="checkbox" class="${scope === 'global' ? 'an-package-cb' : 'an-block-package-cb'}" data-package-id="${esc(pkg.id)}" ${blockId ? `data-block-id="${esc(blockId)}"` : ''} ${enabled ? 'checked' : ''} ${locked || !available ? 'disabled' : ''} style="width:17px;height:17px;accent-color:${pkg.color};flex-shrink:0;">
+              </div>
+              <div style="font-size:11px;color:var(--muted);line-height:1.45;margin-top:6px;">${esc(descriptionFor(pkg))}</div>
+              ${!available ? `<div style="font-size:10px;color:var(--warn);margin-top:6px;">${esc(unavailableReason)}</div>` : ''}
+            </div>
+          </label>`;
+      }).join('');
+    }
+
+    function metricGroupsHtml() {
+      return analyticsApi.packages.map(pkg => {
+        if (!plan.defaultPackages.includes(pkg.id)) return '';
+        const packageMetrics = analyticsApi.metrics.filter(metric => metric.packageId === pkg.id);
+        if (!packageMetrics.length) {
+          return `<div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);">
+            <div style="font-size:12px;font-weight:700;color:var(--text);">${esc(labelFor(pkg))}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:5px;">${trb('Использует выбранные показатели и добавляет групповые распределения, N и описательные сводки.','Uses selected outcomes and adds group distributions, N, and descriptive summaries.')}</div>
+          </div>`;
+        }
+        return `<div style="border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);overflow:hidden;">
+          <div style="padding:10px 14px;background:${pkg.color}0B;border-bottom:1px solid var(--stroke);font-size:12px;font-weight:700;color:var(--text);">${esc(labelFor(pkg))}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));">
+            ${packageMetrics.map(metric => {
+              const checked = plan.selectedMetricIds.includes(metric.id);
+              const locked = metric.mandatory === true;
+              return `<label style="display:flex;align-items:flex-start;gap:9px;padding:10px 14px;border-bottom:1px solid rgba(100,116,139,.09);cursor:${locked ? 'default' : 'pointer'};">
+                <input type="checkbox" class="an-metric-cb" data-metric-id="${esc(metric.id)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} style="margin-top:2px;width:15px;height:15px;accent-color:${pkg.color};">
+                <span style="min-width:0;">
+                  <span style="display:block;font-size:11px;font-weight:650;color:var(--text);">${esc(labelFor(metric))}${locked ? ` · ${trb('обязательно','required')}` : ''}</span>
+                  <span style="display:block;font-size:10px;line-height:1.4;color:var(--muted);margin-top:3px;">${esc(descriptionFor(metric))}</span>
+                </span>
+              </label>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function blockMetricsHtml(override, blockId) {
+      const enabledPackages = new Set(override.packages);
+      const availableMetrics = analyticsApi.metrics.filter(metric => enabledPackages.has(metric.packageId));
+      if (!availableMetrics.length) return '';
+      return `<details style="margin-top:10px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;background:rgba(255,255,255,.3);">
+        <summary style="cursor:pointer;list-style:none;padding:9px 11px;display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:700;color:var(--text);">
+          <span>${trb('Настроить метрики этой задачи','Configure metrics for this task')}</span>
+          <span style="color:var(--muted);font-weight:550;">${override.selectedMetricIds.length} ${trb('выбрано','selected')} ▾</span>
+        </summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));border-top:1px solid var(--stroke);">
+          ${availableMetrics.map(metric => {
+            const pkg = analyticsApi.packages.find(item => item.id === metric.packageId);
+            const locked = metric.mandatory === true;
+            return `<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border-bottom:1px solid rgba(100,116,139,.09);cursor:${locked ? 'default' : 'pointer'};">
+              <input type="checkbox" class="an-block-metric-cb" data-block-id="${esc(blockId)}" data-metric-id="${esc(metric.id)}" ${override.selectedMetricIds.includes(metric.id) ? 'checked' : ''} ${locked ? 'disabled' : ''} style="margin-top:1px;width:14px;height:14px;accent-color:${pkg?.color || 'var(--accent)'};">
+              <span style="font-size:10px;line-height:1.4;color:var(--text);">${esc(labelFor(metric))}${locked ? ` · ${trb('обязательно','required')}` : ''}</span>
+            </label>`;
+          }).join('')}
+        </div>
+      </details>`;
+    }
+
+    function blockOverridesHtml() {
+      if (!analyzableBlocks.length) {
+        return `<div style="font-size:11px;color:var(--muted);padding:12px;">${trb('В протоколе пока нет блоков, для которых можно настроить аналитику.','The protocol has no blocks that can be configured for analytics yet.')}</div>`;
+      }
+      return analyzableBlocks.map(block => {
+        const blockId = String(block.id);
+        const override = plan.blockOverrides[blockId] || null;
+        const capabilities = analyticsApi.blockCapabilities(block);
+        const blockName = localizedBlockLabel(block, block.label || block.type || blockId);
+        const inheritedLabels = plan.defaultPackages.map(id => labelFor(analyticsApi.packages.find(pkg => pkg.id === id))).join(' · ');
+        const ownLabels = override ? override.packages.map(id => labelFor(analyticsApi.packages.find(pkg => pkg.id === id))).join(' · ') : '';
+        return `<div style="padding:13px 14px;border:1px solid var(--stroke);border-radius:13px;background:var(--card-bg);">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+            <div style="min-width:0;">
+              <div style="font-size:12px;font-weight:750;color:var(--text);">${esc(blockName)}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:3px;">${esc(blockId)} · ${block.type === 'cognitive_task' ? trb('задача','task') : trb('пассивный просмотр','passive viewing')}</div>
+            </div>
+            <label style="display:flex;align-items:center;gap:7px;font-size:10px;font-weight:650;color:var(--muted);cursor:pointer;white-space:nowrap;">
+              <input type="checkbox" class="an-block-override-cb" data-block-id="${esc(blockId)}" ${override ? 'checked' : ''} style="width:15px;height:15px;accent-color:var(--accent);">
+              ${trb('Свой набор','Custom set')}
+            </label>
+          </div>
+          ${override ? `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:8px;margin-top:12px;">
+              ${packageCardsHtml(override.packages, capabilities, 'block', blockId)}
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:9px;">${trb('Для блока: ','For this block: ')}${esc(ownLabels)}</div>
+            ${blockMetricsHtml(override, blockId)}
+          ` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${trb('Наследует: ','Inherits: ')}${esc(inheritedLabels)}</div>`}
+        </div>`;
+      }).join('');
+    }
+
+    function renderPlanContent() {
+      plan = analyticsApi.normalizePlan(plan, experimentBlocks);
+      const capabilities = analyticsApi.experimentCapabilities(experimentBlocks);
+      const content = canvasCol.querySelector('#analyticsPlanContent');
       const summary = canvasCol.querySelector('#analyticsSelectedSummary');
-      if (summary) summary.textContent = `${count} ${trb('из', 'of')} ${tabDefs.length} ${trb('инструментов выбрано', 'tools selected')}`;
-      tabDefs.forEach(tab => {
-        const card = canvasCol.querySelector(`.an-tab-card[data-tab="${tab.key}"]`);
-        const cb = card?.querySelector('.an-tab-cb');
-        if (!card || !cb) return;
-        const on = cb.checked;
-        card.style.borderColor = on ? tab.color : 'var(--stroke)';
-        card.style.background = on ? `linear-gradient(180deg,${tab.color}12,transparent)` : 'var(--card-bg)';
-        card.style.boxShadow = on ? `0 8px 24px ${tab.color}22` : 'none';
+      if (summary) {
+        summary.textContent = `${selectedPackageCount()} ${trb('пакета','packages')} · ${plan.selectedMetricIds.length} ${trb('показателей','metrics')} · ${Object.keys(plan.blockOverrides).length} ${trb('исключений по блокам','block overrides')}`;
+      }
+      if (!content) return;
+      content.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <div style="font-size:14px;font-weight:750;color:var(--text);">${trb('Что вы хотите анализировать?','What do you want to analyze?')}</div>
+            <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px;">${trb('Выберите компактные пакеты. Подробный список показателей доступен ниже.','Choose compact packages. The detailed metric list is available below.')}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:10px;">
+            ${packageCardsHtml(plan.defaultPackages, capabilities, 'global')}
+          </div>
+
+          <details id="analyticsMetricsDetails" ${metricsOpen ? 'open' : ''} style="border:1px solid var(--stroke);border-radius:14px;background:rgba(255,255,255,.38);overflow:hidden;">
+            <summary style="cursor:pointer;list-style:none;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:700;color:var(--text);">
+              <span>${trb('Настроить отдельные показатели','Configure individual metrics')}</span>
+              <span style="font-size:10px;color:var(--muted);font-weight:550;">${plan.selectedMetricIds.length} ${trb('выбрано','selected')} ▾</span>
+            </summary>
+            <div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:9px;">${metricGroupsHtml()}</div>
+          </details>
+
+          <details id="analyticsOverridesDetails" ${overridesOpen ? 'open' : ''} style="border:1px solid var(--stroke);border-radius:14px;background:rgba(255,255,255,.38);overflow:hidden;">
+            <summary style="cursor:pointer;list-style:none;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:700;color:var(--text);">
+              <span>${trb('Разные настройки для отдельных задач','Different settings for individual tasks')}</span>
+              <span style="font-size:10px;color:var(--muted);font-weight:550;">${Object.keys(plan.blockOverrides).length} ${trb('исключений','overrides')} ▾</span>
+            </summary>
+            <div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:9px;">${blockOverridesHtml()}</div>
+          </details>
+
+          <div style="font-size:11px;color:var(--muted);padding:12px 14px;border-radius:12px;background:rgba(92,102,189,.05);border:1px dashed rgba(92,102,189,.2);line-height:1.55;">
+            <strong style="color:var(--text);">${trb('Важно:','Important:')}</strong>
+            ${trb(' выбор здесь определяет состав отчёта по умолчанию, но не отключает сбор исходных обезличенных gaze/QC данных. Качество данных всегда остаётся включённым.',' this selection controls the default report, but does not disable collection of source anonymized gaze/QC data. Data quality always remains enabled.')}
+          </div>
+        </div>`;
+
+      content.querySelector('#analyticsMetricsDetails')?.addEventListener('toggle', event => { metricsOpen = event.currentTarget.open; });
+      content.querySelector('#analyticsOverridesDetails')?.addEventListener('toggle', event => { overridesOpen = event.currentTarget.open; });
+
+      content.querySelectorAll('.an-package-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const packageId = input.dataset.packageId;
+          if (input.checked) {
+            if (!plan.defaultPackages.includes(packageId)) plan.defaultPackages.push(packageId);
+            analyticsApi.metrics.filter(metric => metric.packageId === packageId && metric.defaultSelected).forEach(metric => {
+              if (!plan.selectedMetricIds.includes(metric.id)) plan.selectedMetricIds.push(metric.id);
+            });
+          } else {
+            plan.defaultPackages = plan.defaultPackages.filter(id => id !== packageId);
+            plan.selectedMetricIds = plan.selectedMetricIds.filter(id => {
+              const metric = analyticsApi.metrics.find(item => item.id === id);
+              return !metric || metric.mandatory || metric.packageId !== packageId;
+            });
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-metric-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const metricId = input.dataset.metricId;
+          if (input.checked) {
+            if (!plan.selectedMetricIds.includes(metricId)) plan.selectedMetricIds.push(metricId);
+          } else {
+            plan.selectedMetricIds = plan.selectedMetricIds.filter(id => id !== metricId);
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-block-override-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const blockId = input.dataset.blockId;
+          const block = analyzableBlocks.find(item => String(item.id) === String(blockId));
+          if (!block) return;
+          if (input.checked) {
+            const caps = analyticsApi.blockCapabilities(block);
+            const packagesForBlock = plan.defaultPackages.filter(id => analyticsApi.isPackageAvailable(id, caps));
+            if (!packagesForBlock.includes('data_quality')) packagesForBlock.push('data_quality');
+            plan.blockOverrides[blockId] = {
+              packages: packagesForBlock,
+              selectedMetricIds: plan.selectedMetricIds.slice()
+            };
+          } else {
+            delete plan.blockOverrides[blockId];
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-block-package-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const blockId = input.dataset.blockId;
+          const packageId = input.dataset.packageId;
+          const override = plan.blockOverrides[blockId];
+          if (!override) return;
+          if (input.checked) {
+            if (!override.packages.includes(packageId)) override.packages.push(packageId);
+            analyticsApi.metrics.filter(metric => metric.packageId === packageId && metric.defaultSelected).forEach(metric => {
+              if (!override.selectedMetricIds.includes(metric.id)) override.selectedMetricIds.push(metric.id);
+            });
+          } else {
+            override.packages = override.packages.filter(id => id !== packageId);
+            override.selectedMetricIds = override.selectedMetricIds.filter(id => {
+              const metric = analyticsApi.metrics.find(item => item.id === id);
+              return !metric || metric.mandatory || metric.packageId !== packageId;
+            });
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-block-metric-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const override = plan.blockOverrides[input.dataset.blockId];
+          const metricId = input.dataset.metricId;
+          if (!override) return;
+          if (input.checked) {
+            if (!override.selectedMetricIds.includes(metricId)) override.selectedMetricIds.push(metricId);
+          } else {
+            override.selectedMetricIds = override.selectedMetricIds.filter(id => id !== metricId);
+          }
+          persistPlan();
+          renderPlanContent();
+        });
       });
     }
 
-    function saveAnalyticsStep() {
-      const tabs = {};
-      canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
-      localStorage.setItem(analyticsKey, JSON.stringify({ tabs }));
-    }
-
-    canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => {
-      cb.addEventListener('change', refreshAnalyticsCards);
-    });
-    canvasCol.querySelector('#analyticsBackBtn').addEventListener('click', () => { saveAnalyticsStep(); currentStep--; renderStepper(); renderCanvas(); });
-    canvasCol.querySelector('#analyticsNextBtn').addEventListener('click', () => { saveAnalyticsStep(); currentStep++; renderStepper(); renderCanvas(); });
+    renderPlanContent();
+    canvasCol.querySelector('#analyticsBackBtn').addEventListener('click', () => { persistPlan(); currentStep--; renderStepper(); renderCanvas(); });
+    canvasCol.querySelector('#analyticsNextBtn').addEventListener('click', () => { persistPlan(); currentStep++; renderStepper(); renderCanvas(); });
   }
 
   //сохранение черновика
-  function saveDraft() {
+  async function saveDraft() {
     const metaFromForm = canvasCol.querySelector('#metaTitle') ? getProtocolMetaFromForm() : protocolMeta;
     protocolMeta = { ...protocolMeta, ...metaFromForm };
     const expTitle = protocolMeta.title || editingExp?.title || trb('Черновик эксперимента','Experiment draft');
+    if (!(await requireUniqueExperimentTitleAsync(expTitle))) return;
 
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     const id = experimentId || 'exp_' + Date.now();
     const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
+    const analyticsPlan = getBuilderAnalyticsPlan();
 
     const entry = {
       id,
       title: expTitle,
+      workspaceProjectId: currentWorkspaceProjectId(),
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
       blocks: userBlocks,
+      analyticsPlan,
       version: editingExp?.status === 'active' ? protocolVersion : (editingExp?.version || '1.0'),
       history: editingExp?.history || [],
       savedStep: currentStep,
@@ -2943,6 +3417,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function saveProtocol() {
+    if (!requireUniqueExperimentTitle(protocolMeta.title)) return;
     const errors = [];
     validateProtocolMeta(protocolMeta).forEach(field => errors.push(trb('Заполните поле: ','Fill in field: ') + field));
 
@@ -2979,8 +3454,10 @@ function ExperimentBuilderView(options = {}) {
 
   async function doSave() {
     const srcData = parsedExperimentData?.json || {};
+    const builderKey = experimentId || 'draft';
 
     const expTitle = protocolMeta.title || srcData.title || 'Новый эксперимент';
+    if (!(await requireUniqueExperimentTitleAsync(expTitle))) return;
 
     const shell = getParticipantShellMeta();
     protocolMeta.participantShell = shell;
@@ -3002,9 +3479,7 @@ function ExperimentBuilderView(options = {}) {
     userBlocks.forEach((b) => {
       if (b.content?.useBPM) hubMetrics.push('bpm');
     });
-    const analyticsCfg = typeof getExperimentAnalyticsConfig === 'function'
-      ? getExperimentAnalyticsConfig(builderKey)
-      : null;
+    const analyticsPlan = getBuilderAnalyticsPlan();
 
     const json = {
       title: expTitle,
@@ -3013,7 +3488,7 @@ function ExperimentBuilderView(options = {}) {
       description: protocolMeta.description,
       participantShell: shell,
       testHubMetrics: [...new Set(hubMetrics)],
-      analyticsConfig: analyticsCfg,
+      analyticsPlan,
       version: 'v2.0_universal',
       settings: srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' },
       blocks: [
@@ -3054,6 +3529,8 @@ function ExperimentBuilderView(options = {}) {
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
             useAOI: !!b.content?.useAOI,
+            ...(b.content?.useAOI ? { aoiSchemaVersion: b.content?.aoiSchemaVersion || '1.2' } : {}),
+            aoiDefinitions: b.content?.aoiDefinitions || {},
             useEmotionTracking: !!b.content?.useEmotionTracking,
             protocolDurationMs: b.content?.protocolDurationMs || null,
             analytics: b.content?.useEmotionTracking
@@ -3077,6 +3554,9 @@ function ExperimentBuilderView(options = {}) {
             stimuliSource: b.content?.stimuliSource || 'library',
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
+            useAOI: !!b.content?.useAOI,
+            ...(b.content?.useAOI ? { aoiSchemaVersion: b.content?.aoiSchemaVersion || '1.2' } : {}),
+            aoiDefinitions: b.content?.aoiDefinitions || {},
           };
           if (b.content?.useFixation) {
             out.blockConfig.fixation = {
@@ -3098,8 +3578,6 @@ function ExperimentBuilderView(options = {}) {
     if (typeof deriveSelectedMetricsFromBlocks === 'function') {
       json.selected_metrics = deriveSelectedMetricsFromBlocks(json.blocks);
     }
-
-    const builderKey = experimentId || 'draft';
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     const id = experimentId || 'exp_' + Date.now();
 
@@ -3108,6 +3586,7 @@ function ExperimentBuilderView(options = {}) {
       history.push({
         version: editingExp.version,
         blocks: editingExp.blocks,
+        analyticsPlan: editingExp.analyticsPlan || editingExp.definition?.analyticsPlan || null,
         updatedAt: editingExp.updatedAt
       });
     }
@@ -3115,9 +3594,12 @@ function ExperimentBuilderView(options = {}) {
     const entry = {
       id,
       title: json.title,
+      workspaceProjectId: currentWorkspaceProjectId(),
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
       blocks: userBlocks,
+      analyticsPlan,
+      definition: json,
       version: protocolVersion,
       history: history,
       savedStep: 8,
