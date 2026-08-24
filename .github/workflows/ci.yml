@@ -27,7 +27,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/api/package-lock.json
+          cache-dependency-path: |
+            apps/api/package-lock.json
+            apps/autotests/package-lock.json
 
       - name: Install API dependencies
         working-directory: apps/api
@@ -40,6 +42,14 @@ jobs:
       - name: Run Python analyzer smoke test
         working-directory: apps/api
         run: npm run test:rt-python
+
+      - name: Install autotest dependencies
+        working-directory: apps/autotests
+        run: npm ci
+
+      - name: Type-check autotests
+        working-directory: apps/autotests
+        run: npm run typecheck
 
       - name: Validate deployment shell scripts
         run: bash -n deploy/production/*.sh deploy/production/wecog-release
