@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: npm ci
+
+      - name: Run API tests
+        working-directory: apps/api
+        run: npm test
+
+      - name: Run Python analyzer smoke test
+        working-directory: apps/api
+        run: npm run test:rt-python
+
+      - name: Validate deployment shell scripts
+        run: bash -n deploy/production/*.sh deploy/production/wecog-release
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build the production API image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/api/Dockerfile
+          build-args: VCS_REF=${{ github.sha }}
+          push: false
+          load: true
+          tags: wecog-api:ci
+          cache-from: type=gha,scope=wecog-api
+          cache-to: type=gha,mode=max,scope=wecog-api
+          provenance: false
+
+      - name: Build the production web image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/web/Dockerfile
+          build-args: VCS_REF=${{ github.sha }}
+          push: false
+          load: true
+          tags: wecog-web:ci
+          cache-from: type=gha,scope=wecog-web
+          cache-to: type=gha,mode=max,scope=wecog-web
+          provenance: false
+
+      - name: Validate production Compose file
+        run: |
+          printf 'DATABASE_URL=postgres://localhost:5432/emocog\nJWT_SECRET=ci-only-secret-that-is-longer-than-thirty-two-characters\n' \
+            > "${RUNNER_TEMP}/wecog-ci.env"
+          WECOG_REGISTRY_ID=ci-registry \
+          WECOG_IMAGE_TAG="${GITHUB_SHA}" \
+          WECOG_ENV_FILE="${RUNNER_TEMP}/wecog-ci.env" \
+            docker compose --file compose.production.yaml config --quiet
+
+      - name: Check the public web image and private paths
+        run: |
+          docker run --detach --rm \
+            --name wecog-web-ci \
+            --publish 127.0.0.1:18080:8080 \
+            wecog-web:ci
+          trap 'docker stop wecog-web-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null && break
+            sleep 1
+          done
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/)" = 200
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/apps/api/.env)" = 404
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/.git/config)" = 404
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/apps/api/package.json)" = 404

@@ -1,0 +1,115 @@
+name: Roll back production application
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Full 40-character commit SHA; leave empty to use the recorded previous release
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: wecog-production
+  cancel-in-progress: false
+
+env:
+  YC_DEPLOY_SERVICE_ACCOUNT_ID: ajeuqpta4a5pecli5pl4
+  YC_CLOUD_ID: b1gf98l8bh7linds4909
+  YC_FOLDER_ID: b1gakvq29fuiic89917k
+  YC_ORGANIZATION_ID: bpf8tlkd8pg3s191sskt
+  YC_VM_IP: 158.160.179.184
+  YC_VM_LOGIN: wecog-deploy
+  YC_VM_HOST_KEY_SHA256: SHA256:SNEvnvsNL+F+wJ+qXf77r3f8fCBlHRoyhZov+o6z5N0
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Install Yandex Cloud CLI
+        run: |
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/install.sh \
+            --output "${RUNNER_TEMP}/install-yc.sh"
+          bash "${RUNNER_TEMP}/install-yc.sh" -i "${RUNNER_TEMP}/yandex-cloud" -n
+          echo "${RUNNER_TEMP}/yandex-cloud/bin" >> "${GITHUB_PATH}"
+
+      - name: Authenticate through GitHub OIDC
+        run: |
+          github_oidc_token="$({
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https%3A%2F%2Fgithub.com%2Fweb-emocog"
+          } | jq --raw-output --exit-status '.value')"
+          yc_iam_token="$({
+            curl --fail --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/x-www-form-urlencoded' \
+              --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+              --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+              --data-urlencode "audience=${YC_DEPLOY_SERVICE_ACCOUNT_ID}" \
+              --data-urlencode "subject_token=${github_oidc_token}" \
+              --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+              https://auth.yandex.cloud/oauth/token
+          } | jq --raw-output --exit-status '.access_token')"
+          echo "::add-mask::${github_oidc_token}"
+          echo "::add-mask::${yc_iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "${yc_iam_token}" >> "${GITHUB_ENV}"
+
+      - name: Export OS Login certificate and verify VM host key
+        run: |
+          yc config set token "${YC_IAM_TOKEN}" >/dev/null
+          yc config set cloud-id "${YC_CLOUD_ID}" >/dev/null
+          yc config set folder-id "${YC_FOLDER_ID}" >/dev/null
+
+          ssh_directory="${RUNNER_TEMP}/yc-ssh"
+          install --directory --mode 0700 "${ssh_directory}"
+          certificate_output="$({
+            yc compute ssh certificate export \
+              --login "${YC_VM_LOGIN}" \
+              --organization-id "${YC_ORGANIZATION_ID}" \
+              --directory "${ssh_directory}"
+          })"
+          ssh_identity="$(sed -n 's/^Identity: //p' <<< "${certificate_output}")"
+          test -f "${ssh_identity}"
+          test -f "${ssh_identity}-cert.pub"
+          chmod 0600 "${ssh_identity}" "${ssh_identity}-cert.pub"
+
+          known_hosts="${RUNNER_TEMP}/known_hosts"
+          ssh-keyscan -T 10 -t ed25519 "${YC_VM_IP}" > "${known_hosts}"
+          actual_fingerprint="$(ssh-keygen -lf "${known_hosts}" -E sha256 | awk 'NR == 1 { print $2 }')"
+          test "${actual_fingerprint}" = "${YC_VM_HOST_KEY_SHA256}"
+
+          printf 'SSH_IDENTITY=%s\n' "${ssh_identity}" >> "${GITHUB_ENV}"
+          printf 'SSH_KNOWN_HOSTS=%s\n' "${known_hosts}" >> "${GITHUB_ENV}"
+
+      - name: Roll back application containers
+        env:
+          REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          arguments=(rollback)
+          if [[ -n "${REQUESTED_IMAGE_TAG}" ]]; then
+            [[ "${REQUESTED_IMAGE_TAG}" =~ ^[0-9a-f]{40}$ ]]
+            arguments+=("${REQUESTED_IMAGE_TAG}")
+          fi
+          ssh \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}" \
+            -i "${SSH_IDENTITY}" \
+            "${YC_VM_LOGIN}@${YC_VM_IP}" \
+            sudo -n /usr/local/sbin/wecog-release "${arguments[@]}"
+
+      - name: Verify production
+        run: |
+          curl --fail --silent --show-error \
+            --retry 10 --retry-delay 3 --retry-all-errors \
+            https://wecog.ru/ >/dev/null
+          curl --fail --silent --show-error \
+            --retry 10 --retry-delay 3 --retry-all-errors \
+            https://wecog.ru/api/ready >/dev/null

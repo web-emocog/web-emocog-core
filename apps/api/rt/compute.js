@@ -16,7 +16,7 @@ const ANALYZE_SCRIPT = path.resolve(__dirname, '../../../rt_component-/scripts/a
 const CONFIG_PATH = path.resolve(__dirname, '../../../rt_component-/examples/config_default.json');
 
 function getPythonBin() {
-  return process.env.RT_PYTHON || 'python';
+  return process.env.RT_PYTHON || 'python3';
 }
 
 function pythonAvailable() {
