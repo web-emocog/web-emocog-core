@@ -1,0 +1,10 @@
+# Non-secret production identifiers. Lockbox values are fetched at runtime.
+WECOG_REGISTRY_ID=crphf3uq1mmhoqcsh60e
+WECOG_LOCKBOX_SECRET_ID=e6qgmqh8i1odhlg6hv9i
+WECOG_BACKUP_BUCKET=wecog-prod-backups-b1gakvq29fuiic89917k
+
+WECOG_COMPOSE_FILE=/opt/wecog/compose.yaml
+WECOG_SECRET_ENV=/etc/wecog/api.env
+WECOG_UPLOADS_DIR=/var/lib/wecog/uploads
+WECOG_BACKUP_DIR=/var/lib/wecog/backups
+WECOG_STATE_DIR=/var/lib/wecog/state

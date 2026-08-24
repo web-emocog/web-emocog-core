@@ -13,10 +13,10 @@
     "migrate:create": "node-pg-migrate create",
     "admin:bootstrap": "node scripts/bootstrap-admin.js",
     "test": "node --test tests/*.test.js",
-    "test:rt-python": "python ../../rt_component-/scripts/analyze_events_json.py < ../../rt_component-/tests/smoke_input.json"
+    "test:rt-python": "python3 ../../rt_component-/scripts/analyze_events_json.py < ../../rt_component-/tests/smoke_input.json"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

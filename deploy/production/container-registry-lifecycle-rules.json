@@ -1,0 +1,13 @@
+[
+  {
+    "description": "Keep at least ten immutable releases and expire SHA-tagged images after 30 days",
+    "expire_period": "30d",
+    "tag_regexp": "^[0-9a-f]{40}$",
+    "retained_top": 10
+  },
+  {
+    "description": "Remove untagged image versions after two days",
+    "expire_period": "48h",
+    "untagged": true
+  }
+]
