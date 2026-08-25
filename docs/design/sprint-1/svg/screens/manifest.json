@@ -1,0 +1,429 @@
+[
+  {
+    "id": "R0",
+    "title": "Вход",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R0-login.svg"
+  },
+  {
+    "id": "R0",
+    "title": "Вход",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R0-login.svg"
+  },
+  {
+    "id": "R1",
+    "title": "Главная",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R1-overview.svg"
+  },
+  {
+    "id": "R1",
+    "title": "Главная",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R1-overview.svg"
+  },
+  {
+    "id": "R2",
+    "title": "Проекты",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R2-projects.svg"
+  },
+  {
+    "id": "R2",
+    "title": "Проекты",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R2-projects.svg"
+  },
+  {
+    "id": "R3",
+    "title": "Новый проект",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R3-new-project.svg"
+  },
+  {
+    "id": "R3",
+    "title": "Новый проект",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R3-new-project.svg"
+  },
+  {
+    "id": "R4",
+    "title": "Обзор проекта",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R4-project-overview.svg"
+  },
+  {
+    "id": "R4",
+    "title": "Обзор проекта",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R4-project-overview.svg"
+  },
+  {
+    "id": "R5",
+    "title": "Протоколы",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R5-protocols.svg"
+  },
+  {
+    "id": "R5",
+    "title": "Протоколы",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R5-protocols.svg"
+  },
+  {
+    "id": "R6",
+    "title": "Конструктор",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R6-builder.svg"
+  },
+  {
+    "id": "R6",
+    "title": "Конструктор",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R6-builder.svg"
+  },
+  {
+    "id": "R7",
+    "title": "Участники",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R7-participants.svg"
+  },
+  {
+    "id": "R7",
+    "title": "Участники",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R7-participants.svg"
+  },
+  {
+    "id": "R8",
+    "title": "Мониторинг",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R8-monitoring.svg"
+  },
+  {
+    "id": "R8",
+    "title": "Мониторинг",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R8-monitoring.svg"
+  },
+  {
+    "id": "R9",
+    "title": "Результаты",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R9-results.svg"
+  },
+  {
+    "id": "R9",
+    "title": "Результаты",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R9-results.svg"
+  },
+  {
+    "id": "R10",
+    "title": "Сессия",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R10-session.svg"
+  },
+  {
+    "id": "R10",
+    "title": "Сессия",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R10-session.svg"
+  },
+  {
+    "id": "R11",
+    "title": "Настройки",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R11-settings.svg"
+  },
+  {
+    "id": "R11",
+    "title": "Настройки",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R11-settings.svg"
+  },
+  {
+    "id": "R12",
+    "title": "Стимулы",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R12-stimuli.svg"
+  },
+  {
+    "id": "R12",
+    "title": "Стимулы",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R12-stimuli.svg"
+  },
+  {
+    "id": "R13",
+    "title": "Шаблоны",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R13-templates.svg"
+  },
+  {
+    "id": "R13",
+    "title": "Шаблоны",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R13-templates.svg"
+  },
+  {
+    "id": "R14",
+    "title": "Тариф",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R14-billing.svg"
+  },
+  {
+    "id": "R14",
+    "title": "Тариф",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R14-billing.svg"
+  },
+  {
+    "id": "R0b",
+    "title": "Регистрация",
+    "audience": "researcher",
+    "size": "desktop",
+    "file": "screens/researcher/desktop/R0b-registration.svg"
+  },
+  {
+    "id": "R0b",
+    "title": "Регистрация",
+    "audience": "researcher",
+    "size": "mobile",
+    "file": "screens/researcher/mobile/R0b-registration.svg"
+  },
+  {
+    "id": "P1",
+    "title": "Приглашение",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P1-invite.svg"
+  },
+  {
+    "id": "P1",
+    "title": "Приглашение",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P1-invite.svg"
+  },
+  {
+    "id": "P2",
+    "title": "Согласие",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P2-consent.svg"
+  },
+  {
+    "id": "P2",
+    "title": "Согласие",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P2-consent.svg"
+  },
+  {
+    "id": "P3",
+    "title": "Проверка устройства",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P3-device.svg"
+  },
+  {
+    "id": "P3",
+    "title": "Проверка устройства",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P3-device.svg"
+  },
+  {
+    "id": "P4",
+    "title": "Калибровка",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P4-calibration.svg"
+  },
+  {
+    "id": "P4",
+    "title": "Калибровка",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P4-calibration.svg"
+  },
+  {
+    "id": "P5",
+    "title": "Инструкция",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P5-instruction.svg"
+  },
+  {
+    "id": "P5",
+    "title": "Инструкция",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P5-instruction.svg"
+  },
+  {
+    "id": "P6",
+    "title": "Задание",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P6-task.svg"
+  },
+  {
+    "id": "P6",
+    "title": "Задание",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P6-task.svg"
+  },
+  {
+    "id": "P7",
+    "title": "Завершение",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P7-final.svg"
+  },
+  {
+    "id": "P7",
+    "title": "Завершение",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P7-final.svg"
+  },
+  {
+    "id": "P8",
+    "title": "Камера недоступна",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P8-edge.svg"
+  },
+  {
+    "id": "P8",
+    "title": "Камера недоступна",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P8-edge.svg"
+  },
+  {
+    "id": "P4a",
+    "title": "Валидация пройдена",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P4a-validation-pass.svg"
+  },
+  {
+    "id": "P4a",
+    "title": "Валидация пройдена",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P4a-validation-pass.svg"
+  },
+  {
+    "id": "P4b",
+    "title": "Повторная калибровка",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P4b-validation-retry.svg"
+  },
+  {
+    "id": "P4b",
+    "title": "Повторная калибровка",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P4b-validation-retry.svg"
+  },
+  {
+    "id": "P6b",
+    "title": "SAM",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P6b-sam.svg"
+  },
+  {
+    "id": "P6b",
+    "title": "SAM",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P6b-sam.svg"
+  },
+  {
+    "id": "P8b",
+    "title": "Неподдерживаемый экран",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P8b-phone.svg"
+  },
+  {
+    "id": "P8b",
+    "title": "Неподдерживаемый экран",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P8b-phone.svg"
+  },
+  {
+    "id": "P8c",
+    "title": "Ожидает загрузки",
+    "audience": "participant",
+    "size": "desktop",
+    "file": "screens/participant/desktop/P8c-offline.svg"
+  },
+  {
+    "id": "P8c",
+    "title": "Ожидает загрузки",
+    "audience": "participant",
+    "size": "mobile",
+    "file": "screens/participant/mobile/P8c-offline.svg"
+  },
+  {
+    "id": "DS",
+    "title": "Дизайн-система",
+    "audience": "system",
+    "size": "desktop",
+    "file": "screens/system/design-system.svg"
+  },
+  {
+    "id": "SYS",
+    "title": "Системные состояния",
+    "audience": "system",
+    "size": "desktop",
+    "file": "screens/system/states-desktop.svg"
+  },
+  {
+    "id": "SYS",
+    "title": "Системные состояния",
+    "audience": "system",
+    "size": "mobile",
+    "file": "screens/system/states-mobile.svg"
+  }
+]

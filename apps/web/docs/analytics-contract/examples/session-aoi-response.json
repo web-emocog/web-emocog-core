@@ -1,0 +1,170 @@
+{
+  "contractVersion": "1.0",
+  "kind": "session_aoi",
+  "generatedAt": "2026-08-04T18:32:00.000Z",
+  "snapshot": {
+    "id": "snapshot-2026-08-04-001",
+    "datasetHash": "sha256:7c3e00e9062ad4dfe7429d80dc4f312e",
+    "createdAt": "2026-08-04T18:30:00.000Z",
+    "queryEcho": {
+      "schemaVersion": "1.0",
+      "mode": "session",
+      "analysisLevel": "level_1",
+      "projectId": 12,
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "metricIds": ["aoi.dwell_time_ms", "aoi.ttff_ms", "aoi.target_reached"],
+      "filters": {
+        "participantIds": ["P-042"],
+        "sessionIds": [105],
+        "groupIds": [],
+        "conditionIds": [],
+        "blockIds": ["main-block"],
+        "stimulusIds": ["stimulus-42"],
+        "aoiIds": ["aoi-target"],
+        "qcMode": "valid_and_borderline",
+        "qcChannels": ["gaze"],
+        "minValidFraction": 0.7,
+        "minSignalConfidence": 0.65,
+        "dateFrom": null,
+        "dateTo": null,
+        "includeIncompleteSessions": false
+      }
+    },
+    "includedParticipantIds": ["P-042"],
+    "includedSessionIds": [105],
+    "excludedSessions": [],
+    "versions": {
+      "protocol": "1.0.0",
+      "stimulus": "stimulus-42@1",
+      "aoiSchema": "1.2",
+      "metricsCatalog": "1.0",
+      "qcRules": "qc-rules-1.0.0",
+      "frontend": "researcher-web-1.0.0",
+      "backend": "analytics-api-1.0.0"
+    }
+  },
+  "data": {
+    "sessionId": 105,
+    "blockId": "main-block",
+    "presentationId": "presentation-7",
+    "stimulus": {
+      "id": "stimulus-42",
+      "version": "1",
+      "name": "Target image",
+      "type": "image",
+      "contentUrl": "/stimuli/42/content",
+      "intrinsicWidth": 1600,
+      "intrinsicHeight": 900
+    },
+    "coordinateSpace": "stimulus_normalized_0_1",
+    "aoiRows": [
+      {
+        "aoi": {
+          "id": "aoi-target",
+          "name": "Target",
+          "shape": "rectangle",
+          "points": [
+            { "x": 0.35, "y": 0.35 },
+            { "x": 0.65, "y": 0.65 }
+          ],
+          "order": 1,
+          "isTarget": true,
+          "validityInterval": { "startMs": 0, "endMs": 3000 }
+        },
+        "metrics": [
+          {
+            "metricId": "aoi.dwell_time_ms",
+            "value": 0,
+            "unit": "ms",
+            "status": "computed",
+            "reason": null,
+            "numerator": 0,
+            "denominator": 2240,
+            "observationDurationMs": 2240,
+            "nParticipants": 1,
+            "nObservations": 1,
+            "signalConfidence": 0.78,
+            "scope": {
+              "sessionId": 105,
+              "blockId": "main-block",
+              "trialId": "trial-7",
+              "presentationId": "presentation-7",
+              "stimulusId": "stimulus-42",
+              "aoiId": "aoi-target"
+            },
+            "qc": {
+              "channel": "gaze",
+              "status": "borderline",
+              "validFraction": 0.747,
+              "signalConfidence": 0.78,
+              "reasons": ["low_valid_gaze_fraction"],
+              "ruleVersion": "gaze-qc-1.0.0"
+            },
+            "algorithm": { "id": "gaze-aoi", "version": "1.0.0", "parametersHash": "sha256:gaze-aoi-default-v1" }
+          },
+          {
+            "metricId": "aoi.target_reached",
+            "value": false,
+            "unit": "boolean",
+            "status": "computed",
+            "reason": null,
+            "numerator": 0,
+            "denominator": 1,
+            "observationDurationMs": 2240,
+            "nParticipants": 1,
+            "nObservations": 1,
+            "signalConfidence": 0.78,
+            "scope": {
+              "sessionId": 105,
+              "blockId": "main-block",
+              "trialId": "trial-7",
+              "presentationId": "presentation-7",
+              "stimulusId": "stimulus-42",
+              "aoiId": "aoi-target"
+            },
+            "qc": {
+              "channel": "gaze",
+              "status": "borderline",
+              "validFraction": 0.747,
+              "signalConfidence": 0.78,
+              "reasons": ["low_valid_gaze_fraction"],
+              "ruleVersion": "gaze-qc-1.0.0"
+            },
+            "algorithm": { "id": "gaze-aoi", "version": "1.0.0", "parametersHash": "sha256:gaze-aoi-default-v1" }
+          },
+          {
+            "metricId": "aoi.ttff_ms",
+            "value": null,
+            "unit": "ms",
+            "status": "no_event",
+            "reason": "target_not_reached_before_presentation_end",
+            "numerator": null,
+            "denominator": 1,
+            "observationDurationMs": 2240,
+            "nParticipants": 1,
+            "nObservations": 1,
+            "signalConfidence": 0.78,
+            "scope": {
+              "sessionId": 105,
+              "blockId": "main-block",
+              "trialId": "trial-7",
+              "presentationId": "presentation-7",
+              "stimulusId": "stimulus-42",
+              "aoiId": "aoi-target"
+            },
+            "qc": {
+              "channel": "gaze",
+              "status": "borderline",
+              "validFraction": 0.747,
+              "signalConfidence": 0.78,
+              "reasons": ["low_valid_gaze_fraction"],
+              "ruleVersion": "gaze-qc-1.0.0"
+            },
+            "algorithm": { "id": "gaze-aoi", "version": "1.0.0", "parametersHash": "sha256:gaze-aoi-default-v1" }
+          }
+        ]
+      }
+    ]
+  }
+}

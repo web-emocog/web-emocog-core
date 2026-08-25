@@ -4,18 +4,21 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireOperation, OPERATIONS, isPlatformAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 router.use(requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'));
+router.use(requireOperation(OPERATIONS.ANALYTICS_READ));
 
-function scopeJoinAndPredicate(userParamIdx) {
+function scopeJoinAndPredicate(userParamIdx, user) {
+  if (isPlatformAdmin(user)) return { join: '', predicate: '1=1' };
   return {
     join: `
       LEFT JOIN protocols sp ON sp.id = s.protocol_id
       INNER JOIN projects p_scope ON p_scope.id = COALESCE(s.project_id, sp.project_id)
       INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id AND uo_scope.user_id = $${userParamIdx}
+      INNER JOIN user_projects up_scope ON up_scope.project_id = p_scope.id AND up_scope.user_id = uo_scope.user_id
     `,
     predicate: '1=1'
   };
@@ -35,8 +38,8 @@ router.get(
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
       const conditions = [];
-      const params = [req.user.sub];
-      let i = 2;
+      const params = isPlatformAdmin(req.user) ? [] : [req.user.sub];
+      let i = params.length + 1;
       if (req.query.project_id) {
         conditions.push(`s.project_id = $${i++}`);
         params.push(req.query.project_id);
@@ -53,7 +56,7 @@ router.get(
         conditions.push(`s.started_at <= $${i++}`);
         params.push(req.query.date_to);
       }
-      const scope = scopeJoinAndPredicate(1);
+      const scope = scopeJoinAndPredicate(1, req.user);
       const where = conditions.length ? `WHERE ${scope.predicate} AND ${conditions.join(' AND ')}` : `WHERE ${scope.predicate}`;
 
       const r = await pool.query(
@@ -107,7 +110,11 @@ router.get(
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
       const limit = req.query.limit ? parseInt(req.query.limit, 10) : 100;
-      const scope = scopeJoinAndPredicate(1);
+      const scope = scopeJoinAndPredicate(1, req.user);
+      const params = isPlatformAdmin(req.user)
+        ? [limit]
+        : [req.user.sub, limit];
+      const limitParam = params.length;
       const r = await pool.query(
         `SELECT
            s.id,
@@ -143,8 +150,8 @@ router.get(
          LEFT JOIN session_features sf ON sf.session_id = s.id
          WHERE ${scope.predicate}
          ORDER BY s.started_at DESC NULLS LAST
-         LIMIT $2`,
-        [req.user.sub, limit]
+         LIMIT $${limitParam}`,
+        params
       );
       res.json(r.rows);
     } catch (err) {

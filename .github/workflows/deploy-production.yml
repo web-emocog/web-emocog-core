@@ -1,0 +1,211 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: wecog-production
+  cancel-in-progress: false
+
+env:
+  YC_DEPLOY_SERVICE_ACCOUNT_ID: ajeuqpta4a5pecli5pl4
+  YC_CLOUD_ID: b1gf98l8bh7linds4909
+  YC_FOLDER_ID: b1gakvq29fuiic89917k
+  YC_ORGANIZATION_ID: bpf8tlkd8pg3s191sskt
+  YC_REGISTRY_ID: crphf3uq1mmhoqcsh60e
+  YC_VM_IP: 158.160.179.184
+  YC_VM_LOGIN: wecog-deploy
+  YC_VM_DISK_ID: fv4naqkghr1orqdh6fl3
+  YC_VM_HOST_KEY_SHA256: SHA256:SNEvnvsNL+F+wJ+qXf77r3f8fCBlHRoyhZov+o6z5N0
+  YC_AUTOMATED_SNAPSHOTS_TO_KEEP: "5"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Test API and Python analyzer
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm test
+          npm run test:rt-python
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/install.sh \
+            --output "${RUNNER_TEMP}/install-yc.sh"
+          bash "${RUNNER_TEMP}/install-yc.sh" \
+            -i "${RUNNER_TEMP}/yandex-cloud" \
+            -n
+          echo "${RUNNER_TEMP}/yandex-cloud/bin" >> "${GITHUB_PATH}"
+
+      - name: Exchange GitHub OIDC token for Yandex IAM token
+        run: |
+          github_oidc_token="$({
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https%3A%2F%2Fgithub.com%2Fweb-emocog"
+          } | jq --raw-output --exit-status '.value')"
+
+          yc_iam_token="$({
+            curl --fail --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/x-www-form-urlencoded' \
+              --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+              --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+              --data-urlencode "audience=${YC_DEPLOY_SERVICE_ACCOUNT_ID}" \
+              --data-urlencode "subject_token=${github_oidc_token}" \
+              --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+              https://auth.yandex.cloud/oauth/token
+          } | jq --raw-output --exit-status '.access_token')"
+
+          echo "::add-mask::${github_oidc_token}"
+          echo "::add-mask::${yc_iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "${yc_iam_token}" >> "${GITHUB_ENV}"
+
+      - name: Configure Yandex Cloud CLI and registry login
+        run: |
+          yc config set token "${YC_IAM_TOKEN}" >/dev/null
+          yc config set cloud-id "${YC_CLOUD_ID}" >/dev/null
+          yc config set folder-id "${YC_FOLDER_ID}" >/dev/null
+          printf '%s' "${YC_IAM_TOKEN}" \
+            | docker login --username iam --password-stdin cr.yandex
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build and push the immutable API image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: docker/api/Dockerfile
+          build-args: VCS_REF=${{ github.sha }}
+          push: true
+          tags: cr.yandex/${{ env.YC_REGISTRY_ID }}/wecog-api:${{ github.sha }}
+          cache-from: type=gha,scope=wecog-api
+          cache-to: type=gha,mode=max,scope=wecog-api
+          provenance: false
+
+      - name: Build and push the immutable web image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: docker/web/Dockerfile
+          build-args: VCS_REF=${{ github.sha }}
+          push: true
+          tags: cr.yandex/${{ env.YC_REGISTRY_ID }}/wecog-web:${{ github.sha }}
+          cache-from: type=gha,scope=wecog-web
+          cache-to: type=gha,mode=max,scope=wecog-web
+          provenance: false
+
+      - name: Export short-lived OS Login certificate
+        run: |
+          ssh_directory="${RUNNER_TEMP}/yc-ssh"
+          install --directory --mode 0700 "${ssh_directory}"
+          certificate_output="$({
+            yc compute ssh certificate export \
+              --login "${YC_VM_LOGIN}" \
+              --organization-id "${YC_ORGANIZATION_ID}" \
+              --directory "${ssh_directory}"
+          })"
+          ssh_identity="$(sed -n 's/^Identity: //p' <<< "${certificate_output}")"
+          test -n "${ssh_identity}"
+          test -f "${ssh_identity}"
+          test -f "${ssh_identity}-cert.pub"
+          chmod 0600 "${ssh_identity}" "${ssh_identity}-cert.pub"
+          printf 'SSH_IDENTITY=%s\n' "${ssh_identity}" >> "${GITHUB_ENV}"
+
+      - name: Pin and verify the production VM host key
+        run: |
+          known_hosts="${RUNNER_TEMP}/known_hosts"
+          ssh-keyscan -T 10 -t ed25519 "${YC_VM_IP}" > "${known_hosts}"
+          actual_fingerprint="$(ssh-keygen -lf "${known_hosts}" -E sha256 | awk 'NR == 1 { print $2 }')"
+          if [[ "${actual_fingerprint}" != "${YC_VM_HOST_KEY_SHA256}" ]]; then
+            echo "Production VM SSH host key mismatch." >&2
+            echo "Expected: ${YC_VM_HOST_KEY_SHA256}" >&2
+            echo "Actual:   ${actual_fingerprint}" >&2
+            exit 1
+          fi
+          printf 'SSH_KNOWN_HOSTS=%s\n' "${known_hosts}" >> "${GITHUB_ENV}"
+
+      - name: Prepare release and upload the database backup
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}" \
+            -i "${SSH_IDENTITY}" \
+            "${YC_VM_LOGIN}@${YC_VM_IP}" \
+            sudo -n /usr/local/sbin/wecog-release prepare "${GITHUB_SHA}"
+
+      - name: Create pre-deploy disk snapshot
+        run: |
+          snapshot_name="wecog-predeploy-$(date --utc +'%Y%m%d-%H%M%S')-${GITHUB_SHA:0:8}"
+          yc compute snapshot create \
+            --folder-id "${YC_FOLDER_ID}" \
+            --name "${snapshot_name}" \
+            --description "Wecog automatic pre-deploy snapshot for ${GITHUB_SHA}" \
+            --labels "app=wecog,reason=predeploy,commit=${GITHUB_SHA:0:12}" \
+            --disk-id "${YC_VM_DISK_ID}"
+
+      - name: Deploy the prepared release
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}" \
+            -i "${SSH_IDENTITY}" \
+            "${YC_VM_LOGIN}@${YC_VM_IP}" \
+            sudo -n /usr/local/sbin/wecog-release deploy "${GITHUB_SHA}"
+
+      - name: Verify production through public HTTPS
+        run: |
+          curl --fail --silent --show-error \
+            --retry 10 --retry-delay 3 --retry-all-errors \
+            https://wecog.ru/ >/dev/null
+          curl --fail --silent --show-error \
+            --retry 10 --retry-delay 3 --retry-all-errors \
+            https://wecog.ru/api/ready >/dev/null
+
+      - name: Keep only the latest automated pre-deploy snapshots
+        run: |
+          mapfile -t stale_snapshot_ids < <(
+            yc compute snapshot list \
+              --folder-id "${YC_FOLDER_ID}" \
+              --format json \
+              | jq --raw-output \
+                  --arg disk_id "${YC_VM_DISK_ID}" \
+                  --argjson keep "${YC_AUTOMATED_SNAPSHOTS_TO_KEEP}" '
+                    [
+                      .[]
+                      | select(.source_disk_id == $disk_id)
+                      | select(.labels.app == "wecog")
+                      | select(.labels.reason == "predeploy")
+                    ]
+                    | sort_by(.created_at)
+                    | reverse
+                    | .[$keep:][]?.id
+                  '
+          )
+
+          for snapshot_id in "${stale_snapshot_ids[@]}"; do
+            yc compute snapshot delete --id "${snapshot_id}"
+          done

@@ -65,7 +65,7 @@ class PrecheckAnalyzerInline {
             const vision = await FilesetResolver.forVisionTasks("js/vendor/mediapipe/wasm");
             this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
                 baseOptions: {
-                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                    modelAssetPath: "js/vendor/mediapipe/models/face_landmarker.task",
                     delegate: "GPU"
                 },
                 runningMode: this.runningMode,
@@ -137,7 +137,9 @@ class PrecheckAnalyzerInline {
             
             this.lastResult = {
                 illumination, face: faceData, pose, eyes, mouth,
-                landmarks, blendShapes, timestamp: Date.now(),
+                landmarks, blendShapes,
+                timestamp,
+                wallTimestamp: Date.now(),
                 frameSize: { width, height }
             };
             return this.lastResult;
@@ -353,7 +355,9 @@ class PrecheckAnalyzerInline {
             pose: { yaw: null, pitch: null, roll: null, status: 'error' },
             eyes: { left: { isOpen: false }, right: { isOpen: false }, bothOpen: false },
             mouth: { isOpen: false },
-            error: msg, timestamp: Date.now()
+            error: msg,
+            timestamp: performance.now(),
+            wallTimestamp: Date.now()
         };
     }
 

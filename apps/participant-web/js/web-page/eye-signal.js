@@ -67,7 +67,12 @@ export function extractEyeSignalSample(precheckResult, fallbackTimestamp = Date.
     }
 
     return {
-        t: Number.isFinite(precheckResult.timestamp) ? precheckResult.timestamp : fallbackTimestamp,
+        // Session analytics use wall-clock time. MediaPipe frame timestamps are
+        // monotonic navigation time and are kept separately.
+        t: Number.isFinite(fallbackTimestamp) ? fallbackTimestamp : Date.now(),
+        frameTimestamp: Number.isFinite(precheckResult.timestamp)
+            ? precheckResult.timestamp
+            : null,
         leftEAR,
         rightEAR,
         earAvg,

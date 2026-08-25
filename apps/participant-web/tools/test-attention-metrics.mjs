@@ -193,7 +193,7 @@ async function run() {
         logPass('synthetic-2c', `oscillatory_rebounds=${reasons.oscillatory_rebounds || 0}`);
     }
 
-    // scope-1: precheck blinks must not be counted in global (only tracking_test+)
+    // scope-1: global covers the full measured session; postCalibration is isolated.
     {
         const precheckEye = buildEyeSignals({
             durationMs: 8000,
@@ -219,9 +219,12 @@ async function run() {
             eyeTracking: [...precheckGaze, ...trackingGaze]
         });
 
-        assert(metrics.global.blinkDynamics.blinkCount === 1, 'scope-1: global must count only tracking_test+ blinks');
-        assert(metrics.global.meta.scopeStartPhase === 'tracking_test', 'scope-1: scopeStartPhase must be tracking_test');
-        assert(metrics.global.meta.scopeFilterApplied === true, 'scope-1: scopeFilterApplied must be true');
+        assert(metrics.global.blinkDynamics.blinkCount === 4, 'scope-1: global must include precheck and tracking blinks');
+        assert(metrics.global.meta.scopeStartPhase === 'session_first_measured_frame', 'scope-1: global must start at first measured frame');
+        assert(metrics.global.meta.scopeFilterApplied === false, 'scope-1: global must not filter session phases');
+        assert(metrics.postCalibration.blinkDynamics.blinkCount === 1, 'scope-1: postCalibration must exclude precheck blinks');
+        assert(metrics.postCalibration.meta.scopeStartPhase === 'tracking_test', 'scope-1: postCalibration must start at tracking_test');
+        assert(metrics.postCalibration.meta.scopeFilterApplied === true, 'scope-1: postCalibration filter must be explicit');
         logPass('scope-1');
     }
 
@@ -235,8 +238,8 @@ async function run() {
         const eyeTracking = buildGazeSignals({ durationMs: 10000, phase: 'cognitive_instruction' });
         const metrics = buildAttentionMetrics({ eyeSignals, eyeTracking });
 
-        assert(metrics.global.meta.scopeStartPhase === 'fallback_first_sample', 'scope-2: fallback phase expected');
-        assert(metrics.global.meta.scopeFilterApplied === false, 'scope-2: fallback must not mark filter applied');
+        assert(metrics.postCalibration.meta.scopeStartPhase === 'fallback_first_sample', 'scope-2: fallback phase expected');
+        assert(metrics.postCalibration.meta.scopeFilterApplied === false, 'scope-2: fallback must not mark filter applied');
         assert(metrics.global.blinkDynamics.blinkCount === 1, 'scope-2: fallback must still compute blinks');
         logPass('scope-2');
     }
@@ -302,7 +305,7 @@ async function run() {
             const perclos60Max = metrics?.global?.perclos?.windows?.['60s']?.maxPct;
             assert(blinkCount === 3, `regression: blinkCount expected 3, got ${blinkCount}`);
             assert(Number.isFinite(perclos60Max) && perclos60Max < 50, `regression: perclos60 max must be <50, got ${perclos60Max}`);
-            assert(metrics?.global?.meta?.scopeStartPhase === 'tracking_test', 'regression: scope must start from tracking_test');
+            assert(metrics?.postCalibration?.meta?.scopeStartPhase === 'tracking_test', 'regression: postCalibration scope must start from tracking_test');
             logPass('regression-session_S-8JZL3C', `blink=${blinkCount}, perclosEpisodes=${perclosEpisodes}, perclos60Max=${perclos60Max}`);
         }
     }
@@ -333,9 +336,9 @@ async function run() {
         } else {
             const session = JSON.parse(readFileSync(regressionFile, 'utf8'));
             const metrics = buildAttentionMetrics(session);
-            assert(metrics?.global?.meta?.scopeStartPhase === 'tracking_test', 'regression scope: start phase must be tracking_test');
-            assert(metrics?.global?.meta?.scopeFilterApplied === true, 'regression scope: filter must be applied');
-            logPass('regression-session_S-8SPZFQ-scope', `startMs=${metrics?.global?.meta?.scopeStartMs}`);
+            assert(metrics?.postCalibration?.meta?.scopeStartPhase === 'tracking_test', 'regression scope: start phase must be tracking_test');
+            assert(metrics?.postCalibration?.meta?.scopeFilterApplied === true, 'regression scope: filter must be applied');
+            logPass('regression-session_S-8SPZFQ-scope', `startMs=${metrics?.postCalibration?.meta?.scopeStartMs}`);
         }
     }
 

@@ -1,0 +1,83 @@
+{
+  "contractVersion": "1.0",
+  "kind": "model_result",
+  "generatedAt": "2026-08-04T18:37:00.000Z",
+  "snapshot": {
+    "id": "snapshot-comparison-2026-08-04-001",
+    "datasetHash": "sha256:4787b072121248d4d2ebd85f96ee210d",
+    "createdAt": "2026-08-04T18:37:00.000Z",
+    "queryEcho": {
+      "schemaVersion": "1.0",
+      "mode": "group",
+      "analysisLevel": "level_2",
+      "projectId": 12,
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "metricIds": ["aoi.dwell_time_ms"],
+      "filters": {
+        "participantIds": [],
+        "sessionIds": [],
+        "groupIds": ["control", "clinical"],
+        "conditionIds": ["condition-a"],
+        "blockIds": ["main-block"],
+        "stimulusIds": ["stimulus-42"],
+        "aoiIds": ["aoi-target"],
+        "qcMode": "valid_only",
+        "qcChannels": ["gaze"],
+        "minValidFraction": 0.8,
+        "minSignalConfidence": 0.7,
+        "dateFrom": null,
+        "dateTo": null,
+        "includeIncompleteSessions": false
+      },
+      "comparison": {
+        "factorIds": ["group", "condition"],
+        "contrastIds": ["clinical-vs-control@condition-a"]
+      }
+    },
+    "includedParticipantIds": ["P-001", "P-002", "P-003", "P-004"],
+    "includedSessionIds": [101, 102, 103, 104],
+    "excludedSessions": [],
+    "versions": {
+      "protocol": "1.0.0",
+      "stimulus": "stimulus-42@1",
+      "aoiSchema": "1.2",
+      "metricsCatalog": "1.0",
+      "qcRules": "qc-rules-1.0.0",
+      "frontend": "researcher-web-1.0.0",
+      "backend": "analytics-api-1.0.0"
+    }
+  },
+  "data": {
+    "readiness": "confounded",
+    "reason": "group_is_confounded_with_camera_model",
+    "metricId": "aoi.dwell_time_ms",
+    "modelId": "lognormal-mixed-model",
+    "modelVersion": "1.0.0",
+    "formula": "log(dwell_time_ms) ~ group * condition + camera_model + (1 | participant) + (1 | stimulus)",
+    "effect": null,
+    "effectUnit": "ms",
+    "effectLabel": "Clinical minus control dwell time",
+    "referenceLevel": "control",
+    "comparisonLevel": "clinical",
+    "estimateCi95": {
+      "value": null,
+      "lower": null,
+      "upper": null,
+      "confidenceLevel": 0.95,
+      "method": "not_computed"
+    },
+    "pValueAdjusted": null,
+    "adjustmentMethod": null,
+    "nParticipants": 4,
+    "nObservations": 88,
+    "warnings": ["Camera model A occurs only in the clinical group; camera model B occurs only in the control group."],
+    "readinessChecks": [
+      { "id": "sample_size", "status": "pass", "reason": null },
+      { "id": "repeated_measures", "status": "pass", "reason": null },
+      { "id": "channel_compatibility", "status": "pass", "reason": null },
+      { "id": "version_compatibility", "status": "pass", "reason": null },
+      { "id": "technical_confounding", "status": "blocked", "reason": "group_is_confounded_with_camera_model" }
+    ]
+  }
+}

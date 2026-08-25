@@ -4,14 +4,21 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const {
+  requireAuth,
+  requireRole,
+  requireOperation,
+  OPERATIONS,
+  hasProjectMembership,
+} = require('../middleware/auth');
 
 const router = express.Router();
 
 router.post(
   '/batch',
   requireAuth,
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.SESSION_WRITE),
   [
     body('session_id').trim().notEmpty().isLength({ max: 64 }),
     body('participant_id').optional().trim().isLength({ max: 64 }),
@@ -29,14 +36,7 @@ router.post(
       const protocolIdInput = req.body.protocol_id != null ? parseInt(req.body.protocol_id, 10) : null;
 
       async function ensureProjectAccess(projectId) {
-        const r = await pool.query(
-          `SELECT 1
-           FROM projects p
-           INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id
-           WHERE p.id = $1 AND uo.user_id = $2`,
-          [projectId, req.user.sub]
-        );
-        return !!r.rows[0];
+        return hasProjectMembership(pool, projectId, req.user);
       }
 
       async function protocolProjectId(protocolId) {

@@ -88,14 +88,19 @@ class FaceSegmenter {
             }
             
             // Загружаем WASM модуль
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-            );
+            const wasmRoot = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
+            const vision = await FilesetResolver.forVisionTasks(wasmRoot);
             
             // Выбираем модель в зависимости от типа сегментации
             const modelPath = this.segmentationType === 'selfie_multiclass'
-                ? "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"
-                : "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite";
+                ? new URL(
+                    '../vendor/mediapipe/models/selfie_multiclass_256x256.tflite',
+                    import.meta.url
+                ).href
+                : new URL(
+                    '../vendor/mediapipe/models/selfie_segmenter.tflite',
+                    import.meta.url
+                ).href;
             
             // Создаём Image Segmenter
             this.imageSegmenter = await ImageSegmenter.createFromOptions(vision, {

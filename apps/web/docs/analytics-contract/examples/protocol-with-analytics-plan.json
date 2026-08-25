@@ -1,0 +1,86 @@
+{
+  "title": "Visual attention study",
+  "protocolId": "visual-attention-v1",
+  "version": "1.0.0",
+  "analyticsPlan": {
+    "schemaVersion": "1.0",
+    "defaultPackages": [
+      "aoi_attention",
+      "task_performance",
+      "group_descriptive",
+      "data_quality"
+    ],
+    "selectedMetricIds": [
+      "viz.heatmap",
+      "aoi.gaze_on_target_pct",
+      "aoi.dwell_time_ms",
+      "aoi.dwell_time_pct",
+      "aoi.fixation_count",
+      "aoi.fixation_duration_median_ms",
+      "aoi.ttff_ms",
+      "aoi.target_reached",
+      "aoi.target_reached_pct",
+      "aoi.revisit_count",
+      "task.accuracy_pct",
+      "task.rt_median_ms",
+      "task.omission_rate_pct",
+      "task.commission_rate_pct",
+      "qc.sample_count_total",
+      "qc.sample_count_valid",
+      "qc.valid_gaze_pct",
+      "qc.low_confidence_pct",
+      "qc.off_screen_pct",
+      "qc.outside_stimulus_pct"
+    ],
+    "blockOverrides": {
+      "training-block": {
+        "packages": ["task_performance", "data_quality"],
+        "selectedMetricIds": [
+          "task.accuracy_pct",
+          "task.rt_median_ms",
+          "task.omission_rate_pct",
+          "task.commission_rate_pct",
+          "qc.sample_count_total",
+          "qc.sample_count_valid",
+          "qc.valid_gaze_pct",
+          "qc.low_confidence_pct",
+          "qc.off_screen_pct",
+          "qc.outside_stimulus_pct"
+        ]
+      }
+    }
+  },
+  "blocks": [
+    {
+      "id": "training-block",
+      "type": "cognitive_task",
+      "blockConfig": {
+        "useAOI": false
+      }
+    },
+    {
+      "id": "main-block",
+      "type": "cognitive_task",
+      "blockConfig": {
+        "useAOI": true,
+        "aoiSchemaVersion": "1.2",
+        "aoiDefinitions": {
+          "stimulus-42": [
+            {
+              "id": "aoi-target",
+              "name": "Target",
+              "shape": "rectangle",
+              "order": 1,
+              "points": [
+                { "x": 0.35, "y": 0.35 },
+                { "x": 0.65, "y": 0.65 }
+              ],
+              "isTarget": true,
+              "validityInterval": { "startMs": 0, "endMs": 3000 }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

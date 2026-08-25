@@ -4,7 +4,14 @@
 const express = require('express');
 const { param, query, body, validationResult } = require('express-validator');
 const config = require('../config');
-const { requireAuth, requireRole, requirePlatformAdmin } = require('../middleware/auth');
+const {
+  requireAuth,
+  requireRole,
+  requireOperation,
+  requirePlatformAdmin,
+  OPERATIONS,
+  isPlatformAdmin,
+} = require('../middleware/auth');
 const {
   buildNotComputed,
   rowToProxyMetricsResponse,
@@ -22,14 +29,6 @@ const {
 const { pool } = require('../db');
 
 const router = express.Router();
-
-function hasGlobalProjectAccess(user) {
-  return !!user && (user.bypass_admin === true || user.role === 'admin' || user.role === 'PI');
-}
-
-function hasGlobalProtocolAccess(user) {
-  return !!user && (user.bypass_admin === true || user.role === 'admin' || user.role === 'PI');
-}
 
 function parseListQuery(req) {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
@@ -99,7 +98,7 @@ async function getSessionProxyMetrics(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const session = await getSessionForUser(req.params.sessionRef, req.user.sub);
+    const session = await getSessionForUser(req.params.sessionRef, req.user);
     if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
 
     const proxyRow = await loadProxyBySessionDbId(session.id);
@@ -120,12 +119,13 @@ async function listProjectProxyMetrics(req, res) {
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const projectId = parseInt(req.params.id, 10);
-    const allowed = await ensureProjectAccess(projectId, req.user, hasGlobalProjectAccess);
+    const allowed = await ensureProjectAccess(projectId, req.user);
     if (!allowed) return res.status(403).json({ error: 'Access denied for project' });
 
     const q = parseListQuery(req);
     const rows = await listProxyForScope({
       userId: req.user.sub,
+      platformScope: isPlatformAdmin(req.user),
       projectId,
       protocolId: q.protocolId,
       status: q.status,
@@ -156,12 +156,13 @@ async function listProtocolProxyMetrics(req, res) {
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const protocolId = parseInt(req.params.id, 10);
-    const protocol = await ensureProtocolAccess(protocolId, req.user, hasGlobalProtocolAccess);
+    const protocol = await ensureProtocolAccess(protocolId, req.user);
     if (!protocol) return res.status(404).json({ error: 'Protocol not found or access denied' });
 
     const q = parseListQuery(req);
     const rows = await listProxyForScope({
       userId: req.user.sub,
+      platformScope: isPlatformAdmin(req.user),
       projectId: protocol.project_id,
       protocolId,
       status: q.status,
@@ -208,7 +209,7 @@ router.post(
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-      const session = await getSessionForUser(req.params.sessionRef, req.user.sub);
+      const session = await getSessionForUser(req.params.sessionRef, req.user);
       if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
 
       const schemaVersion = req.body.schema_version || SCHEMA_VERSION;
