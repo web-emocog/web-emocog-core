@@ -1,0 +1,153 @@
+=============================================================================
+web-emocog-core — License Notice
+=============================================================================
+
+This project is licensed under the Apache License 2.0 (see LICENSE file).
+
+=============================================================================
+Project Information
+=============================================================================
+
+Project Name: web-emocog-core (EmoCog — Cognitive Research Web Platform)
+Repository: https://github.com/web-emocog/web-emocog-core
+License: Apache License 2.0
+Copyright: web-emocog contributors
+
+=============================================================================
+Project Purpose
+=============================================================================
+
+EmoCog is a web platform for cognitive research: capturing multimodal signals
+in a browser (gaze, pulse, emotions, reaction time), server aggregation with
+quality control, protocol constructor, and analytics for researchers.
+
+Language Composition:
+  - JavaScript: 49.8%
+  - HTML: 43.9%
+  - Python: 3.4%
+  - TypeScript: 1.5%
+  - CSS: 1.4%
+
+=============================================================================
+Licenses Used
+=============================================================================
+
+This project and its source code use the following license types:
+
+1. PRIMARY PROJECT LICENSE:
+   └─ Apache License 2.0
+      Location: LICENSE
+      Applies to: All project source code (unless otherwise noted)
+
+2. THIRD-PARTY COMPONENTS:
+   For detailed information about third-party dependencies and their licenses,
+   see THIRD_PARTY_LICENSES.md
+
+=============================================================================
+License Compliance Summary
+=============================================================================
+
+APACHE LICENSE 2.0 COMPLIANCE:
+  ✓ All source code derivatives maintain Apache 2.0 compatibility
+  ✓ All modifications include appropriate attribution
+  ✓ Third-party code is properly documented
+  ✓ All required notices are preserved
+
+THIRD-PARTY COMPLIANCE:
+  ✓ MIT-licensed dependencies: js-yaml (v4.3.1)
+  ✓ Python-2.0 licensed dependencies: argparse (v2.0.1)
+  ✓ All licenses are compatible with Apache 2.0
+  ✓ License terms are preserved in THIRD_PARTY_LICENSES.md
+
+=============================================================================
+Modules and Their Licenses
+=============================================================================
+
+apps/autotests/:
+  - Package: autotests
+  - Dependencies:
+    * @playwright/test ^1.0.0 (Apache 2.0)
+    * @types/node ^20.0.0 (MIT)
+    * js-yaml ^4.3.1 (MIT)
+
+rppg_alg_qc_test_web_alg_test_v10/:
+  - rPPG SAFE Engine — Research code for HR and RR estimation from video
+  - License: Apache 2.0 (part of main project)
+  - External references: MediaPipe FaceMesh (Apache 2.0), Vite (MIT)
+
+rt_component-/:
+  - RT-component for web orchestra (Python, stdlib-only)
+  - License: Apache 2.0 (part of main project)
+  - Python Standard Library (zero additional dependencies)
+
+=============================================================================
+Dependency Tree
+=============================================================================
+
+NODE.JS DEPENDENCIES (apps/autotests/):
+  js-yaml@4.3.1
+  ├─ License: MIT
+  ├─ Repository: https://github.com/nodeca/js-yaml
+  └─ Dependency:
+     └─ argparse@2.0.1 (Python-2.0)
+
+=============================================================================
+How to Verify Compliance
+=============================================================================
+
+1. LICENSE VERIFICATION:
+   - Check LICENSE file for Apache 2.0 full text
+   - Verify NOTICE.txt (this file) is included in distributions
+
+2. THIRD-PARTY VERIFICATION:
+   - Reference THIRD_PARTY_LICENSES.md for all third-party licenses
+   - Each third-party license is compatible with Apache 2.0
+
+3. SOURCE CODE ATTRIBUTION:
+   - All source files in the project are copyright web-emocog contributors
+   - Original code is clearly distinguishable from third-party integrations
+
+4. DEPENDENCY AUDIT:
+   - Run: npm list (in apps/autotests/)
+   - Cross-reference licenses in THIRD_PARTY_LICENSES.md
+   - Verify all transitive dependencies are documented
+
+=============================================================================
+License Compatibility Matrix
+=============================================================================
+
+Apache 2.0 is compatible with:
+  ✓ MIT
+  ✓ Python-2.0 (BSD-like)
+  ✓ ISC
+  ✓ BSD-2-Clause
+  ✓ BSD-3-Clause
+
+Cannot be combined with:
+  ✗ GPL/AGPL (requires source disclosure)
+  ✗ SSPL (too restrictive)
+
+=============================================================================
+Contributing and License
+=============================================================================
+
+When contributing to web-emocog-core:
+  1. All contributions are submitted under Apache License 2.0
+  2. Add proper file headers with copyright and license
+  3. Document any new third-party dependencies
+  4. Update THIRD_PARTY_LICENSES.md if adding dependencies
+  5. Ensure new dependencies have Apache 2.0-compatible licenses
+
+=============================================================================
+Contacts and Further Information
+=============================================================================
+
+Repository: https://github.com/web-emocog/web-emocog-core
+Issues: https://github.com/web-emocog/web-emocog-core/issues
+
+For license questions or copyright inquiries, please open an issue or
+contact the project maintainers.
+
+=============================================================================
+Last Updated: 2026-08-26
+=============================================================================
