@@ -1,4 +1,5 @@
 import { getEmotionSummary } from './emotion-stub-new.js';
+import { SESSION_CONTRACT_VERSION } from './session-runtime/contracts.mjs';
 
 /**
  * Формирование payload агрегатов для отправки на сервер (Фаза 0.1).
@@ -305,9 +306,64 @@ const INGEST_EVENT_TYPES = new Set([
 
 function trimEventsForIngest(events) {
     const list = Array.isArray(events) ? events : [];
-    const filtered = list.filter((e) => e && INGEST_EVENT_TYPES.has(e.type));
+    const filtered = list.filter((e) => e && (
+        INGEST_EVENT_TYPES.has(e.type)
+        || (e.schemaVersion === 'session_event.v1' && e.category !== 'input')
+    ));
     const picked = filtered.length ? filtered : list;
     return picked.length > 250 ? picked.slice(-250) : picked;
+}
+
+function buildGazeAnalyticsPayload(sessionData) {
+    const samples = Array.isArray(sessionData?.eyeTracking) ? sessionData.eyeTracking : [];
+    const allPresentations = Array.isArray(sessionData?.heatmaps?.perStimulus)
+        ? sessionData.heatmaps.perStimulus
+        : [];
+    const presentations = allPresentations.slice(0, 200).map(entry => ({
+            blockId: entry.blockId ?? null,
+            trialId: entry.trialId ?? null,
+            stimulusId: entry.stimulusId ?? null,
+            stimulusName: entry.stimulusName ?? null,
+            stimulusType: entry.stimulusType ?? null,
+            stimulusVersion: entry.stimulusVersion || '1',
+            presentationId: entry.presentationId || `${String(entry.blockId)}:${String(entry.trialId ?? 'trial')}:${String(entry.stimulusId)}`,
+            intrinsicWidth: Number.isFinite(entry.intrinsicWidth) ? entry.intrinsicWidth : null,
+            intrinsicHeight: Number.isFinite(entry.intrinsicHeight) ? entry.intrinsicHeight : null,
+            grid: entry.grid || { width: 0, height: 0, values: [] },
+            fixationPoints: Array.isArray(entry.fixationPoints) ? entry.fixationPoints : [],
+            sampleCountTotal: Number(entry.sampleCountTotal || 0),
+            sampleCountValid: Number(entry.sampleCountValid || 0),
+            lowConfidenceCount: Number(entry.lowConfidenceCount || 0),
+            offScreenCount: Number(entry.offScreenCount || 0),
+            outsideStimulusCount: Number(entry.outsideStimulusCount || 0),
+            validObservationDurationMs: Number(entry.validObservationDurationMs || 0),
+            meanConfidence: Number.isFinite(entry.meanConfidence) ? entry.meanConfidence : null,
+            algorithm: entry.algorithm || null
+        }));
+    const validSamples = samples.filter(sample => sample?.valid !== false
+        && Number.isFinite(sample?.correctedX) && Number.isFinite(sample?.correctedY));
+    const confidences = validSamples.map(sample => sample?.confidence).filter(Number.isFinite);
+    const times = samples.map(sample => sample?.t).filter(Number.isFinite).sort((a, b) => a - b);
+    const observationDurationMs = times.length > 1 ? Math.max(0, times[times.length - 1] - times[0]) : 0;
+    const outsideStimulusCount = presentations.reduce((sum, entry) => sum + entry.outsideStimulusCount, 0);
+    return {
+        schemaVersion: 'gaze_analytics.v1',
+        coordinateSpace: 'stimulus_normalized_0_1',
+        summary: {
+            sampleCountTotal: samples.length,
+            sampleCountValid: validSamples.length,
+            validFraction: samples.length ? roundN(validSamples.length / samples.length, 4) : null,
+            lowConfidenceCount: samples.filter(sample => Number.isFinite(sample?.confidence) && sample.confidence < 0.65).length,
+            offScreenCount: samples.filter(sample => sample?.onScreen === false).length,
+            outsideStimulusCount,
+            observationDurationMs: Math.round(observationDurationMs),
+            meanConfidence: confidences.length ? roundN(mean(confidences), 4) : null,
+            presentationCountTotal: allPresentations.length,
+            presentationCountStored: presentations.length,
+            presentationsTruncated: allPresentations.length > presentations.length
+        },
+        presentations
+    };
 }
 
 export function buildAggregatesPayload(sessionData, options = {}) {
@@ -325,7 +381,9 @@ export function buildAggregatesPayload(sessionData, options = {}) {
     const bpm_summary = buildBpmSummary(sessionData);
     const rppg_summary = buildRppgSummary(sessionData);
     const respiration_summary = buildRespirationSummary(sessionData);
+    const gaze_analytics = buildGazeAnalyticsPayload(sessionData);
     return {
+        schemaVersion: SESSION_CONTRACT_VERSION,
         ids,
         meta: {
             user: {
@@ -336,6 +394,9 @@ export function buildAggregatesPayload(sessionData, options = {}) {
         precheck: sessionData.precheck ? { ...sessionData.precheck } : {},
         qcSummary: sessionData.qcSummary ? { ...sessionData.qcSummary } : null,
         attentionMetrics: sessionData.attentionMetrics ? { ...sessionData.attentionMetrics } : null,
+        blink_summary: sessionData.blinkSummary ? { ...sessionData.blinkSummary } : null,
+        perclos_summary: sessionData.perclosSummary ? { ...sessionData.perclosSummary } : null,
+        body_pose_summary: sessionData.bodyPoseSummary ? { ...sessionData.bodyPoseSummary } : null,
         blocks,
         emotion_summary: emotionSummaryPayload,
         bpm_summary,
@@ -346,6 +407,7 @@ export function buildAggregatesPayload(sessionData, options = {}) {
             : {}),
         cognitiveResults: Array.isArray(sessionData.cognitiveResults) ? [...sessionData.cognitiveResults] : [],
         gazeValidation: sessionData.gazeValidation ? { ...sessionData.gazeValidation } : null,
+        gaze_analytics,
         events: forIngest
             ? trimEventsForIngest(sessionData.events)
             : (Array.isArray(sessionData.events) ? [...sessionData.events] : []),

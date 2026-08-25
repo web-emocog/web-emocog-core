@@ -30,31 +30,78 @@ npm start
 - уникальный индекс по `session_id`,
 - индекс по `(payload->>'proxy_ready')` для агрегатов experiments.
 
+Миграция `1699000000012_atomic_ingest_security` добавляет
+`invitations.used_runs`, неизменяемую связь `sessions.invitation_id` и
+ограничения счётчика запусков. `up` и `down` поддерживаются.
+
+Публичный `POST /invitations/by-code/:code/ingest-token` одновременно выполняет
+атомарный admission: после consent и до испытания резервирует `used_runs` и
+создаёт immutable session binding. Повтор для того же `session_id` не расходует
+run повторно; чужой invitation возвращает `409`. Незавершённая admitted session
+не освобождается автоматически и должна учитываться retention-политикой.
+
+Миграция `1699000000013_staff_token_version` связывает staff JWT с актуальной
+версией учётной записи. Смена пароля или роли отзывает все ранее выданные
+токены; после rollout всем сотрудникам нужно войти заново.
+
+Миграция `1699000000014_analytics_snapshots` добавляет immutable snapshots
+аналитической выборки. Dashboard и export используют один `snapshot_id` и
+проверяют один `dataset_hash`.
+
 ## Роли (RBAC)
 
 - **admin**, **PI**, **researcher**, **analyst**, **assistant**, **developer**, **respondent**
 
-Защищённые маршруты проверяют JWT и роль через middleware `requireAuth` и `requireRole`.
+Защищённые маршруты используют единый модуль
+`security/permissions.js`: browser `HttpOnly` cookie или внешний staff JWT,
+operation matrix и обязательное членство
+в организации и проекте. Только `admin` (`platform-admin`) имеет
+platform-wide scope. Полная матрица:
+[`docs/api/authorization-matrix-v1.md`](../../docs/api/authorization-matrix-v1.md).
+
+Публичная регистрация не выдаёт staff-роли. Первого или аварийного
+platform-admin создаёт только оператор:
+
+```bash
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
+BOOTSTRAP_ADMIN_PASSWORD='<min-12-char-secret>' \
+npm run admin:bootstrap
+```
+
+Пароль должен содержать 12-72 символа и не более 72 UTF-8 байт: это исключает
+неявное усечение входа в `bcrypt`. Staff JWT действует 1 час и отзывается при
+смене роли или пароля через `token_version`.
+
+Код приглашения является bearer-секретом. Новые коды генерируются только
+сервером из 128 бит энтропии; клиентское поле `code` при создании отклоняется.
+Participant ingest token действует 15 минут, привязан к invitation/session/
+protocol/project и автоматически перевыпускается клиентом при истечении.
+Cookie-authenticated изменяющие запросы требуют `X-CSRF-Token`; browser login
+не сохраняет staff JWT в `localStorage`.
 
 ## Эндпоинты
 
 | Метод | Путь | Описание | Auth |
 |-------|------|----------|------|
 | POST | /auth/register | Регистрация | — |
-| POST | /auth/login | Логин, выдача JWT | — |
-| GET | /auth/me | Текущий пользователь | JWT |
+| POST | /auth/login | Логин: `HttpOnly` cookie для browser или JWT для API-клиента | — |
+| GET | /auth/me | Текущий пользователь; восстанавливает CSRF для cookie-сессии | Cookie / JWT |
 | GET | /auth/users | Список аккаунтов (для RBAC-менеджмента) | JWT + роль |
 | POST | /auth/users | Создание аккаунта с ролью | JWT + роль |
 | PATCH | /auth/users/:id | Обновление роли/display_name/password | JWT + роль |
 | GET/POST/PATCH/DELETE | /organizations | CRUD организаций | JWT + роль |
 | GET/POST/PATCH/DELETE | /projects | CRUD проектов | JWT + роль |
+| GET/POST/PATCH/DELETE | /protocols | Versioned protocol и server-side AOI validation | Cookie/JWT + membership |
+| GET/POST | /invitations | Server-generated invitation codes | Cookie/JWT + membership |
 | POST | /sessions/start | Старт сессии | JWT |
 | POST | /sessions/stop | Стоп сессии | JWT |
 | GET | /sessions | Список сессий (фильтры, QC + proxy source) | JWT |
 | GET | /sessions/:id | Карточка сессии + features + QC/proxy source payload | JWT |
-| POST | /events/batch | Батч событий (session_id, participant_id, events[]) | JWT |
-| POST | /ingest | Приём агрегатов (payload buildAggregatesPayload) | — |
+| POST | /ingest | Единственный типизированный transport событий и итогов SessionFeature | JWT / participant ingest token |
+| POST | /invitations/by-code/:code/ingest-token | Короткоживущий participant token, связанный с session + invitation | Код приглашения |
 | GET | /export | Экспорт CSV/JSON (project_id, protocol_id, date_from, date_to, qc_validity) | JWT |
+| GET/POST | /analytics/v1/* | Filter options, snapshots, session/group AOI, heatmap, comparison readiness, export | Cookie/JWT + membership |
+| POST | /stimuli/convert | PDF/PPT/PPTX в набор JPEG-стимулов | Cookie/JWT + project membership |
 | GET | /experiments | Сводный учет экспериментов по сессиям/QC + proxy readiness | JWT |
 | GET | /experiments/recent | Последние сессии экспериментов c QC + proxy source | JWT |
 | GET | /health | Health check | — |
@@ -77,11 +124,40 @@ npm start
 
 Тесты контракта: `npm test` (без БД).
 
-## HTTPS и PII (Фаза 2.8)
+## HTTP security и PII
 
-- **В проде** приложение должно работать только по HTTPS (reverse proxy или TLS). Опция `FORCE_HTTPS=true` включает редирект с HTTP на HTTPS.
+- **В проде** приложение должно работать только по HTTPS (reverse proxy или TLS). Опция `FORCE_HTTPS=true` отклоняет HTTP с `426 https_required`; API не перенаправляет POST-body или bearer token.
 - **В запросах к API не должно быть PII.** В теле запросов не передавайте email, ФИО и другие персональные данные участников. Участник идентифицируется только по `participant_id` и `session_id`.
-- **При приёме агрегатов** (POST /ingest) поле `meta.user.email` не сохраняется в SessionFeatures; сохраняются только обезличенные сводки.
+- **При приёме агрегатов** `POST /ingest` отклоняет PII, неизвестные поля,
+  слишком глубокие объекты, длинные массивы и oversized body. Данные не
+  «очищаются» молча.
+- **CORS, body limit и rate limit** настраиваются отдельно для `auth`,
+  `ingest` и остальных маршрутов через `.env`.
+- **IP за reverse proxy** учитывается только при явном `TRUST_PROXY_HOPS`.
+  Прямой доступ к Node при этом должен быть закрыт firewall/security group.
+- **Файлы стимулов** получают `content_path` только на сервере. Чтение и
+  удаление разрешены исключительно внутри resolved `UPLOADS_ROOT`.
+
+## Analytics v1
+
+Канонический поток: `filter-options` -> `POST /analytics/v1/snapshots` ->
+session/group endpoints -> `GET /analytics/v1/exports` с тем же `snapshot_id`.
+Production UI не использует demo fallback. `null + status/reason` означает
+отсутствие данных и не заменяется нулём. Level 2 comparison возвращает
+`not_configured`/`insufficient_data`, пока в протоколе нет утверждённого метода;
+backend не фабрикует effect, CI или p-value.
+
+## Конвертация документов
+
+`POST /stimuli/convert` принимает `multipart/form-data` с `file` и
+`project_id`. PDF проверяется через Poppler; PPT/PPTX сначала переводится в PDF
+headless LibreOffice. Расширение сверяется с сигнатурой, применяются лимиты
+размера/страниц/timeout/concurrency, временные файлы удаляются в `finally`, а
+записи БД и созданные JPEG откатываются при частичной ошибке.
+
+Production host должен иметь `soffice`, `pdfinfo` и `pdftoppm`. Параметры:
+`MAX_DOCUMENT_BYTES`, `MAX_DOCUMENT_PAGES`, `DOCUMENT_CONVERSION_TIMEOUT_MS`,
+`DOCUMENT_CONVERSION_DPI`, `DOCUMENT_CONVERSION_CONCURRENCY`.
 
 ## UPLOAD_AGGREGATES_URL
 
@@ -89,7 +165,17 @@ npm start
 
 ## Контракт payload (v1.0)
 
-`POST /ingest` ожидает агрегированный payload из participant-клиента.
+`POST /ingest` ожидает агрегированный `session_feature.v1` из
+participant-клиента. Единственный browser transport:
+`apps/participant-web/js/session-runtime/ingest-transport.mjs`.
+
+Participant token должен совпасть по `session + invitation + protocol +
+project`; mismatch возвращает `409`. Staff JWT может отправлять результат
+только для project-scoped сессии, созданной через `/sessions/start`.
+Запись `session`, `session_features`, `session_qc_summary` и
+`session_proxy_metrics`, а также резервирование invitation run выполняются в
+одной транзакции под session/advisory lock. Повтор с тем же
+`Idempotency-Key` возвращает сохранённый результат без дублей.
 
 - `qcSummary`:
   - поддерживаются `qc_score` и `qcScore` (оба приводятся к шкале 0..100),
@@ -109,7 +195,10 @@ npm start
 
 ## Минимальный контракт ingest payload
 
-Для `POST /ingest` достаточно передать `qcSummary` и `blocks`.
+Минимальный legacy-набор `qcSummary` и `blocks` больше не является полным
+контрактом. Обязательны `schemaVersion=session_feature.v1`, `ids.session`,
+`lifecycle` и typed `events`; JSON Schema публикуется на
+`GET /contracts/session_feature.v1`.
 
 - `qcSummary`:
   - принимаются оба варианта ключа score: `qc_score` и `qcScore`,
@@ -121,3 +210,20 @@ npm start
 - PII:
   - payload не должен содержать персональные данные (email, ФИО и т.п.),
   - используйте только обезличенные идентификаторы (`participant_id`, `session_id`) и агрегаты.
+- Stimulus uploads:
+  - принимаются JPEG, PNG, WebP, GIF, MP3, OGG, WAV, MP4, WebM и PDF;
+  - MIME сверяется с сигнатурой файла, HTML/SVG и несовпадение типа отклоняются;
+  - имя и `content_path` формирует сервер, PDF выдаётся как attachment;
+  - встроенный rate limiter рассчитан на один Node.js process; для нескольких
+    instances необходим общий limiter на reverse proxy или Redis.
+
+## Проверка S2-01
+
+```bash
+npm test
+S2_TEST_DATABASE_URL=postgres://... node --test tests/s2-postgres.integration.test.js
+```
+
+Вторая команда выполняет destructive setup только в отдельной тестовой БД.
+Она проверяет unknown invitation, immutable binding, admission replay/reload,
+rollback ingest writes и параллельный лимит `used_runs`.

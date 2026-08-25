@@ -1,0 +1,2 @@
+# OS Login service account may invoke only the root-owned, argument-validating release controller.
+wecog-deploy ALL=(root) NOPASSWD: /usr/local/sbin/wecog-release

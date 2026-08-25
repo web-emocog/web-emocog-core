@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emocog.local/schemas/analytics-plan-v1.schema.json",
+  "title": "Emocog analytics plan v1",
+  "description": "Researcher-selected reporting plan stored inside a protocol definition. It controls the default analytics UI, not collection or deletion of source data.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "defaultPackages",
+    "selectedMetricIds",
+    "blockOverrides"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "defaultPackages": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/packageId"
+      },
+      "contains": {
+        "const": "data_quality"
+      },
+      "description": "Packages enabled by default. data_quality is mandatory."
+    },
+    "selectedMetricIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/metricId"
+      },
+      "description": "Resolved default report metrics. Stable IDs come from metric-catalog-v1.json."
+    },
+    "blockOverrides": {
+      "type": "object",
+      "description": "Optional report overrides keyed by protocol blockId. Training and main blocks remain independent.",
+      "additionalProperties": {
+        "$ref": "#/$defs/blockOverride"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "packageId": {
+      "enum": [
+        "aoi_attention",
+        "task_performance",
+        "group_descriptive",
+        "data_quality"
+      ]
+    },
+    "metricId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+    },
+    "blockOverride": {
+      "type": "object",
+      "required": ["packages", "selectedMetricIds"],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/packageId"
+          },
+          "contains": {
+            "const": "data_quality"
+          }
+        },
+        "selectedMetricIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/metricId"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

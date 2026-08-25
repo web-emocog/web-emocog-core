@@ -1,0 +1,680 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emocog.local/schemas/analytics-response-v1.schema.json",
+  "title": "Emocog analytics API response v1",
+  "description": "Common response envelope and records for session, AOI, heatmap, group and model-result analytics.",
+  "type": "object",
+  "required": ["contractVersion", "kind", "generatedAt", "snapshot", "data"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "kind": {
+      "enum": ["session_summary", "session_aoi", "heatmap", "group_summary", "model_result"]
+    },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "snapshot": { "$ref": "#/$defs/snapshot" },
+    "data": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "session_summary" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/sessionSummary" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "session_aoi" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/sessionAoi" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "heatmap" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/heatmap" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "group_summary" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/groupSummary" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "model_result" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/modelResult" } } }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "string", "minLength": 1, "maxLength": 128 }
+      ]
+    },
+    "nullableId": {
+      "oneOf": [
+        { "$ref": "#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "metricId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+    },
+    "metricStatus": {
+      "enum": [
+        "computed",
+        "no_event",
+        "no_data",
+        "insufficient_quality",
+        "not_configured",
+        "not_applicable",
+        "failed"
+      ]
+    },
+    "qcStatus": {
+      "enum": ["valid", "borderline", "invalid", "not_computed"]
+    },
+    "qcChannelId": {
+      "enum": ["task", "gaze", "blink", "face", "head_hands", "rppg", "respiration"]
+    },
+    "unit": {
+      "type": ["string", "null"],
+      "enum": ["ms", "pct", "count", "count_per_min", "ratio", "boolean", null]
+    },
+    "versionSet": {
+      "type": "object",
+      "required": ["protocol", "stimulus", "aoiSchema", "metricsCatalog", "qcRules", "frontend"],
+      "properties": {
+        "protocol": { "type": "string", "minLength": 1 },
+        "stimulus": { "type": ["string", "null"] },
+        "aoiSchema": { "type": ["string", "null"] },
+        "metricsCatalog": { "const": "1.0" },
+        "qcRules": { "type": "string", "minLength": 1 },
+        "frontend": { "type": "string", "minLength": 1 },
+        "backend": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "id",
+        "datasetHash",
+        "createdAt",
+        "queryEcho",
+        "includedParticipantIds",
+        "includedSessionIds",
+        "excludedSessions",
+        "versions"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "datasetHash": { "type": "string", "minLength": 8, "maxLength": 256 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "queryEcho": { "$ref": "analytics-query-v1.schema.json" },
+        "includedParticipantIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "includedSessionIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "excludedSessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sessionId", "reasonCode"],
+            "properties": {
+              "sessionId": { "$ref": "#/$defs/id" },
+              "reasonCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "channel": {
+                "oneOf": [
+                  { "$ref": "#/$defs/qcChannelId" },
+                  { "type": "null" }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "versions": { "$ref": "#/$defs/versionSet" }
+      },
+      "additionalProperties": false
+    },
+    "algorithm": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "parametersHash": { "type": ["string", "null"], "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+    "qcResult": {
+      "type": "object",
+      "required": ["channel", "status", "validFraction", "reasons", "ruleVersion"],
+      "properties": {
+        "channel": { "$ref": "#/$defs/qcChannelId" },
+        "status": { "$ref": "#/$defs/qcStatus" },
+        "validFraction": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "signalConfidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "ruleVersion": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["sessionId", "blockId", "trialId", "presentationId", "stimulusId", "aoiId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/nullableId" },
+        "blockId": { "$ref": "#/$defs/nullableId" },
+        "trialId": { "$ref": "#/$defs/nullableId" },
+        "presentationId": { "$ref": "#/$defs/nullableId" },
+        "stimulusId": { "$ref": "#/$defs/nullableId" },
+        "aoiId": { "$ref": "#/$defs/nullableId" }
+      },
+      "additionalProperties": false
+    },
+    "distribution": {
+      "type": ["object", "null"],
+      "properties": {
+        "n": { "type": ["integer", "null"], "minimum": 0 },
+        "mean": { "type": ["number", "null"] },
+        "sd": { "type": ["number", "null"], "minimum": 0 },
+        "median": { "type": ["number", "null"] },
+        "q1": { "type": ["number", "null"] },
+        "q3": { "type": ["number", "null"] },
+        "min": { "type": ["number", "null"] },
+        "max": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "metricResult": {
+      "type": "object",
+      "required": [
+        "metricId",
+        "value",
+        "unit",
+        "status",
+        "reason",
+        "numerator",
+        "denominator",
+        "observationDurationMs",
+        "nParticipants",
+        "nObservations",
+        "signalConfidence",
+        "scope",
+        "qc",
+        "algorithm"
+      ],
+      "properties": {
+        "metricId": { "$ref": "#/$defs/metricId" },
+        "value": { "type": ["number", "boolean", "string", "null"] },
+        "unit": { "$ref": "#/$defs/unit" },
+        "status": { "$ref": "#/$defs/metricStatus" },
+        "reason": { "type": ["string", "null"], "maxLength": 256 },
+        "numerator": { "type": ["number", "null"] },
+        "denominator": { "type": ["number", "null"], "minimum": 0 },
+        "observationDurationMs": { "type": ["number", "null"], "minimum": 0 },
+        "nParticipants": { "type": "integer", "minimum": 0 },
+        "nObservations": { "type": "integer", "minimum": 0 },
+        "signalConfidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "distribution": { "$ref": "#/$defs/distribution" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "qc": {
+          "oneOf": [
+            { "$ref": "#/$defs/qcResult" },
+            { "type": "null" }
+          ]
+        },
+        "algorithm": { "$ref": "#/$defs/algorithm" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "computed" } } },
+          "then": { "properties": { "value": { "type": ["number", "boolean", "string"] } } },
+          "else": { "properties": { "value": { "type": "null" } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "sessionMeta": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "participantAlias",
+        "startedAt",
+        "completedAt",
+        "completionStatus",
+        "protocolId",
+        "protocolVersion",
+        "deviceClass",
+        "resolution",
+        "actualFps"
+      ],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/id" },
+        "participantAlias": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": ["string", "null"], "format": "date-time" },
+        "completionStatus": { "enum": ["completed", "in_progress", "aborted"] },
+        "protocolId": { "$ref": "#/$defs/id" },
+        "protocolVersion": { "type": "string", "minLength": 1 },
+        "deviceClass": { "type": ["string", "null"] },
+        "resolution": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["width", "height"],
+              "properties": {
+                "width": { "type": "integer", "minimum": 1 },
+                "height": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        },
+        "actualFps": { "type": ["number", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "exclusion": {
+      "type": "object",
+      "required": ["level", "entityId", "reasonCode", "channel"],
+      "properties": {
+        "level": { "enum": ["session", "block", "trial", "event"] },
+        "entityId": { "$ref": "#/$defs/id" },
+        "reasonCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "channel": {
+          "oneOf": [
+            { "$ref": "#/$defs/qcChannelId" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionSummary": {
+      "type": "object",
+      "required": ["session", "qcChannels", "metrics", "exclusions"],
+      "properties": {
+        "session": { "$ref": "#/$defs/sessionMeta" },
+        "qcChannels": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/qcResult" }
+        },
+        "metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metricResult" }
+        },
+        "exclusions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/exclusion" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "aoiMeta": {
+      "type": "object",
+      "required": ["id", "name", "shape", "points", "order", "isTarget", "validityInterval"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "shape": { "enum": ["rectangle", "polygon"] },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/point" }
+        },
+        "order": { "type": "integer", "minimum": 1 },
+        "isTarget": { "type": "boolean" },
+        "validityInterval": {
+          "type": "object",
+          "required": ["startMs", "endMs"],
+          "properties": {
+            "startMs": { "type": "integer", "minimum": 0 },
+            "endMs": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "stimulusMeta": {
+      "type": "object",
+      "required": ["id", "version", "name", "type", "contentUrl", "intrinsicWidth", "intrinsicHeight"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["image", "video", "html", "shape", "other"] },
+        "contentUrl": { "type": ["string", "null"] },
+        "intrinsicWidth": { "type": ["integer", "null"], "minimum": 1 },
+        "intrinsicHeight": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "aoiRow": {
+      "type": "object",
+      "required": ["aoi", "metrics"],
+      "properties": {
+        "aoi": { "$ref": "#/$defs/aoiMeta" },
+        "metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metricResult" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionAoi": {
+      "type": "object",
+      "required": ["status", "reason", "sessionId", "blockId", "presentationId", "stimulus", "coordinateSpace", "aoiRows"],
+      "properties": {
+        "status": { "$ref": "#/$defs/metricStatus" },
+        "reason": { "type": ["string", "null"] },
+        "sessionId": { "$ref": "#/$defs/id" },
+        "blockId": { "$ref": "#/$defs/nullableId" },
+        "presentationId": { "$ref": "#/$defs/nullableId" },
+        "stimulus": {
+          "oneOf": [
+            { "$ref": "#/$defs/stimulusMeta" },
+            { "type": "null" }
+          ]
+        },
+        "coordinateSpace": { "const": "stimulus_normalized_0_1" },
+        "aoiRows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/aoiRow" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "heatmap": {
+      "type": "object",
+      "required": [
+        "status",
+        "reason",
+        "aggregationLevel",
+        "stimulus",
+        "coordinateSpace",
+        "normalizationMode",
+        "smoothing",
+        "equalParticipantWeight",
+        "grid",
+        "nParticipants",
+        "nSessions",
+        "nFixations",
+        "validObservationDurationMs",
+        "algorithm"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/metricStatus" },
+        "reason": { "type": ["string", "null"] },
+        "aggregationLevel": { "enum": ["session", "participant", "group"] },
+        "stimulus": {
+          "oneOf": [
+            { "$ref": "#/$defs/stimulusMeta" },
+            { "type": "null" }
+          ]
+        },
+        "coordinateSpace": { "const": "stimulus_normalized_0_1" },
+        "normalizationMode": { "enum": ["time_weighted", "fixation_duration_weighted"] },
+        "smoothing": {
+          "type": "object",
+          "required": ["method", "bandwidthNorm"],
+          "properties": {
+            "method": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "bandwidthNorm": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "equalParticipantWeight": { "type": "boolean" },
+        "grid": {
+          "type": "object",
+          "required": ["width", "height", "values", "maxValue"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 0, "maximum": 1000 },
+            "height": { "type": "integer", "minimum": 0, "maximum": 1000 },
+            "values": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0 }
+            },
+            "maxValue": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "fixationPoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["x", "y", "durationMs", "signalConfidence"],
+            "properties": {
+              "x": { "type": "number", "minimum": 0, "maximum": 1 },
+              "y": { "type": "number", "minimum": 0, "maximum": 1 },
+              "durationMs": { "type": "number", "minimum": 0 },
+              "signalConfidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "startMs": { "type": ["number", "null"], "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "nParticipants": { "type": "integer", "minimum": 0 },
+        "nSessions": { "type": "integer", "minimum": 0 },
+        "nFixations": { "type": "integer", "minimum": 0 },
+        "validObservationDurationMs": { "type": "number", "minimum": 0 },
+        "algorithm": { "$ref": "#/$defs/algorithm" }
+      },
+      "additionalProperties": false
+    },
+    "estimate": {
+      "type": "object",
+      "required": ["value", "lower", "upper", "confidenceLevel", "method"],
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "lower": { "type": ["number", "null"] },
+        "upper": { "type": ["number", "null"] },
+        "confidenceLevel": { "const": 0.95 },
+        "method": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "groupMetric": {
+      "type": "object",
+      "required": [
+        "metricId",
+        "unit",
+        "status",
+        "reason",
+        "nParticipants",
+        "nObservations",
+        "numerator",
+        "denominator",
+        "observationDurationMs",
+        "median",
+        "q1",
+        "q3",
+        "mean",
+        "sd",
+        "min",
+        "max",
+        "estimateCi95",
+        "participantValues",
+        "algorithm"
+      ],
+      "properties": {
+        "metricId": { "$ref": "#/$defs/metricId" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "status": { "$ref": "#/$defs/metricStatus" },
+        "reason": { "type": ["string", "null"] },
+        "nParticipants": { "type": "integer", "minimum": 0 },
+        "nObservations": { "type": "integer", "minimum": 0 },
+        "numerator": { "type": ["number", "null"] },
+        "denominator": { "type": ["number", "null"], "minimum": 0 },
+        "observationDurationMs": { "type": ["number", "null"], "minimum": 0 },
+        "median": { "type": ["number", "null"] },
+        "q1": { "type": ["number", "null"] },
+        "q3": { "type": ["number", "null"] },
+        "mean": { "type": ["number", "null"] },
+        "sd": { "type": ["number", "null"], "minimum": 0 },
+        "min": { "type": ["number", "null"] },
+        "max": { "type": ["number", "null"] },
+        "estimateCi95": { "$ref": "#/$defs/estimate" },
+        "participantValues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["participantId", "value", "nObservations"],
+            "properties": {
+              "participantId": { "$ref": "#/$defs/id" },
+              "value": { "type": ["number", "null"] },
+              "nObservations": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "scope": { "$ref": "#/$defs/scope" },
+        "algorithm": { "$ref": "#/$defs/algorithm" }
+      },
+      "additionalProperties": false
+    },
+    "groupSummary": {
+      "type": "object",
+      "required": ["nParticipants", "nSessions", "nObservations", "qcCounts", "qcByChannel", "deviceCounts", "missingness", "metrics"],
+      "properties": {
+        "nParticipants": { "type": "integer", "minimum": 0 },
+        "nSessions": { "type": "integer", "minimum": 0 },
+        "nObservations": { "type": "integer", "minimum": 0 },
+        "qcCounts": {
+          "type": "object",
+          "required": ["valid", "borderline", "invalid", "notComputed"],
+          "properties": {
+            "valid": { "type": "integer", "minimum": 0 },
+            "borderline": { "type": "integer", "minimum": 0 },
+            "invalid": { "type": "integer", "minimum": 0 },
+            "notComputed": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "qcByChannel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["channel", "valid", "borderline", "invalid", "notComputed"],
+            "properties": {
+              "channel": { "$ref": "#/$defs/qcChannelId" },
+              "valid": { "type": "integer", "minimum": 0 },
+              "borderline": { "type": "integer", "minimum": 0 },
+              "invalid": { "type": "integer", "minimum": 0 },
+              "notComputed": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "deviceCounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["deviceClass", "participantCount", "sessionCount"],
+            "properties": {
+              "deviceClass": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "participantCount": { "type": "integer", "minimum": 0 },
+              "sessionCount": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "missingness": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["reasonCode", "count"],
+            "properties": {
+              "reasonCode": { "type": "string", "minLength": 1 },
+              "count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/groupMetric" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "modelResult": {
+      "type": "object",
+      "required": [
+        "comparisonId",
+        "readiness",
+        "reason",
+        "metricId",
+        "modelId",
+        "modelVersion",
+        "formula",
+        "effect",
+        "estimateCi95",
+        "pValueAdjusted",
+        "adjustmentMethod",
+        "nParticipants",
+        "nObservations",
+        "warnings",
+        "readinessChecks"
+      ],
+      "properties": {
+        "comparisonId": { "$ref": "#/$defs/id" },
+        "readiness": { "enum": ["available", "insufficient_data", "confounded", "not_configured", "failed"] },
+        "reason": { "type": ["string", "null"] },
+        "metricId": {
+          "oneOf": [
+            { "$ref": "#/$defs/metricId" },
+            { "type": "null" }
+          ]
+        },
+        "modelId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "modelVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "formula": { "type": ["string", "null"], "minLength": 1, "maxLength": 1000 },
+        "effect": { "type": ["number", "null"] },
+        "effectUnit": { "$ref": "#/$defs/unit" },
+        "effectLabel": { "type": ["string", "null"], "maxLength": 256 },
+        "referenceLevel": { "type": ["string", "null"], "maxLength": 128 },
+        "comparisonLevel": { "type": ["string", "null"], "maxLength": 128 },
+        "estimateCi95": { "$ref": "#/$defs/estimate" },
+        "pValueAdjusted": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "adjustmentMethod": { "type": ["string", "null"], "maxLength": 128 },
+        "nParticipants": { "type": "integer", "minimum": 0 },
+        "nObservations": { "type": "integer", "minimum": 0 },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "readinessChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status", "reason"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "status": { "enum": ["pass", "warning", "blocked", "not_applicable"] },
+              "reason": { "type": ["string", "null"], "maxLength": 512 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

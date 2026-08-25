@@ -48,13 +48,16 @@ class PrecheckAnalyzer {
                 throw new Error('MediaPipe Vision не загружен.');
             }
             
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-            );
+            const wasmRoot = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
+            const vision = await FilesetResolver.forVisionTasks(wasmRoot);
+            const modelPath = new URL(
+                '../vendor/mediapipe/models/face_landmarker.task',
+                import.meta.url
+            ).href;
             
             this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
                 baseOptions: {
-                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                    modelAssetPath: modelPath,
                     delegate: "GPU"
                 },
                 runningMode: this.runningMode,
@@ -152,7 +155,9 @@ class PrecheckAnalyzer {
             this.lastResult = {
                 illumination, face: faceData, pose, eyes, mouth,
                 blendShapes,
-                landmarks, timestamp: Date.now(),
+                landmarks,
+                timestamp,
+                wallTimestamp: Date.now(),
                 frameSize: { width, height },
                 analysisTime: Math.round(analysisTime)
             };
@@ -173,7 +178,8 @@ class PrecheckAnalyzer {
             eyes: { left: { isOpen: false }, right: { isOpen: false }, bothOpen: false },
             mouth: { isOpen: false },
             error: message,
-            timestamp: Date.now()
+            timestamp: performance.now(),
+            wallTimestamp: Date.now()
         };
     }
 

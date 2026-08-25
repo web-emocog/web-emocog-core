@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844" role="img" aria-label="R5 Протоколы mobile">
+  <title>R5 Протоколы mobile</title>
+  <rect width="390" height="844" fill="#F2F6F4"/>
+  <rect x="0" y="0" width="390" height="68" rx="0" fill="#062D2E"/><circle cx="22" cy="24" r="7" fill="#00A69D"/><text x="38" y="29" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="800" letter-spacing="1">WEC</text><text x="18" y="55" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="16" font-weight="700">Протоколы</text><text x="338" y="29" fill="#9BC7C3" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="400" text-anchor="end">R5</text><line x1="354" y1="20" x2="372" y2="20" stroke="#9BC7C3" stroke-width="1.5"/><line x1="354" y1="26" x2="372" y2="26" stroke="#9BC7C3" stroke-width="1.5"/><line x1="354" y1="32" x2="372" y2="32" stroke="#9BC7C3" stroke-width="1.5"/><rect x="18" y="92" width="354" height="112" rx="14" fill="#062D2E" stroke="#062D2E" stroke-width="1"/>
+            <text x="34" y="120" fill="#F5C451" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400">v3</text>
+            <text x="34" y="150" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="17" font-weight="700">Основной</text>
+            <text x="34" y="180" fill="#9BC7C3" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Опубликован</text>
+            <text x="356" y="180" fill="#FFFFFF" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700" text-anchor="end">141</text><rect x="18" y="220" width="354" height="112" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+            <text x="34" y="248" fill="#006B66" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400">v2</text>
+            <text x="34" y="278" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="17" font-weight="700">Пилот-короткий</text>
+            <text x="34" y="308" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Черновик</text>
+            <text x="356" y="308" fill="#062D2E" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700" text-anchor="end">12</text><rect x="18" y="348" width="354" height="112" rx="14" fill="#FFFFFF" stroke="#B7CCC7" stroke-width="1"/>
+            <text x="34" y="376" fill="#006B66" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400">v1</text>
+            <text x="34" y="406" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="17" font-weight="700">Пилот</text>
+            <text x="34" y="436" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Заморожен</text>
+            <text x="356" y="436" fill="#062D2E" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700" text-anchor="end">18</text><rect x="18" y="498" width="354" height="92" rx="14" fill="#FFF3C4"/><text x="34" y="532" fill="#062D2E" font-family="Golos Text, Arial, sans-serif" font-size="14" font-weight="750">Версии не перезаписываются</text><text x="34" y="558" fill="#4F6B6A" font-family="Golos Text, Arial, sans-serif" font-size="12" font-weight="400">Публикация создаёт снимок</text><rect x="18" y="770" width="354" height="44" rx="10" fill="#006B66" stroke="#006B66" stroke-width="1"/><text x="195" y="798" fill="#FFFFFF" font-family="Golos Text, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="middle">Создать протокол</text>
+</svg>

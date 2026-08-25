@@ -1,0 +1,137 @@
+{
+  "contractVersion": "1.0",
+  "kind": "group_summary",
+  "generatedAt": "2026-08-04T18:35:00.000Z",
+  "snapshot": {
+    "id": "snapshot-group-2026-08-04-001",
+    "datasetHash": "sha256:36162d781b2b67cf52f46069a1fc30b0",
+    "createdAt": "2026-08-04T18:34:00.000Z",
+    "queryEcho": {
+      "schemaVersion": "1.0",
+      "mode": "group",
+      "analysisLevel": "level_1",
+      "projectId": 12,
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "metricIds": ["aoi.dwell_time_ms", "aoi.target_reached_pct", "task.accuracy_pct"],
+      "filters": {
+        "participantIds": [],
+        "sessionIds": [],
+        "groupIds": ["control"],
+        "conditionIds": ["condition-a"],
+        "blockIds": ["main-block"],
+        "stimulusIds": ["stimulus-42"],
+        "aoiIds": ["aoi-target"],
+        "qcMode": "valid_and_borderline",
+        "qcChannels": ["task", "gaze"],
+        "minValidFraction": 0.7,
+        "minSignalConfidence": 0.65,
+        "dateFrom": "2026-09-01T00:00:00.000Z",
+        "dateTo": "2026-09-30T23:59:59.000Z",
+        "includeIncompleteSessions": false
+      }
+    },
+    "includedParticipantIds": ["P-001", "P-002", "P-003"],
+    "includedSessionIds": [101, 102, 103],
+    "excludedSessions": [
+      { "sessionId": 104, "reasonCode": "gaze_qc_invalid", "channel": "gaze" }
+    ],
+    "versions": {
+      "protocol": "1.0.0",
+      "stimulus": "stimulus-42@1",
+      "aoiSchema": "1.2",
+      "metricsCatalog": "1.0",
+      "qcRules": "qc-rules-1.0.0",
+      "frontend": "researcher-web-1.0.0",
+      "backend": "analytics-api-1.0.0"
+    }
+  },
+  "data": {
+    "nParticipants": 3,
+    "nSessions": 3,
+    "nObservations": 72,
+    "qcCounts": {
+      "valid": 2,
+      "borderline": 1,
+      "invalid": 1,
+      "notComputed": 0
+    },
+    "qcByChannel": [
+      { "channel": "task", "valid": 3, "borderline": 0, "invalid": 0, "notComputed": 0 },
+      { "channel": "gaze", "valid": 2, "borderline": 1, "invalid": 1, "notComputed": 0 }
+    ],
+    "deviceCounts": [
+      { "deviceClass": "desktop_webcam", "participantCount": 3, "sessionCount": 3 }
+    ],
+    "missingness": [
+      { "reasonCode": "gaze_qc_invalid", "count": 1 },
+      { "reasonCode": "target_not_reached", "count": 9 }
+    ],
+    "metrics": [
+      {
+        "metricId": "aoi.dwell_time_ms",
+        "unit": "ms",
+        "status": "computed",
+        "reason": null,
+        "nParticipants": 3,
+        "nObservations": 63,
+        "numerator": null,
+        "denominator": 63,
+        "observationDurationMs": 159840,
+        "median": 742,
+        "q1": 610,
+        "q3": 890,
+        "mean": 756,
+        "sd": 148,
+        "min": 580,
+        "max": 930,
+        "estimateCi95": {
+          "value": 742,
+          "lower": 604,
+          "upper": 902,
+          "confidenceLevel": 0.95,
+          "method": "participant_cluster_bootstrap"
+        },
+        "participantValues": [
+          { "participantId": "P-001", "value": 580, "nObservations": 21 },
+          { "participantId": "P-002", "value": 742, "nObservations": 22 },
+          { "participantId": "P-003", "value": 930, "nObservations": 20 }
+        ],
+        "scope": { "sessionId": null, "blockId": "main-block", "trialId": null, "presentationId": null, "stimulusId": "stimulus-42", "aoiId": "aoi-target" },
+        "algorithm": { "id": "gaze-aoi", "version": "1.0.0", "parametersHash": "sha256:gaze-aoi-default-v1" }
+      },
+      {
+        "metricId": "aoi.target_reached_pct",
+        "unit": "pct",
+        "status": "computed",
+        "reason": null,
+        "nParticipants": 3,
+        "nObservations": 72,
+        "numerator": 61,
+        "denominator": 72,
+        "observationDurationMs": 159840,
+        "median": 87.5,
+        "q1": 81.25,
+        "q3": 91.67,
+        "mean": 85.42,
+        "sd": 8.78,
+        "min": 75,
+        "max": 93.75,
+        "estimateCi95": {
+          "value": 85.42,
+          "lower": 75,
+          "upper": 93.75,
+          "confidenceLevel": 0.95,
+          "method": "participant_cluster_bootstrap"
+        },
+        "participantValues": [
+          { "participantId": "P-001", "value": 75, "nObservations": 24 },
+          { "participantId": "P-002", "value": 87.5, "nObservations": 24 },
+          { "participantId": "P-003", "value": 93.75, "nObservations": 24 }
+        ],
+        "scope": { "sessionId": null, "blockId": "main-block", "trialId": null, "presentationId": null, "stimulusId": "stimulus-42", "aoiId": "aoi-target" },
+        "algorithm": { "id": "gaze-aoi", "version": "1.0.0", "parametersHash": "sha256:gaze-aoi-default-v1" }
+      }
+    ]
+  }
+}

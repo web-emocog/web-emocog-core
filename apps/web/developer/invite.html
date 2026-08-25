@@ -144,6 +144,22 @@
       var invitesBody = document.getElementById('invitesBody');
       var protocolsCache = [];
 
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function authHeaders(json) {
+        var headers = json ? { 'Content-Type': 'application/json' } : {};
+        var csrf = sessionStorage.getItem('emocog_csrf_token') || '';
+        if (csrf) headers['X-CSRF-Token'] = csrf;
+        return headers;
+      }
+
       function getApiBase() {
         var fromField = (apiBaseInput && apiBaseInput.value || '').trim();
         if (fromField) return fromField.replace(/\/$/, '');
@@ -185,7 +201,7 @@
 
         if (isInviteSlug(raw)) {
           try {
-            var pub = await fetch(apiBase + '/invitations/by-code/' + encodeURIComponent(raw));
+            var pub = await fetch(apiBase + '/invitations/by-code/' + encodeURIComponent(raw), { credentials: 'include' });
             if (pub.ok) {
               var found = await pub.json();
               if (found && found.protocol_id) {
@@ -224,25 +240,21 @@
         invitesBody.innerHTML = rows.map(function (x) {
           var expires = x.expires_at ? new Date(x.expires_at).toLocaleString() : '—';
           return '<tr>' +
-            '<td>' + (x.id || '—') + '</td>' +
-            '<td style="font-family:ui-monospace,monospace;">' + (x.code || '—') + '</td>' +
-            '<td>' + (x.protocol_id || '—') + '</td>' +
-            '<td>' + (x.runs_used != null ? x.runs_used : '—') + '</td>' +
-            '<td>' + (x.max_runs != null ? x.max_runs : '—') + '</td>' +
-            '<td>' + expires + '</td>' +
+            '<td>' + escapeHtml(x.id || '—') + '</td>' +
+            '<td style="font-family:ui-monospace,monospace;">' + escapeHtml(x.code || '—') + '</td>' +
+            '<td>' + escapeHtml(x.protocol_id || '—') + '</td>' +
+            '<td>' + escapeHtml(x.runs_used != null ? x.runs_used : '—') + '</td>' +
+            '<td>' + escapeHtml(x.max_runs != null ? x.max_runs : '—') + '</td>' +
+            '<td>' + escapeHtml(expires) + '</td>' +
           '</tr>';
         }).join('');
       }
 
       function loadInvites() {
         var apiBase = getApiBase();
-        var token = localStorage.getItem('emocog_api_token');
-        if (!token) {
-          renderInvites([]);
-          return;
-        }
         fetch(apiBase + '/invitations', {
-          headers: { 'Authorization': 'Bearer ' + token }
+          headers: authHeaders(false),
+          credentials: 'include'
         })
           .then(function (r) {
             if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
@@ -256,10 +268,9 @@
 
       function loadProtocols() {
         var apiBase = getApiBase();
-        var token = localStorage.getItem('emocog_api_token');
-        if (!token) return Promise.resolve([]);
         return fetch(apiBase + '/protocols', {
-          headers: { 'Authorization': 'Bearer ' + token }
+          headers: authHeaders(false),
+          credentials: 'include'
         })
           .then(function (r) {
             if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
@@ -282,18 +293,11 @@
 
       btnGenerate.addEventListener('click', async function () {
         var apiBase = getApiBase();
-        var token = localStorage.getItem('emocog_api_token');
         var maxRunsRaw = (maxRunsInput.value || '').trim();
         var expiresAtRaw = (expiresAtInput.value || '').trim();
 
-        if (!token) {
-          copyFeedback.style.display = 'inline';
-          copyFeedback.textContent = 'Сначала выполните вход на странице developer/login.html';
-          return;
-        }
-
         var rawProtocolInput = (protocolIdInput.value || '').trim();
-        var resolved = await resolveProtocolRef(rawProtocolInput, apiBase, token);
+        var resolved = await resolveProtocolRef(rawProtocolInput, apiBase, null);
         if (!resolved || !Number.isFinite(resolved.protocol_id) || resolved.protocol_id <= 0) {
           if (isInviteSlug(rawProtocolInput)) {
             copyFeedback.style.display = 'inline';
@@ -323,9 +327,6 @@
 
         var protocolId = resolved.protocol_id;
         var payload = { protocol_id: protocolId };
-        if (resolved.invite_code && isInviteSlug(resolved.invite_code)) {
-          payload.code = resolved.invite_code;
-        }
         if (maxRunsRaw) {
           var maxRuns = parseInt(maxRunsRaw, 10);
           if (Number.isFinite(maxRuns) && maxRuns > 0) payload.max_runs = maxRuns;
@@ -338,10 +339,8 @@
           var postInvite = async function (p) {
             var resp = await fetch(apiBase + '/invitations', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + token
-              },
+              headers: authHeaders(true),
+              credentials: 'include',
               body: JSON.stringify(p)
             });
             if (!resp.ok) {

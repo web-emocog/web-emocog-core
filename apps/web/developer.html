@@ -203,13 +203,18 @@
       } catch (_) {}
     })();
 
-    document.getElementById('logoutLink').addEventListener('click', function (e) {
+    document.getElementById('logoutLink').addEventListener('click', async function (e) {
       e.preventDefault();
+      try {
+        var logoutBase = (window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+        await fetch(logoutBase + '/auth/logout', { method: 'POST', credentials: 'include', keepalive: true });
+      } catch (_) {}
       try {
         sessionStorage.removeItem('emocog_developer_auth');
         localStorage.removeItem('emocog_developer_auth');
         localStorage.removeItem('emocog_api_token');
         localStorage.removeItem('emocog_api_user');
+        sessionStorage.removeItem('emocog_csrf_token');
       } catch (_) {}
       window.location.href = 'developer/login.html';
     });
@@ -217,21 +222,26 @@
     document.getElementById('changePasswordBtn').addEventListener('click', async function () {
       var currentPassword = window.prompt('Current password:');
       if (currentPassword == null) return;
-      var newPassword = window.prompt('New password (min 8 chars):');
+      var newPassword = window.prompt('New password (min 12 chars):');
       if (newPassword == null) return;
-      if (String(newPassword).length < 8) { alert('New password too short'); return; }
+      if (String(newPassword).length < 12) { alert('New password too short'); return; }
       try {
         var base = (window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
         var token = window.API_TOKEN || localStorage.getItem('emocog_api_token') || '';
+        var csrf = sessionStorage.getItem('emocog_csrf_token') || '';
         var r = await fetch(base + '/auth/me/password', {
           method: 'PATCH',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { Authorization: 'Bearer ' + token } : {})
+            ...(token ? { Authorization: 'Bearer ' + token } : {}),
+            ...(csrf ? { 'X-CSRF-Token': csrf } : {})
           },
           body: JSON.stringify({ currentPassword: currentPassword, newPassword: newPassword })
         });
         if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+        var updatedAuth = await r.json();
+        if (updatedAuth && updatedAuth.csrf_token) sessionStorage.setItem('emocog_csrf_token', updatedAuth.csrf_token);
         alert('Password updated successfully');
       } catch (e) {
         alert('Password update failed: ' + e.message);

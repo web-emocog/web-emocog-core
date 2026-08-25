@@ -920,52 +920,6 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     text-align: center;
 }
 
-.bpm-screen {
-    text-align: center;
-}
-
-.bpm-video-wrap {
-    position: relative;
-    margin: 10px auto 12px;
-    width: min(88vw, 760px);
-    aspect-ratio: 4 / 3;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    background: #0f172a;
-}
-
-#bpmVideo,
-#bpmOverlay {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-}
-
-#bpmVideo {
-    object-fit: cover;
-    transform: scaleX(-1);
-}
-
-#bpmOverlay {
-    pointer-events: none;
-    transform: scaleX(-1);
-}
-
-.bpm-live-panel {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-}
-
-.bpm-live-value {
-    font-size: 42px;
-    font-weight: 700;
-    color: #10B981;
-}
-
 .visuospatial-controls {
     display: flex;
     justify-content: center;

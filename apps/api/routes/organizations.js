@@ -4,21 +4,31 @@
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { withTransaction } = require('../db/transaction');
+const {
+  requireAuth,
+  requireRole,
+  requireOperation,
+  OPERATIONS,
+  isPlatformAdmin,
+  hasOrganizationMembership,
+} = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
-router.get('/', requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'), async (req, res) => {
+router.get('/', requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'), requireOperation(OPERATIONS.ORGANIZATION_READ), async (req, res) => {
   try {
-    const r = await pool.query(
-      `SELECT o.id, o.name, o.slug, o.created_at
-       FROM organizations o
-       INNER JOIN user_organizations uo ON uo.organization_id = o.id
-       WHERE uo.user_id = $1
-       ORDER BY o.name`,
-      [req.user.sub]
-    );
+    const r = isPlatformAdmin(req.user)
+      ? await pool.query('SELECT id, name, slug, created_at FROM organizations ORDER BY name')
+      : await pool.query(
+        `SELECT o.id, o.name, o.slug, o.created_at
+         FROM organizations o
+         INNER JOIN user_organizations uo ON uo.organization_id = o.id
+         WHERE uo.user_id = $1
+         ORDER BY o.name`,
+        [req.user.sub]
+      );
     res.json(r.rows);
   } catch (err) {
     console.error(err);
@@ -29,21 +39,24 @@ router.get('/', requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant')
 router.post(
   '/',
   requireRole('admin', 'PI'),
+  requireOperation(OPERATIONS.ORGANIZATION_MANAGE),
   [body('name').trim().notEmpty(), body('slug').trim().notEmpty().matches(/^[a-z0-9-]+$/)],
   async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const { name, slug } = req.body;
-      const r = await pool.query(
-        'INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id, name, slug, created_at',
-        [name, slug]
-      );
-      const org = r.rows[0];
-      await pool.query(
-        'INSERT INTO user_organizations (user_id, organization_id, role) VALUES ($1, $2, $3)',
-        [req.user.sub, org.id, 'member']
-      );
+      const org = await withTransaction(pool, async client => {
+        const r = await client.query(
+          'INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id, name, slug, created_at',
+          [name, slug]
+        );
+        await client.query(
+          'INSERT INTO user_organizations (user_id, organization_id, role) VALUES ($1, $2, $3)',
+          [req.user.sub, r.rows[0].id, 'member']
+        );
+        return r.rows[0];
+      });
       res.status(201).json(org);
     } catch (err) {
       if (err.code === '23505') return res.status(409).json({ error: 'Slug already exists' });
@@ -55,16 +68,16 @@ router.post(
 
 router.get(
   '/:id',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant'),
+  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.ORGANIZATION_READ),
   [param('id').isInt()],
   async (req, res) => {
     try {
+      const allowed = await hasOrganizationMembership(pool, req.params.id, req.user);
+      if (!allowed) return res.status(404).json({ error: 'Not found' });
       const r = await pool.query(
-        `SELECT o.id, o.name, o.slug, o.created_at
-         FROM organizations o
-         INNER JOIN user_organizations uo ON uo.organization_id = o.id
-         WHERE o.id = $1 AND uo.user_id = $2`,
-        [req.params.id, req.user.sub]
+        'SELECT id, name, slug, created_at FROM organizations WHERE id = $1',
+        [req.params.id]
       );
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(r.rows[0]);
@@ -78,6 +91,7 @@ router.get(
 router.patch(
   '/:id',
   requireRole('admin', 'PI'),
+  requireOperation(OPERATIONS.ORGANIZATION_MANAGE),
   [param('id').isInt(), body('name').optional().trim().notEmpty(), body('slug').optional().trim().matches(/^[a-z0-9-]+$/)],
   async (req, res) => {
     try {
@@ -89,6 +103,8 @@ router.patch(
       if (req.body.name !== undefined) { updates.push(`name = $${i++}`); values.push(req.body.name); }
       if (req.body.slug !== undefined) { updates.push(`slug = $${i++}`); values.push(req.body.slug); }
       if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+      const allowed = await hasOrganizationMembership(pool, req.params.id, req.user);
+      if (!allowed) return res.status(404).json({ error: 'Not found' });
       values.push(req.params.id);
       const r = await pool.query(
         `UPDATE organizations SET ${updates.join(', ')}, updated_at = current_timestamp
@@ -108,9 +124,12 @@ router.patch(
 router.delete(
   '/:id',
   requireRole('admin', 'PI'),
+  requireOperation(OPERATIONS.ORGANIZATION_MANAGE),
   [param('id').isInt()],
   async (req, res) => {
     try {
+      const allowed = await hasOrganizationMembership(pool, req.params.id, req.user);
+      if (!allowed) return res.status(404).json({ error: 'Not found' });
       const r = await pool.query('DELETE FROM organizations WHERE id = $1 RETURNING id', [req.params.id]);
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.status(204).send();

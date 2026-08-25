@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Wecog PostgreSQL backup every day
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=wecog-backup.service
+
+[Install]
+WantedBy=timers.target

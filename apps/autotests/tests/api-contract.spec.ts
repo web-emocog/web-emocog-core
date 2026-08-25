@@ -71,7 +71,7 @@ test.describe('API smoke/contract', () => {
     expect(exportRes.status()).toBe(403);
   });
 
-  test('authenticated ingest accepts blocks contract and returns qc validity', async ({ request }) => {
+  test('respondent token cannot create an unscoped ingest session', async ({ request }) => {
     const email = `autotest_ingest_${Date.now()}_${Math.floor(Math.random() * 10000)}@example.test`;
     const registerRes = await request.post(`${API_BASE}/auth/register`, {
       data: {
@@ -90,10 +90,17 @@ test.describe('API smoke/contract', () => {
         Authorization: `Bearer ${token}`
       },
       data: {
+        schemaVersion: 'session_feature.v1',
         ids: {
           session: `sess_contract_${Date.now()}`,
           participant: `p_${Math.floor(Math.random() * 100000)}`
         },
+        lifecycle: {
+          schemaVersion: 'session_lifecycle.v1',
+          state: 'running',
+          status: 'in_progress'
+        },
+        events: [],
         qcSummary: {
           qcScore: 0.81,
           checks: {
@@ -127,11 +134,9 @@ test.describe('API smoke/contract', () => {
       }
     });
 
-    expect(ingestRes.status()).toBe(201);
+    expect(ingestRes.status()).toBe(409);
     const ingestPayload = await ingestRes.json();
-    expect(ingestPayload.ingested).toBe(true);
-    expect(typeof ingestPayload.session_id).toBe('string');
-    expect(['valid', 'borderline', 'invalid']).toContain(ingestPayload.qc_validity);
+    expect(ingestPayload.code).toBe('session_must_be_precreated');
   });
 
   test('export includes blocks and qc keys when privileged token provided', async ({ request }) => {

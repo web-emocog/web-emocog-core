@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CONFIG_FILE=/etc/wecog/release.conf
+readonly METADATA_TOKEN_URL=http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token
+readonly LOCKBOX_PAYLOAD_URL=https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets
+readonly STORAGE_ENDPOINT=https://storage.yandexcloud.net
+readonly RELEASE_TAG_PATTERN='^[0-9a-f]{40}$'
+readonly LOCAL_BACKUP_RETENTION_MINUTES=2880
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "This command must run as root." >&2
+  exit 77
+fi
+
+if [[ ! -r ${CONFIG_FILE} ]]; then
+  echo "Missing ${CONFIG_FILE}." >&2
+  exit 78
+fi
+
+# shellcheck source=/dev/null
+source "${CONFIG_FILE}"
+
+: "${WECOG_REGISTRY_ID:?Missing WECOG_REGISTRY_ID}"
+: "${WECOG_LOCKBOX_SECRET_ID:?Missing WECOG_LOCKBOX_SECRET_ID}"
+: "${WECOG_BACKUP_BUCKET:?Missing WECOG_BACKUP_BUCKET}"
+: "${WECOG_COMPOSE_FILE:?Missing WECOG_COMPOSE_FILE}"
+: "${WECOG_SECRET_ENV:?Missing WECOG_SECRET_ENV}"
+: "${WECOG_UPLOADS_DIR:?Missing WECOG_UPLOADS_DIR}"
+: "${WECOG_BACKUP_DIR:?Missing WECOG_BACKUP_DIR}"
+: "${WECOG_STATE_DIR:?Missing WECOG_STATE_DIR}"
+
+readonly CURRENT_TAG_FILE="${WECOG_STATE_DIR}/current-tag"
+readonly PREVIOUS_TAG_FILE="${WECOG_STATE_DIR}/previous-tag"
+readonly PENDING_TAG_FILE="${WECOG_STATE_DIR}/pending-tag"
+readonly RELEASE_ENV_FILE="${WECOG_STATE_DIR}/release.env"
+readonly LOCK_FILE="${WECOG_STATE_DIR}/release.lock"
+
+mkdir -p "${WECOG_BACKUP_DIR}" "${WECOG_STATE_DIR}" "$(dirname "${WECOG_SECRET_ENV}")" /run/wecog/docker
+chmod 0700 "${WECOG_BACKUP_DIR}" "${WECOG_STATE_DIR}" /run/wecog /run/wecog/docker
+exec 9>"${LOCK_FILE}"
+flock --exclusive 9
+
+log() {
+  printf '%s %s\n' "$(date --utc +'%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+require_tag() {
+  local tag=${1:-}
+  if [[ ! ${tag} =~ ${RELEASE_TAG_PATTERN} ]]; then
+    echo "Release tag must be a full lowercase 40-character Git commit SHA." >&2
+    exit 64
+  fi
+}
+
+metadata_iam_token() {
+  curl --fail --silent --show-error \
+    --header 'Metadata-Flavor: Google' \
+    "${METADATA_TOKEN_URL}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+}
+
+render_secret_env() {
+  local token temporary
+  token=$(metadata_iam_token)
+  temporary=$(mktemp "${WECOG_SECRET_ENV}.tmp.XXXXXX")
+  chmod 0600 "${temporary}"
+
+  if ! curl --fail --silent --show-error \
+      --header "Authorization: Bearer ${token}" \
+      "${LOCKBOX_PAYLOAD_URL}/${WECOG_LOCKBOX_SECRET_ID}/payload" \
+      | python3 -c '
+import json
+import re
+import sys
+
+payload = json.load(sys.stdin)
+entries = {}
+for entry in payload.get("entries", []):
+    key = entry.get("key", "")
+    value = entry.get("textValue")
+    if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
+        raise SystemExit(f"Invalid Lockbox key: {key!r}")
+    if value is None or "\n" in value or "\r" in value or "\0" in value:
+        raise SystemExit(f"Lockbox value for {key} must be a single text line")
+    entries[key] = value
+
+required = {"DATABASE_URL", "JWT_SECRET"}
+missing = sorted(required - entries.keys())
+if missing:
+    raise SystemExit("Missing Lockbox keys: " + ", ".join(missing))
+if len(entries["JWT_SECRET"]) < 32:
+    raise SystemExit("JWT_SECRET must contain at least 32 characters")
+
+for key in sorted(entries):
+    print(f"{key}={entries[key]}")
+' >"${temporary}"; then
+    rm -f "${temporary}"
+    echo "Unable to render the Lockbox payload." >&2
+    exit 70
+  fi
+
+  chown root:root "${temporary}"
+  mv --force "${temporary}" "${WECOG_SECRET_ENV}"
+  log "Lockbox payload rendered to the protected runtime environment file."
+}
+
+registry_login() {
+  local token
+  token=$(metadata_iam_token)
+  printf '%s' "${token}" \
+    | DOCKER_CONFIG=/run/wecog/docker docker login \
+        --username iam \
+        --password-stdin \
+        cr.yandex >/dev/null
+}
+
+compose_for() {
+  local tag=$1
+  shift
+  WECOG_REGISTRY_ID="${WECOG_REGISTRY_ID}" \
+  WECOG_IMAGE_TAG="${tag}" \
+  WECOG_ENV_FILE="${WECOG_SECRET_ENV}" \
+  DOCKER_CONFIG=/run/wecog/docker \
+    docker compose \
+      --project-name wecog \
+      --file "${WECOG_COMPOSE_FILE}" \
+      "$@"
+}
+
+local_api_image_exists() {
+  local tag=$1
+  docker image inspect \
+    "cr.yandex/${WECOG_REGISTRY_ID}/wecog-api:${tag}" \
+    >/dev/null 2>&1
+}
+
+prune_local_release_images() {
+  local current_tag=$1 previous_tag=${2:-} repository reference
+  for repository in wecog-api wecog-web; do
+    while IFS= read -r reference; do
+      [[ -n ${reference} ]] || continue
+      if [[ ${reference} == "cr.yandex/${WECOG_REGISTRY_ID}/${repository}:${current_tag}" ]]; then
+        continue
+      fi
+      if [[ -n ${previous_tag} ]] \
+          && [[ ${reference} == "cr.yandex/${WECOG_REGISTRY_ID}/${repository}:${previous_tag}" ]]; then
+        continue
+      fi
+      log "Removing superseded local image tag ${reference}."
+      docker image rm "${reference}" >/dev/null || true
+    done < <(
+      docker image ls \
+        --format '{{.Repository}}:{{.Tag}}' \
+        "cr.yandex/${WECOG_REGISTRY_ID}/${repository}"
+    )
+  done
+}
+
+write_release_env() {
+  local tag=$1 temporary
+  temporary=$(mktemp "${RELEASE_ENV_FILE}.tmp.XXXXXX")
+  chmod 0600 "${temporary}"
+  printf 'WECOG_REGISTRY_ID=%s\nWECOG_IMAGE_TAG=%s\nWECOG_ENV_FILE=%s\n' \
+    "${WECOG_REGISTRY_ID}" "${tag}" "${WECOG_SECRET_ENV}" >"${temporary}"
+  mv --force "${temporary}" "${RELEASE_ENV_FILE}"
+}
+
+upload_object() {
+  local source_file=$1 object_key=$2 token
+  token=$(metadata_iam_token)
+  curl --fail --silent --show-error \
+    --retry 3 \
+    --retry-all-errors \
+    --request PUT \
+    --header "Authorization: Bearer ${token}" \
+    --upload-file "${source_file}" \
+    "${STORAGE_ENDPOINT}/${WECOG_BACKUP_BUCKET}/${object_key}"
+}
+
+prune_local_backups() {
+  # Only failed/interrupted backup artifacts should survive here. Successfully
+  # uploaded files are removed immediately by backup_database.
+  find "${WECOG_BACKUP_DIR}" \
+    -maxdepth 1 \
+    -type f \
+    \( -name 'wecog-*.dump' -o -name 'wecog-*.dump.sha256' \) \
+    -mmin "+${LOCAL_BACKUP_RETENTION_MINUTES}" \
+    -delete
+}
+
+backup_database() {
+  local tag=$1 reason=$2 timestamp short_tag filename checksum object_prefix
+  case ${reason} in
+    pre-deploy|daily) ;;
+    *)
+      echo "Unsupported backup reason: ${reason}" >&2
+      exit 64
+      ;;
+  esac
+
+  prune_local_backups
+  timestamp=$(date --utc +'%Y%m%dT%H%M%SZ')
+  short_tag=${tag:0:12}
+  filename="wecog-${timestamp}-${short_tag}.dump"
+  checksum="${filename}.sha256"
+  object_prefix="postgresql/${reason}/${timestamp}-${short_tag}"
+
+  log "Creating a PostgreSQL custom-format dump."
+  compose_for "${tag}" run --rm --no-deps \
+    --volume "${WECOG_BACKUP_DIR}:/backup" \
+    api sh -eu -c \
+      'umask 077; pg_dump --dbname="$DATABASE_URL" --format=custom --no-owner --no-privileges --file="/backup/$1"' \
+      sh "${filename}"
+
+  compose_for "${tag}" run --rm --no-deps \
+    --volume "${WECOG_BACKUP_DIR}:/backup:ro" \
+    api pg_restore --list "/backup/${filename}" >/dev/null
+  (
+    cd -- "${WECOG_BACKUP_DIR}"
+    sha256sum "${filename}" >"${checksum}"
+  )
+  chmod 0600 "${WECOG_BACKUP_DIR}/${filename}" "${WECOG_BACKUP_DIR}/${checksum}"
+
+  log "Uploading the PostgreSQL dump and checksum to Object Storage."
+  upload_object "${WECOG_BACKUP_DIR}/${filename}" "${object_prefix}/${filename}"
+  upload_object "${WECOG_BACKUP_DIR}/${checksum}" "${object_prefix}/${checksum}"
+  rm -f -- "${WECOG_BACKUP_DIR}/${filename}" "${WECOG_BACKUP_DIR}/${checksum}"
+  log "Database backup uploaded: ${object_prefix}/${filename}"
+}
+
+wait_for_health() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 3 \
+        --header 'X-Forwarded-Proto: https' \
+        http://127.0.0.1:3000/ready >/dev/null \
+      && curl --fail --silent --show-error --max-time 3 \
+        http://127.0.0.1:8080/healthz >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+start_release() {
+  local tag=$1
+  write_release_env "${tag}"
+  compose_for "${tag}" up --detach --remove-orphans --wait --wait-timeout 180
+  wait_for_health
+}
+
+prepare_release() {
+  local tag=$1
+  require_tag "${tag}"
+  render_secret_env
+  registry_login
+  log "Pulling immutable images for ${tag}."
+  compose_for "${tag}" pull
+  backup_database "${tag}" pre-deploy
+  printf '%s\n' "${tag}" >"${PENDING_TAG_FILE}"
+  chmod 0600 "${PENDING_TAG_FILE}"
+  log "Release ${tag} is prepared. Create the disk snapshot before deployment."
+}
+
+scheduled_backup() {
+  local tag
+  if [[ ! -r ${CURRENT_TAG_FILE} ]]; then
+    log "No active release is recorded; scheduled database backup skipped."
+    return 0
+  fi
+
+  tag=$(<"${CURRENT_TAG_FILE}")
+  require_tag "${tag}"
+  render_secret_env
+  if ! local_api_image_exists "${tag}"; then
+    registry_login
+    log "The active API image is missing locally; pulling ${tag} for the scheduled backup."
+    compose_for "${tag}" pull api
+  fi
+  backup_database "${tag}" daily
+}
+
+deploy_release() {
+  local tag=$1 old_tag=''
+  require_tag "${tag}"
+  if [[ ! -r ${PENDING_TAG_FILE} ]] || [[ $(<"${PENDING_TAG_FILE}") != "${tag}" ]]; then
+    echo "Release ${tag} was not prepared on this VM." >&2
+    exit 65
+  fi
+  if [[ -r ${CURRENT_TAG_FILE} ]]; then
+    old_tag=$(<"${CURRENT_TAG_FILE}")
+    require_tag "${old_tag}"
+  fi
+
+  log "Applying forward-only database migrations for ${tag}."
+  compose_for "${tag}" run --rm --no-deps api npm run migrate:up
+
+  log "Starting release ${tag}."
+  if ! start_release "${tag}"; then
+    log "Health check failed for ${tag}."
+    if [[ -n ${old_tag} ]]; then
+      log "Restoring application containers for ${old_tag}; database migrations are not reversed."
+      start_release "${old_tag}" || true
+    else
+      compose_for "${tag}" down || true
+    fi
+    exit 1
+  fi
+
+  if [[ -n ${old_tag} && ${old_tag} != "${tag}" ]]; then
+    printf '%s\n' "${old_tag}" >"${PREVIOUS_TAG_FILE}"
+  fi
+  printf '%s\n' "${tag}" >"${CURRENT_TAG_FILE}"
+  rm -f "${PENDING_TAG_FILE}"
+  chmod 0600 "${CURRENT_TAG_FILE}"
+  [[ ! -e ${PREVIOUS_TAG_FILE} ]] || chmod 0600 "${PREVIOUS_TAG_FILE}"
+  prune_local_release_images "${tag}" "${old_tag}"
+  log "Release ${tag} is healthy and active."
+}
+
+rollback_release() {
+  local requested=${1:-} current='' target=''
+  if [[ -n ${requested} ]]; then
+    require_tag "${requested}"
+    target=${requested}
+  elif [[ -r ${PREVIOUS_TAG_FILE} ]]; then
+    target=$(<"${PREVIOUS_TAG_FILE}")
+    require_tag "${target}"
+  else
+    echo "No previous release is recorded." >&2
+    exit 66
+  fi
+  if [[ -r ${CURRENT_TAG_FILE} ]]; then
+    current=$(<"${CURRENT_TAG_FILE}")
+    require_tag "${current}"
+  fi
+
+  render_secret_env
+  registry_login
+  compose_for "${target}" pull
+  log "Rolling application containers back to ${target}. Database migrations are not reversed."
+  start_release "${target}"
+  if [[ -n ${current} && ${current} != "${target}" ]]; then
+    printf '%s\n' "${current}" >"${PREVIOUS_TAG_FILE}"
+  fi
+  printf '%s\n' "${target}" >"${CURRENT_TAG_FILE}"
+  chmod 0600 "${CURRENT_TAG_FILE}"
+  [[ ! -e ${PREVIOUS_TAG_FILE} ]] || chmod 0600 "${PREVIOUS_TAG_FILE}"
+  prune_local_release_images "${target}" "${current}"
+  log "Rollback to ${target} completed."
+}
+
+show_status() {
+  printf 'current=%s\n' "$([[ -r ${CURRENT_TAG_FILE} ]] && cat "${CURRENT_TAG_FILE}" || printf 'none')"
+  printf 'previous=%s\n' "$([[ -r ${PREVIOUS_TAG_FILE} ]] && cat "${PREVIOUS_TAG_FILE}" || printf 'none')"
+  printf 'pending=%s\n' "$([[ -r ${PENDING_TAG_FILE} ]] && cat "${PENDING_TAG_FILE}" || printf 'none')"
+  if [[ -r ${CURRENT_TAG_FILE} ]]; then
+    compose_for "$(<"${CURRENT_TAG_FILE}")" ps
+  fi
+}
+
+case ${1:-} in
+  prepare)
+    [[ $# -eq 2 ]] || { echo "Usage: $0 prepare <full-git-sha>" >&2; exit 64; }
+    prepare_release "$2"
+    ;;
+  deploy)
+    [[ $# -eq 2 ]] || { echo "Usage: $0 deploy <full-git-sha>" >&2; exit 64; }
+    deploy_release "$2"
+    ;;
+  rollback)
+    [[ $# -le 2 ]] || { echo "Usage: $0 rollback [full-git-sha]" >&2; exit 64; }
+    rollback_release "${2:-}"
+    ;;
+  backup)
+    [[ $# -eq 1 ]] || { echo "Usage: $0 backup" >&2; exit 64; }
+    scheduled_backup
+    ;;
+  status)
+    [[ $# -eq 1 ]] || { echo "Usage: $0 status" >&2; exit 64; }
+    show_status
+    ;;
+  *)
+    echo "Usage: $0 {prepare <sha>|deploy <sha>|rollback [sha]|backup|status}" >&2
+    exit 64
+    ;;
+esac

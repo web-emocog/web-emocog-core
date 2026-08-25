@@ -1,18 +1,18 @@
-function buildCommonsEntry({
+function buildLocalEntry({
     species,
     fileName,
-    author = 'Wikimedia Commons contributors',
-    license = 'See source page (CC BY / CC BY-SA / Public Domain)',
-    licenseUrl = 'https://commons.wikimedia.org/wiki/Commons:Licensing'
+    assetName,
+    sourcePage,
+    author,
+    license,
+    licenseUrl = ''
 }) {
-    const encodedName = encodeURIComponent(fileName);
-    const pageName = fileName.replace(/ /g, '_');
     return {
         species,
         fileName,
-        stimulusId: `${species}:${pageName}`,
-        url: `https://commons.wikimedia.org/wiki/Special:FilePath/File:${encodedName}`,
-        sourcePage: `https://commons.wikimedia.org/wiki/File:${pageName}`,
+        stimulusId: `${species}:${assetName}`,
+        url: `assets/vpc/felidae/${assetName}`,
+        sourcePage,
         author,
         license,
         licenseUrl
@@ -21,45 +21,101 @@ function buildCommonsEntry({
 
 export const FELIDAE_SPECIES_POOLS = Object.freeze({
     lion: [
-        buildCommonsEntry({ species: 'lion', fileName: 'Lion (Panthera Leo).jpg' }),
-        buildCommonsEntry({ species: 'lion', fileName: 'Panthera-leo.jpg' }),
-        buildCommonsEntry({ species: 'lion', fileName: 'Panthera leo (55027011675).jpg' })
+        buildLocalEntry({
+            species: 'lion',
+            fileName: 'Lion (Panthera Leo).jpg',
+            assetName: 'lion.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Lion_(Panthera_Leo).jpg',
+            author: 'Stephanie cheks',
+            license: 'CC BY-SA 4.0',
+            licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0'
+        })
     ],
     tiger: [
-        buildCommonsEntry({ species: 'tiger', fileName: 'Panthera tigris tigris.jpg' }),
-        buildCommonsEntry({ species: 'tiger', fileName: 'Panthera tigris (TIGER).jpg' }),
-        buildCommonsEntry({ species: 'tiger', fileName: '(PANTHERA TIGRIS) TIGER.jpg' })
+        buildLocalEntry({
+            species: 'tiger',
+            fileName: 'Panthera tigris tigris.jpg',
+            assetName: 'tiger.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Panthera_tigris_tigris.jpg',
+            author: 'John and Karen Hollingsworth; retouched by Zwoenitzer',
+            license: 'Public domain'
+        })
     ],
     leopard: [
-        buildCommonsEntry({ species: 'leopard', fileName: 'Leopard panthera pardus.jpg' }),
-        buildCommonsEntry({ species: 'leopard', fileName: 'Panthera-pardus.jpg' }),
-        buildCommonsEntry({ species: 'leopard', fileName: 'Panthera pardus pardus.jpg' })
+        buildLocalEntry({
+            species: 'leopard',
+            fileName: 'Leopard panthera pardus.jpg',
+            assetName: 'leopard.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Leopard_panthera_pardus.jpg',
+            author: 'Charles J. Sharp',
+            license: 'CC BY-SA 3.0',
+            licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0'
+        })
     ],
     cheetah: [
-        buildCommonsEntry({ species: 'cheetah', fileName: 'Cheetah (Acinonyx jubatus).jpg' }),
-        buildCommonsEntry({ species: 'cheetah', fileName: 'Cheetah (Acinonyx jubatus), Maasai Mara.jpg' }),
-        buildCommonsEntry({ species: 'cheetah', fileName: 'Cheetah African predator mammal animal acinonyx jubatus.jpg' })
+        buildLocalEntry({
+            species: 'cheetah',
+            fileName: 'Cheetah (Acinonyx jubatus).jpg',
+            assetName: 'cheetah.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Cheetah_(Acinonyx_jubatus).jpg',
+            author: 'cliff1066',
+            license: 'CC BY 2.0',
+            licenseUrl: 'https://creativecommons.org/licenses/by/2.0'
+        })
     ],
     jaguar: [
-        buildCommonsEntry({ species: 'jaguar', fileName: 'Jaguar, Panthera Onca.jpg' }),
-        buildCommonsEntry({ species: 'jaguar', fileName: 'Panthera onca at the Toronto Zoo.jpg' })
+        buildLocalEntry({
+            species: 'jaguar',
+            fileName: 'Jaguar, Panthera Onca.jpg',
+            assetName: 'jaguar.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Jaguar,_Panthera_Onca.jpg',
+            author: 'Eduardo Estrada, Wildlife & Conservation Photography',
+            license: 'CC BY-SA 4.0',
+            licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0'
+        })
     ],
     lynx: [
-        buildCommonsEntry({ species: 'lynx', fileName: 'Lynx lynx.jpg' }),
-        buildCommonsEntry({ species: 'lynx', fileName: 'Lynx-lynx.jpg' }),
-        buildCommonsEntry({ species: 'lynx', fileName: 'Lynx lynx (Linnaeus 1758).jpg' })
+        buildLocalEntry({
+            species: 'lynx',
+            fileName: 'Lynx lynx.jpg',
+            assetName: 'lynx.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Lynx_lynx.jpg',
+            author: 'Wikimedia Commons',
+            license: 'Public domain'
+        })
     ],
     puma: [
-        buildCommonsEntry({ species: 'puma', fileName: 'Puma (Puma concolor).jpg' }),
-        buildCommonsEntry({ species: 'puma', fileName: 'Puma concolor 2.jpg' })
+        buildLocalEntry({
+            species: 'puma',
+            fileName: 'Puma (Puma concolor).jpg',
+            assetName: 'puma.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Puma_(Puma_concolor).jpg',
+            author: 'Jbarreirol',
+            license: 'CC BY-SA 3.0',
+            licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0'
+        })
     ],
     caracal: [
-        buildCommonsEntry({ species: 'caracal', fileName: 'Cute caracal.jpg' }),
-        buildCommonsEntry({ species: 'caracal', fileName: 'Caracal (Caracal caracal).jpg' })
+        buildLocalEntry({
+            species: 'caracal',
+            fileName: 'Cute caracal.jpg',
+            assetName: 'caracal.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Cute_caracal.jpg',
+            author: 'ZhanserikKT',
+            license: 'CC BY 4.0',
+            licenseUrl: 'https://creativecommons.org/licenses/by/4.0'
+        })
     ],
     domestic_cat: [
-        buildCommonsEntry({ species: 'domestic_cat', fileName: 'Felis catus1.jpg' }),
-        buildCommonsEntry({ species: 'domestic_cat', fileName: 'Cat November 2010-1a.jpg' })
+        buildLocalEntry({
+            species: 'domestic_cat',
+            fileName: 'Felis catus1.jpg',
+            assetName: 'domestic-cat.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Felis_catus1.jpg',
+            author: 'Sbonfus',
+            license: 'CC0',
+            licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/'
+        })
     ]
 });
 

@@ -1,0 +1,189 @@
+{
+  "contractVersion": "1.0",
+  "kind": "session_summary",
+  "generatedAt": "2026-08-04T18:31:00.000Z",
+  "snapshot": {
+    "id": "snapshot-2026-08-04-001",
+    "datasetHash": "sha256:7c3e00e9062ad4dfe7429d80dc4f312e",
+    "createdAt": "2026-08-04T18:30:00.000Z",
+    "queryEcho": {
+      "schemaVersion": "1.0",
+      "mode": "session",
+      "analysisLevel": "level_1",
+      "projectId": 12,
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "metricIds": ["task.accuracy_pct", "task.rt_median_ms", "qc.valid_gaze_pct"],
+      "filters": {
+        "participantIds": ["P-042"],
+        "sessionIds": [105],
+        "groupIds": [],
+        "conditionIds": [],
+        "blockIds": ["main-block"],
+        "stimulusIds": ["stimulus-42"],
+        "aoiIds": [],
+        "qcMode": "valid_and_borderline",
+        "qcChannels": ["task", "gaze"],
+        "minValidFraction": 0.7,
+        "minSignalConfidence": 0.65,
+        "dateFrom": null,
+        "dateTo": null,
+        "includeIncompleteSessions": false
+      }
+    },
+    "includedParticipantIds": ["P-042"],
+    "includedSessionIds": [105],
+    "excludedSessions": [],
+    "versions": {
+      "protocol": "1.0.0",
+      "stimulus": "stimulus-42@1",
+      "aoiSchema": "1.2",
+      "metricsCatalog": "1.0",
+      "qcRules": "qc-rules-1.0.0",
+      "frontend": "researcher-web-1.0.0",
+      "backend": "analytics-api-1.0.0"
+    }
+  },
+  "data": {
+    "session": {
+      "sessionId": 105,
+      "participantAlias": "P-042",
+      "startedAt": "2026-08-03T09:00:00.000Z",
+      "completedAt": "2026-08-03T09:12:40.000Z",
+      "completionStatus": "completed",
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "deviceClass": "desktop_webcam",
+      "resolution": { "width": 1920, "height": 1080 },
+      "actualFps": 29.7
+    },
+    "qcChannels": [
+      {
+        "channel": "task",
+        "status": "valid",
+        "validFraction": 0.96,
+        "signalConfidence": null,
+        "reasons": [],
+        "ruleVersion": "task-qc-1.0.0"
+      },
+      {
+        "channel": "gaze",
+        "status": "borderline",
+        "validFraction": 0.74,
+        "signalConfidence": 0.78,
+        "reasons": ["low_valid_gaze_fraction"],
+        "ruleVersion": "gaze-qc-1.0.0"
+      }
+    ],
+    "metrics": [
+      {
+        "metricId": "task.accuracy_pct",
+        "value": 75,
+        "unit": "pct",
+        "status": "computed",
+        "reason": null,
+        "numerator": 18,
+        "denominator": 24,
+        "observationDurationMs": 72000,
+        "nParticipants": 1,
+        "nObservations": 24,
+        "signalConfidence": null,
+        "scope": {
+          "sessionId": 105,
+          "blockId": "main-block",
+          "trialId": null,
+          "presentationId": null,
+          "stimulusId": null,
+          "aoiId": null
+        },
+        "qc": {
+          "channel": "task",
+          "status": "valid",
+          "validFraction": 0.96,
+          "signalConfidence": null,
+          "reasons": [],
+          "ruleVersion": "task-qc-1.0.0"
+        },
+        "algorithm": { "id": "task-performance", "version": "1.0.0", "parametersHash": null }
+      },
+      {
+        "metricId": "task.rt_median_ms",
+        "value": 438,
+        "unit": "ms",
+        "status": "computed",
+        "reason": null,
+        "numerator": null,
+        "denominator": 18,
+        "observationDurationMs": 72000,
+        "nParticipants": 1,
+        "nObservations": 18,
+        "signalConfidence": null,
+        "distribution": {
+          "n": 18,
+          "mean": 451.7,
+          "sd": 86.4,
+          "median": 438,
+          "q1": 392,
+          "q3": 501,
+          "min": 310,
+          "max": 690
+        },
+        "scope": {
+          "sessionId": 105,
+          "blockId": "main-block",
+          "trialId": null,
+          "presentationId": null,
+          "stimulusId": null,
+          "aoiId": null
+        },
+        "qc": {
+          "channel": "task",
+          "status": "valid",
+          "validFraction": 0.96,
+          "signalConfidence": null,
+          "reasons": [],
+          "ruleVersion": "task-qc-1.0.0"
+        },
+        "algorithm": { "id": "rt-analyzer", "version": "1.0.0", "parametersHash": "sha256:rt-default-v1" }
+      },
+      {
+        "metricId": "qc.valid_gaze_pct",
+        "value": 74,
+        "unit": "pct",
+        "status": "computed",
+        "reason": null,
+        "numerator": 53280,
+        "denominator": 72000,
+        "observationDurationMs": 72000,
+        "nParticipants": 1,
+        "nObservations": 2138,
+        "signalConfidence": 0.78,
+        "scope": {
+          "sessionId": 105,
+          "blockId": "main-block",
+          "trialId": null,
+          "presentationId": null,
+          "stimulusId": null,
+          "aoiId": null
+        },
+        "qc": {
+          "channel": "gaze",
+          "status": "borderline",
+          "validFraction": 0.74,
+          "signalConfidence": 0.78,
+          "reasons": ["low_valid_gaze_fraction"],
+          "ruleVersion": "gaze-qc-1.0.0"
+        },
+        "algorithm": { "id": "gaze-validity", "version": "1.0.0", "parametersHash": "sha256:gaze-qc-v1" }
+      }
+    ],
+    "exclusions": [
+      {
+        "level": "trial",
+        "entityId": "trial-11",
+        "reasonCode": "response_before_rt_min",
+        "channel": "task"
+      }
+    ]
+  }
+}

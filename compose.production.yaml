@@ -1,0 +1,75 @@
+name: wecog
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 20m
+    max-file: "5"
+
+services:
+  web:
+    image: cr.yandex/${WECOG_REGISTRY_ID:?WECOG_REGISTRY_ID is required}/wecog-web:${WECOG_IMAGE_TAG:?WECOG_IMAGE_TAG is required}
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8080:8080
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 6
+
+  api:
+    image: cr.yandex/${WECOG_REGISTRY_ID:?WECOG_REGISTRY_ID is required}/wecog-api:${WECOG_IMAGE_TAG:?WECOG_IMAGE_TAG is required}
+    restart: unless-stopped
+    # PostgreSQL currently listens only on the VM loopback interface. Keeping this
+    # exception here makes the later move to Managed PostgreSQL a Compose-only change.
+    network_mode: host
+    env_file:
+      - path: ${WECOG_ENV_FILE:-/etc/wecog/api.env}
+        required: true
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOST: 127.0.0.1
+      PORT: "3000"
+      FORCE_HTTPS: "true"
+      TRUST_PROXY_HOPS: "1"
+      CORS_ORIGINS: https://wecog.ru,https://www.wecog.ru
+      UPLOADS_ROOT: /var/lib/wecog/uploads
+      RT_PYTHON: python3
+    volumes:
+      - /var/lib/wecog/uploads:/var/lib/wecog/uploads
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 4g
+    cpus: 4.0
+    stop_grace_period: 30s
+    logging: *default-logging
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get({host:'127.0.0.1',port:3000,path:'/ready',headers:{'X-Forwarded-Proto':'https'}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 6

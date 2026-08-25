@@ -5,21 +5,39 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const {
+  requireAuth,
+  requireRole,
+  requireOperation,
+  OPERATIONS,
+  isPlatformAdmin,
+  hasProjectMembership,
+} = require('../middleware/auth');
 const { listProtocolProxyMetrics } = require('./proxy_metrics');
+const { validateProtocolAois } = require('../../web/aoi-protocol');
 
 const router = express.Router();
 router.use(requireAuth);
 
-const STAFF_ROLES = new Set(['admin', 'PI', 'developer', 'researcher', 'analyst', 'assistant']);
+function rejectInvalidAois(res, definition) {
+  const validation = validateProtocolAois(definition);
+  if (validation.ok) return false;
+  res.status(422).json({
+    error: 'Protocol AOI validation failed',
+    code: 'protocol_aoi_invalid',
+    details: validation.errors,
+  });
+  return true;
+}
 
 function hasGlobalProtocolAccess(user) {
-  return !!user && (user.bypass_admin === true || STAFF_ROLES.has(user.role));
+  return isPlatformAdmin(user);
 }
 
 router.get(
   '/',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.PROTOCOL_READ),
   [query('project_id').optional().isInt()],
   async (req, res) => {
     try {
@@ -30,7 +48,10 @@ router.get(
         INNER JOIN projects p ON p.id = pr.project_id
       `;
       if (!globalAccess) {
-        sql += ' INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id';
+        sql += `
+          INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id
+          INNER JOIN user_projects up ON up.project_id = p.id AND up.user_id = uo.user_id
+        `;
       }
       sql += globalAccess ? ' WHERE 1=1' : ' WHERE uo.user_id = $1';
       const params = globalAccess ? [] : [req.user.sub];
@@ -51,9 +72,10 @@ router.get(
 router.post(
   '/',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.PROTOCOL_WRITE),
   [
     body('project_id').isInt(),
-    body('name').trim().notEmpty(),
+    body('name').trim().notEmpty().isLength({ max: 255 }),
     body('definition').isObject(),
   ],
   async (req, res) => {
@@ -61,13 +83,9 @@ router.post(
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const { project_id, name, definition } = req.body;
-      const check = hasGlobalProtocolAccess(req.user)
-        ? await pool.query('SELECT 1 FROM projects WHERE id = $1', [project_id])
-        : await pool.query(
-          'SELECT 1 FROM projects p INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id WHERE p.id = $1 AND uo.user_id = $2',
-          [project_id, req.user.sub]
-        );
-      if (!check.rows[0]) return res.status(403).json({ error: 'Not member of project organization' });
+      if (rejectInvalidAois(res, definition)) return;
+      const projectAllowed = await hasProjectMembership(pool, project_id, req.user);
+      if (!projectAllowed) return res.status(403).json({ error: 'Not member of project' });
       const r = await pool.query(
         `INSERT INTO protocols (project_id, name, definition) VALUES ($1, $2, $3)
          RETURNING id, project_id, name, definition, created_at, updated_at`,
@@ -76,6 +94,12 @@ router.post(
       res.status(201).json(r.rows[0]);
     } catch (err) {
       if (err.code === '23503') return res.status(400).json({ error: 'Project not found' });
+      if (err.code === '23505') {
+        return res.status(409).json({
+          error: 'A protocol with this name already exists in the project',
+          code: 'protocol_name_conflict',
+        });
+      }
       console.error(err);
       res.status(500).json({ error: 'Create failed' });
     }
@@ -85,6 +109,7 @@ router.post(
 router.get(
   '/:id/proxy-metrics',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.ANALYTICS_READ),
   [
     param('id').isInt(),
     query('status').optional().isIn(['not_computed', 'partial', 'computed', 'failed']),
@@ -100,6 +125,7 @@ router.get(
 router.get(
   '/:id',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.PROTOCOL_READ),
   [param('id').isInt()],
   async (req, res) => {
     try {
@@ -115,6 +141,7 @@ router.get(
            FROM protocols pr
            INNER JOIN projects p ON p.id = pr.project_id
            INNER JOIN user_organizations uo ON uo.organization_id = p.organization_id
+           INNER JOIN user_projects up ON up.project_id = p.id AND up.user_id = uo.user_id
            WHERE pr.id = $1 AND uo.user_id = $2`,
           [req.params.id, req.user.sub]
         );
@@ -130,15 +157,17 @@ router.get(
 router.patch(
   '/:id',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.PROTOCOL_WRITE),
   [
     param('id').isInt(),
-    body('name').optional().trim().notEmpty(),
+    body('name').optional().trim().notEmpty().isLength({ max: 255 }),
     body('definition').optional().isObject(),
   ],
   async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      if (req.body.definition !== undefined && rejectInvalidAois(res, req.body.definition)) return;
       const updates = [];
       const values = [];
       let i = 1;
@@ -168,6 +197,10 @@ router.patch(
           `UPDATE protocols pr SET ${updates.join(', ')}, updated_at = current_timestamp
            FROM projects p, user_organizations uo
            WHERE pr.project_id = p.id AND p.organization_id = uo.organization_id AND uo.user_id = $${i} AND pr.id = $${i + 1}
+             AND EXISTS (
+               SELECT 1 FROM user_projects up
+               WHERE up.project_id = p.id AND up.user_id = uo.user_id
+             )
            RETURNING pr.id, pr.project_id, pr.name, pr.definition, pr.updated_at`,
           values
         );
@@ -175,6 +208,12 @@ router.patch(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(r.rows[0]);
     } catch (err) {
+      if (err.code === '23505') {
+        return res.status(409).json({
+          error: 'A protocol with this name already exists in the project',
+          code: 'protocol_name_conflict',
+        });
+      }
       console.error(err);
       res.status(500).json({ error: 'Update failed' });
     }
@@ -184,6 +223,7 @@ router.patch(
 router.delete(
   '/:id',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.PROTOCOL_WRITE),
   [param('id').isInt()],
   async (req, res) => {
     try {
@@ -198,6 +238,10 @@ router.delete(
           `DELETE FROM protocols pr
            USING projects p, user_organizations uo
            WHERE pr.project_id = p.id AND p.organization_id = uo.organization_id AND uo.user_id = $1 AND pr.id = $2
+             AND EXISTS (
+               SELECT 1 FROM user_projects up
+               WHERE up.project_id = p.id AND up.user_id = uo.user_id
+             )
            RETURNING pr.id`,
           [req.user.sub, req.params.id]
         );

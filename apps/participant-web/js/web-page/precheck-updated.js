@@ -1,5 +1,5 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
-import { state, CONSTANTS, BACKEND_CONFIG } from './state.js';
+import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js';
 import { translations } from '../../translations.js';
 import { measureCameraFPS } from './camera.js';
 
@@ -131,7 +131,6 @@ export async function startPreCheck() {
                 const videoTrack = state.runtime.cameraStream.getVideoTracks()[0];
                 if (videoTrack) {
                     const settings = videoTrack.getSettings();
-                    console.log('[Camera] Реальные настройки:', settings);
                     console.log(`[Camera] Реальный frameRate: ${settings.frameRate || 'unknown'}`);
                     
                     // Сохраняем в sessionData
@@ -139,7 +138,6 @@ export async function startPreCheck() {
                         width: settings.width,
                         height: settings.height,
                         frameRate: settings.frameRate,
-                        deviceId: settings.deviceId,
                         facingMode: settings.facingMode
                     };
                 }
@@ -261,7 +259,10 @@ export function startContinuousAnalysis() {
         
         // Интервал анализа 
         if (state.flags.isPrecheckRunning) {
-            state.runtime.analysisFrameId = setTimeout(analyzeFrame, BACKEND_CONFIG.SEND_INTERVAL);
+            state.runtime.analysisFrameId = setTimeout(
+                analyzeFrame,
+                LOCAL_ANALYSIS_CONFIG.FRAME_INTERVAL_MS
+            );
         }
     }
 

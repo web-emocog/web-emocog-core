@@ -4,18 +4,21 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireOperation, OPERATIONS, isPlatformAdmin } = require('../middleware/auth');
 const { rowToProxyMetricsResponse } = require('../proxy_metrics/contract');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use(requireRole('admin', 'PI', 'researcher', 'analyst'));
+router.use(requireRole('admin', 'PI', 'researcher', 'analyst', 'developer'));
+router.use(requireOperation(OPERATIONS.EXPORT_READ));
 
-function scopedJoinAndWhere(userParamIdx) {
+function scopedJoinAndWhere(userParamIdx, user) {
+  if (isPlatformAdmin(user)) return '';
   return `
     LEFT JOIN protocols sp ON sp.id = s.protocol_id
     INNER JOIN projects p_scope ON p_scope.id = COALESCE(s.project_id, sp.project_id)
     INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id AND uo_scope.user_id = $${userParamIdx}
+    INNER JOIN user_projects up_scope ON up_scope.project_id = p_scope.id AND up_scope.user_id = uo_scope.user_id
   `;
 }
 
@@ -117,11 +120,11 @@ router.get(
         LEFT JOIN session_qc_summary q ON q.session_id = s.id
         LEFT JOIN session_features f ON f.session_id = s.id
         LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
-        ${scopedJoinAndWhere(1)}
+        ${scopedJoinAndWhere(1, req.user)}
         WHERE 1=1
       `;
-      const params = [req.user.sub];
-      let i = 2;
+      const params = isPlatformAdmin(req.user) ? [] : [req.user.sub];
+      let i = params.length + 1;
       if (req.query.project_id) { params.push(req.query.project_id); sql += ` AND s.project_id = $${i++}`; }
       if (req.query.protocol_id) { params.push(req.query.protocol_id); sql += ` AND s.protocol_id = $${i++}`; }
       if (req.query.date_from) { params.push(req.query.date_from); sql += ` AND s.started_at >= $${i++}`; }

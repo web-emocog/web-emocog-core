@@ -129,6 +129,19 @@ export function getEmotionSample(precheckResult) {
  * @returns {{ valence_mean: number|null, arousal_mean: number|null, n: number }}
  */
 export function getEmotionSummary(sessionData) {
+    const accumulator = sessionData?.emotionAccumulator;
+    if (
+        Number.isFinite(accumulator?.n)
+        && accumulator.n > 0
+        && Number.isFinite(accumulator.valenceSum)
+        && Number.isFinite(accumulator.arousalSum)
+    ) {
+        return {
+            valence_mean: +(accumulator.valenceSum / accumulator.n).toFixed(4),
+            arousal_mean: +(accumulator.arousalSum / accumulator.n).toFixed(4),
+            n: accumulator.n
+        };
+    }
     const primary =
         sessionData?.emotionSamples ??
         sessionData?.emotion_samples ??
@@ -183,6 +196,19 @@ export function appendEmotionSample(state, sample, t = Date.now(), tRelMs = null
     if (!Array.isArray(state.sessionData.emotionSamples)) {
         state.sessionData.emotionSamples = [];
     }
+    if (!state.sessionData.emotionAccumulator) {
+        state.sessionData.emotionAccumulator = {
+            n: 0,
+            valenceSum: 0,
+            arousalSum: 0,
+            startedAt: t,
+            updatedAt: t
+        };
+    }
+    state.sessionData.emotionAccumulator.n += 1;
+    state.sessionData.emotionAccumulator.valenceSum += valence;
+    state.sessionData.emotionAccumulator.arousalSum += arousal;
+    state.sessionData.emotionAccumulator.updatedAt = t;
 
     const start = state.sessionData.startTime || t;
     state.sessionData.emotionSamples.push({
