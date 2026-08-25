@@ -559,6 +559,8 @@ S2_TEST_DATABASE_URL=postgres://... node --test tests/s2-postgres.integration.te
 
 ## Деплой
 
+Актуальная production-версия: [https://wecog.ru](https://wecog.ru).
+
 Типовая схема: nginx раздаёт статику из корня репозитория и проксирует `/api` на Node-процесс (порт `PORT`, по умолчанию 3000).
 
 ```mermaid
