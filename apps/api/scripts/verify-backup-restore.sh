@@ -27,8 +27,8 @@ signature_sql="SELECT json_build_object(
   'features', (SELECT COUNT(*) FROM session_features),
   'users', (SELECT COUNT(*) FROM users)
 )::text"
-source_signature="$(PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -Atc "$signature_sql")"
-restore_signature="$(PGDATABASE="$RESTORE_DATABASE_URL" psql -v ON_ERROR_STOP=1 -Atc "$signature_sql")"
+source_signature="$(psql --dbname="$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "$signature_sql")"
+restore_signature="$(psql --dbname="$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "$signature_sql")"
 
 if [[ "$source_signature" != "$restore_signature" ]]; then
   echo "Backup/restore signature mismatch." >&2

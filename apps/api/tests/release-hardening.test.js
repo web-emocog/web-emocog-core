@@ -39,4 +39,22 @@ describe('S3-01 release hardening', () => {
     assert.ok(config.database.bulkInsertBatchSize <= 1_000);
     assert.ok(config.database.statementTimeoutMs <= 600_000);
   });
+
+  it('passes database URLs explicitly to backup and restore clients', () => {
+    const backup = fs.readFileSync(path.join(apiRoot, 'scripts/backup-db.sh'), 'utf8');
+    const restore = fs.readFileSync(path.join(apiRoot, 'scripts/restore-db.sh'), 'utf8');
+    const drill = fs.readFileSync(path.join(apiRoot, 'scripts/verify-backup-restore.sh'), 'utf8');
+
+    assert.match(backup, /pg_dump\s+\\\n\s+--dbname="\$DATABASE_URL"/);
+    assert.match(restore, /pg_restore\s+\\\n\s+--dbname="\$RESTORE_DATABASE_URL"/);
+    assert.match(restore, /psql --dbname="\$RESTORE_DATABASE_URL"/);
+    assert.match(drill, /psql --dbname="\$DATABASE_URL"/);
+    assert.match(drill, /psql --dbname="\$RESTORE_DATABASE_URL"/);
+    assert.doesNotMatch(`${backup}\n${restore}\n${drill}`, /PGDATABASE=/);
+  });
+
+  it('grants CodeQL read-only access to workflow run metadata', () => {
+    const workflow = fs.readFileSync(path.resolve(apiRoot, '../../.github/workflows/codeql.yml'), 'utf8');
+    assert.match(workflow, /permissions:\s+actions: read\s+contents: read\s+security-events: write/);
+  });
 });
