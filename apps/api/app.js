@@ -62,22 +62,26 @@ app.get('/health', (req, res) => {
     status: 'ok',
     phase: 4,
     node_env: config.nodeEnv,
+    release_version: config.release.version,
+    release_sha: config.release.sha,
     uptime_sec: Math.round(process.uptime()),
     rt_analyzer: getRtAnalyzerHealth(),
   });
 });
 
 app.get('/ready', async (req, res) => {
+  if (app.locals.shutdownState?.isShuttingDown()) {
+    return res.status(503).json({ status: 'not_ready', reason: 'shutting_down' });
+  }
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ready', db: 'ok' });
+    return res.json({ status: 'ready', db: 'ok' });
   } catch (err) {
-    res.status(503).json({ status: 'not_ready', db: 'error' });
+    return res.status(503).json({ status: 'not_ready', db: 'error' });
   }
 });
 
 app.use((err, req, res, next) => {
-  console.error(err);
   if (err?.type === 'entity.too.large') {
     return res.status(413).json({
       error: 'Request body is too large',
@@ -117,6 +121,9 @@ app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'Invalid JSON', code: 'invalid_json' });
   }
+  // Only unexpected server faults get a stack trace. Client-controlled 4xx
+  // failures above must not expose request data or provide a log-flood vector.
+  console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 

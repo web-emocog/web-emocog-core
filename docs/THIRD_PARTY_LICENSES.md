@@ -48,6 +48,18 @@ c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0  selfie_multicl
 EmoCog source code is distributed under Apache License 2.0; see repository
 `LICENSE`.
 
+## Open Vocal Biomarkers core
+
+- Component: `Audio_detection/**`.
+- License: MIT; see `Audio_detection/LICENSE`.
+- Execution: local browser Worker, without an external inference service.
+- Production output excludes raw PCM and condition/diagnostic flags.
+
+The browser bundle `Audio_detection/browser/open-vocal-biomarkers.mjs` is
+generated only from the same pinned MIT source files by
+`Audio_detection/scripts/build-browser-bundle.mjs` and is parity-tested against
+the CommonJS core.
+
 ## VPC Felidae image set
 
 The nine VPC stimuli are served from `apps/participant-web/assets/vpc/felidae`
@@ -55,6 +67,20 @@ so a participant browser does not contact Wikimedia. The source page, author
 and exact CC/Public Domain license are recorded in
 `manifest-felidae.js`; the original Commons API response is retained as
 `commons-metadata.json`.
+
+## Atkinson Hyperlegible Next
+
+- Component: `apps/web/assets/fonts/atkinson-hyperlegible-next.woff2`.
+- Upstream revision: `7925f50f649b3813257faf2f4c0b381011f434f1`.
+- License: SIL Open Font License 1.1; the bundled text is in
+  `apps/web/assets/fonts/ATKINSON-OFL.txt`.
+- Upstream: https://github.com/googlefonts/atkinson-hyperlegible-next
+- Purpose: locally served, high-legibility typography for participant,
+  researcher and developer interfaces.
+
+```text
+abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd  atkinson-hyperlegible-next.woff2
+```
 
 ## Update policy
 

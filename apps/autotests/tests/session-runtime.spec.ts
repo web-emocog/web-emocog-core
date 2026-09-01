@@ -4,11 +4,594 @@ import { getPageUrl } from './helpers/testUtils';
 const PAGE_URL = getPageUrl();
 
 test.describe('Participant session runtime', () => {
+  test('applies every participant locale to consent and precheck labels', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => typeof (window as any).setLanguage === 'function');
+
+    const mismatches = await page.evaluate(async () => {
+      const moduleUrl = new URL('translations.js', window.location.href).href;
+      const { translations, participantLocales } = await import(moduleUrl);
+      const selectors: Record<string, string> = {
+        privacy_policy_link: '[data-i18n="privacy_policy_link"]',
+        label_light: '[data-i18n="label_light"]',
+        label_face: '[data-i18n="label_face"]',
+        label_pose: '[data-i18n="label_pose"]',
+        label_visibility: '[data-i18n="label_visibility"]',
+        precheck_criteria_help: '[data-i18n="precheck_criteria_help"]',
+      };
+      const runtimeKeys = [
+        'runtime_recalibrate',
+        'runtime_upload_retry_action',
+        'runtime_upload_preparing',
+        'runtime_upload_attempt',
+        'runtime_upload_retry_wait',
+        'runtime_upload_success',
+        'runtime_upload_failure',
+        'runtime_protocol_start_failure_title',
+        'runtime_protocol_start_failure_body',
+        'runtime_protocol_retry_action',
+      ];
+      const failures: Array<{ locale: string; key: string; actual: string; expected: string }> = [];
+      for (const locale of participantLocales) {
+        (window as any).setLanguage(locale);
+        if (document.documentElement.lang !== locale) {
+          failures.push({
+            locale,
+            key: 'document.lang',
+            actual: document.documentElement.lang,
+            expected: locale,
+          });
+        }
+        for (const [key, selector] of Object.entries(selectors)) {
+          const actual = document.querySelector(selector)?.textContent?.trim() || '';
+          const expected = String(translations[locale][key]).trim();
+          if (actual !== expected) failures.push({ locale, key, actual, expected });
+        }
+        for (const key of runtimeKeys) {
+          const actual = String(translations[locale][key] || '').trim();
+          if (!actual) failures.push({ locale, key, actual, expected: 'localized text' });
+          if (locale !== 'en' && actual === String(translations.en[key] || '').trim()) {
+            failures.push({ locale, key, actual, expected: `non-English ${locale} text` });
+          }
+        }
+      }
+      return failures;
+    });
+
+    expect(mismatches).toEqual([]);
+  });
+
+  test('selects the highest-error validation zones for targeted recalibration', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const targets = await page.evaluate(async () => {
+      const moduleUrl = new URL(
+        'js/web-page/tests-updated.js',
+        window.location.href,
+      ).href;
+      const { getWorstValidationTargets } = await import(moduleUrl);
+      return getWorstValidationTargets([
+        {
+          targetX: 100,
+          targetY: 50,
+          samples: [{ targetX: 100, targetY: 50, gazeX: 600, gazeY: 50 }],
+        },
+        {
+          targetX: 900,
+          targetY: 450,
+          samples: [{ targetX: 900, targetY: 450, gazeX: 910, gazeY: 460 }],
+        },
+        {
+          targetX: 500,
+          targetY: 250,
+          samples: [{ targetX: 500, targetY: 250, gazeX: 700, gazeY: 250 }],
+        },
+      ], { width: 1000, height: 500 }, 2);
+    });
+
+    expect(targets).toHaveLength(2);
+    expect(targets[0]).toMatchObject({ x: 10, y: 10, errorPx: 500 });
+    expect(targets[1]).toMatchObject({ x: 50, y: 50, errorPx: 200 });
+  });
+
+  test('blocks an unknown invitation before consent and never requests ingest', async ({ page }) => {
+    let tokenRequests = 0;
+    let ingestRequests = 0;
+    await page.route('**/invitations/by-code/**', async route => {
+      if (route.request().url().endsWith('/ingest-token')) tokenRequests += 1;
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Invitation not found' }),
+      });
+    });
+    await page.route('**/ingest', async route => {
+      ingestRequests += 1;
+      await route.fulfill({ status: 200, body: '{}' });
+    });
+    await page.goto(`${PAGE_URL}?code=UNKNOWN-E2E`, { waitUntil: 'load' });
+    await page.locator('#btnStartIntro').click();
+    await expect(page.locator('#step1')).toHaveClass(/active/);
+    await expect(page.locator('#inviteLinkHint')).toContainText(/не найдено|not found/i);
+    expect(tokenRequests).toBe(0);
+    expect(ingestRequests).toBe(0);
+  });
+
+  test('opens contact and questionnaire immediately after consent without reload', async ({ page }) => {
+    const invitationCode = 'INV-QUESTIONNAIRE-E2E';
+    await page.route('**/invitations/by-code/**', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith('/ingest-token')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ token: 'participant-questionnaire-token' }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          invitation_id: 2,
+          code: invitationCode,
+          protocol_id: 2,
+          project_id: 1,
+          protocol_name: 'Questionnaire E2E',
+          definition: {
+            participantShell: {
+              consent: true,
+              questionnaire: true,
+              precheck: true,
+              calibration: true,
+            },
+            blocks: [{
+              id: 'instruction-1',
+              type: 'instruction',
+              content: { title: 'Instruction', text: 'Continue' },
+            }],
+          },
+        }),
+      });
+    });
+    await page.goto(`${PAGE_URL}?code=${invitationCode}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationProtocolDefinition));
+    await page.locator('#btnStartIntro').click();
+    await page.locator('#consentCheck').check();
+    await page.locator('#consentBtn').click();
+    await expect(page.locator('#step3')).toHaveClass(/active/);
+    await page.locator('#step3NextBtn').click();
+    await expect(page.locator('#step4')).toHaveClass(/active/);
+    await expect(page.locator('#age')).toBeVisible();
+  });
+  test('keeps protocol instruction buttons enabled and advances on click', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      shared.runtime.invitationProtocolDefinition = {
+        version: 'v2-instruction-e2e',
+        title: 'Instruction participant test',
+        blocks: [{
+          id: 'instruction_e2e',
+          type: 'instruction',
+          content: {
+            title: 'Инструкция',
+            text: 'Прочитайте условие и продолжайте.',
+            buttonText: 'Продолжить',
+          },
+        }],
+      };
+      const moduleUrl = new URL(
+        'js/web-page/experimental_task-updated.js',
+        window.location.href,
+      ).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      (window as any).__instructionComplete = false;
+      await loadAndStartCognitiveTask({
+        autoFinishSession: false,
+        onComplete: () => { (window as any).__instructionComplete = true; },
+      });
+    });
+
+    await expect(page.locator('#cogTitle')).toHaveText('Инструкция');
+    const continueButton = page.locator('#cogStartBtn');
+    await expect(continueButton).toBeVisible();
+    await expect(continueButton).toBeEnabled();
+    await expect(page.locator('#cogCheckContainer')).toBeHidden();
+    await continueButton.click();
+    await expect.poll(() => page.evaluate(
+      () => (window as any).__instructionComplete
+    )).toBe(true);
+  });
+
+  test('localizes legacy standard instructions when English is selected', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.currentLang = 'en';
+      shared.runtime.sessionRuntime.policyShown = true;
+      shared.runtime.invitationProtocolDefinition = {
+        version: 'v2-legacy-standard-instruction-e2e',
+        blocks: [{
+          id: 'legacy_simple_rt_instruction',
+          type: 'instruction',
+          content: {
+            title: 'Инструкция: Simple RT - тренировка',
+            text: 'Старый протокол без сохранённых английских полей.',
+            buttonText: 'Продолжить',
+          },
+        }, {
+          id: 'legacy_simple_rt_task',
+          type: 'cognitive_task',
+          taskType: 'simple_rt',
+          blockConfig: { responseMode: 'keyboard' },
+          trials: [{
+            id: 'simple_rt_1',
+            correctResponse: 'Space',
+            stimulus: { type: 'shape' },
+          }],
+        }],
+      };
+      const moduleUrl = new URL(
+        'js/web-page/experimental_task-updated.js',
+        window.location.href,
+      ).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({ autoFinishSession: false });
+    });
+
+    await expect(page.locator('#cogTitle')).toHaveText('Instruction: Simple RT - practice');
+    await expect(page.locator('#cogText')).toContainText('press Space as quickly as possible');
+    await expect(page.locator('#cogText')).toContainText('Response method: press Space');
+    await expect(page.locator('#cogStartBtn')).toHaveText('Start');
+  });
+
+  test('uses the protocol handed off after validation even if runtime state changes', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      shared.runtime.invitationProtocolDefinition = null;
+      const moduleUrl = new URL(
+        'js/web-page/experimental_task-updated.js',
+        window.location.href,
+      ).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      (window as any).__handoffComplete = false;
+      await loadAndStartCognitiveTask({
+        protocol: {
+          version: 'v2-handoff-e2e',
+          title: 'Validation handoff',
+          blocks: [{
+            id: 'after_validation_instruction',
+            type: 'instruction',
+            content: {
+              title: 'Следующий блок',
+              text: 'Протокол продолжается после LOOCV.',
+              buttonText: 'Продолжить',
+            },
+          }],
+        },
+        autoFinishSession: false,
+        onComplete: () => { (window as any).__handoffComplete = true; },
+      });
+    });
+
+    await expect(page.locator('#cogTitle')).toHaveText('Следующий блок');
+    await page.locator('#cogStartBtn').click();
+    await expect.poll(() => page.evaluate(
+      () => (window as any).__handoffComplete
+    )).toBe(true);
+  });
+
+  test('does not finish or upload when an invitation protocol has no executable blocks', async ({ page }) => {
+    let ingestCalls = 0;
+    await page.route('**/ingest', async route => {
+      ingestCalls += 1;
+      await route.fulfill({ status: 200, body: '{}' });
+    });
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      shared.runtime.invitationProtocolDefinition = null;
+      const moduleUrl = new URL(
+        'js/web-page/experimental_task-updated.js',
+        window.location.href,
+      ).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({
+        protocol: {
+          version: 'v2-invalid-e2e',
+          title: 'Invalid invitation protocol',
+          blocks: [{ id: 'unsupported', type: 'unsupported_type' }],
+        },
+      });
+    });
+
+    await expect(page.locator('#cogTitle')).toContainText(/техническая ошибка|technical error/i);
+    await expect(page.locator('#cogText')).toContainText(/сессия не завершена|session is not complete/i);
+    await expect(page.locator('#cogStartBtn')).toBeVisible();
+    await expect(page.locator('#step7')).not.toHaveClass(/active/);
+    expect(ingestCalls).toBe(0);
+  });
+
+  test('renders typed survey questions and keeps required validation actionable', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.sessionData.events = [];
+      shared.runtime.sessionRuntime.policyShown = true;
+      shared.runtime.invitationProtocolDefinition = {
+        version: 'v2-survey-e2e',
+        title: 'Survey participant test',
+        blocks: [{
+          id: 'survey_e2e',
+          type: 'survey',
+          content: {
+            schemaVersion: 'protocol_survey.v1',
+            title: 'После задания',
+            description: 'Ответьте, опираясь на свои ощущения.',
+            questions: [
+              { id: 'open', text: 'Что вы заметили?', type: 'open', required: true },
+              {
+                id: 'single',
+                text: 'Выберите один вариант',
+                type: 'single',
+                required: false,
+                options: [{ id: 'yes', label: 'Да' }, { id: 'no', label: 'Нет' }],
+              },
+              {
+                id: 'multiple',
+                text: 'Можно выбрать несколько',
+                type: 'multiple',
+                required: false,
+                options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+              },
+            ],
+          },
+        }],
+      };
+      const moduleUrl = new URL(
+        'js/web-page/experimental_task-updated.js',
+        window.location.href,
+      ).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      (window as any).__surveyComplete = false;
+      await loadAndStartCognitiveTask({
+        autoFinishSession: false,
+        onComplete: () => { (window as any).__surveyComplete = true; },
+      });
+    });
+
+    await expect(page.locator('#cogText.survey-runtime')).toBeVisible();
+    await expect(page.locator('.survey-runtime-question')).toHaveCount(3);
+    const continueButton = page.locator('#cogStartBtn');
+    await expect(continueButton).toBeEnabled();
+    await continueButton.click();
+    await expect(page.locator('.survey-question-error').first())
+      .toContainText(/обязательный|required/i);
+    expect(await page.evaluate(() => (window as any).__surveyComplete)).toBe(false);
+
+    await page.locator('.survey-runtime-open').fill('Стало легче сосредоточиться');
+    await continueButton.click();
+    await expect.poll(() => page.evaluate(() => (window as any).__surveyComplete)).toBe(true);
+    const surveyEvent = await page.evaluate(() => (
+      (window as any).__WECOG_STATE__.sessionData.events
+        .find((event: { type?: string }) => event.type === 'survey_response')
+    ));
+    expect(surveyEvent.category).toBe('block');
+    expect(surveyEvent.responses).toEqual([
+      { questionId: 'open', responseType: 'open', value: 'Стало легче сосредоточиться' },
+      { questionId: 'single', responseType: 'single', value: null },
+      { questionId: 'multiple', responseType: 'multiple', value: [] },
+    ]);
+  });
+
+  test('runs invitation tests in protocol order without exposing Test Hub', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const moduleUrl = new URL(
+        'js/gaze-tracker/gaze-tests/index.js',
+        window.location.href,
+      ).href;
+      const { runProtocolTestSequence } = await import(moduleUrl);
+      (window as any).__protocolCalls = [];
+      (window as any).__protocolSequence = runProtocolTestSequence(
+        ['rt', 'tracking'],
+        {
+          runRTTest: async () => {
+            (window as any).__protocolCalls.push('rt');
+            return { trialResults: 1 };
+          },
+          runTrackingTest: async () => {
+            (window as any).__protocolCalls.push('tracking');
+            return { trackingSamples: 10, averageCameraFps: 30 };
+          },
+          finishSession: async () => {
+            (window as any).__protocolCalls.push('finish');
+          },
+        },
+      );
+    });
+
+    const modal = page.locator('#wecog-session-modal');
+    for (let index = 0; index < 6; index += 1) {
+      if ((await page.evaluate(() => (window as any).__protocolCalls)).includes('finish')) break;
+      if (await modal.isVisible()) {
+        await page.locator('[data-session-modal-action]').click();
+      }
+      await page.waitForTimeout(50);
+    }
+    await expect.poll(() => page.evaluate(
+      () => (window as any).__protocolCalls,
+    )).toEqual(['rt', 'tracking', 'finish']);
+    await page.evaluate(() => (window as any).__protocolSequence);
+    await expect(page.locator('#testHubContainer')).toBeHidden();
+  });
+
+  test('BPM accepts immutable MediaPipe landmarks and stays background-only', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const result = await page.evaluate(async () => {
+      const moduleUrl = new URL(
+        'js/session-runtime/continuous-bpm.js',
+        window.location.href,
+      ).href;
+      const { ContinuousBpmCollector } = await import(moduleUrl);
+      const errors: string[] = [];
+      const collector = new ContinuousBpmCollector({
+        onError: (error: Error) => errors.push(error.message),
+      });
+      const ready = await collector.start();
+      const frame = document.createElement('canvas');
+      frame.width = 320;
+      frame.height = 240;
+      Object.defineProperty(frame, 'videoWidth', { value: 320 });
+      Object.defineProperty(frame, 'videoHeight', { value: 240 });
+      const landmarks = Object.freeze(Array.from({ length: 478 }, (_, index) =>
+        Object.freeze({
+          x: 0.25 + (index % 20) * 0.025,
+          y: 0.2 + (index % 24) * 0.02,
+          z: 0,
+        })
+      ));
+      collector.process(frame as any, landmarks as any, performance.now());
+      return { ready, errors };
+    });
+    expect(result.ready).toBe(true);
+    expect(result.errors).toEqual([]);
+
+    const invalidatesBlock = await page.evaluate(async () => {
+      const source = await fetch('js/session-runtime/frame-pipeline.js').then(r => r.text());
+      return /code:\s*'bpm_module_failed'[\s\S]*?invalidatesBlock:\s*false/.test(source);
+    });
+    expect(invalidatesBlock).toBe(true);
+  });
+
+  test('BPM recovers after repeated frame errors instead of staying unavailable', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const result = await page.evaluate(async () => {
+      const moduleUrl = new URL('js/session-runtime/continuous-bpm.js', window.location.href).href;
+      const { ContinuousBpmCollector } = await import(moduleUrl);
+      const errors: string[] = [];
+      let recovered = 0;
+      const collector = new ContinuousBpmCollector({
+        onError: (error: Error) => errors.push(error.message),
+        onRecovered: () => { recovered += 1; },
+      });
+      await collector.start();
+      let calls = 0;
+      collector.engine = {
+        update: () => {
+          calls += 1;
+          if (calls <= 3) throw new Error('transient-rppg-frame');
+          return null;
+        },
+      } as any;
+      const frame = document.createElement('canvas');
+      frame.width = 64;
+      frame.height = 48;
+      Object.defineProperty(frame, 'videoWidth', { value: 64 });
+      Object.defineProperty(frame, 'videoHeight', { value: 48 });
+      const landmarks = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+      for (let index = 0; index < 4; index += 1) {
+        collector.process(frame as any, landmarks, index * 33);
+      }
+      return { errors, recovered, consecutiveErrors: collector.consecutiveErrors };
+    });
+    expect(result.errors).toEqual(['transient-rppg-frame']);
+    expect(result.recovered).toBe(1);
+    expect(result.consecutiveErrors).toBe(0);
+  });
+
+  test('does not treat a global skin-mask guess as proven face occlusion', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const result = await page.evaluate(async () => {
+      const moduleUrl = new URL(
+        'js/session-runtime/quality-detector.mjs',
+        window.location.href,
+      ).href;
+      const { SessionQualityDetector } = await import(moduleUrl);
+      const detector = new SessionQualityDetector({
+        rules: { face_occluded: { holdMs: 0, message: 'occluded' } },
+      });
+      const frame = {
+        face: { detected: true },
+        illumination: { status: 'ok' },
+        pose: { status: 'ok', isStable: true, isTilted: false },
+      };
+      const globalOnly = detector.update(frame, {
+        faceVisibility: { handDetected: true, issues: ['hand_on_face'] },
+        issues: ['hand_on_face'],
+      }, 1000);
+      const regional = detector.update(frame, {
+        faceVisibility: {
+          handDetected: true,
+          issues: ['left_eye_hand_occluded'],
+        },
+        issues: ['left_eye_hand_occluded'],
+      }, 1001);
+      return {
+        globalRaised: globalOnly.raised.map((item: any) => item.code),
+        regionalRaised: regional.raised.map((item: any) => item.code),
+      };
+    });
+    expect(result.globalRaised).not.toContain('face_occluded');
+    expect(result.regionalRaised).toContain('face_occluded');
+  });
+
+  test('precheck video has no playback affordance and successful checks expose calibration', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const video = page.locator('#precheckVideo');
+    await expect(video).not.toHaveAttribute('controls', /.*/);
+    await expect(video).toHaveCSS('pointer-events', 'none');
+    const calibrationButton = page.locator('#startCalibBtn');
+    await expect(calibrationButton).toHaveClass(/hidden/);
+    await expect(calibrationButton).toBeHidden();
+
+    const result = await page.evaluate(async () => {
+      document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
+      document.getElementById('step5')?.classList.add('active');
+      const precheckUrl = new URL('js/web-page/precheck-updated.js', window.location.href).href;
+      const stateUrl = new URL('js/web-page/state.js', window.location.href).href;
+      const [{ checkAllIndicators }, { state, CONSTANTS }] = await Promise.all([
+        import(precheckUrl),
+        import(stateUrl),
+      ]);
+      state.indicatorsStatus = {
+        illumination: 'passed',
+        face: 'passed',
+        pose: 'passed',
+        visibility: 'passed',
+      };
+      state.runtime.precheckData = {
+        face: { detected: true, bbox: { height: 0.3 } },
+      };
+      state.runtime.successFrames = CONSTANTS.REQUIRED_SUCCESS_FRAMES - 1;
+      checkAllIndicators();
+      const button = document.getElementById('startCalibBtn') as HTMLButtonElement;
+      return {
+        hidden: button.classList.contains('hidden'),
+        disabled: button.disabled,
+        pass: state.sessionData.precheck.pass_fail,
+      };
+    });
+    expect(result).toEqual({ hidden: false, disabled: false, pass: true });
+    await expect(calibrationButton).toBeVisible();
+    await expect(calibrationButton).toBeEnabled();
+  });
+
   test('admits after consent, removes invitation from URL, and reloads the admitted session', async ({ page }) => {
     const invitationCode = 'INV-ADMISSION-E2E';
     const lookups: string[] = [];
     let tokenRequests = 0;
-    await page.route('**/api/invitations/by-code/**', async (route) => {
+    await page.route('**/invitations/by-code/**', async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       if (url.pathname.endsWith('/ingest-token')) {
@@ -47,8 +630,19 @@ test.describe('Participant session runtime', () => {
       await route.fallback();
     });
 
+    await page.addInitScript(() => {
+      localStorage.setItem('emocog_dev_auto_precheck', '1');
+    });
     await page.goto(`${PAGE_URL}?code=${invitationCode}`, { waitUntil: 'load' });
     await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationProtocolDefinition));
+    await expect.poll(() => page.evaluate(
+      () => (window as any).__WECOG_STATE__.runtime.invitationParticipantShell
+    )).toEqual({
+      consent: true,
+      questionnaire: true,
+      precheck: true,
+      calibration: true,
+    });
     await page.locator('#btnStartIntro').click();
     await page.locator('#consentCheck').check();
     await page.locator('#consentBtn').click();
@@ -58,7 +652,12 @@ test.describe('Participant session runtime', () => {
     const admittedSessionId = await page.evaluate(
       () => (window as any).__WECOG_STATE__.sessionData.ids.session
     );
+    const admittedParticipantId = await page.evaluate(
+      () => (window as any).__WECOG_STATE__.sessionData.ids.participant
+    );
     expect(admittedSessionId).toBeTruthy();
+    expect(admittedSessionId).not.toContain('S-DEV-');
+    expect(admittedParticipantId).not.toContain('P-DEV-');
 
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationProtocolDefinition));
@@ -72,7 +671,12 @@ test.describe('Participant session runtime', () => {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
 
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const stateModule = await import(new URL(
+        'js/web-page/state.js',
+        window.location.href,
+      ).href);
+      stateModule.setSessionPhase('cognitive_instruction', { force: true });
       (window as any).__WECOG_STATE__.runtime.sessionRuntime.enterInstruction({
         source: 'playwright-test',
       });
@@ -85,7 +689,21 @@ test.describe('Participant session runtime', () => {
     await page.locator('[data-session-modal-action]').click();
     await expect(page.locator('#wecog-session-modal')).not.toBeVisible();
 
-    const pauseRejected = await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const stateModule = await import(new URL(
+        'js/web-page/state.js',
+        window.location.href,
+      ).href);
+      stateModule.setSessionPhase('calibration', { force: true });
+    });
+    await expect(pause).not.toBeVisible();
+
+    const pauseRejected = await page.evaluate(async () => {
+      const stateModule = await import(new URL(
+        'js/web-page/state.js',
+        window.location.href,
+      ).href);
+      stateModule.setSessionPhase('cognitive_stimulus', { force: true });
       const runtime = (window as any).__WECOG_STATE__.runtime.sessionRuntime;
       runtime.beginBlock({ blockId: 'browser-rt', blockType: 'rt' });
       return runtime.pause();
@@ -111,6 +729,49 @@ test.describe('Participant session runtime', () => {
     });
     expect(decision.repeatRequired).toBe(true);
     await expect(page.locator('#wecog-session-alert')).toContainText('повтор');
+    await page.evaluate(() => {
+      document.getElementById('fullscreenCalibration')?.classList.add('active');
+      const point = document.getElementById('fullscreenCalibPoint') as HTMLElement;
+      point.style.display = 'block';
+      point.style.left = '50%';
+      point.style.top = '24px';
+    });
+    const clickTarget = await page.evaluate(() => {
+      const point = document.getElementById('fullscreenCalibPoint') as HTMLElement;
+      const rect = point.getBoundingClientRect();
+      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.id;
+    });
+    expect(clickTarget).toBe('fullscreenCalibPoint');
+    await page.locator('#wecog-session-alert-close').click();
+    await expect(page.locator('#wecog-session-alert')).toBeHidden();
+  });
+
+  test('precheck and calibration show only an anonymized reference/current head contour', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const result = await page.evaluate(async () => {
+      document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
+      document.getElementById('step5')?.classList.add('active');
+      const moduleUrl = new URL('js/gaze-tracker/head-pose-guide.js', window.location.href).href;
+      const guide = await import(moduleUrl);
+      const frame = {
+        face: { detected: true, bbox: { x: 0.32, y: 0.2, width: 0.36, height: 0.54 } },
+        pose: { yaw: 1, pitch: -1, roll: 2 },
+      };
+      guide.updateHeadPoseGuide(frame);
+      guide.captureHeadPoseReference(frame);
+      guide.showCalibrationHeadPoseGuide(true);
+      guide.setCalibrationGuideTarget(5, 5);
+      return {
+        snapshot: guide.getHeadPoseGuideSnapshot(),
+        corner: document.getElementById('calibrationHeadPoseGuide')?.dataset.corner,
+      };
+    });
+    expect(result.snapshot.reference).not.toBeNull();
+    expect(result.snapshot.deviation.status).toBe('aligned');
+    expect(result.corner).toBe('bottom-right');
+    await expect(page.locator('#precheckVideo')).toHaveCSS('opacity', '1');
+    await expect(page.locator('#overlayCanvas')).toBeVisible();
+    await expect(page.locator('#calibrationHeadPoseGuide')).toHaveCSS('pointer-events', 'none');
   });
 
   test('explains and repeats only invalid cognitive trials', async ({ page }) => {
@@ -138,7 +799,7 @@ test.describe('Participant session runtime', () => {
     });
     expect(decision.repeatRequired).toBe(true);
     await expect(page.locator('#wecog-session-alert')).toContainText(
-      'Текущая проба будет повторена'
+      'Будут повторены только незасчитанные пробы.'
     );
 
     await page.evaluate(() => {
@@ -152,7 +813,7 @@ test.describe('Participant session runtime', () => {
       'Не засчитано 3 пробы из 10'
     );
     await expect(page.locator('[data-session-modal-body]')).toContainText(
-      'Освещение недостаточно'
+      'Слишком темно, необходимо включить лампу или подойти к окну'
     );
     await expect(page.locator('[data-session-modal-note]')).not.toBeVisible();
     await page.locator('[data-session-modal-action]').click();
@@ -382,14 +1043,14 @@ test.describe('Participant session runtime', () => {
   test('finish stops camera and retries final ingest idempotently', async ({ page }) => {
     const idempotencyKeys: string[] = [];
     let ingestCalls = 0;
-    await page.route('**/api/invitations/by-code/FINISH-TEST/ingest-token', async route => {
+    await page.route('**/invitations/by-code/FINISH-TEST/ingest-token', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ token: 'participant-ingest-token' }),
       });
     });
-    await page.route('**/api/ingest', async route => {
+    await page.route('**/ingest', async route => {
       ingestCalls += 1;
       idempotencyKeys.push(route.request().headers()['idempotency-key'] || '');
       await route.fulfill({
@@ -450,14 +1111,17 @@ test.describe('Participant session runtime', () => {
     expect(result.lifecycleState).toBe('completed');
     expect(result.cameraTrackStops).toBe(1);
     expect(result.cameraStreamCleared).toBe(true);
-    expect(Object.values(result.moduleStatuses)).toEqual([
-      'stopped',
-      'stopped',
-      'stopped',
-      'stopped',
-      'stopped',
-      'stopped',
+    expect(Object.keys(result.moduleStatuses)).toEqual([
+      'gaze',
+      'blinks',
+      'rt',
+      'bpm',
+      'emotion',
+      'bodyPose',
+      'audio',
+      'multimodal',
     ]);
+    expect(Object.values(result.moduleStatuses).every(status => status === 'stopped')).toBe(true);
     expect(ingestCalls).toBe(2);
     expect(idempotencyKeys[0]).toBeTruthy();
     expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);

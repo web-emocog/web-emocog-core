@@ -9,6 +9,10 @@ import { SessionCheckpointStore } from './checkpoint-store.mjs';
 import { SessionRuntimeUI } from './runtime-ui.js';
 import { SessionFramePipeline } from './frame-pipeline.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
+import { resolveSessionFeatureFlags } from './feature-flags.mjs';
+import { SessionAudioCollector } from '../audio/session-audio.js';
+import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
+import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
 
@@ -35,13 +39,21 @@ class ParticipantSessionRuntime {
         this.checkpointPromise = null;
         this.checkpointRequested = false;
         this.framePipeline = null;
+        this.featureFlags = resolveSessionFeatureFlags();
+        this.sessionClock = null;
+        this.audioCollector = null;
+        this.audioStartPromise = null;
+        this.multimodalCollector = null;
+        this.stopModulesPromise = null;
         this.moduleStatus = {
             gaze: 'idle',
             blinks: 'idle',
             rt: 'idle',
             bpm: 'idle',
             emotion: 'idle',
-            bodyPose: 'idle'
+            bodyPose: 'idle',
+            audio: 'idle',
+            multimodal: 'idle'
         };
         this.policyShown = false;
         this.reloadRecovery = null;
@@ -92,12 +104,16 @@ class ParticipantSessionRuntime {
                 const interruptedBlock = this.machine.currentBlock
                     ? { ...this.machine.currentBlock }
                     : null;
-                this.reportIssue({
-                    kind: ERROR_KINDS.TECHNICAL,
-                    code: 'page_reloaded',
-                    message: 'Страница была перезагружена. Проверка камеры и калибровка будут запущены заново.',
-                    recoverable: true
-                });
+                const restoredShellStep = Number(state.sessionData?.shellStep);
+                const requiresPrompt = !!interruptedBlock || restoredShellStep >= 5;
+                if (requiresPrompt) {
+                    this.reportIssue({
+                        kind: ERROR_KINDS.TECHNICAL,
+                        code: 'page_reloaded',
+                        message: 'Страница была перезагружена. Проверка камеры и калибровка будут запущены заново.',
+                        recoverable: true
+                    });
+                }
                 let repeatDecision = null;
                 if (interruptedBlock) {
                     repeatDecision = this.completeBlock({
@@ -117,13 +133,16 @@ class ParticipantSessionRuntime {
                 this.reloadRecovery = {
                     restoredAt: Date.now(),
                     interruptedBlock,
-                    repeatRequired: repeatDecision?.repeatRequired === true
+                    repeatRequired: repeatDecision?.repeatRequired === true,
+                    requiresPrompt,
+                    shellStep: Number.isFinite(restoredShellStep) ? restoredShellStep : null
                 };
                 recordSessionEvent('session_restored_after_reload', {
                     category: EVENT_CATEGORIES.LIFECYCLE,
                     severity: 'warning',
                     blockId: interruptedBlock?.blockId || null,
-                    repeatRequired: this.reloadRecovery.repeatRequired
+                    repeatRequired: this.reloadRecovery.repeatRequired,
+                    requiresPrompt
                 });
             }
         } else if (restored?.sessionData && restored?.sessionData?.upload?.ok !== true) {
@@ -149,7 +168,7 @@ class ParticipantSessionRuntime {
 
     _scheduleFinalUploadRetry() {
         setTimeout(() => {
-            import('../web-page/tests-updated.js')
+            import('../web-page/tests-updated.js?v=20260828-2')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         }, 0);
@@ -162,6 +181,15 @@ class ParticipantSessionRuntime {
     }
 
     _onTransition(transition, snapshot) {
+        if (transition.state === SESSION_STATES.PAUSED) {
+            this.audioCollector?.pause?.().catch(error => {
+                console.warn('[SessionRuntime] audio pause failed:', error);
+            });
+        } else if (transition.previousState === SESSION_STATES.PAUSED) {
+            this.audioCollector?.resume?.().catch(error => {
+                console.warn('[SessionRuntime] audio resume failed:', error);
+            });
+        }
         state.sessionData.lifecycle = this.machine.lifecycle({
             modules: { ...this.moduleStatus },
             finishAttemptId: state.sessionData.lifecycle?.finishAttemptId || null
@@ -255,6 +283,18 @@ class ParticipantSessionRuntime {
     }
 
     pause() {
+        const phase = state.runtime?.currentPhase
+            || document.documentElement?.dataset?.sessionPhase
+            || null;
+        if (phase !== 'cognitive_instruction' && phase !== 'protocol_instruction') {
+            recordSessionEvent('session_pause_rejected', {
+                category: EVENT_CATEGORIES.LIFECYCLE,
+                severity: 'warning',
+                reason: 'pause_not_allowed_in_phase',
+                phase
+            });
+            return { accepted: false, reason: 'pause_not_allowed_in_phase' };
+        }
         const result = this.machine.requestPause();
         if (!result.accepted) {
             recordSessionEvent('session_pause_rejected', {
@@ -323,6 +363,36 @@ class ParticipantSessionRuntime {
         });
     }
 
+    async promptBlockInstruction(details = {}) {
+        this.enterInstruction({
+            source: 'block_instruction',
+            blockId: details.blockId || null,
+            blockType: details.blockType || null
+        });
+        await this.ui.showBlockInstruction(details);
+        recordSessionEvent('session_block_instruction_acknowledged', {
+            category: EVENT_CATEGORIES.BLOCK,
+            blockId: details.blockId || null,
+            blockType: details.blockType || null
+        });
+        return true;
+    }
+
+    async notifyBlockComplete(details = {}) {
+        this.enterInstruction({
+            source: 'block_complete_message',
+            blockId: details.blockId || null,
+            blockType: details.blockType || null
+        });
+        await this.ui.showBlockComplete(details);
+        recordSessionEvent('session_block_complete_acknowledged', {
+            category: EVENT_CATEGORIES.BLOCK,
+            blockId: details.blockId || null,
+            blockType: details.blockType || null
+        });
+        return true;
+    }
+
     async promptRepeat(blockId) {
         const repeat = this.machine.consumeRepeat(blockId);
         if (!repeat) return false;
@@ -356,13 +426,17 @@ class ParticipantSessionRuntime {
 
     async promptReloadRecovery() {
         if (!this.reloadRecovery) return false;
-        await this.ui.showReloadRecovery();
-        this.resolveIssue('page_reloaded');
-        this.enterInstruction({ source: 'reload_recovery_acknowledged' });
+        const recovery = this.reloadRecovery;
+        if (recovery.requiresPrompt !== false) {
+            await this.ui.showReloadRecovery();
+            this.resolveIssue('page_reloaded');
+            this.enterInstruction({ source: 'reload_recovery_acknowledged' });
+        }
         recordSessionEvent('session_reload_recovery_acknowledged', {
             category: EVENT_CATEGORIES.LIFECYCLE,
-            blockId: this.reloadRecovery.interruptedBlock?.blockId || null,
-            repeatRequired: this.reloadRecovery.repeatRequired
+            blockId: recovery.interruptedBlock?.blockId || null,
+            repeatRequired: recovery.repeatRequired,
+            requiresPrompt: recovery.requiresPrompt !== false
         });
         this.reloadRecovery = null;
         await this.saveCheckpoint();
@@ -373,32 +447,108 @@ class ParticipantSessionRuntime {
         return this.machine.consumeRepeat(blockId);
     }
 
+    _ensureSessionPlugins() {
+        this.featureFlags = resolveSessionFeatureFlags(
+            state.runtime?.invitationProtocolDefinition || null
+        );
+        ensureMeasurementStart(state.sessionData);
+        if (!this.sessionClock) {
+            this.sessionClock = createMonotonicClock({
+                startedMonotonicMs: Number(state.sessionData.startTime) || undefined
+            });
+            state.runtime.sessionClock = this.sessionClock;
+            state.runtime.sessionFeatureFlags = this.featureFlags;
+        }
+        if (!this.audioCollector) {
+            this.audioCollector = new SessionAudioCollector({
+                state,
+                clock: this.sessionClock,
+                enabled: this.featureFlags.audio,
+                recordEvent: (type, payload) => recordSessionEvent(type, {
+                    category: EVENT_CATEGORIES.MODULE,
+                    ...payload
+                })
+            });
+        }
+        if (!this.multimodalCollector) {
+            this.multimodalCollector = new MultimodalSessionCollector({
+                state,
+                clock: this.sessionClock,
+                enabled: this.featureFlags.multimodal,
+                bodyEnabled: this.featureFlags.bodyMovement,
+                gamerMode: this.featureFlags.gamerMode
+            });
+            const started = this.multimodalCollector.start();
+            this.setModuleStatus('multimodal', started ? 'running' : 'disabled');
+        }
+    }
+
+    startAudioModule() {
+        this._ensureSessionPlugins();
+        if (this.audioStartPromise) return this.audioStartPromise;
+        this.setModuleStatus('audio', this.featureFlags.audio ? 'initializing' : 'disabled');
+        this.audioStartPromise = this.audioCollector.start().then(started => {
+            if (this.stopModulesPromise) return started;
+            const status = started
+                ? 'running'
+                : (this.audioCollector.status || (this.featureFlags.audio ? 'failed' : 'disabled'));
+            this.setModuleStatus('audio', status);
+            return started;
+        });
+        return this.audioStartPromise;
+    }
+
+    captureMultimodalFrame(input) {
+        return this.multimodalCollector?.captureFrame(input) || null;
+    }
+
     async startContinuousModules() {
         if (this.framePipeline?.isRunning()) return true;
+        this._ensureSessionPlugins();
+        // Start the permission request before the first await so this method can
+        // be called directly from the participant's click gesture.
+        this.startAudioModule();
         const video = document.getElementById('precheckVideo');
         this.framePipeline = new SessionFramePipeline({
             state,
             controller: this,
             video
         });
+        // Microphone permission is optional and its browser prompt may remain
+        // unanswered. It must never delay camera analysis or protocol progress.
         const started = await this.framePipeline.start();
         if (!started) {
             this.reportIssue({
                 kind: ERROR_KINDS.TECHNICAL,
                 code: 'continuous_modules_not_started',
-                message: 'Не удалось запустить непрерывный анализ сессии.',
-                recoverable: true
+                message: 'Continuous camera analysis could not start.',
+                recoverable: true,
+                invalidatesBlock: false,
+                details: {
+                    hasVideoStream: Boolean(video?.srcObject),
+                    hasAnalyzer: Boolean(state.runtime.localAnalyzer)
+                }
             });
             return false;
         }
-        ensureMeasurementStart(state.sessionData);
+        this.resolveIssue('continuous_modules_not_started');
         this.setModuleStatus('gaze', 'running');
         this.setModuleStatus('blinks', 'running');
         this.setModuleStatus('rt', 'running');
         this._startRtListener();
         recordSessionEvent('continuous_modules_started', {
             category: EVENT_CATEGORIES.MODULE,
-            modules: ['gaze', 'blinks', 'rt', 'bpm', 'emotion', 'bodyPose']
+            modules: [
+                'gaze',
+                'blinks',
+                'rt',
+                'bpm',
+                'emotion',
+                'bodyPose',
+                'audio',
+                'multimodal'
+            ],
+            featureFlags: this.featureFlags
         });
         return true;
     }
@@ -447,28 +597,34 @@ class ParticipantSessionRuntime {
         });
     }
 
-    stopContinuousModules(reason = 'session_finish') {
-        const bpmRun = this.framePipeline?.stop(reason) || null;
-        if (bpmRun) {
-            if (!Array.isArray(state.sessionData.bpmRuns)) state.sessionData.bpmRuns = [];
-            state.sessionData.bpmRuns.push(bpmRun);
-            if (!Array.isArray(state.sessionData.respirationRuns)) state.sessionData.respirationRuns = [];
-            state.sessionData.respirationRuns.push({
-                mode: bpmRun.mode,
-                reason: bpmRun.reason,
-                durationMs: bpmRun.durationMs,
-                sampleCount: bpmRun.sampleCount,
-                respRateMean: bpmRun.respRateMean,
-                rppgSession: bpmRun.rppgSession
-            });
-        }
-        if (this.rtListenersActive) {
-            document.removeEventListener('keydown', this.boundRtInput, true);
-            document.removeEventListener('pointerdown', this.boundRtInput, true);
-            this.rtListenersActive = false;
-        }
-        for (const name of Object.keys(this.moduleStatus)) this.setModuleStatus(name, 'stopped');
-        return bpmRun;
+    async stopContinuousModules(reason = 'session_finish') {
+        if (this.stopModulesPromise) return this.stopModulesPromise;
+        this.stopModulesPromise = (async () => {
+            const bpmRun = this.framePipeline?.stop(reason) || null;
+            if (bpmRun) {
+                if (!Array.isArray(state.sessionData.bpmRuns)) state.sessionData.bpmRuns = [];
+                state.sessionData.bpmRuns.push(bpmRun);
+                if (!Array.isArray(state.sessionData.respirationRuns)) state.sessionData.respirationRuns = [];
+                state.sessionData.respirationRuns.push({
+                    mode: bpmRun.mode,
+                    reason: bpmRun.reason,
+                    durationMs: bpmRun.durationMs,
+                    sampleCount: bpmRun.sampleCount,
+                    respRateMean: bpmRun.respRateMean,
+                    rppgSession: bpmRun.rppgSession
+                });
+            }
+            await this.audioCollector?.stop(reason);
+            this.multimodalCollector?.stop();
+            if (this.rtListenersActive) {
+                document.removeEventListener('keydown', this.boundRtInput, true);
+                document.removeEventListener('pointerdown', this.boundRtInput, true);
+                this.rtListenersActive = false;
+            }
+            for (const name of Object.keys(this.moduleStatus)) this.setModuleStatus(name, 'stopped');
+            return bpmRun;
+        })();
+        return this.stopModulesPromise;
     }
 
     beginFinish() {

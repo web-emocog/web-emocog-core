@@ -19,29 +19,74 @@ function cloneProtocolData(value) {
     ];
   }
 
+  function standardStimulus(id, nameRu, nameEn, type, infoRu, infoEn, extra = {}) {
+    return { id, name:nameRu, nameRu, nameEn, type, info:infoRu, infoRu, infoEn, ...extra };
+  }
+
+  function localizedStimulusName(stimulus) {
+    if (!stimulus) return '';
+    const isEn = typeof CURRENT_LANG !== 'undefined' && CURRENT_LANG === 'en';
+    return isEn ? (stimulus.nameEn || stimulus.name) : (stimulus.nameRu || stimulus.name);
+  }
+
+  function localizedStimulusInfo(stimulus) {
+    if (!stimulus) return '';
+    const isEn = typeof CURRENT_LANG !== 'undefined' && CURRENT_LANG === 'en';
+    return isEn ? (stimulus.infoEn || stimulus.info) : (stimulus.infoRu || stimulus.info);
+  }
+
   function standardProtocolStimuli() {
-    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(ch => ({ id:'std_cpt_' + ch.toLowerCase(), name:'AX-CPT: буква ' + ch, type:'text', info:'Буква', text:ch }));
-    const switches = ['4G','7A','2E','9K','6O','3M','8I','5T'].map(v => ({ id:'std_switch_' + v.toLowerCase(), name:'Task Switching: ' + v, type:'text', info:'Число-буква', text:v }));
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(ch => standardStimulus(
+      'std_cpt_' + ch.toLowerCase(),
+      'AX-CPT: буква ' + ch,
+      'AX-CPT: letter ' + ch,
+      'text',
+      'Буква',
+      'Letter',
+      { text:ch }
+    ));
+    const switches = ['4G','7A','2E','9K','6O','3M','8I','5T'].map(v => standardStimulus(
+      'std_switch_' + v.toLowerCase(),
+      'Task Switching: ' + v,
+      'Task Switching: ' + v,
+      'text',
+      'Пара «число — буква»',
+      'Number-letter pair',
+      { text:v }
+    ));
+    const emotionRu = { neutral:'нейтральное', happy:'радость', anger:'гнев', sad:'грусть', fear:'страх', surprise:'удивление', disgust:'отвращение' };
     const emotions = ['neutral','happy','anger','sad','fear','surprise','disgust'].flatMap(em =>
-      Array.from({ length: em === 'disgust' ? 4 : 6 }, (_, i) => ({ id:`std_emo_${em}_${String(i+1).padStart(2,'0')}`, name:`Emotion Viewing: ${em} ${i+1}`, type:'image', info:'Плейсхолдер эмоционального лица', emotion:em }))
+      Array.from({ length: em === 'disgust' ? 4 : 6 }, (_, i) => standardStimulus(
+        `std_emo_${em}_${String(i+1).padStart(2,'0')}`,
+        `Просмотр эмоций: ${emotionRu[em]} ${i+1}`,
+        `Emotion viewing: ${em} ${i+1}`,
+        'image',
+        'Плейсхолдер эмоционального лица',
+        'Emotional face placeholder',
+        { emotion:em }
+      ))
     );
     return [
-      { id:'std_simple_black_square', name:'Simple RT: черный квадрат', type:'text', info:'Черный квадрат на белом фоне' },
-      { id:'std_go_green_circle', name:'Go: зеленый круг', type:'text', info:'Go-стимул' },
-      { id:'std_nogo_red_circle', name:'No-Go: красный круг', type:'text', info:'No-Go-стимул' },
+      standardStimulus('std_simple_black_square', 'Simple RT: чёрный квадрат', 'Simple RT: black square', 'text', 'Чёрный квадрат на белом фоне', 'Black square on a white background'),
+      standardStimulus('std_go_green_circle', 'Go: зелёный круг', 'Go: green circle', 'text', 'Go-стимул', 'Go stimulus'),
+      standardStimulus('std_nogo_red_circle', 'No-Go: красный круг', 'No-Go: red circle', 'text', 'No-Go-стимул', 'No-Go stimulus'),
       ...[
-        ['red_red','КРАСНЫЙ красным','congruent'], ['blue_blue','СИНИЙ синим','congruent'], ['green_green','ЗЕЛЕНЫЙ зеленым','congruent'],
-        ['red_blue','КРАСНЫЙ синим','incongruent'], ['blue_green','СИНИЙ зеленым','incongruent'], ['green_red','ЗЕЛЕНЫЙ красным','incongruent']
-      ].map(x => ({ id:'std_stroop_' + x[0], name:'Stroop: ' + x[1], type:'text', info:x[2] })),
-      { id:'std_flanker_right_cong', name:'Flanker: >>>>>', type:'text', info:'Конгруэнтный вправо' },
-      { id:'std_flanker_left_cong', name:'Flanker: <<<<<', type:'text', info:'Конгруэнтный влево' },
-      { id:'std_flanker_right_incong', name:'Flanker: >><>>', type:'text', info:'Неконгруэнтный вправо' },
-      { id:'std_flanker_left_incong', name:'Flanker: <<><<', type:'text', info:'Неконгруэнтный влево' },
-      { id:'std_nback_circle', name:'N-back: круг', type:'text', info:'Геометрическая фигура' },
-      { id:'std_nback_square', name:'N-back: квадрат', type:'text', info:'Геометрическая фигура' },
-      { id:'std_nback_triangle', name:'N-back: треугольник', type:'text', info:'Геометрическая фигура' },
-      { id:'std_nback_diamond', name:'N-back: ромб', type:'text', info:'Геометрическая фигура' },
-      { id:'std_pvt_counter', name:'PVT: счетчик миллисекунд', type:'text', info:'Красный счетчик RT' },
+        ['red_red','КРАСНЫЙ красным','RED in red','Конгруэнтный','Congruent'],
+        ['blue_blue','СИНИЙ синим','BLUE in blue','Конгруэнтный','Congruent'],
+        ['green_green','ЗЕЛЁНЫЙ зелёным','GREEN in green','Конгруэнтный','Congruent'],
+        ['red_blue','КРАСНЫЙ синим','RED in blue','Неконгруэнтный','Incongruent'],
+        ['blue_green','СИНИЙ зелёным','BLUE in green','Неконгруэнтный','Incongruent'],
+        ['green_red','ЗЕЛЁНЫЙ красным','GREEN in red','Неконгруэнтный','Incongruent']
+      ].map(x => standardStimulus('std_stroop_' + x[0], 'Stroop: ' + x[1], 'Stroop: ' + x[2], 'text', x[3], x[4])),
+      standardStimulus('std_flanker_right_cong', 'Flanker: >>>>>', 'Flanker: >>>>>', 'text', 'Конгруэнтный, вправо', 'Congruent, right'),
+      standardStimulus('std_flanker_left_cong', 'Flanker: <<<<<', 'Flanker: <<<<<', 'text', 'Конгруэнтный, влево', 'Congruent, left'),
+      standardStimulus('std_flanker_right_incong', 'Flanker: <<><<', 'Flanker: <<><<', 'text', 'Неконгруэнтный, вправо', 'Incongruent, right'),
+      standardStimulus('std_flanker_left_incong', 'Flanker: >><>>', 'Flanker: >><>>', 'text', 'Неконгруэнтный, влево', 'Incongruent, left'),
+      standardStimulus('std_nback_circle', 'N-back: круг', 'N-back: circle', 'text', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_square', 'N-back: квадрат', 'N-back: square', 'text', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_triangle', 'N-back: треугольник', 'N-back: triangle', 'text', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_diamond', 'N-back: ромб', 'N-back: diamond', 'text', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_pvt_counter', 'PVT: счётчик миллисекунд', 'PVT: millisecond counter', 'text', 'Красный счётчик RT', 'Red RT counter'),
       ...letters,
       ...switches,
       ...emotions
@@ -75,7 +120,7 @@ function cloneProtocolData(value) {
     standardProtocolStimuli().forEach(stim => {
       const existing = stimuliList.find(s => String(s.id) === String(stim.id));
       if (existing) {
-        ['name', 'type', 'info', 'emotion', 'text'].forEach(function (key) {
+        ['name', 'nameRu', 'nameEn', 'type', 'info', 'infoRu', 'infoEn', 'emotion', 'text'].forEach(function (key) {
           if (stim[key] != null && existing[key] !== stim[key]) {
             existing[key] = stim[key];
             stimuliChanged = true;
@@ -218,6 +263,10 @@ Simply look at the screen at a natural pace until the images stop changing.
 Maintain a comfortable position in front of the camera.`
     }
   };
+
+  // Participant runtime uses this table to localize legacy protocols that were
+  // published before bilingual instruction fields were persisted.
+  globalThis.WecogTemplateInstructionTranslations = TEMPLATE_INSTRUCTION_TRANSLATIONS;
 
   function instructionProtocolBlock(titleRu, textRu, titleEn, textEn) {
     const translated = TEMPLATE_INSTRUCTION_TRANSLATIONS[titleRu] || {};

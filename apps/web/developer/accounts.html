@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Аккаунты и роли — EmoCog</title>
+  <title>wecog — аккаунты и роли</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --ok:#10B981; --danger:#ef4444; --border:rgba(92,102,189,.25); }
     * { box-sizing:border-box; margin:0; padding:0; }
@@ -32,9 +35,12 @@
     .tools input, .tools select { max-width:220px; }
     .small { font-size:11px; color:var(--muted); }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
-  <script src="../auth-guard.js"></script>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -43,7 +49,7 @@
       }
       window.EmocogAuthGuard.ensureProtectedPage({
         loginPath: 'login.html',
-        allowedRoles: ['admin', 'developer'],
+        allowedRoles: ['admin', 'org_admin', 'PI'],
         preserveAuthOnRoleDenied: true,
         roleDeniedRedirect: '../researcher.html'
       });
@@ -67,10 +73,11 @@
           <label for="role">Роль</label>
           <select id="role">
             <option value="respondent">respondent</option>
-            <option value="developer">developer</option>
             <option value="researcher">researcher</option>
             <option value="analyst">analyst</option>
             <option value="assistant">assistant</option>
+            <option value="org_admin">org_admin</option>
+            <option value="developer">developer</option>
             <option value="PI">PI</option>
             <option value="admin">admin</option>
           </select>
@@ -80,7 +87,7 @@
       <input id="displayName" type="text" placeholder="Например: Demo Researcher" autocomplete="off">
       <label for="orgs">Org IDs через запятую (опционально)</label>
       <input id="orgs" type="text" placeholder="1,2,5" autocomplete="off">
-      <label for="projects">Project IDs через запятую (обязательно для staff-ролей)</label>
+      <label for="projects">Project IDs через запятую (для исследовательских ролей)</label>
       <input id="projects" type="text" placeholder="1,2,5" autocomplete="off">
       <button type="button" id="createBtn">Создать аккаунт</button>
       <p class="hint">Используется только защищённый `POST /auth/users`; публичная регистрация не выдаёт staff-роли.</p>
@@ -94,10 +101,11 @@
         <select id="roleFilter">
           <option value="">Все роли</option>
           <option value="respondent">respondent</option>
-          <option value="developer">developer</option>
           <option value="researcher">researcher</option>
           <option value="analyst">analyst</option>
           <option value="assistant">assistant</option>
+          <option value="org_admin">org_admin</option>
+          <option value="developer">developer</option>
           <option value="PI">PI</option>
           <option value="admin">admin</option>
         </select>
@@ -106,7 +114,7 @@
       <div class="small">Для смены роли выберите новое значение и нажмите Save.</div>
       <table>
         <thead>
-          <tr><th>ID</th><th>Email</th><th>Role</th><th>Org IDs</th><th>Action</th></tr>
+          <tr><th>ID</th><th>Email</th><th>Role</th><th>Org IDs</th><th>Project IDs</th><th>Action</th></tr>
         </thead>
         <tbody id="usersBody"></tbody>
       </table>
@@ -116,11 +124,12 @@
 
   <script>
     (function () {
-      var base = (localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+      var base = (window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
       var gridEl = document.querySelector('.grid');
       var createStatus = document.getElementById('createStatus');
       var listStatus = document.getElementById('listStatus');
       var usersBody = document.getElementById('usersBody');
+      var availableRoles = [];
 
       function setStatus(el, text, isErr) {
         el.textContent = text || '';
@@ -182,22 +191,25 @@
 
       function renderUsers(rows) {
         if (!rows.length) {
-          usersBody.innerHTML = '<tr><td colspan="5">Нет данных</td></tr>';
+          usersBody.innerHTML = '<tr><td colspan="6">Нет данных</td></tr>';
           return;
         }
         usersBody.innerHTML = rows.map(function (u) {
-          var roleOptions = ['respondent', 'developer', 'researcher', 'analyst', 'assistant', 'PI', 'admin']
+          var rowRoles = availableRoles.indexOf(u.role) >= 0 ? availableRoles : availableRoles.concat([u.role]);
+          var roleOptions = rowRoles
             .map(function (role) {
               return '<option value="' + role + '"' + (u.role === role ? ' selected' : '') + '>' + role + '</option>';
             })
             .join('');
           var orgs = Array.isArray(u.organization_ids) ? u.organization_ids.join(',') : '';
+          var projects = Array.isArray(u.project_ids) ? u.project_ids.join(',') : '';
           return (
             '<tr data-id="' + escapeHtml(u.id) + '">' +
               '<td>' + escapeHtml(u.id) + '</td>' +
               '<td>' + escapeHtml(u.email || '—') + '</td>' +
               '<td><select class="user-role">' + roleOptions + '</select></td>' +
-              '<td>' + escapeHtml(orgs || '—') + '</td>' +
+              '<td><input class="user-orgs" value="' + escapeHtml(orgs) + '" aria-label="Organization IDs"></td>' +
+              '<td><input class="user-projects" value="' + escapeHtml(projects) + '" aria-label="Project IDs"></td>' +
               '<td><button type="button" class="save-user" style="margin-top:0;padding:6px 10px;">Save</button></td>' +
             '</tr>'
           );
@@ -208,18 +220,25 @@
             var tr = btn.closest('tr');
             var userId = tr.getAttribute('data-id');
             var role = tr.querySelector('.user-role').value;
+            var organizationIds = parseOrgIds(tr.querySelector('.user-orgs').value);
+            var projectIds = parseOrgIds(tr.querySelector('.user-projects').value);
             try {
-              var r = await fetch(base + '/auth/users/' + encodeURIComponent(userId), {
-                method: 'PATCH',
+              var membershipResponse = await fetch(base + '/auth/users/' + encodeURIComponent(userId) + '/memberships', {
+                method: 'PUT',
                 headers: jsonHeaders(),
                 credentials: 'include',
-                body: JSON.stringify({ role: role })
+                body: JSON.stringify({
+                  role: role,
+                  organization_ids: organizationIds,
+                  project_ids: projectIds
+                })
               });
-              if (!r.ok) {
-                var e = await r.json().catch(function () { return {}; });
-                throw new Error(e.error || (r.status + ' ' + r.statusText));
+              if (!membershipResponse.ok) {
+                var membershipError = await membershipResponse.json().catch(function () { return {}; });
+                throw new Error(membershipError.error || (membershipResponse.status + ' ' + membershipResponse.statusText));
               }
-              setStatus(listStatus, 'Роль обновлена для user #' + userId);
+              setStatus(listStatus, 'Роль и доступы обновлены для user #' + userId);
+              await loadUsers();
             } catch (err) {
               setStatus(listStatus, 'Ошибка обновления: ' + (err.message || err), true);
             }
@@ -244,7 +263,7 @@
           renderUsers(Array.isArray(rows) ? rows : []);
           setStatus(listStatus, 'Загружено: ' + (Array.isArray(rows) ? rows.length : 0));
         } catch (err) {
-          usersBody.innerHTML = '<tr><td colspan="5">Ошибка загрузки</td></tr>';
+          usersBody.innerHTML = '<tr><td colspan="6">Ошибка загрузки</td></tr>';
           setStatus(listStatus, 'Ошибка: ' + (err.message || err), true);
         }
       }
@@ -264,11 +283,25 @@
           return r.json();
         })
         .then(function (perms) {
-          if (!perms || !perms.is_platform_admin) {
+          if (!perms || !perms.can_open_admin_panel) {
             lockAccountsUi(
-              'Создание аккаунтов с ролями admin / PI / developer и выдача прав разработчика — только у администратора платформы (не у роли «разработчик» или PI).'
+              'Управление пользователями доступно администратору организации.'
             );
             return;
+          }
+          var currentUser = null;
+          try { currentUser = JSON.parse(localStorage.getItem('emocog_api_user') || 'null'); } catch (_) {}
+          availableRoles = perms.is_platform_admin
+            ? ['respondent', 'developer', 'researcher', 'analyst', 'assistant', 'org_admin', 'PI', 'admin']
+            : (currentUser && currentUser.role === 'org_admin'
+              ? ['respondent', 'researcher', 'analyst', 'assistant', 'org_admin']
+              : ['respondent', 'researcher', 'analyst', 'assistant']);
+          Array.from(document.getElementById('role').options).forEach(function (option) {
+            option.hidden = availableRoles.indexOf(option.value) < 0;
+            option.disabled = option.hidden;
+          });
+          if (availableRoles.indexOf(document.getElementById('role').value) < 0) {
+            document.getElementById('role').value = availableRoles[0];
           }
           document.getElementById('createBtn').addEventListener('click', createUser);
           document.getElementById('reloadBtn').addEventListener('click', loadUsers);

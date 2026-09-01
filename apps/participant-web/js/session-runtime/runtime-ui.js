@@ -1,4 +1,6 @@
 import { ERROR_KINDS, SESSION_STATES } from './contracts.mjs';
+import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js';
+import { translations } from '../../translations.js?v=20260828-2';
 
 const POLICY_TEXT = {
     ru: {
@@ -13,7 +15,12 @@ const POLICY_TEXT = {
         repeatLimit: 'Продолжить сессию',
         recoveryTitle: 'Сессия восстановлена',
         recoveryBody: 'Страница была перезагружена. Камеру и персональную калибровку необходимо запустить заново; прерванное испытание будет повторено.',
-        recoveryAction: 'Перейти к проверке камеры'
+        recoveryAction: 'Перейти к проверке камеры',
+        blockInstructionTitle: 'Инструкция',
+        blockInstructionAction: 'Начать',
+        blockCompleteTitle: 'Блок завершён',
+        blockCompleteBody: 'Данные блока сохранены. Далее будет показана инструкция следующего блока.',
+        blockCompleteAction: 'Далее'
     },
     en: {
         title: 'Test conditions',
@@ -27,13 +34,70 @@ const POLICY_TEXT = {
         repeatLimit: 'Continue session',
         recoveryTitle: 'Session restored',
         recoveryBody: 'The page was reloaded. Camera analysis and personal calibration must be started again; the interrupted task will be repeated.',
-        recoveryAction: 'Go to camera check'
+        recoveryAction: 'Go to camera check',
+        blockInstructionTitle: 'Instructions',
+        blockInstructionAction: 'Start',
+        blockCompleteTitle: 'Block completed',
+        blockCompleteBody: 'The block data has been saved. Instructions for the next block will follow.',
+        blockCompleteAction: 'Continue'
     }
 };
 
 function langText(getLanguage) {
-    const lang = getLanguage() === 'en' ? 'en' : 'ru';
-    return POLICY_TEXT[lang];
+    const lang = translations[getLanguage()] ? getLanguage() : 'en';
+    const pack = translations[lang] || translations.en;
+    const fallback = POLICY_TEXT[lang] || POLICY_TEXT.en;
+    return {
+        lang,
+        title: pack.runtime_policy_title || fallback.title,
+        body: pack.runtime_policy_body || fallback.body,
+        note: pack.runtime_policy_note || fallback.note,
+        continue: pack.runtime_continue || fallback.continue,
+        pause: pack.runtime_pause || fallback.pause,
+        resume: pack.runtime_resume || fallback.resume,
+        repeat: pack.runtime_repeat_block_action || fallback.repeat,
+        repeatTrials: pack.runtime_repeat_trials_action || fallback.repeatTrials,
+        repeatLimit: pack.runtime_repeat_limit_action || fallback.repeatLimit,
+        recoveryTitle: pack.runtime_recovery_title || fallback.recoveryTitle,
+        recoveryBody: pack.runtime_recovery_body || fallback.recoveryBody,
+        recoveryAction: pack.runtime_recovery_action || fallback.recoveryAction,
+        blockInstructionTitle: pack.runtime_instruction_title || fallback.blockInstructionTitle,
+        blockInstructionAction: pack.runtime_instruction_action || fallback.blockInstructionAction,
+        blockCompleteTitle: pack.runtime_block_complete_title || fallback.blockCompleteTitle,
+        blockCompleteBody: pack.runtime_block_complete_body || fallback.blockCompleteBody,
+        blockCompleteAction: pack.runtime_block_complete_action || fallback.blockCompleteAction,
+        dismiss: pack.runtime_dismiss || 'Dismiss notification',
+        genericTechnical: pack.runtime_generic_technical || 'A technical analysis error occurred.',
+        genericQuality: pack.runtime_generic_quality || 'Measurement conditions do not meet the requirements.',
+        repeatTrialsTitle: pack.runtime_repeat_trials_title || 'Some trials must be repeated',
+        repeatBlockTitle: pack.runtime_repeat_block_title || 'Block must be repeated',
+        repeatReasonPrefix: pack.runtime_repeat_reason_prefix || 'Reasons',
+        repeatTrialsSuffix: pack.runtime_repeat_trials_suffix || 'Only the invalid trials will be repeated.',
+        repeatBlockBody: pack.runtime_repeat_block_body || 'The previous attempt was not accepted.',
+        repeatLimitTitle: pack.runtime_repeat_limit_title || 'Repeat limit reached',
+        repeatLimitBody: pack.runtime_repeat_limit_body || 'The session will continue without another repeat.'
+    };
+}
+
+const ISSUE_TRANSLATION_KEYS = Object.freeze({
+    continuous_modules_not_started: 'runtime_continuous_start_failed',
+    face_missing: 'tip_face_not_found',
+    low_light: 'tip_light_dark',
+    head_pose: 'tip_pose_unstable',
+    face_occluded: 'tip_face_occluded',
+    low_fps: 'issue_low_fps_time',
+    page_reloaded: 'runtime_recovery_body'
+});
+
+function localizedIssueMessage(issue, getLanguage) {
+    const text = langText(getLanguage);
+    const pack = translations[text.lang] || translations.en;
+    const key = ISSUE_TRANSLATION_KEYS[issue?.code];
+    if (key && pack[key]) return pack[key];
+    if (text.lang === 'ru' && issue?.message) return issue.message;
+    return issue?.kind === ERROR_KINDS.TECHNICAL
+        ? text.genericTechnical
+        : text.genericQuality;
 }
 
 function russianTrialWord(value) {
@@ -53,9 +117,17 @@ export class SessionRuntimeUI {
         this.onResume = options.onResume || (() => {});
         this.root = null;
         this.alert = null;
+        this.alertMessage = null;
+        this.alertClose = null;
         this.pauseButton = null;
         this.modal = null;
         this.modalResolve = null;
+        this.lastSnapshot = null;
+        this.currentPhase = null;
+        this.boundPhaseChange = event => {
+            this.currentPhase = event?.detail?.phase || null;
+            this._renderPauseButton();
+        };
     }
 
     init() {
@@ -64,9 +136,12 @@ export class SessionRuntimeUI {
         style.id = 'wecog-session-runtime-style';
         style.textContent = `
           #wecog-session-runtime{position:fixed;inset:0;z-index:10050;pointer-events:none;font-family:inherit}
-          #wecog-session-alert{position:absolute;left:50%;top:18px;transform:translateX(-50%);width:min(680px,calc(100% - 32px));padding:12px 16px;border:1px solid #d97706;border-radius:12px;background:#fffbeb;color:#7c2d12;box-shadow:0 12px 30px rgba(15,23,42,.18);display:none;pointer-events:auto}
+          #wecog-session-alert{position:absolute;left:50%;top:18px;transform:translateX(-50%);width:min(680px,calc(100% - 32px));padding:12px 48px 12px 16px;border:1px solid #d97706;border-radius:12px;background:#fffbeb;color:#7c2d12;box-shadow:0 12px 30px rgba(15,23,42,.18);display:none;pointer-events:none}
           #wecog-session-alert[data-kind="technical"]{border-color:#dc2626;background:#fef2f2;color:#7f1d1d}
+          #wecog-session-alert-close{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:30px;height:30px;padding:0;border:0;border-radius:8px;background:transparent;color:currentColor;font:700 22px/1 sans-serif;cursor:pointer;pointer-events:auto}
+          #wecog-session-alert-close:hover,#wecog-session-alert-close:focus-visible{background:rgba(15,23,42,.08);outline:none}
           #wecog-session-pause{position:absolute;right:20px;bottom:20px;display:none;padding:10px 16px;border:1px solid #0f172a;border-radius:10px;background:#fff;color:#0f172a;font-weight:700;pointer-events:auto;cursor:pointer}
+          html:not([data-session-phase="cognitive_instruction"]):not([data-session-phase="protocol_instruction"]) #wecog-session-pause{display:none!important}
           #wecog-session-modal{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.68);pointer-events:auto}
           .wecog-session-card{width:min(600px,100%);padding:28px;border-radius:18px;background:#fff;color:#0f172a;box-shadow:0 24px 80px rgba(0,0,0,.3)}
           .wecog-session-card h2{margin:0 0 12px;font-size:25px}
@@ -79,7 +154,10 @@ export class SessionRuntimeUI {
         this.root = document.createElement('div');
         this.root.id = 'wecog-session-runtime';
         this.root.innerHTML = `
-          <div id="wecog-session-alert" role="status" aria-live="assertive"></div>
+          <div id="wecog-session-alert" role="status" aria-live="assertive">
+            <span data-session-alert-message></span>
+            <button id="wecog-session-alert-close" type="button" aria-label="Закрыть уведомление">×</button>
+          </div>
           <button id="wecog-session-pause" type="button"></button>
           <div id="wecog-session-modal" role="dialog" aria-modal="true">
             <div class="wecog-session-card">
@@ -92,9 +170,14 @@ export class SessionRuntimeUI {
         `;
         document.body.appendChild(this.root);
         this.alert = this.root.querySelector('#wecog-session-alert');
+        this.alertMessage = this.alert.querySelector('[data-session-alert-message]');
+        this.alertClose = this.alert.querySelector('#wecog-session-alert-close');
         this.pauseButton = this.root.querySelector('#wecog-session-pause');
         this.modal = this.root.querySelector('#wecog-session-modal');
         this.pauseButton.onclick = () => this.onPause();
+        this.alertClose.onclick = () => this.hideIssue();
+        window.addEventListener('wecog:session-phase-change', this.boundPhaseChange);
+        this.currentPhase = document.documentElement.dataset.sessionPhase || null;
         this._refreshText();
     }
 
@@ -102,14 +185,25 @@ export class SessionRuntimeUI {
         if (!this.root) return;
         const text = langText(this.getLanguage);
         this.pauseButton.textContent = text.pause;
+        this.alertClose.setAttribute(
+            'aria-label',
+            text.dismiss
+        );
     }
 
     updateState(snapshot) {
         this.init();
         this._refreshText();
-        const pauseAllowed = snapshot?.state === SESSION_STATES.INSTRUCTION
-            && snapshot?.currentBlock?.stage !== 'trial';
-        this.pauseButton.style.display = pauseAllowed ? 'block' : 'none';
+        this.lastSnapshot = snapshot || null;
+        this._renderPauseButton();
+
+        const guideMode = snapshot?.state === SESSION_STATES.INSTRUCTION
+            ? 'instruction'
+            : (snapshot?.state === SESSION_STATES.PAUSED
+                ? 'paused'
+                : ([SESSION_STATES.QUALITY_ERROR, SESSION_STATES.TECHNICAL_ERROR]
+                    .includes(snapshot?.state) ? 'locked' : 'hidden'));
+        setHeadPoseGuideMode(guideMode);
 
         if (snapshot?.state === SESSION_STATES.PAUSED && !this.modalResolve) {
             const text = langText(this.getLanguage);
@@ -122,22 +216,32 @@ export class SessionRuntimeUI {
         }
     }
 
+    _renderPauseButton() {
+        if (!this.pauseButton) return;
+        const phase = this.currentPhase
+            || document.documentElement.dataset.sessionPhase
+            || null;
+        const isBlockInstruction = phase === 'cognitive_instruction'
+            || phase === 'protocol_instruction';
+        const pauseAllowed = this.lastSnapshot?.state === SESSION_STATES.INSTRUCTION
+            && this.lastSnapshot?.currentBlock?.stage !== 'trial'
+            && isBlockInstruction;
+        this.pauseButton.style.display = pauseAllowed ? 'block' : 'none';
+    }
+
     showIssue(issue, duringTest, blockType = null) {
         this.init();
         this.alert.dataset.kind = issue?.kind || ERROR_KINDS.QUALITY;
+        const text = langText(this.getLanguage);
         const repeatsTrial = ['cognitive_task', 'rt', 'rt_gonogo'].includes(
             String(blockType || '').toLowerCase()
         );
         const repeatText = duringTest
-            ? (this.getLanguage() === 'en'
-                ? (repeatsTrial
-                    ? ' The current trial will be repeated.'
-                    : ' The current block will be repeated.')
-                : (repeatsTrial
-                    ? ' Текущая проба будет повторена.'
-                    : ' Текущий блок будет повторён.'))
+            ? (repeatsTrial
+                ? ` ${text.repeatTrialsSuffix}`
+                : ` ${text.repeatBlockTitle}.`)
             : '';
-        this.alert.textContent = `${issue?.message || 'Ошибка качества.'}${repeatText}`;
+        this.alertMessage.textContent = `${localizedIssueMessage(issue, this.getLanguage)}${repeatText}`;
         this.alert.style.display = 'block';
     }
 
@@ -163,23 +267,20 @@ export class SessionRuntimeUI {
         const issues = Array.isArray(repeat?.issues)
             ? [...new Map(repeat.issues.map(issue => [issue.code || issue.issueId, issue])).values()]
             : [];
-        const reasons = issues.map(issue => issue.message).filter(Boolean).join('; ');
+        const reasons = issues
+            .map(issue => localizedIssueMessage(issue, this.getLanguage))
+            .filter(Boolean)
+            .join('; ');
         const hasTrials = count > 0;
-        const body = this.getLanguage() === 'en'
-            ? (
-                hasTrials
-                    ? `${count}${total ? ` of ${total}` : ''} trials were not accepted.${reasons ? ` Reasons: ${reasons}.` : ''} Only these ${count} trials will now be repeated.`
-                    : `The previous attempt was not accepted (${reason}). Correct the conditions before continuing.`
-            )
-            : (
-                hasTrials
-                    ? `Не засчитано ${count} ${russianTrialWord(count)}${total ? ` из ${total}` : ''}.${reasons ? ` Причины: ${reasons}.` : ''} Сейчас будут повторены только незасчитанные пробы (${count}).`
-                    : `Предыдущая попытка не принята (${reason}). Исправьте условия перед продолжением.`
-            );
+        const body = text.lang === 'ru'
+            ? (hasTrials
+                ? `Не засчитано ${count} ${russianTrialWord(count)}${total ? ` из ${total}` : ''}.${reasons ? ` ${text.repeatReasonPrefix}: ${reasons}.` : ''} ${text.repeatTrialsSuffix}`
+                : text.repeatBlockBody)
+            : (hasTrials
+                ? `${count}${total ? ` / ${total}` : ''}.${reasons ? ` ${text.repeatReasonPrefix}: ${reasons}.` : ''} ${text.repeatTrialsSuffix}`
+                : text.repeatBlockBody);
         return this._showModal({
-            title: this.getLanguage() === 'en'
-                ? (hasTrials ? 'Some trials must be repeated' : 'Block must be repeated')
-                : (hasTrials ? 'Часть проб необходимо повторить' : 'Блок необходимо повторить'),
+            title: hasTrials ? text.repeatTrialsTitle : text.repeatBlockTitle,
             body,
             note: hasTrials ? '' : text.note,
             action: hasTrials ? text.repeatTrials : text.repeat
@@ -190,12 +291,8 @@ export class SessionRuntimeUI {
         const count = Number(repeat?.repeatItemCount) || 0;
         const text = langText(this.getLanguage);
         return this._showModal({
-            title: this.getLanguage() === 'en'
-                ? 'Quality limit reached'
-                : 'Достигнут лимит повторов',
-            body: this.getLanguage() === 'en'
-                ? `${count || 'Some'} trials still do not meet the quality criteria. Their data will remain marked invalid; the session will continue without another loop.`
-                : `Незасчитанные пробы (${count || 'несколько'}) всё ещё не соответствуют критериям качества. Их данные останутся помечены как невалидные, но сессия продолжится без нового цикла.`,
+            title: text.repeatLimitTitle,
+            body: `${count || ''}${count ? '. ' : ''}${text.repeatLimitBody}`,
             note: '',
             action: text.repeatLimit
         });
@@ -208,6 +305,26 @@ export class SessionRuntimeUI {
             body: text.recoveryBody,
             note: text.note,
             action: text.recoveryAction
+        });
+    }
+
+    async showBlockInstruction(details = {}) {
+        const text = langText(this.getLanguage);
+        return this._showModal({
+            title: details.title || text.blockInstructionTitle,
+            body: details.body || '',
+            note: details.note || text.note,
+            action: details.action || text.blockInstructionAction
+        });
+    }
+
+    async showBlockComplete(details = {}) {
+        const text = langText(this.getLanguage);
+        return this._showModal({
+            title: details.title || text.blockCompleteTitle,
+            body: details.body || text.blockCompleteBody,
+            note: '',
+            action: details.action || text.blockCompleteAction
         });
     }
 

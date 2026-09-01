@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EmoCog — Платформа оценки внимания и эмоций</title>
+  <title>wecog — исследовательская платформа</title>
+  <link rel="icon" href="assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/wecog-foundation.css?v=20260819-1">
+  <script src="assets/wecog-theme.js?v=20260819-1"></script>
   <style>
     :root {
       --bg: #0f0f1a;
@@ -121,77 +124,211 @@
       justify-content: center;
       font-size: 18px;
     }
+    html, body { min-height: 100%; height: auto; font-family: var(--wc-font); }
+    body {
+      display: block;
+      padding: 112px clamp(20px, 5vw, 72px) 40px;
+      background:
+        linear-gradient(90deg, transparent 49.9%, color-mix(in srgb, var(--wc-line) 45%, transparent) 50%, transparent 50.1%),
+        var(--wc-canvas);
+      background-size: 80px 100%;
+      color: var(--wc-ink);
+    }
+    .site-header {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 20;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 clamp(20px, 5vw, 72px);
+      background: color-mix(in srgb, var(--wc-canvas) 90%, transparent);
+      border-bottom: 1px solid var(--wc-line);
+      backdrop-filter: blur(18px);
+    }
+    .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--wc-ink); text-decoration: none; }
+    .brand .logo { width: 38px; height: 38px; margin: 0; border-radius: 0; background: none; box-shadow: none; }
+    :root[data-theme="dark"] .site-header .brand .logo { padding: 3px; border-radius: 9px; background: #f5f5ec; }
+    .brand-name { font-size: 23px; font-weight: 760; letter-spacing: -0.045em; }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .site-header .theme-toggle {
+      position: static;
+      width: auto;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0 13px;
+      gap: 8px;
+      border: 1px solid var(--wc-line);
+      border-radius: 999px;
+      background: var(--wc-surface);
+      color: var(--wc-ink);
+      font: 700 14px/1 var(--wc-font);
+    }
+    .wrap {
+      max-width: 1320px;
+      min-height: calc(100vh - 152px);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(420px, .85fr);
+      gap: clamp(40px, 8vw, 120px);
+      align-items: center;
+      text-align: left;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--wc-ink);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 720;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      max-width: 780px;
+      font-size: clamp(3.5rem, 7vw, 7.4rem);
+      font-weight: 760;
+      letter-spacing: -0.065em;
+      line-height: .88;
+      margin-bottom: 30px;
+    }
+    .hero-line { display: block; width: fit-content; }
+    .hero-accent { color: var(--wc-blue); font-style: italic; }
+    .hero .sub {
+      max-width: 610px;
+      margin: 0;
+      color: var(--wc-muted);
+      font-size: clamp(1.12rem, 1.8vw, 1.45rem);
+      line-height: 1.48;
+    }
+    .cards { display: flex; flex-direction: column; gap: 12px; }
+    .card {
+      display: grid;
+      grid-template-columns: 52px 1fr 44px;
+      align-items: center;
+      gap: 18px;
+      min-height: 118px;
+      padding: 20px;
+      color: var(--wc-ink);
+      text-align: left;
+      background: var(--wc-surface);
+      border: 1px solid var(--wc-line);
+      border-radius: var(--wc-radius-md);
+      box-shadow: none;
+      transition: transform .18s ease, background-color .18s ease, border-color .18s ease;
+    }
+    .card:hover { transform: translateX(8px); border-color: var(--wc-ink); box-shadow: none; }
+    .card-icon, .card.researcher .card-icon, .card.respondent .card-icon, .card.admin .card-icon {
+      width: 52px;
+      height: 52px;
+      margin: 0;
+      border-radius: 50%;
+      background: var(--wc-surface-soft);
+      color: var(--wc-ink);
+      font-size: 16px;
+      font-weight: 760;
+      letter-spacing: .02em;
+    }
+    .card.respondent .card-icon { background: var(--wc-accent); color: var(--wc-accent-ink); }
+    .card h2 { color: var(--wc-ink); font-size: 1.18rem; line-height: 1.2; margin: 0 0 4px; }
+    .card p { color: var(--wc-muted); font-size: .94rem; line-height: 1.38; }
+    .card-arrow {
+      width: 44px;
+      height: 44px;
+      border: 1px solid var(--wc-line);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 23px;
+    }
+    .card:hover .card-arrow { background: var(--wc-ink); color: var(--wc-surface); border-color: var(--wc-ink); }
+    @media (max-width: 900px) {
+      body { padding-top: 104px; background-size: 48px 100%; }
+      .wrap { grid-template-columns: 1fr; gap: 40px; align-content: center; }
+      .hero { padding-top: 16px; }
+      .hero h1 { font-size: clamp(3.5rem, 18vw, 6.2rem); }
+    }
+    @media (max-width: 520px) {
+      .site-header { height: 68px; }
+      .wrap { min-height: calc(100vh - 124px); }
+      .theme-toggle [data-theme-label] { display: none; }
+      .card { grid-template-columns: 44px 1fr 38px; min-height: 104px; padding: 16px; gap: 13px; }
+      .card-icon, .card-arrow { width: 44px !important; height: 44px !important; }
+    }
   </style>
 </head>
 <body>
-  <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme">🌓</button>
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="wecog, на главную">
+      <img class="logo" src="assets/wecog-mark.svg" alt="">
+      <span class="brand-name">wecog</span>
+    </a>
+    <div class="header-actions">
+      <button type="button" class="theme-toggle" data-wecog-theme-toggle>
+        <span data-theme-icon aria-hidden="true">◐</span>
+        <span data-theme-label>авто</span>
+      </button>
+    </div>
+  </header>
   <div class="wrap">
-    <div class="logo" aria-hidden="true"></div>
-    <h1>EmoCog</h1>
-    <p class="sub">Платформа оценки внимания и эмоций</p>
+    <section class="hero">
+      <div class="eyebrow">Research workspace</div>
+      <h1 aria-label="Понимать реакцию точнее..."><span class="hero-line">Понимать</span><span class="hero-line">реакцию</span><span class="hero-line hero-accent">точнее...</span></h1>
+      <p class="sub">Единая среда для когнитивных исследований: от протокола и безопасного сбора сигналов до проверяемой аналитики.</p>
+    </section>
     <nav class="cards" aria-label="Выбор роли">
-      <a href="researcher.html" class="card researcher" id="cardResearcher">
-        <div class="card-icon">🔬</div>
-        <h2>Исследователь</h2>
-        <p>Дашборды, сессии, протоколы и аналитика</p>
+      <a href="developer/login.html?portal=researcher" class="card researcher" id="cardResearcher">
+        <div class="card-icon" aria-hidden="true">01</div>
+        <div><h2>Исследователь</h2><p>Проекты, протоколы и аналитика</p></div>
+        <span class="card-arrow" aria-hidden="true">↗</span>
       </a>
       <a href="../participant-web/invite.html" class="card respondent" id="cardParticipant">
-        <div class="card-icon">👤</div>
-        <h2>Участник</h2>
-        <p>Участие в исследовании по ссылке-приглашению</p>
+        <div class="card-icon" aria-hidden="true">02</div>
+        <div><h2>Участник</h2><p>Перейти по приглашению</p></div>
+        <span class="card-arrow" aria-hidden="true">↗</span>
       </a>
-      <a href="developer/login.html" class="card developer" id="cardDeveloper">
-        <div class="card-icon">🛠</div>
-        <h2>Разработчик</h2>
-        <p>Тестирование модулей: precheck, BPM, gaze, QC</p>
+      <a href="developer/login.html?portal=admin" class="card admin" id="cardAdmin">
+        <div class="card-icon" aria-hidden="true">03</div>
+        <div><h2>Администратор</h2><p>Организация, доступы и технический вход</p></div>
+        <span class="card-arrow" aria-hidden="true">↗</span>
       </a>
     </nav>
-    <p class="footer" id="landingFooter">Вставьте ссылку-приглашение на странице участника. Для исследователя и разработчика нужен вход.</p>
   </div>
+  <script src="api-base.js?v=20260819-1"></script>
   <script>
     (function () {
       function apiBaseUrl() {
-        try {
-          var s = localStorage.getItem('emocog_api_base');
-          if (s && s.trim()) return s.trim().replace(/\/$/, '');
-        } catch (_) {}
-        return (window.location.origin + '/api').replace(/\/$/, '');
+        return window.EmocogApiBase
+          ? window.EmocogApiBase.resolve()
+          : (window.location.origin + '/api').replace(/\/$/, '');
       }
       function applyLandingAccess(ctx) {
         var cardRes = document.getElementById('cardResearcher');
-        var cardDev = document.getElementById('cardDeveloper');
+        var cardAdmin = document.getElementById('cardAdmin');
         var cardPart = document.getElementById('cardParticipant');
-        var foot = document.getElementById('landingFooter');
         if (ctx.guest) {
           if (cardRes) { cardRes.style.display = 'none'; }
-          if (cardDev) { cardDev.style.display = 'none'; }
+          if (cardAdmin) { cardAdmin.style.display = 'none'; }
           if (cardPart) { cardPart.style.display = ''; }
-          if (foot) {
-            foot.textContent = 'Гостю доступен только раздел «Участник»: вставьте ссылку-приглашение.';
-          }
           return;
         }
         // Нет токена (инкогнито, новый браузер): показываем все роли — вход на целевой странице.
         if (ctx.anonymousPortal) {
           if (cardRes) { cardRes.style.display = ''; }
-          if (cardDev) { cardDev.style.display = ''; }
+          if (cardAdmin) { cardAdmin.style.display = ''; }
           if (cardPart) { cardPart.style.display = ''; }
-          if (foot) {
-            foot.textContent =
-              'Вход не выполнен: «Исследователь» и «Разработчик» откроют страницу входа. Участнику нужна ссылка-приглашение.';
-          }
           return;
         }
         var role = ctx.user && ctx.user.role;
-        var researchRoles = { researcher: 1, PI: 1, analyst: 1, assistant: 1, admin: 1, developer: 1 };
-        var devPortalRoles = { developer: 1, admin: 1 };
+        var researchRoles = { researcher: 1, PI: 1, org_admin: 1, analyst: 1, assistant: 1, admin: 1 };
+        var adminPortalRoles = { org_admin: 1, PI: 1, developer: 1, admin: 1 };
         if (cardPart) { cardPart.style.display = ''; }
         if (cardRes) { cardRes.style.display = researchRoles[role] ? '' : 'none'; }
-        if (cardDev) { cardDev.style.display = devPortalRoles[role] ? '' : 'none'; }
-        if (foot) {
-          foot.textContent =
-            'Исследователь: дашборд и запуск участника по приглашению. Разработчик и администратор — полный доступ к тестовым модулям.';
-        }
+        if (cardAdmin) { cardAdmin.style.display = adminPortalRoles[role] ? '' : 'none'; }
       }
       function landingGuestOnlyMode() {
         try {
@@ -206,16 +343,11 @@
         return false;
       }
       function bootstrapLanding() {
-        var token = '';
-        try {
-          token = localStorage.getItem('emocog_api_token') || '';
-        } catch (_) {}
         if (landingGuestOnlyMode()) {
           applyLandingAccess({ guest: true });
           return;
         }
-        var headers = token ? { Authorization: 'Bearer ' + token } : {};
-        fetch(apiBaseUrl() + '/auth/me', { headers: headers, credentials: 'include' })
+        fetch(apiBaseUrl() + '/auth/me', { credentials: 'include' })
           .then(function (r) {
             if (!r.ok) throw new Error('me');
             return r.json();
@@ -235,43 +367,6 @@
       }
       bootstrapLanding();
 
-      (function bindLogoHome() {
-        var logo = document.querySelector('.logo');
-        if (!logo || logo.dataset.homeBound) return;
-        logo.dataset.homeBound = '1';
-        logo.style.cursor = 'pointer';
-        logo.setAttribute('role', 'link');
-        logo.setAttribute('tabindex', '0');
-        logo.setAttribute('title', 'На главную');
-        function go() {
-          window.location.href = 'index.html';
-        }
-        logo.addEventListener('click', go);
-        logo.addEventListener('keydown', function (ev) {
-          if (ev.key === 'Enter' || ev.key === ' ') {
-            ev.preventDefault();
-            go();
-          }
-        });
-      })();
-
-      var KEY = 'emocog_theme';
-      function resolveInitialTheme() {
-        var saved = localStorage.getItem(KEY);
-        if (saved === 'light' || saved === 'dark') return saved;
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      }
-      function applyTheme(theme) {
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem(KEY, theme);
-      }
-      var theme = resolveInitialTheme();
-      applyTheme(theme);
-      var btn = document.getElementById('themeToggle');
-      if (btn) btn.addEventListener('click', function () {
-        theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
-        applyTheme(theme);
-      });
     })();
   </script>
 </body>

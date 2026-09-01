@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-  <title>EMO COG — Optimized App Shell</title>
+  <title>wecog — кабинет исследователя</title>
+  <link rel="icon" href="assets/wecog-mark.svg?v=20260825-3" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/wecog-foundation.css?v=20260825-3">
+  <script src="assets/wecog-theme.js?v=20260825-3"></script>
   <script>
     (function () {
       function go(code) {
@@ -1992,6 +1995,49 @@ body{
 }
 .dash-wrap .sliderRow .lbl { font-size: 12px; color: var(--muted); }
 .dash-wrap .sliderRow input[type="range"] { padding: 0; height: 10px; width: 140px; }
+.qc-range {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  height: 22px !important;
+  min-width: 180px;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  cursor: pointer;
+}
+.qc-range::-webkit-slider-runnable-track {
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--qc-track);
+  box-shadow: inset 0 0 0 1px rgba(15, 35, 29, .10);
+}
+.qc-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -6px;
+  border: 3px solid var(--card-bg);
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 1px 5px rgba(15, 35, 29, .32);
+}
+.qc-range::-moz-range-track {
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--qc-track);
+  box-shadow: inset 0 0 0 1px rgba(15, 35, 29, .10);
+}
+.qc-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 3px solid var(--card-bg);
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 1px 5px rgba(15, 35, 29, .32);
+}
 .dash-wrap .badge {
   font-size: 12px;
   color: var(--muted);
@@ -2780,6 +2826,7 @@ body{
 /* ===== END WELCOME SCREEN ===== */
 
 </style>
+  <link rel="stylesheet" href="assets/researcher-redesign.css?v=20260828-3">
 </head>
 <body>
   <script>
@@ -2795,7 +2842,12 @@ body{
       window.location.replace((window.location.origin || '') + base + 'run_new.html?code=' + encodeURIComponent(code));
     })();
   </script>
-  <script src="auth-guard.js"></script>
+  <script src="api-base.js?v=20260819-1"></script>
+  <script src="account-storage.js?v=20260829-1"></script>
+  <script>
+    if (window.WecogAccountStorage) window.WecogAccountStorage.activateCachedUser();
+  </script>
+  <script src="auth-guard.js?v=20260820-2"></script>
   <script>
     (function () {
       var previewParams = new URLSearchParams(window.location.search);
@@ -2814,12 +2866,19 @@ body{
       }
       window.EmocogAuthGuard.ensureProtectedPage({
         loginPath: 'developer/login.html',
-        allowedRoles: ['researcher', 'admin', 'PI', 'analyst', 'assistant', 'developer']
+        allowedRoles: ['researcher', 'admin', 'org_admin', 'PI', 'analyst', 'assistant']
       }).then(function (result) {
         if (!result || !result.ok) return;
         try {
+          var workspaceSwitch = window.WecogAccountStorage && result.user
+            ? window.WecogAccountStorage.activate(result.user.id)
+            : { changed: false };
           if (result.apiBase) localStorage.setItem('emocog_api_base', result.apiBase);
           if (result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
+          if (workspaceSwitch && workspaceSwitch.changed) {
+            window.location.reload();
+            return;
+          }
         } catch (_) {}
       });
     })();
@@ -2836,7 +2895,7 @@ body{
     })();
   </script> -->
  
-  <script src="cognitive-task-protocols.js"></script>
+  <script src="cognitive-task-protocols.js?v=20260825-3"></script>
   <script src="../shared/rt-registry.js"></script>
 
   <!-- ===== WELCOME SCREEN ===== -->
@@ -2844,6 +2903,11 @@ body{
 
     <!-- Language switcher top-right -->
     <div class="ws-topbar">
+      <div class="wecog-theme-switch" data-wecog-theme-group role="group" aria-label="Цветовая схема">
+        <button type="button" class="wecog-theme-option" data-wecog-theme-value="auto"><span data-theme-option-label>Авто</span></button>
+        <button type="button" class="wecog-theme-option" data-wecog-theme-value="light"><span data-theme-option-label>Светлая</span></button>
+        <button type="button" class="wecog-theme-option" data-wecog-theme-value="dark"><span data-theme-option-label>Тёмная</span></button>
+      </div>
       <div class="ws-lang" style="display:flex;gap:6px;">
         <button id="wsLangRu" class="active" onclick="wsSetLang('ru')">RU</button>
         <button id="wsLangEn" onclick="wsSetLang('en')">EN</button>
@@ -2854,9 +2918,9 @@ body{
 
       <!-- LEFT: branding + CTA -->
       <div class="ws-left">
-        <div class="ws-logo"></div>
+        <div class="ws-logo"><img src="assets/wecog-mark.svg?v=20260825-3" alt=""></div>
         <div class="ws-title" id="wsTitle">
-          Добро пожаловать<br>на платформу <span class="hl">EMO COG!</span>
+          Добро пожаловать<br>в <span class="hl">wecog</span>
         </div>
         <div class="ws-desc" id="wsDesc">
           Здесь вы можете создавать новые эксперименты, отслеживать подробную аналитику по проектам и управлять своими медиафайлами.<br><br>
@@ -2892,6 +2956,7 @@ body{
       <div class="ws-modal-title" id="wsModalTitle">Новый проект</div>
       <div class="ws-modal-sub" id="wsModalSub">Введите название проекта. После создания вы сможете добавлять в него эксперименты и следить за аналитикой.</div>
       <input class="ws-modal-input" id="wsModalInput" type="text" maxlength="80" autocomplete="off" />
+      <div id="wsModalError" role="alert" style="display:none;margin-top:10px;color:#B91C1C;font-size:12px;line-height:1.4;"></div>
       <div class="ws-modal-btns">
         <button class="ws-modal-cancel" id="wsModalCancelBtn"><span id="wsModalCancelLabel">Отмена</span></button>
         <button class="ws-modal-create" id="wsModalCreateBtn"><span id="wsModalCreateLabel">Создать</span></button>
@@ -2910,40 +2975,42 @@ body{
     <!-- LEFT PANEL -->
     <div class="panel left-panel" id="mobileNavigationPanel">
       <div class="hdr">
-        <div class="brand">
-          <div class="logo"></div>
+        <a class="brand" href="#/overview" aria-label="wecog, главная">
+          <div class="logo"><img src="assets/wecog-mark.svg?v=20260825-3" alt=""></div>
           <div class="t">
-            <h1>EMO COG</h1>
-            <div class="sub">Research Platform</div>
+            <h1>wecog</h1>
+            <div class="sub">Research workspace</div>
           </div>
-        </div>
+        </a>
         <div style="display:flex;gap:4px;margin-left:auto;flex-shrink:0;">
-          <button id="langRu" onclick="setLang('ru')" style="padding:4px 9px;border-radius:8px;border:1px solid rgba(92,102,189,.28);background:rgba(92,102,189,.12);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.04em;">RU</button>
-          <button id="langEn" onclick="setLang('en')" style="padding:4px 9px;border-radius:8px;border:1px solid var(--stroke);background:transparent;color:var(--muted2);font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.04em;">EN</button>
+          <button id="langRu" class="wecog-lang-button active" onclick="setLang('ru')">RU</button>
+          <button id="langEn" class="wecog-lang-button" onclick="setLang('en')">EN</button>
         </div>
       </div>
       
       <div class="left-body">
         <div class="left-body-scroll">
-        <!-- Project select -->
-        <div>
-          <div class="section-title">Project</div>
-          <select class="select" id="projectSelect">
+        <!-- Current project context -->
+        <div class="project-context">
+          <div class="project-context-heading">
+            <div class="section-title" id="projectContextTitle">Текущий проект</div>
+            <span class="project-context-dot" aria-hidden="true"></span>
+          </div>
+          <select class="select" id="projectSelect" data-no-auto-i18n>
             <option value="">—</option>
           </select>
-        </div>
-        
-        <!-- Current user role -->
-        <div>
-          <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
-            <span id="currentUserRoleTitle">РОЛЬ</span>
-            <span id="currentUserRoleLabel" style="font-size:13px;font-weight:700;letter-spacing:0;text-transform:none;color:#047857;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.35);border-radius:999px;padding:2px 10px;">исследователь</span>
-          </div>
+          <a class="navigation-create" id="navCreateProtocol" href="#/experiments/builder">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" d="M12 5v14M5 12h14"/>
+            </svg>
+            <span id="navCreateProtocolLabel">Новый протокол</span>
+            <span class="navigation-create-arrow" aria-hidden="true">↗</span>
+          </a>
         </div>
         
         <!-- Main Navigation -->
         <div>
-          <div class="section-title" id="navSectionTitle">Navigation</div>
+          <div class="section-title" id="navSectionTitle">Работа</div>
           <nav class="nav">
             <a href="#/overview" id="nav-overview">
               <span class="icon">
@@ -2960,7 +3027,7 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
 </svg>
               </span>
-              <span>Проекты</span>
+              <span>Исследования</span>
             </a>
             
             <div class="has-subnav" id="nav-stimuli-parent">
@@ -2974,14 +3041,14 @@ body{
             </a>
             </div>
             
-            <div class="has-subnav" id="nav-analytics-parent" style="display:none;">
+            <div class="has-subnav" id="nav-analytics-parent">
               <a href="#/analytics/session-card" id="nav-analytics-session-card">
                 <span class="icon">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
 </svg>
                 </span>
-                <span id="navAnalyticsLabel">Инструменты аналитики</span>
+                <span id="navAnalyticsLabel">Аналитика</span>
               </a>
               <div class="subnav">
                 <a href="#/analytics/session-card" id="nav-analytics-session-card-sub">Session Card</a>
@@ -2991,48 +3058,39 @@ body{
               </div>
             </div>
             
+          </nav>
+        </div>
+
+        <div class="navigation-management">
+          <div class="section-title" id="navManagementTitle">Управление</div>
+          <nav class="nav nav-secondary" aria-label="Управление кабинетом">
             <a href="#/admin" id="nav-admin" style="display:none;">
               <span class="icon">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
                 </svg>
               </span>
-              <span>Admin</span>
+              <span>Доступы</span>
             </a>
             
-            <a href="#/settings" id="nav-settings" style="display:none;">
+            <a href="#/settings" id="nav-settings">
               <span class="icon">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
 </svg>
               </span>
-              <span>Settings</span>
+              <span>Настройки</span>
             </a>
             
-            <a href="#/billing" id="nav-billing">
-              <span class="icon">
-<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
-</svg>
-              </span>
-              <span>Тариф</span>
-            </a>
-          </nav>
-        </div>
-        <div id="projectNavigationWrap" style="display:none;">
-          <div class="section-title">Выбранный проект</div>
-          <nav class="nav" id="projectNavigation">
-            <a href="#/projects/current/overview" id="nav-project-overview" data-project-section="overview"><span>Обзор</span></a>
-            <a href="#/projects/current/protocols" id="nav-project-protocols" data-project-section="protocols"><span>Протоколы</span></a>
-            <a href="#/projects/current/participants" id="nav-project-participants" data-project-section="participants"><span>Участники</span></a>
-            <a href="#/projects/current/monitoring" id="nav-project-monitoring" data-project-section="monitoring"><span>Мониторинг</span></a>
-            <a href="#/projects/current/results" id="nav-project-results" data-project-section="results"><span>Результаты</span></a>
-            <a href="#/projects/current/settings" id="nav-project-settings" data-project-section="settings"><span>Настройки</span></a>
           </nav>
         </div>
         </div>
         <div class="left-logout">
+          <div class="left-account-role">
+            <span id="currentUserRoleTitle" class="sr-only">РОЛЬ</span>
+            <span id="currentUserRoleLabel">исследователь</span>
+          </div>
           <button type="button" class="left-logout-btn" id="leftLogoutBtn">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
@@ -3064,11 +3122,11 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
 </svg>
             </button>
-            <div class="crumbs" id="breadcrumbs">
-              <span>EMO COG</span>
+            <nav class="crumbs" id="breadcrumbs" aria-label="Хлебные крошки">
+              <a class="crumb-home" href="#/overview" id="breadcrumbHome">Главная</a>
               <span class="sep">/</span>
               <span id="pageTitle">Главная</span>
-            </div>
+            </nav>
           </div>
           <div class="right">
             <div class="search-box">
@@ -3077,7 +3135,12 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 </svg>
               </span>
-              <input type="text" placeholder="Search..."/>
+              <input type="search" id="researcherNavSearch" placeholder="Найти раздел" autocomplete="off"/>
+            </div>
+            <div class="wecog-theme-switch" data-wecog-theme-group role="group" aria-label="Цветовая схема">
+              <button type="button" class="wecog-theme-option" data-wecog-theme-value="auto"><span data-theme-option-label>Авто</span></button>
+              <button type="button" class="wecog-theme-option" data-wecog-theme-value="light"><span data-theme-option-label>Светлая</span></button>
+              <button type="button" class="wecog-theme-option" data-wecog-theme-value="dark"><span data-theme-option-label>Тёмная</span></button>
             </div>
             <button class="iconBtn" id="btnFocus" title="Focus mode">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -3137,9 +3200,9 @@ body{
 
   <div class="toast" id="toast"></div>
   
-  <script src="researcher-i18n.js"></script>
-  <script src="researcher-experiments.js?v=20260807-3"></script>
-  <script src="researcher-analytics.js?v=20260806-1"></script>
+  <script src="researcher-i18n.js?v=20260819-1"></script>
+  <script src="researcher-experiments.js?v=20260827-1"></script>
+  <script src="researcher-analytics.js?v=20260820-2"></script>
   <script src="researcher-analytics-config.js?v=20260806-1"></script>
   <script>
     // Fictional analytics are opt-in and confined to local visual review.
@@ -3151,13 +3214,15 @@ body{
       }
     })();
   </script>
-  <script src="researcher-analytics-production.js?v=20260806-1"></script>
-  <script src="researcher-admin-settings.js?v=20260807-1"></script>
+  <script src="researcher-analytics-production.js?v=20260828-2"></script>
+  <script src="researcher-admin-settings.js?v=20260825-3"></script>
   <script src="aoi-geometry.js?v=20260806-1"></script>
   <script src="aoi-protocol.js?v=20260807-1"></script>
-  <script src="researcher-builder.js?v=20260807-2"></script>
-  <script src="researcher-stimuli.js?v=20260807-2"></script>
-  <script src="researcher-core.js?v=20260807-2"></script>
-  <script src="researcher-api-bridge.js?v=20260807-2"></script>
+  <script src="../shared/survey-contract.js?v=20260828-2"></script>
+  <script src="researcher-builder.js?v=20260828-2"></script>
+  <script src="researcher-stimuli.js?v=20260827-1"></script>
+  <script src="researcher-core.js?v=20260828-3"></script>
+  <script src="researcher-api-bridge.js?v=20260819-1"></script>
+  <script src="researcher-navigation.js?v=20260825-1"></script>
 </body>
 </html>

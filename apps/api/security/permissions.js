@@ -1,8 +1,9 @@
 /**
  * Canonical authentication, role permissions and tenant-scope checks.
  *
- * `admin` is the database/JWT representation of platform-admin. Every other
- * staff role must have both organization and project membership.
+ * `admin` is the internal platform bootstrap role. User-facing organization
+ * administrators use `org_admin`; developers have technical UI access but no
+ * tenant data permissions.
  */
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -11,6 +12,7 @@ const { pool } = require('../db');
 
 const ROLES = Object.freeze([
   'admin',
+  'org_admin',
   'PI',
   'researcher',
   'analyst',
@@ -46,6 +48,7 @@ const ALL_NON_PLATFORM_OPERATIONS = Object.values(OPERATIONS)
 
 const ROLE_OPERATIONS = Object.freeze({
   admin: new Set(Object.values(OPERATIONS)),
+  org_admin: new Set(ALL_NON_PLATFORM_OPERATIONS),
   PI: new Set(ALL_NON_PLATFORM_OPERATIONS),
   researcher: new Set([
     OPERATIONS.ORGANIZATION_READ,
@@ -83,30 +86,16 @@ const ROLE_OPERATIONS = Object.freeze({
     OPERATIONS.SESSION_WRITE,
     OPERATIONS.STIMULUS_READ,
   ]),
-  // Developer workflow: project -> protocol -> publish -> invitation ->
-  // session -> analytics/export, always inside explicit tenant membership.
-  developer: new Set([
-    OPERATIONS.ORGANIZATION_READ,
-    OPERATIONS.PROJECT_READ,
-    OPERATIONS.PROJECT_CREATE,
-    OPERATIONS.PROJECT_UPDATE,
-    OPERATIONS.PROTOCOL_READ,
-    OPERATIONS.PROTOCOL_WRITE,
-    OPERATIONS.PROTOCOL_PUBLISH,
-    OPERATIONS.INVITATION_READ,
-    OPERATIONS.INVITATION_WRITE,
-    OPERATIONS.SESSION_READ,
-    OPERATIONS.SESSION_WRITE,
-    OPERATIONS.ANALYTICS_READ,
-    OPERATIONS.EXPORT_READ,
-    OPERATIONS.STIMULUS_READ,
-    OPERATIONS.STIMULUS_WRITE,
-  ]),
+  developer: new Set(),
   respondent: new Set(),
 });
 
 function isPlatformAdmin(user) {
   return Boolean(user) && user.role === 'admin';
+}
+
+function isOrganizationAdmin(user) {
+  return Boolean(user) && user.role === 'org_admin';
 }
 
 function canRolePerform(role, operation) {
@@ -204,7 +193,10 @@ function requireRole(...allowedRoles) {
     if (!req.user?.role) {
       return res.status(403).json({ error: 'Forbidden', message: 'Role required' });
     }
-    if (!allowed.has(req.user.role)) {
+    // Existing routes name the legacy PI lead role. `org_admin` is its explicit
+    // user-facing successor and receives the same non-platform route surface.
+    const organizationAdminAlias = isOrganizationAdmin(req.user) && allowed.has('PI');
+    if (!allowed.has(req.user.role) && !organizationAdminAlias) {
       return res.status(403).json({ error: 'Forbidden', message: 'Insufficient role' });
     }
     return next();
@@ -247,13 +239,14 @@ async function hasOrganizationMembership(pool, organizationId, user) {
 async function hasProjectMembership(pool, projectId, user) {
   if (!projectId || !user) return false;
   if (isPlatformAdmin(user)) return true;
+  const organizationWide = isOrganizationAdmin(user);
   const result = await pool.query(
     `SELECT 1
      FROM projects p
      INNER JOIN user_organizations uo
        ON uo.organization_id = p.organization_id AND uo.user_id = $2
-     INNER JOIN user_projects up
-       ON up.project_id = p.id AND up.user_id = $2
+     ${organizationWide ? '' : `INNER JOIN user_projects up
+       ON up.project_id = p.id AND up.user_id = $2`}
      WHERE p.id = $1`,
     [projectId, user.sub]
   );
@@ -263,14 +256,15 @@ async function hasProjectMembership(pool, projectId, user) {
 async function hasProtocolMembership(pool, protocolId, user) {
   if (!protocolId || !user) return false;
   if (isPlatformAdmin(user)) return true;
+  const organizationWide = isOrganizationAdmin(user);
   const result = await pool.query(
     `SELECT 1
      FROM protocols pr
      INNER JOIN projects p ON p.id = pr.project_id
      INNER JOIN user_organizations uo
        ON uo.organization_id = p.organization_id AND uo.user_id = $2
-     INNER JOIN user_projects up
-       ON up.project_id = p.id AND up.user_id = $2
+     ${organizationWide ? '' : `INNER JOIN user_projects up
+       ON up.project_id = p.id AND up.user_id = $2`}
      WHERE pr.id = $1`,
     [protocolId, user.sub]
   );
@@ -280,6 +274,7 @@ async function hasProtocolMembership(pool, protocolId, user) {
 async function hasSessionMembership(pool, sessionId, user) {
   if (!sessionId || !user) return false;
   if (isPlatformAdmin(user)) return true;
+  const organizationWide = isOrganizationAdmin(user);
   const result = await pool.query(
     `SELECT 1
      FROM sessions s
@@ -287,8 +282,8 @@ async function hasSessionMembership(pool, sessionId, user) {
      INNER JOIN projects p ON p.id = COALESCE(s.project_id, pr.project_id)
      INNER JOIN user_organizations uo
        ON uo.organization_id = p.organization_id AND uo.user_id = $2
-     INNER JOIN user_projects up
-       ON up.project_id = p.id AND up.user_id = $2
+     ${organizationWide ? '' : `INNER JOIN user_projects up
+       ON up.project_id = p.id AND up.user_id = $2`}
      WHERE (s.id::text = $1::text OR s.session_id = $1::text)`,
     [sessionId, user.sub]
   );
@@ -301,7 +296,9 @@ function buildPermissionSnapshot(user) {
     .filter(operation => canRolePerform(role, operation));
   return {
     role: role || null,
-    scope: role === 'admin' ? 'platform' : 'tenant_membership',
+    scope: role === 'admin'
+      ? 'platform'
+      : (role === 'developer' ? 'technical_only' : 'tenant_membership'),
     operations,
     is_platform_admin: role === 'admin',
   };
@@ -320,6 +317,7 @@ module.exports = {
   requireOperation,
   requirePlatformAdmin,
   isPlatformAdmin,
+  isOrganizationAdmin,
   hasOrganizationMembership,
   hasProjectMembership,
   hasProtocolMembership,

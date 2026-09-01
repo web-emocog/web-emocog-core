@@ -267,6 +267,7 @@ export function buildHeatmaps(samples, options = {}) {
         }
 
         const blockId = sample?.blockId ?? null;
+        const attempt = sample?.attempt ?? null;
         const trialId = sample?.trialId ?? null;
         const stimulusId = sample?.stimulusId ?? null;
         const stimulusType = sample?.stimulusType ?? null;
@@ -274,11 +275,13 @@ export function buildHeatmaps(samples, options = {}) {
         const isStimulusPhase = sample?.phase === 'cognitive_stimulus';
 
         if (isStimulusPhase && blockId != null && stimulusId != null) {
-            const perStimulusKey = `${String(blockId)}::${String(trialId ?? 'trial')}::${String(stimulusId)}`;
+            const attemptKey = String(attempt ?? 'attempt');
+            const perStimulusKey = `${String(blockId)}::${attemptKey}::${String(trialId ?? 'trial')}::${String(stimulusId)}`;
             if (!perStimulusMap.has(perStimulusKey)) {
                 perStimulusMap.set(perStimulusKey, {
                     meta: {
                         blockId,
+                        attempt,
                         trialId,
                         stimulusId,
                         stimulusName: sample?.stimulusName ?? null,
@@ -288,7 +291,7 @@ export function buildHeatmaps(samples, options = {}) {
                         intrinsicWidth: sample?.stimulusRect?.intrinsicWidth ?? null,
                         intrinsicHeight: sample?.stimulusRect?.intrinsicHeight ?? null,
                         presentationStartMs: Number.isFinite(sample?.tRelMs) ? sample.tRelMs : t,
-                        presentationId: `${String(blockId)}:${String(trialId ?? 'trial')}:${String(stimulusId)}`
+                        presentationId: `${String(blockId)}:${attemptKey}:${String(trialId ?? 'trial')}:${String(stimulusId)}`
                     },
                     acc: createAccumulator(width, height)
                 });

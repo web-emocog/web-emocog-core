@@ -76,7 +76,10 @@ function buildAnalysisResult(prepared, config) {
   }
 
   const abstainReasons = []; // Причины воздержания
+  const hasVoicedPitch = Number(features.pitch_mean_hz || 0) >= 50
+    && Number(features.pitch_mean_hz || 0) <= 350;
   if (quality.is_ood) abstainReasons.push("quality_ood");
+  if (!hasVoicedPitch) abstainReasons.push("low_voiced_coverage");
   if (markerResult.confidence < config.abstain_confidence_threshold) abstainReasons.push("low_marker_confidence");
   if (quality.score < config.abstain_quality_threshold) abstainReasons.push("low_quality_score");
 

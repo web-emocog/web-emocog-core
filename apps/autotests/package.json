@@ -7,7 +7,8 @@
     "typecheck": "tsc --noEmit",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
-    "test:api": "RUN_API_CONTRACT=1 playwright test tests/api-contract.spec.ts"
+    "test:api": "RUN_API_CONTRACT=1 playwright test tests/api-contract.spec.ts",
+    "test:researcher": "RUN_RESEARCHER_CONTRACT=1 playwright test tests/researcher-regression.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.0.0",

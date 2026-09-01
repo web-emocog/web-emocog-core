@@ -86,6 +86,16 @@ router.post(
           'INSERT INTO projects (organization_id, name, slug) VALUES ($1, $2, $3) RETURNING id, organization_id, name, slug, created_at',
           [organization_id, name, slug]
         );
+        await client.query(
+          `INSERT INTO user_projects (user_id, project_id, role)
+           SELECT u.id, $1, 'org_admin'
+           FROM users u
+           INNER JOIN user_organizations uo
+             ON uo.user_id = u.id AND uo.organization_id = $2
+           WHERE u.role = 'org_admin'
+           ON CONFLICT (user_id, project_id) DO UPDATE SET role = EXCLUDED.role`,
+          [r.rows[0].id, organization_id]
+        );
         if (!isPlatformAdmin(req.user)) {
           await client.query(
             `INSERT INTO user_projects (user_id, project_id, role)

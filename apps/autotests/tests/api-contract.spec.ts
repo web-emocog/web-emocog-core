@@ -35,7 +35,7 @@ test.describe('API smoke/contract', () => {
     expect(payload.token.length).toBeGreaterThan(10);
   });
 
-  test('ingest requires token or invitation code', async ({ request }) => {
+  test('ingest rejects an unauthenticated request without exposing admission details', async ({ request }) => {
     const ingestRes = await request.post(`${API_BASE}/ingest`, {
       data: {
         ids: {
@@ -46,7 +46,7 @@ test.describe('API smoke/contract', () => {
 
     expect(ingestRes.status()).toBe(401);
     const payload = await ingestRes.json();
-    expect(String(payload?.error || '')).toContain('token or ids.invitationCode required');
+    expect(payload?.error).toBe('Unauthorized');
   });
 
   test('export supports pagination and enforces RBAC', async ({ request }) => {
@@ -134,9 +134,9 @@ test.describe('API smoke/contract', () => {
       }
     });
 
-    expect(ingestRes.status()).toBe(409);
+    expect(ingestRes.status()).toBe(403);
     const ingestPayload = await ingestRes.json();
-    expect(ingestPayload.code).toBe('session_must_be_precreated');
+    expect(ingestPayload.error).toBe('Forbidden');
   });
 
   test('export includes blocks and qc keys when privileged token provided', async ({ request }) => {

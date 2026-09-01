@@ -67,7 +67,6 @@ export async function navigateToStep(page: Page, targetStep: string): Promise<vo
     // Логика навигации по шагам
     if (currentStep === 'step1') {
       await page.getByRole('button', { name: /Начать|Start/i }).click();
-      await page.waitForTimeout(500);
     } else if (currentStep === 'step2') {
       // Проверяем чекбокс согласия
       const consentCheck = page.locator('#consentCheck');
@@ -78,7 +77,6 @@ export async function navigateToStep(page: Page, targetStep: string): Promise<vo
       const consentBtn = page.locator('#consentBtn');
       await expect(consentBtn).toBeEnabled({ timeout: 2000 });
       await consentBtn.click();
-      await page.waitForTimeout(500);
     } else if (currentStep === 'step3') {
       // Заполняем email если пустой
       const emailInput = page.locator('#userEmail');
@@ -89,7 +87,6 @@ export async function navigateToStep(page: Page, targetStep: string): Promise<vo
         await page.waitForTimeout(300);
       }
       await page.getByRole('button', { name: /Далее|Next/i }).click();
-      await page.waitForTimeout(500);
     } else if (currentStep === 'step4') {
       // Заполняем обязательные поля анкеты
       const age = page.locator('#age');
@@ -126,7 +123,6 @@ export async function navigateToStep(page: Page, targetStep: string): Promise<vo
       const formBtn = page.locator('#formBtn');
       await expect(formBtn).toBeEnabled({ timeout: 3000 });
       await formBtn.click();
-      await page.waitForTimeout(500);
     } else {
       // Для других шагов ищем кнопку "Далее"
       const nextBtn = page.locator('.step.active').getByRole('button', { 
@@ -135,11 +131,16 @@ export async function navigateToStep(page: Page, targetStep: string): Promise<vo
       
       if (await nextBtn.count() > 0) {
         await nextBtn.click();
-        await page.waitForTimeout(500);
       } else {
         throw new Error(`Cannot find navigation button on step ${currentStep}`);
       }
     }
+
+    // Camera/FPS collection can take longer than a fixed delay, especially in Firefox.
+    await expect.poll(
+      async () => getActiveStep(page),
+      { timeout: 10_000, intervals: [100, 200, 500] }
+    ).not.toBe(currentStep);
   }
 
   const finalStep = await getActiveStep(page);
@@ -155,4 +156,3 @@ export async function expectStayOnStep(page: Page, stepId: string): Promise<void
   const currentStep = await getActiveStep(page);
   expect(currentStep).toBe(stepId);
 }
-

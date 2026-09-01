@@ -1,7 +1,13 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
 import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js';
-import { translations } from '../../translations.js';
+import { translations } from '../../translations.js?v=20260828-2';
 import { measureCameraFPS } from './camera.js';
+import {
+    captureHeadPoseReference,
+    resetHeadPoseReference,
+    setHeadPoseGuideMode,
+    updateHeadPoseGuide
+} from '../gaze-tracker/head-pose-guide.js';
 
 function dbg(scope, event, data) {
     try {
@@ -45,6 +51,9 @@ function tt(key) {
     const langPack = translations[state.currentLang] || {};
     const value = langPack[key];
     if (typeof value !== 'undefined' && value !== null && value !== '') return value;
+    if (key.startsWith('tip_') && langPack.precheck_generic_tip) {
+        return langPack.precheck_generic_tip;
+    }
     logMissingI18nOnce(key, 'tt');
     return PRECHECK_TEXT_FALLBACK[key] || key;
 }
@@ -80,10 +89,20 @@ function logMissingI18nOnce(key, context) {
     }
 }
 
+function setCalibrationButtonState(button, { visible, enabled = false }) {
+    if (!button) return;
+    button.classList.toggle('hidden', !visible);
+    button.style.removeProperty('display');
+    button.disabled = !enabled;
+}
+
 export async function startPreCheck() {
     console.log('Запуск pre-check камеры...');
     dbg('precheck', 'startPreCheck:clicked', {});
     ensurePrecheckLayoutStyles();
+    resetHeadPoseReference();
+    setHeadPoseGuideMode('precheck');
+    state.runtime.headPoseReference = null;
 
     if (state.flags.isPrecheckRunning) {
         stopPreCheck();
@@ -96,8 +115,7 @@ export async function startPreCheck() {
     const precheckStatus = document.querySelector('.precheck-status');
     
     startPrecheckBtn.style.display = 'none';
-    startCalibBtn.style.display = 'block';
-    startCalibBtn.disabled = true;
+    setCalibrationButtonState(startCalibBtn, { visible: true });
     
     statusMessage.textContent = translations[state.currentLang].precheck_requesting;
     precheckStatus.className = 'precheck-status waiting-bg';
@@ -191,7 +209,7 @@ export async function startPreCheck() {
         precheckStatus.className = 'precheck-status error-bg';
         
         startPrecheckBtn.style.display = 'block';
-        startCalibBtn.style.display = 'none';
+        setCalibrationButtonState(startCalibBtn, { visible: false });
         
     }
 }
@@ -276,9 +294,7 @@ export function updateIndicators(data) {
     updatePoseIndicator(data.pose);
     updateVisibilityIndicator(data.visibility);
 
-    if (data.face && data.face.detected && data.face.bbox) {
-        drawFaceOverlay(data.face);
-    }
+    updateHeadPoseGuide(data);
 }
 
 /**
@@ -364,6 +380,9 @@ export function checkAllIndicators() {
     }
     
     const isConsistentSuccess = state.runtime.successFrames >= CONSTANTS.REQUIRED_SUCCESS_FRAMES;
+    if (isConsistentSuccess && !state.runtime.headPoseReference) {
+        state.runtime.headPoseReference = captureHeadPoseReference(state.runtime.precheckData);
+    }
 
     // Фаза 1.1: gate — записываем в sessionData.precheck для калибровки и отчётов
     const pass_fail = allPassed && isConsistentSuccess;
@@ -371,10 +390,13 @@ export function checkAllIndicators() {
     state.sessionData.precheck = {
         pass_fail,
         fail_reason,
+        head_pose_reference: state.runtime.headPoseReference
+            ? { ...state.runtime.headPoseReference }
+            : null,
         timestamp: Date.now()
     };
-    // Кнопка «Начать калибровку» активна только при pass_fail === true
-    if (startCalibBtn) startCalibBtn.disabled = !pass_fail;
+    // Кнопка видна во время проверки и активна только после устойчивого успеха.
+    setCalibrationButtonState(startCalibBtn, { visible: true, enabled: pass_fail });
 
     // Логируем только переходы precheck-состояний (без спама каждый кадр).
     const snapshot = {
@@ -435,7 +457,7 @@ export function checkAllIndicators() {
     
     statusMessage.innerHTML = statusHTML;
     
-    startCalibBtn.style.display = 'block';
+    setCalibrationButtonState(startCalibBtn, { visible: true, enabled: pass_fail });
 }
 
 export function resetIndicatorsToWaiting() {
@@ -471,6 +493,8 @@ export function resetIndicatorsToWaiting() {
     };
     
     state.runtime.successFrames = 0;
+    state.runtime.headPoseReference = null;
+    resetHeadPoseReference();
     
     const guideText = document.querySelector('.guide-text');
     if (guideText) {
@@ -494,10 +518,7 @@ export function resetIndicatorsToWaiting() {
         startPrecheckBtn.disabled = false;
     }
     
-    if (startCalibBtn) {
-        startCalibBtn.style.display = 'none';
-        startCalibBtn.disabled = true;
-    }
+    setCalibrationButtonState(startCalibBtn, { visible: false });
 }
 
 export function collectTips() {
@@ -567,17 +588,17 @@ export function collectTips() {
                 if (pose.issues.includes('yaw_exceeded')) {
                     // yaw > 0 — голова повёрнута вправо, нужно повернуть влево
                     if (pose.yaw > 0) {
-                        tips.push(translations[state.currentLang].tip_pose_turn_down);
+                        tips.push(translations[state.currentLang].tip_pose_turn_left);
                     } else {
-                        tips.push(translations[state.currentLang].tip_pose_turn_up);
+                        tips.push(translations[state.currentLang].tip_pose_turn_right);
                     }
                 }
                 if (pose.issues.includes('pitch_exceeded')) {
                     // pitch > 0 — голова опущена, нужно поднять
                     if (pose.pitch > 0) {
-                        tips.push(translations[state.currentLang].tip_pose_tilt_right);
+                        tips.push(translations[state.currentLang].tip_pose_raise_head);
                     } else {
-                        tips.push(translations[state.currentLang].tip_pose_tilt_left);
+                        tips.push(translations[state.currentLang].tip_pose_lower_head);
                     }
                 }
                 if (pose.issues.includes('roll_exceeded')) {
@@ -870,70 +891,6 @@ export function updateVisibilityIndicator(data) {
     statusEl.textContent = statusText;
     indicator.className = `indicator ${indicatorClass}`;
     state.indicatorsStatus.visibility = indicatorClass || null;
-}
-
-export function drawFaceOverlay(faceData) {
-    const canvas = document.getElementById('overlayCanvas');
-    const ctx = canvas.getContext('2d');
-    const video = document.getElementById('precheckVideo');
-    
-    if (!video.videoWidth || !video.videoHeight) return;
-    
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-    }
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    if (faceData.detected && faceData.bbox) {
-        const bbox = faceData.bbox;
-        
-        // Инвертируем X координату для зеркального отображения
-        // Видео отображается с transform: scaleX(-1), поэтому bbox тоже нужно отзеркалить
-        const mirroredX = 1 - bbox.x - bbox.width;
-        
-        const x = mirroredX * canvas.width;
-        const y = bbox.y * canvas.height;
-        const width = bbox.width * canvas.width;
-        const height = bbox.height * canvas.height;
-        
-        let color, lineWidth;
-        switch(faceData.status) {
-            case 'optimal':
-                color = '#10B981'; // green
-                lineWidth = 2;
-                break;
-            case 'too_small':
-            case 'too_large':
-            case 'out_of_zone':
-            case 'tilted':
-                color = '#EF4444'; // red
-                lineWidth = 3;
-                break;
-            default:
-                color = '#F59E0B'; // orange
-                lineWidth = 2;
-        }
-        
-        // bounding box
-        ctx.strokeStyle = color;
-        ctx.lineWidth = lineWidth;
-        ctx.strokeRect(x, y, width, height);
-
-        // В пользовательской версии не показываем проценты размера лица,
-        // чтобы не вводить в заблуждение (важен зелёный статус, а не число).
-        // Процент оставляем только через dev-режим (state.flags.debug).
-        if (state.flags && state.flags.debug) {
-            ctx.fillStyle = color;
-            ctx.font = 'bold 14px Arial';
-            ctx.fillText(
-                `${Math.round(faceData.size)}%`,
-                x + width + 5,
-                y + height / 2
-            );
-        }
-    }
 }
 
 /**

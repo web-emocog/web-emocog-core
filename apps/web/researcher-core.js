@@ -22,10 +22,12 @@ const state={
 };
 
 // Phase 3: API config and auth (researcher dashboards)
-window.API_BASE = window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api');
-window.API_TOKEN = window.API_TOKEN || localStorage.getItem('emocog_api_token') || '';
-function authHeaders(){ const h = {}; if(window.API_TOKEN) h['Authorization'] = 'Bearer '+window.API_TOKEN; const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
-function apiHeaders(){ const h = {'Content-Type':'application/json'}; if(window.API_TOKEN) h['Authorization'] = 'Bearer '+window.API_TOKEN; return h; }
+window.API_BASE = window.EmocogApiBase
+  ? window.EmocogApiBase.resolve()
+  : (window.API_BASE || (window.location.origin + '/api'));
+window.API_TOKEN = '';
+function authHeaders(){ const h = {}; const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
+function apiHeaders(){ return {'Content-Type':'application/json'}; }
 async function apiFailError(r){
   let detail = r.statusText || '';
   try{
@@ -65,7 +67,7 @@ function getParticipantWebBasePath(){
 function buildParticipantRunLink(codeOrProtocolId){
   var code = String(codeOrProtocolId || '').trim();
   if (!code) return getParticipantWebBasePath() + 'run_new.html';
-  return (window.location.origin || '') + '/invite/' + encodeURIComponent(code);
+  return getParticipantWebBasePath() + 'run_new.html?code=' + encodeURIComponent(code);
 }
 window.getParticipantWebBasePath = getParticipantWebBasePath;
 window.buildParticipantRunLink = buildParticipantRunLink;
@@ -84,10 +86,11 @@ function redirectLegacyParticipantInviteHash() {
 }
 
 function getApiBaseForResearcher() {
-  return String(window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+  return String(window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
 }
 function hasResearcherApiToken() {
-  return !!(window.API_TOKEN || localStorage.getItem('emocog_api_token') || localStorage.getItem('emocog_developer_auth'));
+  return localStorage.getItem('emocog_developer_auth') === '1'
+    || sessionStorage.getItem('emocog_developer_auth') === '1';
 }
 function builderApiStateKey(experimentKey) {
   return 'emocog_builder_api_' + (experimentKey || 'draft');
@@ -149,12 +152,25 @@ async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
   if (targetProtocolId && !options.forceCreate) {
     saved = await apiPatch('/protocols/' + targetProtocolId, payload);
   } else {
-    saved = await apiPost('/protocols', Object.assign({ project_id: projectId }, payload));
+    try {
+      saved = await apiPost('/protocols', Object.assign({ project_id: projectId }, payload));
+    } catch (error) {
+      if (!/^409\b/.test(String(error && error.message || error))) throw error;
+      // Recover only the same stable protocol identity. Matching by title alone
+      // could overwrite a different researcher's protocol after local state loss.
+      var protocols = await apiGet('/protocols?project_id=' + encodeURIComponent(String(projectId)));
+      var matching = Array.isArray(protocols) ? protocols.find(function (protocol) {
+        return String(protocol && protocol.definition && protocol.definition.protocolId || '') === String(definition.protocolId || '');
+      }) : null;
+      if (!matching || !matching.id || !definition.protocolId) throw error;
+      saved = await apiPatch('/protocols/' + matching.id, payload);
+    }
   }
   saveBuilderApiState(experimentKey, {
     apiProtocolId: saved.id,
     projectId: saved.project_id || projectId,
-    invitationCode: options.invitationCode || apiState.invitationCode || null
+    invitationCode: options.invitationCode || apiState.invitationCode || null,
+    publishVerifiedAt: null
   });
   localStorage.setItem('emocog_selected_project_id', String(saved.project_id || projectId));
   return saved;
@@ -174,23 +190,36 @@ async function publishBuilderProtocolAndInvitation(exportJson, experimentKey, pr
   var apiState = loadBuilderApiState(experimentKey);
   var publishOpts = {};
   var existingInvitation = null;
-  var existingCode = apiState.invitationCode || slug;
-  try {
-    existingInvitation = await apiGet(
-      '/invitations/by-code/' + encodeURIComponent(existingCode)
-    );
-    if (existingInvitation && existingInvitation.protocol_id) {
-      publishOpts.forceProtocolId = parseInt(existingInvitation.protocol_id, 10);
-    }
-  } catch (_) { /* новый код — создаём протокол как обычно */ }
+  var existingCode = apiState.invitationCode;
+  if (existingCode) {
+    try {
+      existingInvitation = await apiGet(
+        '/invitations/by-code/' + encodeURIComponent(existingCode)
+      );
+      if (existingInvitation && existingInvitation.protocol_id) {
+        publishOpts.forceProtocolId = parseInt(existingInvitation.protocol_id, 10);
+      }
+    } catch (_) { /* сохранённое приглашение больше недоступно — создадим новое */ }
+  }
   var savedProtocol = await persistBuilderProtocolToApi(exportJson, experimentKey, publishOpts);
   var inv = existingInvitation && Number(existingInvitation.protocol_id) === Number(savedProtocol.id)
     ? existingInvitation
-    : await createInvitationForProtocol(savedProtocol.id);
+    : null;
+  if (!inv) {
+    var invitations = await apiGet('/invitations?protocol_id=' + encodeURIComponent(String(savedProtocol.id)));
+    var now = Date.now();
+    inv = Array.isArray(invitations) ? invitations.find(function (candidate) {
+      var withinExpiry = !candidate.expires_at || Date.parse(candidate.expires_at) > now;
+      var withinRuns = candidate.max_runs == null || Number(candidate.runs_used || 0) < Number(candidate.max_runs);
+      return withinExpiry && withinRuns;
+    }) : null;
+  }
+  if (!inv) inv = await createInvitationForProtocol(savedProtocol.id);
   saveBuilderApiState(experimentKey, {
     apiProtocolId: savedProtocol.id,
     invitationCode: inv.code,
-    projectId: savedProtocol.project_id
+    projectId: savedProtocol.project_id,
+    publishVerifiedAt: new Date().toISOString()
   });
   return {
     protocol: savedProtocol,
@@ -338,35 +367,19 @@ function setAdminMode(enabled){
   $('#app').classList.toggle('admin-mode', enabled);
 }
 
-function getSelectedProjectRouteId(){
-  const select = $('#projectSelect');
-  const stored = localStorage.getItem('emocog_selected_project_id');
-  const value = stored || select?.value || '';
-  return value ? encodeURIComponent(String(value)) : null;
-}
-
-function updateProjectNavigation(){
-  const wrap = $('#projectNavigationWrap');
-  if(!wrap) return;
-  const projectId = getSelectedProjectRouteId();
-  wrap.style.display = projectId ? '' : 'none';
-  wrap.querySelectorAll('[data-project-section]').forEach(link=>{
-    const section = link.dataset.projectSection;
-    link.href = projectId
-      ? `#/projects/${projectId}/${section}`
-      : '#/experiments';
-  });
-}
-
 // Active navigation highlight
 function setActiveNav(route){
   // Clear all active states
-  document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
+  document.querySelectorAll('.nav a').forEach(a=>{
+    a.classList.remove('active');
+    a.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.nav .has-subnav').forEach(d=>d.classList.remove('active'));
 
   const el=$(`#nav-${route}`);
   if(el){
     el.classList.add('active');
+    if(!String(route || '').startsWith('analytics-')) el.setAttribute('aria-current','page');
     // If inside a subnav div, activate the parent div.has-subnav
     const parentHasSub = el.closest('.has-subnav');
     if(parentHasSub) parentHasSub.classList.add('active');
@@ -378,14 +391,20 @@ function setActiveNav(route){
     if(analyticsParent) analyticsParent.classList.add('active');
     // Also mark the main Analytics link as active
     const mainLink = $('#nav-analytics-session-card');
-    if(mainLink) mainLink.classList.add('active');
+    if(mainLink){
+      mainLink.classList.add('active');
+      mainLink.setAttribute('aria-current','page');
+    }
   }
   // For any stimuli route: expand the stimuli subnav
   if(route && route.startsWith('stimuli')){
     const stimuliParent = $('#nav-stimuli-parent');
     if(stimuliParent) stimuliParent.classList.add('active');
     const mainLink = $('#nav-stimuli');
-    if(mainLink) mainLink.classList.add('active');
+    if(mainLink){
+      mainLink.classList.add('active');
+      mainLink.setAttribute('aria-current','page');
+    }
   }
 }
 
@@ -445,52 +464,29 @@ function render(hashOverride){
   const view=$('#view');
   let routeKey=route;
   const subKey=parts[1]||'';
-  const projectSection = routeKey === 'projects' ? (parts[2] || 'overview') : null;
-  if(routeKey === 'projects' && parts[1] && parts[1] !== 'current'){
-    localStorage.setItem('emocog_selected_project_id', decodeURIComponent(parts[1]));
-  }
-  let viewRoute = routeKey;
-  let viewSubKey = subKey;
-  if(routeKey === 'projects'){
-    const projectRouteMap = {
-      overview: 'overview',
-      protocols: 'experiments',
-      participants: 'sessions',
-      monitoring: 'analytics',
-      results: 'analytics',
-      settings: 'settings'
-    };
-    viewRoute = projectRouteMap[projectSection] || 'overview';
-    viewSubKey = projectSection === 'monitoring'
-      ? 'data-quality'
-      : (projectSection === 'results' ? 'session-card' : '');
-  }
   let rk=routeKey;
-  if(projectSection){
-    rk = `project-${projectSection}`;
-  } else if(routeKey==='analytics'){
+  if(routeKey==='analytics'){
     // For analytics sub-routes, highlight the specific subnav item
     rk = subKey ? `analytics-${subKey}-sub` : 'analytics-session-card';
   }
 
-  updateProjectNavigation();
   setActiveNav(rk);
 
   // Set analytics mode for analytics routes
-  setAnalyticsMode(viewRoute === 'analytics');
-  setOverviewMode(viewRoute === 'overview');
-  setStimuliMode(viewRoute === 'stimuli');
-  setAdminMode(viewRoute === 'admin');
-  setSettingsMode(viewRoute === 'settings');
+  setAnalyticsMode(routeKey === 'analytics');
+  setOverviewMode(routeKey === 'overview');
+  setStimuliMode(routeKey === 'stimuli');
+  setAdminMode(routeKey === 'admin');
+  setSettingsMode(routeKey === 'settings');
   setExperimentsActiveMode(false);
   setExperimentsConstructorMode(false);
 
   // Create new page content
   let node;
 
-  if(viewRoute==='overview') node=OverviewView();
+  if(routeKey==='overview') node=OverviewView();
   //(Аня)
-  else if (viewRoute === 'experiments') {
+  else if (routeKey === 'experiments') {
     if (parts[1] === 'builder') {
       setExperimentsConstructorMode(true);
       const urlParams = new URLSearchParams(window.location.search);
@@ -504,17 +500,17 @@ function render(hashOverride){
       node = ExperimentsListView();
     }
   }
-  else if(viewRoute==='stimuli') {
+  else if(routeKey==='stimuli') {
     // Sub-routes: /stimuli/all, /stimuli/library, /stimuli/upload — handled inside StimuliAOIView via selectedFolder/tab state
     if (subKey === 'all') { selectedFolder = null; currentStimuliFilter = 'all'; }
     node = StimuliAOIView();
   }//конец
-  else if(viewRoute==='sessions') node=SessionsView();
-  else if(viewRoute==='analytics') node=AnalyticsView(viewSubKey||'session-card');
-  else if(viewRoute==='export') node=ExportView();
-  else if(viewRoute==='admin') node=AdminView();
-  else if(viewRoute==='settings') node=SettingsView();
-  else if(viewRoute==='billing') node=BillingView();
+  else if(routeKey==='sessions') node=SessionsView();
+  else if(routeKey==='analytics') node=AnalyticsView(subKey||'session-card');
+  else if(routeKey==='export') node=ExportView();
+  else if(routeKey==='admin') node=AdminView();
+  else if(routeKey==='settings') node=SettingsView();
+  else if(routeKey==='billing') node=BillingView();
   else node=OverviewView();
 
   // Instantly replace content - NO wrapper, NO animation
@@ -551,19 +547,14 @@ function startNewExperimentBuilder() {
 // Event listeners
 //$('#orgSelect').addEventListener('change',e=>{state.org=e.target.value.replace('Org: ','');render();toast('Org changed');});
 $('#projectSelect').addEventListener('change',e=>{
-  const select = e.target;
-  const option = select.options[select.selectedIndex];
-  state.project = option?.textContent || '';
-  if(select.value){
-    localStorage.setItem('emocog_selected_project_id', String(select.value));
-    localStorage.setItem('emocog_selected_workspace_project_id', String(select.value));
-    navigate(`#/projects/${encodeURIComponent(String(select.value))}/overview`);
-  }else{
-    localStorage.removeItem('emocog_selected_project_id');
-    localStorage.removeItem('emocog_selected_workspace_project_id');
-    navigate('#/experiments');
-  }
-  toast(CURRENT_LANG === 'en' ? 'Project changed' : 'Проект выбран');
+  state.project=e.target.value.replace('Project: ','');
+  try {
+    const workspaceProjects = JSON.parse(localStorage.getItem('emocog_ws_projects')) || [];
+    const workspaceProject = workspaceProjects.find(project => project.name === state.project || String(project.id) === String(e.target.value));
+    if (workspaceProject) localStorage.setItem('emocog_selected_workspace_project_id', String(workspaceProject.id));
+  } catch (_) { /* keep the previously selected project id */ }
+  render();
+  toast(CURRENT_LANG === 'en' ? 'Project changed' : 'Проект изменён');
 });
 // quick export replaced by + Create menu
 
@@ -665,7 +656,7 @@ bootstrapAdminAccess();
   // ── i18n texts ──
   const WS_TEXTS = {
     ru: {
-      title: 'Добро пожаловать<br>на платформу <span class="hl">EMO COG!</span>',
+      title: 'Добро пожаловать<br>в <span class="hl">wecog</span>',
       desc: 'Здесь вы можете создавать новые эксперименты, отслеживать подробную аналитику по проектам и управлять своими медиафайлами.<br><br><b>Создайте проект</b> или выберите существующий — и нажмите кнопку ниже.',
       btn: 'Перейти к экспериментам',
       panelTitle: 'Ваши проекты',
@@ -681,7 +672,7 @@ bootstrapAdminAccess();
       selectHint: '← Выберите или создайте проект',
     },
     en: {
-      title: 'Welcome<br>to the <span class="hl">EMO COG</span> Platform!',
+      title: 'Welcome<br>to <span class="hl">wecog</span>',
       desc: 'Here you can create new experiments, track detailed analytics for your projects, and manage your media files.<br><br><b>Create a project</b> or select an existing one — then click the button below.',
       btn: 'Go to experiments',
       panelTitle: 'Your projects',
@@ -721,13 +712,14 @@ bootstrapAdminAccess();
   }
 
   // ── Sync selected project to left panel ──
-  function syncProjectToLeftPanel(projectName) {
+  function syncProjectToLeftPanel(projectName, projectId) {
     const sel = document.getElementById('projectSelect');
     if (!sel) return;
     // Check if option already exists
     let found = false;
     for (let i = 0; i < sel.options.length; i++) {
-      if (sel.options[i].textContent.trim() === projectName ||
+      if (String(sel.options[i].value) === String(projectId) ||
+          sel.options[i].textContent.trim() === projectName ||
           sel.options[i].value === projectName) {
         sel.selectedIndex = i;
         found = true;
@@ -783,7 +775,7 @@ bootstrapAdminAccess();
     }
 
     container.innerHTML = list.map(p => `
-      <div class="ws-proj-item ${selectedProjectId === p.id ? 'selected' : ''}" data-id="${escapeUiHtml(p.id)}" data-name="${escapeUiHtml(p.name)}">
+      <div class="ws-proj-item ${selectedProjectId === p.id ? 'selected' : ''}" data-no-auto-i18n data-id="${escapeUiHtml(p.id)}" data-name="${escapeUiHtml(p.name)}">
         <div class="ws-proj-dot">${escapeUiHtml(initials(p.name))}</div>
         <div class="ws-proj-info">
           <div class="ws-proj-name">${escapeUiHtml(p.name)}</div>
@@ -805,6 +797,23 @@ bootstrapAdminAccess();
       });
     });
   }
+
+  window.syncWelcomeProjects = function(projects) {
+    const list = (Array.isArray(projects) ? projects : []).map(function(project) {
+      return {
+        id: String(project.id),
+        name: String(project.name || ('Project ' + project.id)),
+        createdAt: project.created_at || project.createdAt || new Date().toISOString(),
+        organizationId: project.organization_id == null ? null : Number(project.organization_id),
+      };
+    });
+    saveProjects(list);
+    const preferred = localStorage.getItem('emocog_selected_project_id');
+    selectedProjectId = list.some(function(project) { return project.id === String(preferred); })
+      ? String(preferred)
+      : (list[0] ? list[0].id : null);
+    renderProjects();
+  };
 
   // ── Apply language ──
   function wsApplyLang(lang) {
@@ -856,6 +865,8 @@ bootstrapAdminAccess();
   function openModal() {
     if (!modal) return;
     if (wsModalInputEl) { wsModalInputEl.value = ''; }
+    const errorEl = document.getElementById('wsModalError');
+    if (errorEl) { errorEl.textContent = ''; errorEl.style.display = 'none'; }
     modal.classList.add('open');
     setTimeout(() => { if (wsModalInputEl) wsModalInputEl.focus(); }, 80);
   }
@@ -873,22 +884,50 @@ bootstrapAdminAccess();
     modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
   }
 
-  var doCreate = function() {
+  var doCreate = async function() {
     var name = (wsModalInputEl ? wsModalInputEl.value : '').trim();
     if (!name) {
       if (wsModalInputEl) { wsModalInputEl.style.borderColor = '#EF4444'; setTimeout(() => wsModalInputEl.style.borderColor = '', 1200); }
       return;
     }
-    var list = loadProjects();
-    var newProj = { id: 'proj_' + Date.now(), name: name, createdAt: new Date().toISOString() };
-    list.unshift(newProj);
-    saveProjects(list);
-    selectedProjectId = newProj.id;
-    closeModal();
-    renderProjects();
-    // Update enter button
-    var enterBtnEl = document.getElementById('wsEnterBtn');
-    if (enterBtnEl) enterBtnEl.disabled = false;
+    var errorEl = document.getElementById('wsModalError');
+    var createButton = document.getElementById('wsModalCreateBtn');
+    if (errorEl) { errorEl.textContent = ''; errorEl.style.display = 'none'; }
+    if (createButton) createButton.disabled = true;
+    try {
+      if (typeof apiGet !== 'function' || typeof apiPost !== 'function') {
+        throw new Error('API недоступен. Проверьте соединение и повторите попытку.');
+      }
+      var projects = await apiGet('/projects');
+      var organizationId = projects[0] && projects[0].organization_id;
+      if (!organizationId) {
+        var organizations = await apiGet('/organizations');
+        organizationId = organizations[0] && organizations[0].id;
+      }
+      if (!organizationId) {
+        throw new Error('Сначала администратор должен создать организацию и выдать доступ.');
+      }
+      var created = await apiPost('/projects', {
+        organization_id: Number(organizationId),
+        name: name,
+        slug: 'project-' + Date.now().toString(36),
+      });
+      selectedProjectId = String(created.id);
+      localStorage.setItem('emocog_selected_project_id', selectedProjectId);
+      if (window.EmocogResearcherBridge) {
+        await window.EmocogResearcherBridge.syncProjectsFromApi();
+      } else {
+        window.syncWelcomeProjects([created].concat(projects));
+      }
+      closeModal();
+    } catch (error) {
+      if (errorEl) {
+        errorEl.textContent = error && error.message ? error.message : 'Не удалось создать проект.';
+        errorEl.style.display = 'block';
+      }
+    } finally {
+      if (createButton) createButton.disabled = false;
+    }
   };
 
   var createBtn = document.getElementById('wsModalCreateBtn');
@@ -914,7 +953,8 @@ bootstrapAdminAccess();
       const proj = list.find(p => p.id === selectedProjectId);
       if (proj) {
         localStorage.setItem('emocog_selected_workspace_project_id', String(proj.id));
-        syncProjectToLeftPanel(proj.name);
+        localStorage.setItem('emocog_selected_project_id', String(proj.id));
+        syncProjectToLeftPanel(proj.name, proj.id);
         if (typeof navigate === 'function') navigate('#/overview');
         // Re-render overview to reflect project
         setTimeout(() => { if (typeof render === 'function') render(); }, 50);
@@ -930,7 +970,12 @@ bootstrapAdminAccess();
 
   // ── Init ──
   renderProjects();
-  wsApplyLang('ru');
+  let initialWorkspaceLanguage = 'ru';
+  try {
+    const savedLanguage = localStorage.getItem('wecog_researcher_language');
+    if (savedLanguage === 'ru' || savedLanguage === 'en') initialWorkspaceLanguage = savedLanguage;
+  } catch (_) {}
+  wsApplyLang(initialWorkspaceLanguage);
 })();
 // ===== END WELCOME SCREEN LOGIC =====
 

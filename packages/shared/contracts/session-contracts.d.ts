@@ -45,7 +45,10 @@ export interface SessionLifecycleV1 {
   currentBlock: Record<string, unknown> | null;
   repeatQueue: Array<Record<string, unknown>>;
   activeIssues: Array<Record<string, unknown>>;
-  modules?: Record<'gaze' | 'blinks' | 'rt' | 'bpm' | 'emotion' | 'bodyPose', string>;
+  modules?: Record<
+    'gaze' | 'blinks' | 'rt' | 'bpm' | 'emotion' | 'bodyPose' | 'audio' | 'multimodal',
+    string
+  >;
 }
 
 export interface SessionFeatureV1 {
@@ -64,6 +67,9 @@ export interface SessionFeatureV1 {
   blink_summary?: Record<string, unknown> | null;
   perclos_summary?: Record<string, unknown> | null;
   body_pose_summary?: Record<string, unknown> | null;
+  audio_summary?: Record<string, unknown> | null;
+  multimodal_summary?: Record<string, unknown> | null;
+  multimodal_heatmap?: Record<string, unknown> | null;
   emotion_summary?: Record<string, unknown> | null;
   bpm_summary?: Record<string, unknown> | null;
   rppg_summary?: Record<string, unknown> | null;
