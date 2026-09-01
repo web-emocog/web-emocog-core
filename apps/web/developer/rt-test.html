@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reaction Time — тест считывания нажатий</title>
+  <title>wecog — reaction time</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e8e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
@@ -36,8 +39,26 @@
     .stats span { font-size: 13px; color: #94a3b8; }
     .stats strong { color: #e8e8f0; }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
   <a href="../developer.html" class="back">← К тестам разработчика</a>
   <h1>Reaction Time — считывание нажатий</h1>
   <p class="sub">Go/NoGo: при зелёном «GO» нажмите Space или кликните. При красном «NO GO» не нажимайте. Лог в формате rt_component (JSONL).</p>
@@ -57,6 +78,6 @@
     <h2>Лог событий</h2>
     <div id="log"></div>
   </div>
-  <script src="rt-test.js"></script>
+  <script src="rt-test.js?v=20260820-2"></script>
 </body>
 </html>

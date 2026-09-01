@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Emotion Test — EmoCog</title>
+  <title>wecog — emotion test</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --border:rgba(92,102,189,.25); --ok:#10B981; --warn:#F59E0B; --danger:#ef4444; }
     * { box-sizing:border-box; margin:0; padding:0; }
@@ -30,9 +33,12 @@
     .timeline { width:100%; height:220px; border:1px solid var(--border); border-radius:10px; background:rgba(0,0,0,.18); }
     .legend { font-size:12px; color:var(--muted); margin-top:8px; display:flex; gap:14px; }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
-  <script src="../auth-guard.js"></script>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -84,7 +90,7 @@
           <div class="hint">FaceDetector API / fallback</div>
         </div>
         <div class="metric" style="grid-column:1/-1;">
-          <div class="k">доминирующая эмоция (эвристика)</div>
+          <div class="k">доминирующая эмоция (FACS, с калибровкой)</div>
           <div class="v" id="dominantV">—</div>
           <div class="hint" id="scoresHint">Топ-3 по scores</div>
         </div>
@@ -102,7 +108,8 @@
   </div>
 
   <script type="module">
-    import { getEmotionSample } from '../../participant-web/js/emotion-stub-new.js';
+    import { getEmotionSample, resetEmotionWiringState, startEmotionSession } from '../../participant-web/js/emotion-stub-new.js';
+    import { FilesetResolver, FaceLandmarker } from '../../participant-web/js/vendor/mediapipe/vision_bundle.mjs';
 
     const video = document.getElementById('video');
     const statusEl = document.getElementById('status');
@@ -121,7 +128,9 @@
     let timer = null;
     const points = [];
     const MAX_POINTS = 180;
-    const detector = ('FaceDetector' in window) ? new FaceDetector({ fastMode: true, maxDetectedFaces: 1 }) : null;
+    let faceLandmarker = null;
+    let lastVideoTime = -1;
+    let tickBusy = false;
 
     function setStatus(text, isErr) {
       statusEl.textContent = text;
@@ -180,59 +189,62 @@
       return clamp((sum / (targetW * targetH)) / 255, 0, 1);
     }
 
-    let lastFaceCenter = null;
-    async function detectFace() {
-      if (!detector || video.readyState < 2) return { detected: true, yaw: 0, pitch: 0, roll: 0, mode: 'fallback' };
+    async function initFaceLandmarker() {
+      if (faceLandmarker) return faceLandmarker;
+      const vision = await FilesetResolver.forVisionTasks('../../participant-web/js/vendor/mediapipe/wasm');
+      const common = {
+        runningMode: 'VIDEO', numFaces: 1,
+        minFaceDetectionConfidence: 0.55,
+        minFacePresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55,
+      };
+      const modelAssetPath = '../../participant-web/js/vendor/mediapipe/models/face_landmarker.task';
       try {
-        const faces = await detector.detect(video);
-        if (!Array.isArray(faces) || faces.length === 0) {
-          lastFaceCenter = null;
-          return { detected: false, yaw: 0, pitch: 0, roll: 0, mode: 'detector' };
-        }
-        const bb = faces[0]?.boundingBox;
-        if (!bb) return { detected: true, yaw: 0, pitch: 0, roll: 0, mode: 'detector' };
-        const cx = bb.x + bb.width / 2;
-        const cy = bb.y + bb.height / 2;
-        let yaw = 0;
-        let pitch = 0;
-        if (lastFaceCenter) {
-          yaw = clamp(((cx - lastFaceCenter.x) / Math.max(1, video.videoWidth)) * 80, -35, 35);
-          pitch = clamp(((cy - lastFaceCenter.y) / Math.max(1, video.videoHeight)) * 80, -35, 35);
-        }
-        lastFaceCenter = { x: cx, y: cy };
-        return { detected: true, yaw, pitch, roll: 0, mode: 'detector' };
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, { ...common, baseOptions:{ modelAssetPath, delegate:'GPU' } });
       } catch (_) {
-        return { detected: true, yaw: 0, pitch: 0, roll: 0, mode: 'fallback' };
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, { ...common, baseOptions:{ modelAssetPath, delegate:'CPU' } });
       }
+      return faceLandmarker;
     }
 
     async function tick() {
-      if (!stream || video.readyState < 2) return;
+      if (!stream || video.readyState < 2 || !faceLandmarker || tickBusy) return;
+      if (video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+      tickBusy = true;
       const brightness = meanBrightness();
-      const faceInfo = await detectFace();
-      const precheckResult = {
-        illumination: { meanBrightness: brightness },
-        face: { detected: faceInfo.detected !== null ? faceInfo.detected : true },
-        pose: { yaw: faceInfo.yaw, pitch: faceInfo.pitch, roll: faceInfo.roll },
-        eyes: { bothOpen: faceInfo.detected !== false }
-      };
-      const sample = getEmotionSample(precheckResult);
-      valenceEl.textContent = sample.valence.toFixed(3);
-      arousalEl.textContent = sample.arousal.toFixed(3);
-      brightnessEl.textContent = brightness.toFixed(3);
-      faceEl.textContent = faceInfo.detected ? 'yes' : 'no';
-      dominantEl.textContent = sample.dominant || 'neutral';
-      if (sample.scores && scoresHintEl) {
-        const top = Object.entries(sample.scores)
-          .sort(function (a, b) { return b[1] - a[1]; })
-          .slice(0, 3)
-          .map(function (e) { return e[0] + ' ' + (e[1] * 100).toFixed(0) + '%'; })
-          .join(' · ');
-        scoresHintEl.textContent = top || '—';
+      try {
+        const result = faceLandmarker.detectForVideo(video, performance.now());
+        const landmarks = result?.faceLandmarks?.[0] || null;
+        const sample = getEmotionSample(landmarks ? { landmarks } : { face:{ detected:false } });
+        valenceEl.textContent = Number.isFinite(sample.valence) ? sample.valence.toFixed(3) : '—';
+        arousalEl.textContent = Number.isFinite(sample.arousal) ? sample.arousal.toFixed(3) : '—';
+        brightnessEl.textContent = brightness.toFixed(3);
+        faceEl.textContent = landmarks ? 'yes' : 'no';
+        dominantEl.textContent = sample.dominant || 'unknown';
+        if (sample.calibrationReady === false) {
+          setStatus(`Калибровка нейтрального лица: ${sample.calibrationFrames || 0}/18. Смотрите спокойно в камеру.`);
+        } else if (!landmarks) {
+          setStatus('Результат не публикуется: лицо не обнаружено.', true);
+        } else {
+          setStatus('FACS-анализ активен. Слабые и неоднозначные сигналы остаются neutral.');
+        }
+        if (sample.scores && scoresHintEl) {
+          const top = Object.entries(sample.scores)
+            .sort(function (a, b) { return b[1] - a[1]; })
+            .slice(0, 3)
+            .map(function (e) { return e[0] + ' ' + (e[1] * 100).toFixed(0) + '%'; })
+            .join(' · ');
+          scoresHintEl.textContent = top || '—';
+        }
+        if (!sample.degraded && Number.isFinite(sample.valence) && Number.isFinite(sample.arousal)) {
+          points.push({ valence: sample.valence, arousal: sample.arousal });
+          if (points.length > MAX_POINTS) points.shift();
+          drawTimeline();
+        }
+      } finally {
+        tickBusy = false;
       }
-      points.push({ valence: sample.valence, arousal: sample.arousal });
-      if (points.length > MAX_POINTS) points.shift();
-      drawTimeline();
     }
 
     async function start() {
@@ -242,7 +254,11 @@
           video.srcObject = stream;
           await video.play();
         }
-        setStatus('Модуль эмоций запущен.');
+        setStatus('Загружаем локальную модель MediaPipe...');
+        await initFaceLandmarker();
+        resetEmotionWiringState();
+        startEmotionSession('developer-emotion-' + Date.now());
+        setStatus('Смотрите спокойно в камеру: идёт короткая персональная калибровка.');
         if (timer) clearInterval(timer);
         timer = setInterval(function () { tick().catch(function () {}); }, 350);
       } catch (err) {
@@ -260,6 +276,7 @@
         stream = null;
       }
       video.srcObject = null;
+      resetEmotionWiringState();
       setStatus('Остановлено.');
     }
 

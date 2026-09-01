@@ -103,6 +103,8 @@ export async function runVisuospatialDrawingTest(options = {}) {
         startBtn.addEventListener('click', onClick);
     });
 
+    if (typeof options.onStart === 'function') options.onStart();
+
     // 2. Переключаемся в fullscreen drawing overlay.
     hide(introCard);
     show(drawingOverlay, 'block');

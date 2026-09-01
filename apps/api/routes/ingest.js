@@ -6,8 +6,12 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { pool } = require('../db');
+const config = require('../config');
 const {
   authenticateBearerHeader,
+  canRolePerform,
+  OPERATIONS,
+  requireAuth,
   resolveCurrentStaffPrincipal,
   hasProjectMembership,
 } = require('../security/permissions');
@@ -338,14 +342,21 @@ function requireIngestCredential(req, res, next) {
     }
   }
 
-  const staffClaims = authenticateBearerHeader(authorization);
-  if (!staffClaims) {
-    return res.status(401).json({
-      error: 'Unauthorized ingest: token or ids.invitationCode required',
-    });
-  }
-  req.ingestStaffClaims = staffClaims;
-  return next();
+  // Researcher web uses an HttpOnly staff cookie. Reuse the canonical auth
+  // middleware here so cookie requests receive the same CSRF and revocation
+  // checks as every other state-changing staff endpoint.
+  return requireAuth(req, res, (error) => {
+    if (error) return next(error);
+    if (!canRolePerform(req.user?.role, OPERATIONS.SESSION_WRITE)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: `Operation not permitted: ${OPERATIONS.SESSION_WRITE}`,
+        required_permission: OPERATIONS.SESSION_WRITE,
+      });
+    }
+    req.ingestStaffClaims = req.user;
+    return next();
+  });
 }
 
 router.post(
@@ -361,6 +372,9 @@ router.post(
     body('precheck').optional({ nullable: true }).isObject(),
     body('qcSummary').optional({ nullable: true }).isObject(),
     body('attentionMetrics').optional({ nullable: true }).isObject(),
+    body('audio_summary').optional({ nullable: true }).isObject(),
+    body('multimodal_summary').optional({ nullable: true }).isObject(),
+    body('multimodal_heatmap').optional({ nullable: true }).isObject(),
     body('emotion_summary').optional({ nullable: true }).isObject(),
     body('experimentMeta').optional({ nullable: true }).isObject(),
     body('cognitiveResults').optional({ nullable: true }).isArray(),
@@ -418,7 +432,8 @@ router.post(
         if (staffClaims) {
           const principal = await resolveCurrentStaffPrincipal(
             client,
-            req.headers.authorization
+            req.headers.authorization,
+            req.cookies?.[config.auth.staffCookieName]
           );
           if (!principal) {
             throw new HttpError(

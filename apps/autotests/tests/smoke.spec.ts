@@ -2,10 +2,46 @@ import { test, expect } from '@playwright/test';
 import { getPageUrl, getActiveStep, navigateToStep } from './helpers/testUtils';
 
 const PAGE_URL = getPageUrl();
+const SMOKE_INVITATION_CODE = 'E2E-SMOKE';
+const SMOKE_PAGE_URL = `${PAGE_URL}?code=${SMOKE_INVITATION_CODE}`;
+
+test.beforeEach(async ({ page }) => {
+  await page.route(`**/invitations/by-code/${SMOKE_INVITATION_CODE}**`, async route => {
+    if (route.request().url().endsWith('/ingest-token')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ token: 'smoke-participant-token' }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        invitation_id: 1,
+        code: SMOKE_INVITATION_CODE,
+        protocol_id: 1,
+        project_id: 1,
+        protocol_name: 'Smoke protocol',
+        definition: {
+          version: 'v2-smoke',
+          participantShell: {
+            consent: true,
+            questionnaire: true,
+            precheck: true,
+            calibration: true,
+          },
+          blocks: [],
+        },
+      }),
+    });
+  });
+});
 
 test.describe('Smoke: Базовая навигация', () => {
   test('Страница открывается и виден STEP 1', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     
     const step1 = page.locator('#step1');
     await expect(step1).toBeVisible();
@@ -16,7 +52,7 @@ test.describe('Smoke: Базовая навигация', () => {
   });
 
   test('Все шаги существуют на странице', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     
     for (let i = 1; i <= 6; i++) {
       const step = page.locator(`#step${i}`);
@@ -25,30 +61,57 @@ test.describe('Smoke: Базовая навигация', () => {
   });
 
   test('Переход с шага 1 на шаг 2 работает', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     
     const startBtn = page.getByRole('button', { name: /Начать|Start/i });
     await expect(startBtn).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     await startBtn.click();
     
     await expect(page.locator('#step2')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('#step1')).not.toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    const consentHeadingTop = await page.locator('#step2 h2').evaluate(
+      heading => heading.getBoundingClientRect().top
+    );
+    expect(consentHeadingTop).toBeGreaterThanOrEqual(0);
   });
 
-  test('Переключатель языка присутствует', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+  test('Доступны десять языков интерфейса', async ({ page }) => {
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     
-    const langRu = page.locator('#langRu');
-    const langEn = page.locator('#langEn');
-    
-    await expect(langRu).toBeVisible();
-    await expect(langEn).toBeVisible();
+    const localeSelect = page.locator('#participantLanguageSelect');
+    await expect(localeSelect).toBeVisible();
+    await expect(localeSelect.locator('option')).toHaveCount(10);
+  });
+
+  test('Пречек не оставляет предыдущий язык и не подменяет шкалы английским', async ({ page }) => {
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    const localeSelect = page.locator('#participantLanguageSelect');
+    const expectedLighting: Record<string, string> = {
+      ru: 'Освещение', en: 'Lighting', zh: '光线', es: 'Iluminación', hi: 'रोशनी',
+      ar: 'الإضاءة', fr: 'Éclairage', bn: 'আলো', pt: 'Iluminação', ur: 'روشنی',
+    };
+
+    for (const [locale, label] of Object.entries(expectedLighting)) {
+      await localeSelect.selectOption(locale);
+      await expect(page.locator('[data-i18n="label_light"]')).toHaveText(label);
+      await expect(page.locator('.status-hint')).not.toHaveText('');
+      await expect(page.locator('html')).toHaveAttribute('lang', locale);
+    }
+
+    await localeSelect.selectOption('es');
+    await expect(page.locator('.status-hint')).toContainText('indicador se vuelve verde');
+    await localeSelect.selectOption('ru');
+    await expect(page.locator('.status-hint')).toContainText('Зелёный индикатор');
+    await expect(page.locator('.status-hint')).not.toContainText('indicador se vuelve verde');
   });
 });
 
 test.describe('Smoke: Consent Gating', () => {
   test('Кнопка согласия disabled по умолчанию', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step2');
     
     const consentBtn = page.locator('#consentBtn');
@@ -56,7 +119,7 @@ test.describe('Smoke: Consent Gating', () => {
   });
 
   test('Кнопка согласия enabled после установки галочки', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step2');
     
     const consentCheck = page.locator('#consentCheck');
@@ -68,7 +131,7 @@ test.describe('Smoke: Consent Gating', () => {
   });
 
   test('Переход на шаг 3 после согласия работает', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step2');
     
     await page.locator('#consentCheck').check();
@@ -81,7 +144,7 @@ test.describe('Smoke: Consent Gating', () => {
 
 test.describe('Smoke: Email шаг', () => {
   test('Email поле присутствует на шаге 3', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step3');
     
     const emailInput = page.locator('#userEmail');
@@ -92,7 +155,7 @@ test.describe('Smoke: Email шаг', () => {
 
 test.describe('Smoke: Анкета шаг', () => {
   test('Все обязательные поля присутствуют на шаге 4', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step4');
     
     await expect(page.locator('#age')).toBeVisible();
@@ -103,7 +166,7 @@ test.describe('Smoke: Анкета шаг', () => {
   });
 
   test('Кнопка формы disabled при неполной анкете', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step4');
     
     const formBtn = page.locator('#formBtn');
@@ -111,7 +174,7 @@ test.describe('Smoke: Анкета шаг', () => {
   });
 
   test('Кнопка формы enabled при заполненной анкете', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
+    await page.goto(SMOKE_PAGE_URL, { waitUntil: 'load', timeout: 30_000 });
     await navigateToStep(page, 'step4');
     
     // Заполняем обязательные поля
@@ -128,4 +191,3 @@ test.describe('Smoke: Анкета шаг', () => {
     await expect(formBtn).toBeEnabled({ timeout: 3000 });
   });
 });
-

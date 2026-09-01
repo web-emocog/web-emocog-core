@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Разработчик — тестирование модулей EmoCog</title>
+  <title>wecog — инструменты разработчика</title>
+  <link rel="icon" href="assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/wecog-foundation.css?v=20260820-1">
+  <script src="assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     :root {
       --bg: #0f0f1a;
@@ -79,9 +82,12 @@
       justify-content: center;
     }
   </style>
+  <link rel="stylesheet" href="assets/developer-redesign.css?v=20260820-2">
+  <script src="assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
-  <script src="auth-guard.js"></script>
+  <script src="api-base.js?v=20260819-1"></script>
+  <script src="auth-guard.js?v=20260820-2"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -97,13 +103,11 @@
     })();
   </script>
   <div class="top">
-    <h1>🛠 Тестирование модулей</h1>
+    <h1>Диагностика модулей</h1>
     <span style="display:flex;align-items:center;gap:12px;">
       <span id="authMeta" style="font-size:13px;color:#94a3b8;"></span>
       <a href="developer/login.html" id="logoutLink" style="font-size:13px;color:#94a3b8;">Выйти</a>
       <button type="button" id="changePasswordBtn" class="theme-toggle" aria-label="Change password">🔐</button>
-      <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle theme">🌓</button>
-      <a href="index.html">← На главную</a>
     </span>
   </div>
   <div class="grid">
@@ -123,7 +127,19 @@
       <div class="tag">Emotion Module</div>
       <h2>Emotion Test (valence/arousal)</h2>
       <p>Тестирование эмоционального модуля из participant flow: live-метрики valence/arousal, динамика на таймлайне.</p>
-      <a href="developer/emotion-test.html?v=20260324">Открыть Emotion Test</a>
+      <a href="developer/emotion-test.html?v=20260825-3">Открыть Emotion Test</a>
+    </div>
+    <div class="card">
+      <div class="tag">Audio / Voice QC</div>
+      <h2>Аудиомодуль</h2>
+      <p>Локальная проверка микрофона, качества речевого окна и акустических признаков. Сырой звук не сохраняется и не отправляется.</p>
+      <a href="developer/audio-test.html?v=20260825">Открыть тест аудио</a>
+    </div>
+    <div class="card">
+      <div class="tag">MediaPipe Pose</div>
+      <h2>Движение корпуса</h2>
+      <p>Проверка плеч, таза, наклона корпуса, скорости перемещения и всплесков движения. Видео и исходные landmarks не сохраняются.</p>
+      <a href="developer/body-pose-test.html?v=20260827">Открыть детекцию корпуса</a>
     </div>
     <div class="card">
       <div class="tag">Reaction Time</div>
@@ -172,26 +188,6 @@
   </div>
   <script>
     (function () {
-      var KEY = 'emocog_theme';
-      function resolveInitialTheme() {
-        var saved = localStorage.getItem(KEY);
-        if (saved === 'light' || saved === 'dark') return saved;
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      }
-      function applyTheme(theme) {
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem(KEY, theme);
-      }
-      var theme = resolveInitialTheme();
-      applyTheme(theme);
-      var btn = document.getElementById('themeToggle');
-      if (btn) btn.addEventListener('click', function () {
-        theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
-        applyTheme(theme);
-      });
-    })();
-
-    (function () {
       try {
         var userRaw = localStorage.getItem('emocog_api_user');
         if (!userRaw) return;
@@ -206,7 +202,7 @@
     document.getElementById('logoutLink').addEventListener('click', async function (e) {
       e.preventDefault();
       try {
-        var logoutBase = (window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+        var logoutBase = (window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
         await fetch(logoutBase + '/auth/logout', { method: 'POST', credentials: 'include', keepalive: true });
       } catch (_) {}
       try {
@@ -226,15 +222,13 @@
       if (newPassword == null) return;
       if (String(newPassword).length < 12) { alert('New password too short'); return; }
       try {
-        var base = (window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
-        var token = window.API_TOKEN || localStorage.getItem('emocog_api_token') || '';
+        var base = (window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
         var csrf = sessionStorage.getItem('emocog_csrf_token') || '';
         var r = await fetch(base + '/auth/me/password', {
           method: 'PATCH',
           credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { Authorization: 'Bearer ' + token } : {}),
             ...(csrf ? { 'X-CSRF-Token': csrf } : {})
           },
           body: JSON.stringify({ currentPassword: currentPassword, newPassword: newPassword })

@@ -133,7 +133,12 @@ function detectSpeechSegments(samples, sampleRate, topDb = 30, minSpeechSec = 0.
   const noiseFloor = percentile(rms, 35);
   const medianRms = percentile(rms, 50);
   const peakRms = percentile(rms, 95);
-  const threshold = Math.max(noiseFloor * (1 + topDb / 60), medianRms * 1.5, peakRms * 0.08, 0.004);
+  const noiseAdaptive = noiseFloor * (1 + topDb / 75);
+  const threshold = Math.max(
+    Math.min(noiseAdaptive, peakRms * 0.55),
+    peakRms * 0.08,
+    0.004,
+  );
 
   const minSpeechSamples = Math.round(minSpeechSec * sampleRate);
   const frameFlags = rms.map((v) => v >= threshold);

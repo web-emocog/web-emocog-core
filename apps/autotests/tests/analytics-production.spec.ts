@@ -82,6 +82,28 @@ test('analytics plan preserves training/main overrides', async ({ page }) => {
   expect(result.blockOverrides.main.selectedMetricIds).toContain('aoi.dwell_time_ms');
 });
 
+test('session dashboard hides backend failure details but logs them technically', async ({ page }) => {
+  const technicalLogs: string[] = [];
+  page.on('console', message => {
+    if (message.type() === 'error') technicalLogs.push(message.text());
+  });
+  await page.evaluate(async () => {
+    // @ts-expect-error application global
+    const production = window.EmocogAnalyticsProduction;
+    production.store.state.snapshot = { id: 'snapshot-error-regression' };
+    production.store.state.dirty = false;
+    production.api.sessionSummary = async () => {
+      throw new Error('404 — Session is not included in the snapshot');
+    };
+    await production.store.loadSessionSummary();
+  });
+
+  await expect(page.getByRole('heading', { name: 'Карточка сессии недоступна' })).toBeVisible();
+  await expect(page.getByText('Session is not included in the snapshot')).toHaveCount(0);
+  await expect(page.locator('#analyticsSummaryRetry')).toBeVisible();
+  expect(technicalLogs.some(line => line.includes('Session is not included in the snapshot'))).toBeTruthy();
+});
+
 test('completed session shows AOI/heatmap, stays aligned after resize, and exports the same snapshot', async ({ page }) => {
   await page.locator('details > summary').first().click();
   await page.locator('#analyticsBlockFilter').selectOption('main-block');

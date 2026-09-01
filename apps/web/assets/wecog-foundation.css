@@ -1,0 +1,61 @@
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("fonts/atkinson-hyperlegible-next.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --wc-canvas: #f4f3ec;
+  --wc-surface: #ffffff;
+  --wc-surface-soft: #eae9e2;
+  --wc-ink: #10211b;
+  --wc-muted: #59655f;
+  --wc-line: #cdd2cc;
+  --wc-accent: #c7f43d;
+  --wc-accent-ink: #10211b;
+  --wc-blue: #185cff;
+  --wc-danger: #cf3f36;
+  --wc-warning: #c87400;
+  --wc-success: #147a4a;
+  --wc-focus: #185cff;
+  --wc-shadow: 0 24px 70px rgba(16, 33, 27, 0.1);
+  --wc-radius-sm: 10px;
+  --wc-radius-md: 18px;
+  --wc-radius-lg: 28px;
+  --wc-font: "Atkinson Hyperlegible Next", "Segoe UI", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --wc-canvas: #0c120f;
+  --wc-surface: #141d19;
+  --wc-surface-soft: #202b26;
+  --wc-ink: #f5f5ec;
+  --wc-muted: #abb7b0;
+  --wc-line: #334039;
+  --wc-accent: #c7f43d;
+  --wc-accent-ink: #10211b;
+  --wc-blue: #77a0ff;
+  --wc-danger: #ff8179;
+  --wc-warning: #f6b44e;
+  --wc-success: #53cf8b;
+  --wc-focus: #c7f43d;
+  --wc-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+}
+
+*:focus-visible {
+  outline: 3px solid var(--wc-focus) !important;
+  outline-offset: 3px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

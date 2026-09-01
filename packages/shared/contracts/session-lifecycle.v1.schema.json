@@ -36,7 +36,9 @@
         "rt": { "type": "string" },
         "bpm": { "type": "string" },
         "emotion": { "type": "string" },
-        "bodyPose": { "type": "string" }
+        "bodyPose": { "type": "string" },
+        "audio": { "type": "string" },
+        "multimodal": { "type": "string" }
       },
       "additionalProperties": false
     }

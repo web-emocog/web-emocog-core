@@ -9,6 +9,7 @@ const {
   requireAuth,
   requireRole,
   requireOperation,
+  requirePlatformAdmin,
   OPERATIONS,
   isPlatformAdmin,
   hasOrganizationMembership,
@@ -38,8 +39,7 @@ router.get('/', requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant',
 
 router.post(
   '/',
-  requireRole('admin', 'PI'),
-  requireOperation(OPERATIONS.ORGANIZATION_MANAGE),
+  requirePlatformAdmin,
   [body('name').trim().notEmpty(), body('slug').trim().notEmpty().matches(/^[a-z0-9-]+$/)],
   async (req, res) => {
     try {
@@ -123,8 +123,7 @@ router.patch(
 
 router.delete(
   '/:id',
-  requireRole('admin', 'PI'),
-  requireOperation(OPERATIONS.ORGANIZATION_MANAGE),
+  requirePlatformAdmin,
   [param('id').isInt()],
   async (req, res) => {
     try {

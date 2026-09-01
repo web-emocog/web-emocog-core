@@ -4,11 +4,11 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
-import { state } from './state.js';
-import { translations } from '../../translations.js';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js';
+import { state, recordSessionEvent } from './state.js';
+import { translations } from '../../translations.js?v=20260828-2';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20260828-2';
 import { measureRenderFPS } from './camera.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { getParticipantShell } from './protocol-invite-utils.js';
 import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
@@ -22,6 +22,12 @@ const MVP_STEP = {
     SESSION: 6,
     FINAL: 7
 };
+
+function participantText(ru, en, es) {
+    if (state.currentLang === 'ru') return ru;
+    if (state.currentLang === 'es') return es || en;
+    return en;
+}
 
 function invitationDefinition() {
     return typeof window !== 'undefined' ? window.__WECOG_STATE__?.runtime?.invitationProtocolDefinition : null;
@@ -66,7 +72,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js');
+        const mod = await import('./tests-updated.js?v=20260828-2');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;
@@ -109,19 +115,38 @@ function activeStepSnapshot() {
 // ── setLanguage ──────────────────────────────────────────────────────────────
 
 export function setLanguage(lang) {
-    const nextLang = (lang === 'en') ? 'en' : 'ru';
+    const nextLang = Object.prototype.hasOwnProperty.call(translations, lang) ? lang : 'ru';
+    const previousLang = state.currentLang;
     state.currentLang = nextLang;
+    state.sessionData.user = state.sessionData.user || {};
+    state.sessionData.user.interfaceLanguage = nextLang;
     try {
         localStorage.setItem('emocog_participant_lang', nextLang);
     } catch (_) {}
 
-    document.getElementById('langRu').classList.toggle('active', nextLang === 'ru');
-    document.getElementById('langEn').classList.toggle('active', nextLang === 'en');
+    document.documentElement.lang = nextLang;
+    document.documentElement.dir = (nextLang === 'ar' || nextLang === 'ur') ? 'rtl' : 'ltr';
+    document.getElementById('langRu')?.classList.toggle('active', nextLang === 'ru');
+    document.getElementById('langEn')?.classList.toggle('active', nextLang === 'en');
+    const localeSelect = document.getElementById('participantLanguageSelect');
+    if (localeSelect && localeSelect.value !== nextLang) localeSelect.value = nextLang;
 
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
         if (translations[nextLang]?.[key]) {
             el.innerText = translations[nextLang][key];
+        }
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        if (translations[nextLang]?.[key]) {
+            el.setAttribute('placeholder', translations[nextLang][key]);
+        }
+    });
+    document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+        const key = el.getAttribute('data-i18n-aria-label');
+        if (translations[nextLang]?.[key]) {
+            el.setAttribute('aria-label', translations[nextLang][key]);
         }
     });
 
@@ -138,6 +163,17 @@ export function setLanguage(lang) {
 
     if (state.flags.isPrecheckRunning && state.runtime.precheckData) {
         checkAllIndicators();
+    }
+
+    if (previousLang !== nextLang) {
+        recordSessionEvent('interface_language_changed', {
+            category: 'session',
+            from: previousLang || null,
+            to: nextLang
+        });
+        window.dispatchEvent(new CustomEvent('wecog:languagechange', {
+            detail: { from: previousLang || null, lang: nextLang }
+        }));
     }
 }
 
@@ -187,6 +223,11 @@ export function nextStep(stepNumber) {
     const nextEl = document.getElementById('step' + targetStep);
     if (nextEl) {
         nextEl.classList.add('active');
+        if (targetStep >= MVP_STEP.CONSENT && targetStep <= MVP_STEP.PRECHECK) {
+            state.sessionData.shellStep = targetStep;
+            void state.runtime?.sessionRuntime?.saveCheckpoint?.();
+        }
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
         dbg('ui', 'step:change:applied', { resolved: targetStep, activeDomId: nextEl.id, ...activeStepSnapshot() });
     } else {
         dbgErr('ui', 'step:change:invalid', { resolved: targetStep, missingId: 'step' + targetStep });
@@ -225,8 +266,9 @@ export function toggleConsent() {
 
     consentBtn.disabled = !isAccepted;
 
-    if (consentError) {
-        consentError.style.display = isAccepted ? 'none' : '';
+    if (consentError && isAccepted) {
+        consentError.hidden = true;
+        consentError.textContent = '';
     }
 }
 
@@ -263,6 +305,24 @@ export async function generateIdsAndProceed() {
     state.sessionData.ids.session     = sessionId;
     state.sessionData.ids.participant = participantId;
     state.sessionData.user.interfaceLanguage = state.currentLang;
+    const consentCheck = document.getElementById('consentCheck');
+    if (!consentCheck?.checked) {
+        toggleConsent();
+        return false;
+    }
+    state.sessionData.consent = {
+        informed_consent: {
+            accepted: true,
+            documentVersion: 'informed-consent-v1.0',
+            acceptedAt: new Date().toISOString(),
+            participantId
+        },
+        privacy_policy: {
+            accepted: true,
+            documentVersion: 'privacy-policy-v1.0',
+            acceptedAt: new Date().toISOString()
+        }
+    };
 
     console.log('[IDs Generated]', {
         session:     sessionId.substring(0, 8) + '...',
@@ -280,11 +340,14 @@ export async function generateIdsAndProceed() {
     }
 
     try {
+        const invitationCode = state.sessionData.ids.invitationCode || null;
+        if (invitationCode && !state.runtime?.invitationProtocolDefinition) {
+            throw new Error('invitation_not_loaded');
+        }
         await primeParticipantSession({
             sessionId,
-            invitationCode: state.sessionData.ids.invitationCode || null
+            invitationCode
         });
-        await state.runtime?.sessionRuntime?.saveCheckpoint?.();
         const currentUrl = new URL(window.location.href);
         if (currentUrl.searchParams.has('code')) {
             currentUrl.searchParams.delete('code');
@@ -297,15 +360,23 @@ export async function generateIdsAndProceed() {
     } catch (error) {
         const consentError = document.getElementById('consentError');
         if (consentError) {
-            consentError.style.display = 'block';
-            consentError.textContent = state.currentLang === 'en'
-                ? `The session could not be reserved: ${error.message}`
-                : `Не удалось зарезервировать сессию: ${error.message}`;
+            consentError.hidden = false;
+            consentError.textContent = translations[state.currentLang]?.session_reservation_error
+                || participantText(
+                    'Не удалось открыть сессию. Проверьте ссылку приглашения и подключение к сети.',
+                    'The session could not be opened. Check the invitation link and network connection.',
+                    'No se pudo abrir la sesión. Compruebe el enlace de invitación y la conexión.'
+                );
         }
+        recordSessionEvent('participant_admission_failed', {
+            category: 'technical',
+            severity: 'error',
+            message: error?.message || String(error)
+        });
         return false;
     }
 
-    nextStep(3);
+    nextStep(MVP_STEP.EMAIL);
     return true;
 }
 
@@ -324,9 +395,11 @@ export function submitEmail() {
     if (!emailRegex.test(email)) {
         if (errorEl) {
             errorEl.style.display = 'block';
-            errorEl.innerText = state.currentLang === 'ru'
-                ? 'Введите корректный email'
-                : 'Please enter a valid email';
+            errorEl.innerText = participantText(
+                'Введите корректный email',
+                'Please enter a valid email',
+                'Introduzca un correo electrónico válido'
+            );
         }
         return;
     }
@@ -372,7 +445,8 @@ export function submitForm() {
     state.sessionData.user.inputDevice = document.getElementById('inputDevice')?.value || document.getElementById('deviceSelect')?.value || '';
     state.sessionData.user.keyboard    = document.getElementById('keyboardType')?.value || document.getElementById('keyboardSelect')?.value || '';
 
-    nextStep(5);
+    nextStep(MVP_STEP.PRECHECK);
+    return true;
 }
 
 window.submitForm = submitForm;
@@ -634,7 +708,7 @@ function renderFinalQcMetrics(payload, lang) {
     `;
 }
 
-export function updateFinalStepWithQC(qcSummary) {
+export function updateFinalStepWithQC(qcSummary, options = {}) {
     try {
         hideQcOverlay();
     } catch (_) {}
@@ -643,11 +717,21 @@ export function updateFinalStepWithQC(qcSummary) {
     const t = translations[lang] || {};
     const qcStatusEl = document.getElementById('qcStatusBlock');
 
-    if (qcStatusEl && qcSummary) {
-        const passed = qcSummary.overallPass;
-        const validGazePct = qcSummary.gazeValidPct || 0;
-        const faceOkPct = qcSummary.faceOkPct || 0;
-        const durationMs = qcSummary.durationMs || 0;
+    if (qcStatusEl) {
+        const serverValidity = ['valid', 'borderline', 'invalid'].includes(options.serverValidity)
+            ? options.serverValidity
+            : null;
+        if (!qcSummary && !serverValidity) {
+            qcStatusEl.innerHTML = `
+                <div class="qc-status-pending">
+                    <strong>${lang === 'ru' ? 'QC рассчитывается' : (lang === 'es' ? 'Calculando el control de calidad' : 'QC is being calculated')}</strong>
+                </div>
+            `;
+        } else {
+        const passed = serverValidity ? serverValidity === 'valid' : qcSummary?.overallPass === true;
+        const validGazePct = qcSummary?.gazeValidPct || 0;
+        const faceOkPct = qcSummary?.faceOkPct || 0;
+        const durationMs = qcSummary?.durationMs || 0;
 
         if (passed) {
             qcStatusEl.innerHTML = `
@@ -662,7 +746,7 @@ export function updateFinalStepWithQC(qcSummary) {
             `;
         } else {
             const issues = [];
-            if (qcSummary.checks) {
+            if (qcSummary?.checks) {
                 if (!qcSummary.checks.duration) issues.push(t.issue_short_duration);
                 if (!qcSummary.checks.faceVisible) issues.push(t.issue_low_face_visible);
                 if (!qcSummary.checks.faceOk) issues.push(t.issue_low_face_ok_pct);
@@ -675,11 +759,14 @@ export function updateFinalStepWithQC(qcSummary) {
                 if (!qcSummary.checks.lowFps) issues.push(t.issue_low_fps_time);
             }
             const issuesList = issues.filter(Boolean).join(', ');
+            const statusLabel = serverValidity === 'borderline'
+                ? (lang === 'ru' ? 'QC: пограничное качество' : (lang === 'es' ? 'QC: calidad límite' : 'QC: borderline quality'))
+                : (t.qc_failed_full || 'QC Failed');
             qcStatusEl.innerHTML = `
                 <div class="qc-status-failed">
-                    <strong>${t.qc_failed_full || 'QC Failed'}</strong>
+                    <strong>${statusLabel}</strong>
                     <div style="font-size: 12px; margin-top: 8px;">
-                        ${t.qc_issues || 'Issues'}: ${issuesList || 'N/A'}
+                        ${t.qc_issues || 'Issues'}: ${issuesList || (lang === 'ru' ? 'недостаточно валидного сигнала' : (lang === 'es' ? 'señal válida insuficiente' : 'insufficient valid signal'))}
                     </div>
                     <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">
                         ${t.qc_duration || 'Duration'}: ${Math.round(durationMs / 1000)}${t.seconds || 's'} |
@@ -688,6 +775,7 @@ export function updateFinalStepWithQC(qcSummary) {
                     </div>
                 </div>
             `;
+        }
         }
     }
 

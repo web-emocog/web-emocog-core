@@ -116,12 +116,15 @@ function scoreMarkers(features) {
   const duration = Number(features.duration_sec || 0);
   const speechFraction = Number(features.speech_fraction || 0);
   const words = Number(features.word_count || 0);
-  const wordComponent = words <= 0 ? 0.5 : norm(words, 8, 120);
+  const acousticCoverage = Number(features.pitch_mean_hz || 0) > 0
+    || Number(features.hnr_db || 0) !== 0
+    ? 1
+    : 0;
   const confidence = clamp(
-    0.45 * norm(duration, 8, 60) +
-      0.35 * norm(speechFraction, 0.20, 0.90) +
-      0.20 * wordComponent,
-    0.10,
+    0.45 * norm(duration, 6, 16) +
+      0.40 * norm(speechFraction, 0.10, 0.65) +
+      0.15 * acousticCoverage,
+    0.05,
     0.95,
   );
 

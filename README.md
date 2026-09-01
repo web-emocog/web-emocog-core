@@ -518,9 +518,14 @@ erDiagram
 | **rPPG / BPM** | [lib/rppg_alg_qc_test_web_alg_test_v10/](lib/rppg_alg_qc_test_web_alg_test_v10/) · [README](lib/rppg_alg_qc_test_web_alg_test_v10/README.md) | оценка пульса и дыхания из видеосигнала лица |
 | **Emotion / FACS** | [js/emotion/](apps/participant-web/js/emotion/) | извлечение Action Units, классификация эмоций, валентность/возбуждение |
 | **QC-метрики** | [js/qc-metrics/](apps/participant-web/js/qc-metrics/) · [README](apps/participant-web/js/qc-metrics/README.md) | клиентская оценка качества (лицо, взгляд, длительность, FPS) |
-| **Audio (опц.)** | [Audio_detection/](Audio_detection/) · [README](Audio_detection/README.md) | ядро голосовых биомаркеров, эвристический анализ |
+| **Audio (опц.)** | [Audio_detection/](Audio_detection/) · [README](Audio_detection/README.md) | отдельное согласие, WebAudio capture, Worker-анализ, QC и агрегаты всей сессии |
+| **Multimodal** | [packages/shared/multimodal/](packages/shared/multimodal/) · [README](packages/shared/multimodal/README.md) | синхронизация gaze/emotion/head/body, слои heatmap и UI-независимый renderer |
 
 Сырое видео/аудио **не покидает браузер** — на сервер уходят только агрегированные метрики.
+
+Фоновые модули задаются в конструкторе протокола на шаге QC через
+`settings.featureFlags`. Аудио выключено по умолчанию и дополнительно требует
+отдельного согласия участника. `gamerMode` не включается автоматически.
 
 ---
 
@@ -573,6 +578,7 @@ flowchart LR
 
 - Каноническая точка входа API: `server.js` (`npm start`).
 - ES-модули из `lib/` требуют верного MIME — см. [deploy/nginx-snippet-emocog-lib.conf](deploy/nginx-snippet-emocog-lib.conf).
+- Доступ participant к камере/микрофону и MIME для S3-модулей — см. [deploy/nginx-participant-media.conf](deploy/nginx-participant-media.conf).
 - Вход участника: `apps/participant-web/run_new.html?code=...`.
 - Метаданные последнего деплоя фиксируются в [DEPLOY_VERSION.txt](DEPLOY_VERSION.txt).
 
@@ -621,6 +627,11 @@ flowchart LR
 **Аудио**
 - [Audio_detection/README.md](Audio_detection/README.md) — голосовые биомаркеры (ядро)
 - [Audio_detection/docs/integration_contract_ru.md](Audio_detection/docs/integration_contract_ru.md) — контракт интеграции
+
+**Multimodal**
+- [packages/shared/multimodal/README.md](packages/shared/multimodal/README.md) — общий clock, слои heatmap и UI-независимый renderer
+- [docs/reports/2026-08-19-s3-02-audio-session.md](docs/reports/2026-08-19-s3-02-audio-session.md) — мини-отчёт S3-02
+- [docs/reports/2026-08-19-s3-03-multimodal-map.md](docs/reports/2026-08-19-s3-03-multimodal-map.md) — мини-отчёт S3-03
 
 **Прочее**
 - [apps/autotests/README.md](apps/autotests/README.md) — автотесты (Playwright)

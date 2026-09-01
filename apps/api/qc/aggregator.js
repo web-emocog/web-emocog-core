@@ -35,10 +35,39 @@ function computeQcValidity(qcSummary, payload) {
         fail_reasons.push('low_tracking_on_target');
       }
       if (checks.lowFps === false || checks.low_fps === false) fail_reasons.push('low_fps_time');
+      if (checks.consecutiveLowFps === false || checks.consecutive_low_fps === false) {
+        fail_reasons.push('consecutive_low_fps');
+      }
     }
     if (qcSummary.failReasons && Array.isArray(qcSummary.failReasons)) {
       qcSummary.failReasons.forEach(r => { if (r && !fail_reasons.includes(r)) fail_reasons.push(r); });
     }
+  }
+
+  const checkEntries = checks
+    ? Object.entries(checks).filter(([, value]) => typeof value === 'boolean')
+    : [];
+  const checkScore = checkEntries.length
+    ? (checkEntries.filter(([, value]) => value).length / checkEntries.length) * 100
+    : null;
+  const criticalChecks = [
+    checks?.duration,
+    checks?.faceVisible ?? checks?.face_visible,
+    checks?.faceOk ?? checks?.face_ok,
+    checks?.illuminationOk ?? checks?.illumination_ok,
+    checks?.occlusion,
+    checks?.gazeValid ?? checks?.gaze_valid,
+    checks?.gazeOnScreen ?? checks?.gaze_on_screen,
+    checks?.gazeAccuracy ?? checks?.gaze_accuracy,
+  ].filter(value => typeof value === 'boolean');
+  const hasCriticalFailure = criticalChecks.some(value => value === false);
+  const hasAdvisoryFailure = checkEntries.some(([, value]) => value === false) && !hasCriticalFailure;
+
+  // The browser score contains multiplicative penalties. A single short FPS
+  // episode must not turn otherwise usable gaze/face evidence into a zero-like
+  // score. Boolean checks provide an independent, auditable evidence score.
+  if (!hasCriticalFailure && checkScore !== null) {
+    qc_score = qc_score === null ? checkScore : Math.max(qc_score, checkScore);
   }
 
   let validity = 'invalid';
@@ -46,12 +75,14 @@ function computeQcValidity(qcSummary, payload) {
     if (qc_score >= 70) validity = 'valid';
     else if (qc_score >= 50) validity = 'borderline';
   }
-  if (fail_reasons.length === 0 && qc_score !== null && qc_score >= 50) {
-    if (qc_score >= 70) validity = 'valid';
-    else validity = 'borderline';
-  }
+  if (hasCriticalFailure) validity = 'invalid';
+  else if (hasAdvisoryFailure && validity === 'valid') validity = 'borderline';
 
-  return { validity, qc_score, fail_reasons };
+  return {
+    validity,
+    qc_score: qc_score === null ? null : Math.round(qc_score * 10) / 10,
+    fail_reasons
+  };
 }
 
 const RT_QC_THRESHOLDS = Object.freeze({

@@ -1,7 +1,7 @@
 /**
  * Compatibility facade. Transport logic lives only in ingest-transport.mjs.
  */
-import { buildAggregatesPayload } from '../unified-aggregates-new.js';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
 import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
 
 export async function sendSessionData(sessionData, options = {}) {

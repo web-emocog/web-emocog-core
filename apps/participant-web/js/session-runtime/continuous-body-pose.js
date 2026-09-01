@@ -14,7 +14,7 @@ const LANDMARK = Object.freeze({
     LEFT_HIP: 23,
     RIGHT_HIP: 24
 });
-const SAMPLE_CAP = 18000;
+const SAMPLE_CAP = 3600;
 
 function finite(value) {
     return Number.isFinite(value) ? Number(value) : null;
@@ -62,36 +62,52 @@ export function summarizeBodyPoseState(state, movementBursts = 0) {
         : [];
     const accumulator = state?.sessionData?.bodyPoseAccumulator;
     const count = Number.isFinite(accumulator?.n) ? accumulator.n : samples.length;
-    const velocities = samples.map(sample => sample.movementVelocity);
+    const validCount = Number.isFinite(accumulator?.validCount)
+        ? accumulator.validCount
+        : samples.filter(sample => sample.valid).length;
+    const validSamples = samples.filter(sample => sample.valid);
+    const velocities = validSamples.map(sample => sample.movementVelocity);
     return {
         version: 'body_pose_mediapipe.v1',
         source: 'mediapipe_pose_landmarker_lite',
+        enabled: accumulator?.enabled !== false,
+        gamerMode: accumulator?.gamerMode === true,
+        coordinateSpace: 'camera_normalized_torso_delta',
         sampleCount: count,
+        validSampleCount: validCount,
+        oodSampleCount: accumulator?.oodCount ?? samples.filter(sample => sample.ood).length,
+        occludedSampleCount: accumulator?.occludedCount ?? 0,
         retainedSampleCount: samples.length,
         durationMs: Number.isFinite(accumulator?.startedAt)
             ? Math.max(0, (accumulator.updatedAt || accumulator.startedAt) - accumulator.startedAt)
             : (samples.length > 1 ? samples.at(-1).t - samples[0].t : 0),
-        confidenceMean: count > 0 && Number.isFinite(accumulator?.confidenceSum)
-            ? finite(accumulator.confidenceSum / count)
-            : finite(mean(samples.map(sample => sample.confidence))),
-        movementVelocityMean: count > 0 && Number.isFinite(accumulator?.movementVelocitySum)
-            ? finite(accumulator.movementVelocitySum / count)
+        confidenceMean: validCount > 0 && Number.isFinite(accumulator?.confidenceSum)
+            ? finite(accumulator.confidenceSum / validCount)
+            : finite(mean(validSamples.map(sample => sample.confidence))),
+        movementVelocityMean: validCount > 0 && Number.isFinite(accumulator?.movementVelocitySum)
+            ? finite(accumulator.movementVelocitySum / validCount)
             : finite(mean(velocities)),
         movementVelocityP95: finite(percentile(velocities, 0.95)),
         movementBurstCount: accumulator?.movementBurstCount ?? movementBursts,
-        torsoLeanAbsMeanDeg: count > 0 && Number.isFinite(accumulator?.torsoLeanAbsSum)
-            ? finite(accumulator.torsoLeanAbsSum / count)
-            : finite(mean(samples.map(sample => Math.abs(sample.torsoLeanDeg)))),
-        shoulderRollAbsMeanDeg: count > 0 && Number.isFinite(accumulator?.shoulderRollAbsSum)
-            ? finite(accumulator.shoulderRollAbsSum / count)
-            : finite(mean(samples.map(sample => Math.abs(sample.shoulderRollDeg))))
+        torsoLeanAbsMeanDeg: validCount > 0 && Number.isFinite(accumulator?.torsoLeanAbsSum)
+            ? finite(accumulator.torsoLeanAbsSum / validCount)
+            : finite(mean(validSamples.map(sample => Math.abs(sample.torsoLeanDeg)))),
+        shoulderRollAbsMeanDeg: validCount > 0 && Number.isFinite(accumulator?.shoulderRollAbsSum)
+            ? finite(accumulator.shoulderRollAbsSum / validCount)
+            : finite(mean(validSamples.map(sample => Math.abs(sample.shoulderRollDeg)))),
+        rawVideoStored: false,
+        rawLandmarksStored: false
     };
 }
 
 export class ContinuousBodyPoseCollector {
-    constructor({ state, onError } = {}) {
+    constructor(options = {}) {
+        const { state, onError, enabled, gamerMode, clock } = options;
         this.state = state;
         this.onError = onError || (() => {});
+        this.enabled = enabled !== false;
+        this.gamerMode = gamerMode === true;
+        this.clock = clock || null;
         this.landmarker = null;
         this.ready = false;
         this.initializing = null;
@@ -101,9 +117,22 @@ export class ContinuousBodyPoseCollector {
         this.lastLandmarks = null;
         this.movementBursts = 0;
         this.inBurst = false;
+        this.scaleBaseline = { count: 0, shoulderWidthSum: 0, torsoHeightSum: 0 };
     }
 
     async start() {
+        if (!this.enabled) {
+            this.state.sessionData.bodyPoseSummary = {
+                version: 'body_pose_mediapipe.v1',
+                enabled: false,
+                gamerMode: this.gamerMode,
+                sampleCount: 0,
+                validSampleCount: 0,
+                rawVideoStored: false,
+                rawLandmarksStored: false
+            };
+            return false;
+        }
         if (this.ready) return true;
         if (this.initializing) return this.initializing;
         this.closed = false;
@@ -153,6 +182,7 @@ export class ContinuousBodyPoseCollector {
         const landmarks = result?.landmarks?.[0];
         if (!Array.isArray(landmarks) || landmarks.length <= LANDMARK.RIGHT_HIP) {
             this.state.runtime.lastBodyPoseSample = null;
+            this._recordRejected('occluded');
             return null;
         }
 
@@ -168,6 +198,7 @@ export class ContinuousBodyPoseCollector {
         ]) ?? 0;
         if (confidence < 0.35) {
             this.state.runtime.lastBodyPoseSample = null;
+            this._recordRejected('low_confidence');
             return null;
         }
 
@@ -185,6 +216,21 @@ export class ContinuousBodyPoseCollector {
             Math.hypot(shoulderCenter.x - hipCenter.x, shoulderCenter.y - hipCenter.y),
             1e-4
         );
+        if (confidence >= 0.5 && this.scaleBaseline.count < 30) {
+            this.scaleBaseline.count += 1;
+            this.scaleBaseline.shoulderWidthSum += shoulderWidth;
+            this.scaleBaseline.torsoHeightSum += torsoHeight;
+        }
+        const referenceShoulderWidth = this.scaleBaseline.count >= 10
+            ? this.scaleBaseline.shoulderWidthSum / this.scaleBaseline.count
+            : null;
+        const referenceTorsoHeight = this.scaleBaseline.count >= 10
+            ? this.scaleBaseline.torsoHeightSum / this.scaleBaseline.count
+            : null;
+        const scaleRatio = referenceShoulderWidth && referenceTorsoHeight
+            ? mean([shoulderWidth / referenceShoulderWidth, torsoHeight / referenceTorsoHeight])
+            : 1;
+        const ood = confidence < 0.5 || scaleRatio < 0.6 || scaleRatio > 1.65;
         const dtSec = Number.isFinite(this.lastTimestamp)
             ? Math.max((timestamp - this.lastTimestamp) / 1000, 1 / 120)
             : null;
@@ -201,17 +247,28 @@ export class ContinuousBodyPoseCollector {
             ) / dtSec)) ?? 0
             : 0;
         const movementVelocity = Math.max(translationVelocity, landmarkVelocity);
-        const isMovementBurst = movementVelocity >= 0.18;
+        const isMovementBurst = !ood && movementVelocity >= 0.18;
         const startedMovementBurst = isMovementBurst && !this.inBurst;
         if (startedMovementBurst) this.movementBursts += 1;
         this.inBurst = isMovementBurst;
 
         const wallTime = Date.now();
+        const stamp = this.clock?.now?.({ performanceNowMs: timestamp }) || null;
         const sample = {
             t: wallTime,
+            timeOriginMs: stamp?.timeOriginMs ?? null,
+            monotonicMs: stamp?.monotonicMs ?? null,
+            sessionTimeMs: stamp?.sessionTimeMs ?? null,
             tRelMs: Math.max(0, wallTime - (this.state.sessionData.startTime || wallTime)),
             ...phaseContext(this.state),
             confidence: Math.round(confidence * 1000) / 1000,
+            valid: !ood,
+            ood,
+            qc: {
+                reason: ood ? 'pose_out_of_distribution' : null,
+                baselineReady: this.scaleBaseline.count >= 10,
+                scaleRatio: finite(scaleRatio)
+            },
             torsoCenterX: finite(torsoCenter.x),
             torsoCenterY: finite(torsoCenter.y),
             translationVelocity: finite(translationVelocity),
@@ -242,6 +299,11 @@ export class ContinuousBodyPoseCollector {
                 n: 0,
                 startedAt: wallTime,
                 updatedAt: wallTime,
+                enabled: this.enabled,
+                gamerMode: this.gamerMode,
+                validCount: 0,
+                oodCount: 0,
+                occludedCount: 0,
                 confidenceSum: 0,
                 movementVelocitySum: 0,
                 torsoLeanAbsSum: 0,
@@ -252,10 +314,14 @@ export class ContinuousBodyPoseCollector {
         const accumulator = this.state.sessionData.bodyPoseAccumulator;
         accumulator.n += 1;
         accumulator.updatedAt = wallTime;
-        accumulator.confidenceSum += sample.confidence;
-        accumulator.movementVelocitySum += sample.movementVelocity;
-        accumulator.torsoLeanAbsSum += Math.abs(sample.torsoLeanDeg);
-        accumulator.shoulderRollAbsSum += Math.abs(sample.shoulderRollDeg);
+        if (sample.valid) accumulator.validCount += 1;
+        if (sample.ood) accumulator.oodCount += 1;
+        if (sample.valid) {
+            accumulator.confidenceSum += sample.confidence;
+            accumulator.movementVelocitySum += sample.movementVelocity;
+            accumulator.torsoLeanAbsSum += Math.abs(sample.torsoLeanDeg);
+            accumulator.shoulderRollAbsSum += Math.abs(sample.shoulderRollDeg);
+        }
         if (startedMovementBurst) accumulator.movementBurstCount += 1;
         this.state.sessionData.bodyPoseSamples.push(sample);
         if (this.state.sessionData.bodyPoseSamples.length > SAMPLE_CAP) {
@@ -266,6 +332,30 @@ export class ContinuousBodyPoseCollector {
         this.lastTorsoCenter = torsoCenter;
         this.lastLandmarks = landmarks.map(point => ({ x: point.x, y: point.y }));
         return sample;
+    }
+
+    _recordRejected(reason) {
+        if (!this.state.sessionData.bodyPoseAccumulator) {
+            this.state.sessionData.bodyPoseAccumulator = {
+                n: 0,
+                startedAt: Date.now(),
+                updatedAt: Date.now(),
+                enabled: this.enabled,
+                gamerMode: this.gamerMode,
+                validCount: 0,
+                oodCount: 0,
+                occludedCount: 0,
+                confidenceSum: 0,
+                movementVelocitySum: 0,
+                torsoLeanAbsSum: 0,
+                shoulderRollAbsSum: 0,
+                movementBurstCount: 0
+            };
+        }
+        const accumulator = this.state.sessionData.bodyPoseAccumulator;
+        accumulator.updatedAt = Date.now();
+        accumulator.oodCount += 1;
+        if (reason === 'occluded') accumulator.occludedCount += 1;
     }
 
     summary() {

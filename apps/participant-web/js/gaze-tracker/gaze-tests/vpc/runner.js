@@ -73,12 +73,14 @@ export async function runVPCTest(options = {}) {
     const vpcScreen = document.getElementById('vpcTestScreen');
     const progressText = document.getElementById('vpcProgressText');
     const phaseText = document.getElementById('vpcPhaseText');
+    const embeddedInstruction = vpcScreen?.querySelector('[data-i18n="vpc_instruction"]');
     const fixation = document.getElementById('vpcFixationMark');
     const centerImage = document.getElementById('vpcCenterImage');
     const leftImage = document.getElementById('vpcLeftImage');
     const rightImage = document.getElementById('vpcRightImage');
 
     updateScreenMode({ container, vpcScreen });
+    hide(embeddedInstruction);
     hideAllStimulus({ fixation, centerImage, leftImage, rightImage });
 
     setSessionPhase(TEST_PHASES.VPC_FIXATION, { source: 'vpc_run_start' });

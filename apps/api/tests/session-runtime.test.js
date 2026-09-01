@@ -245,6 +245,7 @@ describe('continuous body posture summary', () => {
           {
             t: 9000,
             confidence: 0.7,
+            valid: true,
             movementVelocity: 0.4,
             torsoLeanDeg: 5,
             shoulderRollDeg: 4,
@@ -252,6 +253,7 @@ describe('continuous body posture summary', () => {
         ],
         bodyPoseAccumulator: {
           n: 100,
+          validCount: 100,
           startedAt: 1000,
           updatedAt: 11000,
           confidenceSum: 80,
@@ -317,7 +319,7 @@ describe('quality detector', () => {
     assert.equal(raised[0].code, 'frame_analysis_failed');
   });
 
-  it('uses critical FaceSegmenter hand occlusion without low-skin false positives', async () => {
+  it('requires regional hand occlusion without global-mask or low-skin false positives', async () => {
     let now = 1000;
     const { SessionQualityDetector } = await importRuntimeModule('quality-detector.mjs');
     const detector = new SessionQualityDetector({ now: () => now });
@@ -334,13 +336,25 @@ describe('quality detector', () => {
     now += 2500;
     assert.equal(detector.update(goodFrame, lowSkin).raised.length, 0);
 
-    const hand = {
+    const globalHandGuess = {
       faceVisibility: { isComplete: false, handDetected: true, issues: ['hand_on_face'] },
       issues: ['hand_on_face'],
     };
-    detector.update(goodFrame, hand);
+    detector.update(goodFrame, globalHandGuess);
     now += 2100;
-    assert.equal(detector.update(goodFrame, hand).raised[0].code, 'face_occluded');
+    assert.equal(detector.update(goodFrame, globalHandGuess).raised.length, 0);
+
+    const regionalHand = {
+      faceVisibility: {
+        isComplete: false,
+        handDetected: true,
+        issues: ['left_eye_hand_occluded'],
+      },
+      issues: ['left_eye_hand_occluded'],
+    };
+    detector.update(goodFrame, regionalHand);
+    now += 2100;
+    assert.equal(detector.update(goodFrame, regionalHand).raised[0].code, 'face_occluded');
   });
 
   it('ignores brief FPS drops and raises a sustained low FPS issue', async () => {
@@ -488,6 +502,12 @@ describe('participant API origin and retry policy', () => {
         configuredBase: 'http://api.wecog.ru/v1',
       }),
       'https://wecog.ru/api'
+    );
+    assert.equal(
+      resolveParticipantApiBase({
+        runtime: { location: { href: 'http://127.0.0.1:8080/apps/participant-web/run_new.html' } },
+      }),
+      'http://127.0.0.1:3000'
     );
   });
 

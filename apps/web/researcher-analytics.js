@@ -682,7 +682,17 @@ function AnalyticsView(sub) {
         body.appendChild(root);
         setTimeout(() => {
           try { initFn(root); }
-          catch(e) { console.error('Dashboard init error:', e); root.innerHTML = '<div class="card" style="padding:20px;"><p style="color:var(--bad)">Ошибка: ' + e.message + '</p></div>'; }
+          catch(e) {
+            console.error('Dashboard init error:', e);
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.style.padding = '20px';
+            const message = document.createElement('p');
+            message.style.color = 'var(--bad)';
+            message.textContent = 'Ошибка: ' + (e && e.message ? e.message : String(e));
+            card.appendChild(message);
+            root.replaceChildren(card);
+          }
         }, 0);
       }
     }

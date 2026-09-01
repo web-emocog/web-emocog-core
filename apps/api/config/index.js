@@ -25,6 +25,16 @@ function positiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : fallback;
 }
 
+const requestTimeoutMs = positiveInt(
+  process.env.HTTP_REQUEST_TIMEOUT_MS,
+  120_000,
+  600_000
+);
+const headersTimeoutMs = Math.min(
+  positiveInt(process.env.HTTP_HEADERS_TIMEOUT_MS, 30_000, 120_000),
+  requestTimeoutMs
+);
+
 if (
   nodeEnv === 'production' &&
   (
@@ -44,6 +54,23 @@ module.exports = {
   port: positiveInt(process.env.PORT, 3000, 65_535),
   database: {
     url: process.env.DATABASE_URL || 'postgres://localhost:5432/emocog',
+    poolMax: positiveInt(process.env.DB_POOL_MAX, 20, 200),
+    idleTimeoutMs: positiveInt(process.env.DB_IDLE_TIMEOUT_MS, 30_000, 300_000),
+    connectionTimeoutMs: positiveInt(
+      process.env.DB_CONNECTION_TIMEOUT_MS,
+      2_000,
+      60_000
+    ),
+    statementTimeoutMs: positiveInt(
+      process.env.DB_STATEMENT_TIMEOUT_MS,
+      60_000,
+      600_000
+    ),
+    bulkInsertBatchSize: positiveInt(
+      process.env.DB_BULK_INSERT_BATCH_SIZE,
+      100,
+      1_000
+    ),
   },
   jwt: {
     secret: jwtSecret,
@@ -59,6 +86,19 @@ module.exports = {
   forceHttps: nodeEnv === 'production' || process.env.FORCE_HTTPS === 'true',
   http: {
     trustProxyHops: nonNegativeInt(process.env.TRUST_PROXY_HOPS, 0),
+    requestTimeoutMs,
+    headersTimeoutMs,
+    keepAliveTimeoutMs: positiveInt(
+      process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS,
+      5_000,
+      60_000
+    ),
+    shutdownGraceMs: positiveInt(
+      process.env.SHUTDOWN_GRACE_MS,
+      30_000,
+      120_000
+    ),
+    maxHeadersCount: positiveInt(process.env.HTTP_MAX_HEADERS_COUNT, 100, 1_000),
     corsOrigins: csv(process.env.CORS_ORIGINS || (
       nodeEnv === 'production'
         ? 'https://wecog.ru'
@@ -90,5 +130,9 @@ module.exports = {
       pdfInfoBin: process.env.PDFINFO_BIN || 'pdfinfo',
       pdfToPpmBin: process.env.PDFTOPPM_BIN || 'pdftoppm',
     },
+  },
+  release: {
+    version: process.env.RELEASE_VERSION || 'development',
+    sha: process.env.RELEASE_SHA || 'unknown',
   },
 };

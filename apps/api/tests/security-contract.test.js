@@ -28,11 +28,13 @@ describe('role x operation x tenant matrix', () => {
 
   it('keeps platform-wide scope exclusive to platform admin', () => {
     assert.equal(isPlatformAdmin({ role: 'admin' }), true);
-    for (const role of ['PI', 'researcher', 'analyst', 'assistant', 'developer']) {
+    for (const role of ['org_admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer']) {
       assert.equal(isPlatformAdmin({ role }), false);
       assert.equal(canRolePerform(role, OPERATIONS.PLATFORM_ADMIN), false);
-      for (const operation of readOperations) {
-        assert.equal(canRolePerform(role, operation), true, `${role}: ${operation}`);
+      if (role !== 'developer') {
+        for (const operation of readOperations) {
+          assert.equal(canRolePerform(role, operation), true, `${role}: ${operation}`);
+        }
       }
     }
   });
@@ -56,23 +58,33 @@ describe('role x operation x tenant matrix', () => {
     assert.equal(calls.length, before, 'platform admin does not require tenant lookup');
   });
 
-  it('supports the complete developer workflow inside membership scope', () => {
-    const workflow = [
-      OPERATIONS.PROJECT_CREATE,
-      OPERATIONS.PROJECT_READ,
-      OPERATIONS.PROJECT_UPDATE,
-      OPERATIONS.PROTOCOL_WRITE,
-      OPERATIONS.PROTOCOL_PUBLISH,
-      OPERATIONS.INVITATION_WRITE,
-      OPERATIONS.SESSION_WRITE,
-      OPERATIONS.ANALYTICS_READ,
-      OPERATIONS.EXPORT_READ,
-    ];
-    for (const operation of workflow) {
-      assert.equal(canRolePerform('developer', operation), true, operation);
+  it('lets an organization admin reach every project only through organization membership', async () => {
+    let queryText = '';
+    const pool = {
+      query: async sql => {
+        queryText = sql;
+        return { rows: [{ ok: 1 }] };
+      },
+    };
+    assert.equal(
+      await hasProjectMembership(pool, 44, { sub: 9, role: 'org_admin' }),
+      true
+    );
+    assert.match(queryText, /user_organizations/);
+    assert.doesNotMatch(queryText, /user_projects/);
+  });
+
+  it('keeps developers technical-only and organization admins tenant-scoped', () => {
+    for (const operation of Object.values(OPERATIONS)) {
+      assert.equal(canRolePerform('developer', operation), false, operation);
     }
-    assert.equal(canRolePerform('developer', OPERATIONS.PROJECT_DELETE), false);
-    assert.equal(canRolePerform('developer', OPERATIONS.USER_MANAGE), false);
+    for (const operation of Object.values(OPERATIONS)) {
+      assert.equal(
+        canRolePerform('org_admin', operation),
+        operation !== OPERATIONS.PLATFORM_ADMIN,
+        operation
+      );
+    }
   });
 
   it('keeps analyst read-only and assistant outside analytics/export', () => {

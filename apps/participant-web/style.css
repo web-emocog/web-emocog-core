@@ -107,6 +107,8 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
 
 .consent-box { background: #F8FAFC; padding: 20px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 14px; margin-bottom: 20px; border: 1px solid var(--border); }
 .checkbox-wrapper { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 15px; border: 2px solid var(--border); border-radius: 12px; }
+.audio-consent { margin-top: 10px; border-width: 1px; background: #F8FAFC; font-size: 13px; line-height: 1.45; }
+.audio-consent[hidden] { display: none; }
 
 .input-error {
     border-color: var(--error) !important;
@@ -288,9 +290,8 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     border-radius: 50%;
     cursor: pointer;
     z-index: 2001;
-    filter: drop-shadow(0 0 10px rgba(220, 38, 38, 0.8));
     transform: translate(-50%, -50%);
-    transition: all 0.3s ease;
+    transition: transform 0.12s ease, opacity 0.12s ease;
 }
 
 .fullscreen-calib-point:hover {
@@ -306,8 +307,78 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     font-size: 18px;
     text-align: center;
     z-index: 2002;
-    pointer-events: none;
     user-select: none;
+    pointer-events: none;
+}
+
+.calib-instruction > span,
+.calib-progress {
+    pointer-events: none;
+}
+
+.calibration-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 2004;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: #fff;
+}
+
+.calibration-intro[hidden] {
+    display: none;
+}
+
+.calibration-intro-card {
+    width: min(560px, 100%);
+    padding: clamp(28px, 5vw, 48px);
+    border: 1px solid #d5d9d4;
+    border-radius: 24px;
+    background: #fff;
+    color: #10211b;
+    text-align: left;
+}
+
+.calibration-intro-kicker {
+    margin-bottom: 16px;
+    color: #55635c;
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.calibration-intro-card h2 {
+    margin: 0 0 18px;
+    color: #10211b;
+}
+
+.calibration-intro-card p {
+    margin: 0 0 26px;
+    color: #55635c;
+    font-size: 19px;
+    line-height: 1.55;
+}
+
+.calibration-intro-card .btn {
+    width: auto;
+    margin: 0;
+}
+
+.calibration-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 18px;
+    pointer-events: auto;
+}
+
+.calibration-actions .btn {
+    width: auto;
+    min-width: 180px;
+    margin: 0;
 }
 
 .calib-progress {
@@ -350,6 +421,14 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     height: 100%;
     object-fit: cover;
     transform: scaleX(-1);
+    pointer-events: none;
+    opacity: 1;
+}
+
+#precheckVideo::-webkit-media-controls,
+#precheckVideo::-webkit-media-controls-start-playback-button {
+    display: none !important;
+    -webkit-appearance: none;
 }
 
 #overlayCanvas {
@@ -359,6 +438,7 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     width: 100%;
     height: 100%;
     pointer-events: none;
+    z-index: 2;
 }
 
 .face-guide {
@@ -372,6 +452,35 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     border-radius: 10px;
     pointer-events: none;
     transition: border-color 0.3s ease;
+    display: none;
+}
+
+.calibration-head-pose-guide {
+    position: fixed;
+    width: 138px;
+    height: 104px;
+    padding: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 18px;
+    background: rgba(8, 17, 31, 0.84);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(8px);
+    z-index: 10060;
+    display: none;
+    pointer-events: none;
+}
+
+.calibration-head-pose-guide.active { display: block; }
+.calibration-head-pose-guide[data-corner="top-left"] { left: 18px; top: 18px; }
+.calibration-head-pose-guide[data-corner="top-right"] { right: 18px; top: 18px; }
+.calibration-head-pose-guide[data-corner="bottom-left"] { left: 18px; bottom: 18px; }
+.calibration-head-pose-guide[data-corner="bottom-right"] { right: 18px; bottom: 18px; }
+
+#calibrationHeadPoseCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 14px;
 }
 
 .guide-text {
@@ -383,6 +492,7 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     font-size: 13px;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
     transition: all 0.3s ease;
+    z-index: 3;
 }
 
 /* Индикаторы (pre-check) */

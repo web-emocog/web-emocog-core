@@ -9,22 +9,23 @@ import {
     generateUniqueId,
     copyIds, 
     checkForm, 
+    submitForm,
     validateEmailField, 
     collectTechDataAndProceed, 
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260807-1';
+} from './ui-updated.js?v=20260828-2';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js';
+} from './precheck-updated.js?v=20260828-2';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js';
+} from './tests-updated.js?v=20260828-2';
 
 import {
     deriveInvitationHubMetrics,
@@ -39,6 +40,28 @@ import {
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
+import {
+    captureAudioConsent,
+    configureAudioConsentUI
+} from '../audio/consent-ui.js';
+
+const RETAINED_GAZE_TARGET = 30_000;
+const RETAINED_GAZE_HARD_CAP = 32_000;
+const PARTICIPANT_LOCALES = new Set(['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur']);
+
+function participantText(ru, en, es) {
+    if (state.currentLang === 'ru') return ru;
+    if (state.currentLang === 'es') return es || en;
+    return en;
+}
+
+export function appendGazeSample(sample) {
+    state.sessionData.eyeTracking.push(sample);
+    if (state.sessionData.eyeTracking.length > RETAINED_GAZE_HARD_CAP) {
+        const overflow = state.sessionData.eyeTracking.length - RETAINED_GAZE_TARGET;
+        state.sessionData.eyeTracking.splice(0, overflow);
+    }
+}
 initQcPauseOverlay({ getLang: () => state.currentLang });
 
 if (typeof window !== 'undefined') {
@@ -151,7 +174,8 @@ export function handleGazeUpdate(gazeData) {
             const taskContext = getCurrentTaskContext();
             const viewport = getContentViewport();
             const stimulusRect = currentStimulusContentRect();
-            state.sessionData.eyeTracking.push({
+            const clockStamp = state.runtime.sessionClock?.now?.() || null;
+            appendGazeSample({
                 x: null,
                 y: null,
                 displayX: null,
@@ -167,10 +191,15 @@ export function handleGazeUpdate(gazeData) {
                 onScreen: false,
                 clipped: gazeData.clipped === true,
                 t: rejectedAt,
+                timeOriginMs: clockStamp?.timeOriginMs ?? null,
+                monotonicMs: clockStamp?.monotonicMs ?? rejectedAt,
+                sessionTimeMs: clockStamp?.sessionTimeMs ?? getRelativeSessionTimeMs(rejectedAt),
                 tRelMs: getRelativeSessionTimeMs(rejectedAt),
                 phase: state.runtime.currentPhase || '',
                 blockId: taskContext.blockId ?? null,
+                attempt: taskContext.attempt ?? null,
                 trialId: taskContext.trialId ?? null,
+                presentationId: taskContext.presentationId ?? null,
                 stimulusId: taskContext.stimulusId ?? null,
                 stimulusName: taskContext.stimulusName ?? null,
                 stimulusType: taskContext.stimulusType ?? null,
@@ -180,7 +209,11 @@ export function handleGazeUpdate(gazeData) {
             });
         }
         
-        if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
+        if (
+            state.runtime.qcMetrics
+            && state.runtime.qcMetrics.isRunning()
+            && state.runtime.gazeTracker?.isCalibrated?.() === true
+        ) {
             state.runtime.qcMetrics.addGazePoint(null, state.runtime.lastPoseData);
         }
         return;
@@ -231,16 +264,22 @@ export function handleGazeUpdate(gazeData) {
     }
 
     if (state.flags.isRecording) {
+        const clockStamp = state.runtime.sessionClock?.now?.() || null;
         const eyeSample = {
             x,
             y,
             displayX: x,
             displayY: y,
             t,
+            timeOriginMs: clockStamp?.timeOriginMs ?? null,
+            monotonicMs: clockStamp?.monotonicMs ?? t,
+            sessionTimeMs: clockStamp?.sessionTimeMs ?? getRelativeSessionTimeMs(t),
             tRelMs: getRelativeSessionTimeMs(t),
             phase,
             blockId: taskContext.blockId ?? null,
+            attempt: taskContext.attempt ?? null,
             trialId: taskContext.trialId ?? null,
+            presentationId: taskContext.presentationId ?? null,
             stimulusId: taskContext.stimulusId ?? null,
             stimulusName: taskContext.stimulusName ?? null,
             stimulusType: taskContext.stimulusType ?? null,
@@ -264,10 +303,16 @@ export function handleGazeUpdate(gazeData) {
             // именно по ним нужно считать AOI / heatmap / off-screen.
             correctedX: Number.isFinite(gazeData.correctedX) ? gazeData.correctedX : null,
             correctedY: Number.isFinite(gazeData.correctedY) ? gazeData.correctedY : null,
+            normalizedX: Number.isFinite(gazeData.correctedX) && screenWidth > 0
+                ? gazeData.correctedX / screenWidth
+                : null,
+            normalizedY: Number.isFinite(gazeData.correctedY) && screenHeight > 0
+                ? gazeData.correctedY / screenHeight
+                : null,
             screenWidth,
             screenHeight
         };
-        state.sessionData.eyeTracking.push(eyeSample);
+        appendGazeSample(eyeSample);
         if (d && d.enabled && !_eyeTrackingShapeLogged) {
             _eyeTrackingShapeLogged = true;
             dbg('gaze', 'eyeTracking:sampleShape', {
@@ -283,7 +328,11 @@ export function handleGazeUpdate(gazeData) {
         }
     }
 
-    if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
+    if (
+        state.runtime.qcMetrics
+        && state.runtime.qcMetrics.isRunning()
+        && state.runtime.gazeTracker?.isCalibrated?.() === true
+    ) {
         // Передаём onScreen, чтобы QC использовал честный флаг от трекера
         // и не пересчитывал его по уже зажатым координатам.
         state.runtime.qcMetrics.addGazePoint({ x, y, onScreen }, state.runtime.lastPoseData);
@@ -397,6 +446,7 @@ async function loadInvitationProtocolByCode(code) {
         }
 
         state.runtime.invitationProtocolDefinition = payload.definition;
+        configureAudioConsentUI(state, payload.definition);
         state.runtime.invitationProtocolMeta = {
             invitationId: payload.invitation_id || null,
             protocolId: payload.protocol_id || null,
@@ -515,19 +565,20 @@ function ensureDeveloperSessionIds() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    const sessionRuntime = await initSessionRuntime();
-    dbg('app', 'app:init:start', { href: window.location.href });
-    dbg('api', 'api:base', { base: resolveParticipantApiBase() });
-    console.log('App initialized (Phase 0 – privacy & aggregates)');
+    let initialParticipantLanguage = state.currentLang;
     try {
         const pendingLang = window.__EMOCOG_PENDING_LANG__;
         const storedLang = localStorage.getItem('emocog_participant_lang');
         const preferredLang = pendingLang || storedLang;
-        if (preferredLang === 'en' || preferredLang === 'ru') {
-            state.currentLang = preferredLang;
-        }
+        if (PARTICIPANT_LOCALES.has(preferredLang)) initialParticipantLanguage = preferredLang;
     } catch (_) {}
+    setLanguage(initialParticipantLanguage);
 
+    const sessionRuntime = await initSessionRuntime();
+    configureAudioConsentUI(state, state.runtime?.invitationProtocolDefinition || null);
+    dbg('app', 'app:init:start', { href: window.location.href });
+    dbg('api', 'api:base', { base: resolveParticipantApiBase() });
+    console.log('App initialized (Phase 0 – privacy & aggregates)');
     const participantInviteBypass = await fetchParticipantInviteBypass();
 
     // Код приглашения из URL (ссылка-приглашение ведёт на пречек с ?code=...)
@@ -535,7 +586,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const invitationCodeFromUrl = params.get('code');
     const invitationCode = invitationCodeFromUrl || state.sessionData.ids.invitationCode;
     const developerModule = (params.get('developer_module') || '').trim().toLowerCase();
-    const localDevelopmentBypass = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     let developerAutoPrecheck = false;
     try {
         developerAutoPrecheck = localStorage.getItem('emocog_dev_auto_precheck') === '1';
@@ -550,6 +600,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         } catch (e) {
             console.warn('[Invitation] Failed to load protocol by code:', e);
+            state.sessionData.ids.invitationCode = null;
+            state.runtime.invitationProtocolDefinition = null;
+            state.runtime.invitationProtocolMeta = null;
+            state.runtime.invitationLoadError = {
+                code: invitationCode.trim(),
+                message: e?.message || String(e)
+            };
             recordSessionEvent('invitation_protocol_load_failed', {
                 message: e?.message || String(e)
             });
@@ -564,6 +621,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const inviteInput = document.getElementById('inviteLinkInput');
     const inviteBtn = document.getElementById('applyInviteLinkBtn');
     const inviteHint = document.getElementById('inviteLinkHint');
+    if (inviteInput && invitationCodeFromUrl) inviteInput.value = invitationCodeFromUrl;
     if (inviteBtn && inviteInput) {
         const applyInvite = () => {
             const code = extractInvitationCodeFromInput(inviteInput.value);
@@ -599,13 +657,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!raw) {
                     if (
                         !participantInviteBypass
-                        && !localDevelopmentBypass
                         && !state.sessionData.ids.invitationCode
                         && !invitationCode
                     ) {
                         if (hint) {
                             hint.textContent =
                                 'Вставьте ссылку-приглашение или код. Если у вас нет приглашения, попросите исследователя отправить ссылку.';
+                        }
+                        return;
+                    }
+                    if (!participantInviteBypass && state.runtime?.invitationLoadError) {
+                        if (hint) {
+                            hint.textContent = 'Приглашение не найдено или больше не действует. Получите новую ссылку у исследователя.';
                         }
                         return;
                     }
@@ -661,6 +724,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         dbg('ui', 'button:consentBtn', {});
         consentBtn.disabled = true;
         try {
+            captureAudioConsent(state);
             await generateIdsAndProceed();
         } finally {
             consentBtn.disabled = false;
@@ -690,7 +754,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         formBtn.addEventListener('click', (e) => {
             e.preventDefault();
             dbg('ui', 'button:formBtn', { formValid: checkForm() });
-            if (checkForm()) nextStep(5);
+            if (checkForm()) submitForm();
         });
     }
 
@@ -714,12 +778,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const langRu = document.getElementById('langRu');
     const langEn = document.getElementById('langEn');
+    const participantLanguageSelect = document.getElementById('participantLanguageSelect');
     if (langRu) langRu.addEventListener('click', () => setLanguage('ru'));
     if (langEn) langEn.addEventListener('click', () => setLanguage('en'));
+    if (participantLanguageSelect) {
+        participantLanguageSelect.addEventListener('change', () => {
+            setLanguage(participantLanguageSelect.value);
+        });
+    }
 
-    setLanguage(state.currentLang);
-    const devModuleEntry =
-        developerModule === 'precheck' || developerModule === 'tracking' || developerModule === 'hub' || developerAutoPrecheck;
+    // A stale developer flag must never hijack a real invitation session. It used
+    // to replace participant/session ids with P-DEV/S-DEV and bypass admission.
+    const devModuleEntry = participantInviteBypass && !invitationCode && (
+        developerModule === 'precheck'
+        || developerModule === 'tracking'
+        || developerModule === 'hub'
+        || developerAutoPrecheck
+    );
     const platformBypassEntry = participantInviteBypass && !invitationCode;
     if (devModuleEntry || platformBypassEntry) {
         ensureDeveloperSessionIds();
@@ -754,12 +829,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (sessionRuntime?.reloadRecovery) {
-        nextStep(5);
-        const precheckStatus = document.getElementById('precheckStatus');
-        if (precheckStatus) {
-            precheckStatus.textContent = state.currentLang === 'en'
-                ? 'Restart the camera check and calibration before continuing.'
-                : 'Перезапустите проверку камеры и калибровку перед продолжением.';
+        const requiresPrompt = sessionRuntime.reloadRecovery.requiresPrompt !== false;
+        const interruptedBlock = sessionRuntime.reloadRecovery.interruptedBlock;
+        const restoredShellStep = Number(state.sessionData?.shellStep);
+        const recoveryStep = (requiresPrompt || interruptedBlock)
+            ? 5
+            : (restoredShellStep >= 3 && restoredShellStep <= 5
+            ? restoredShellStep
+            : 3);
+        nextStep(recoveryStep);
+        if (requiresPrompt) {
+            const precheckStatus = document.getElementById('precheckStatus');
+            if (precheckStatus) {
+                precheckStatus.textContent = participantText(
+                    'Перезапустите проверку камеры и калибровку перед продолжением.',
+                    'Restart the camera check and calibration before continuing.',
+                    'Reinicie la comprobación de la cámara y la calibración antes de continuar.'
+                );
+            }
         }
         sessionRuntime.promptReloadRecovery()
             .catch(error => console.warn('[SessionRuntime] reload recovery prompt failed:', error));

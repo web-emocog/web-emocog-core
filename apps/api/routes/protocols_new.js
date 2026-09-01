@@ -15,6 +15,8 @@ const {
 } = require('../middleware/auth');
 const { listProtocolProxyMetrics } = require('./proxy_metrics');
 const { validateProtocolAois } = require('../../web/aoi-protocol');
+const { validateProtocolSurveyBlocks } = require('../../shared/survey-contract');
+const { normalizeMandatoryParticipantShell } = require('../protocol/participant-shell');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -25,6 +27,17 @@ function rejectInvalidAois(res, definition) {
   res.status(422).json({
     error: 'Protocol AOI validation failed',
     code: 'protocol_aoi_invalid',
+    details: validation.errors,
+  });
+  return true;
+}
+
+function rejectInvalidSurveys(res, definition) {
+  const validation = validateProtocolSurveyBlocks(definition);
+  if (validation.ok) return false;
+  res.status(422).json({
+    error: 'Protocol survey validation failed',
+    code: 'protocol_survey_invalid',
     details: validation.errors,
   });
   return true;
@@ -43,9 +56,24 @@ router.get(
     try {
       const globalAccess = hasGlobalProtocolAccess(req.user);
       let sql = `
-        SELECT pr.id, pr.project_id, pr.name, pr.definition, pr.created_at, pr.updated_at
+        SELECT pr.id, pr.project_id, pr.name, pr.definition, pr.created_at, pr.updated_at,
+               active_invitation.id AS invitation_id,
+               active_invitation.code AS invitation_code,
+               active_invitation.max_runs AS invitation_max_runs,
+               active_invitation.used_runs AS invitation_used_runs,
+               active_invitation.expires_at AS invitation_expires_at,
+               active_invitation.created_at AS invitation_created_at
         FROM protocols pr
         INNER JOIN projects p ON p.id = pr.project_id
+        LEFT JOIN LATERAL (
+          SELECT i.id, i.code, i.max_runs, i.used_runs, i.expires_at, i.created_at
+          FROM invitations i
+          WHERE i.protocol_id = pr.id
+            AND (i.expires_at IS NULL OR i.expires_at > current_timestamp)
+            AND (i.max_runs IS NULL OR i.used_runs < i.max_runs)
+          ORDER BY i.created_at DESC
+          LIMIT 1
+        ) active_invitation ON true
       `;
       if (!globalAccess) {
         sql += `
@@ -82,8 +110,10 @@ router.post(
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-      const { project_id, name, definition } = req.body;
+      const { project_id, name } = req.body;
+      const definition = normalizeMandatoryParticipantShell(req.body.definition);
       if (rejectInvalidAois(res, definition)) return;
+      if (rejectInvalidSurveys(res, definition)) return;
       const projectAllowed = await hasProjectMembership(pool, project_id, req.user);
       if (!projectAllowed) return res.status(403).json({ error: 'Not member of project' });
       const r = await pool.query(
@@ -167,7 +197,11 @@ router.patch(
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-      if (req.body.definition !== undefined && rejectInvalidAois(res, req.body.definition)) return;
+      const normalizedDefinition = req.body.definition === undefined
+        ? undefined
+        : normalizeMandatoryParticipantShell(req.body.definition);
+      if (normalizedDefinition !== undefined && rejectInvalidAois(res, normalizedDefinition)) return;
+      if (normalizedDefinition !== undefined && rejectInvalidSurveys(res, normalizedDefinition)) return;
       const updates = [];
       const values = [];
       let i = 1;
@@ -177,7 +211,7 @@ router.patch(
       }
       if (req.body.definition !== undefined) {
         updates.push(`definition = $${i++}`);
-        values.push(JSON.stringify(req.body.definition));
+        values.push(JSON.stringify(normalizedDefinition));
       }
       if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
       let r;

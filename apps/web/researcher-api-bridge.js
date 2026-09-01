@@ -303,9 +303,12 @@
     if (!hasLiveApi()) return false;
     try {
       const projects = await fetchProjects();
-      populateProjectSelect(projects);
       if (projects.length && !getSelectedProjectId()) {
         setSelectedProjectId(projects[0].id, projects[0].name);
+      }
+      populateProjectSelect(projects);
+      if (typeof global.syncWelcomeProjects === 'function') {
+        global.syncWelcomeProjects(projects);
       }
       if (global.state && projects[0]) {
         const cur = projects.find((p) => p.id === getSelectedProjectId()) || projects[0];

@@ -60,13 +60,16 @@ function evaluateQuality(samples, sampleRate, durationSec, speechFraction, speec
   const noiseEnergy = noiseCount ? noiseEnergyAcc / noiseCount : speechEnergy * 0.35 + 1e-8;
   const snrProxyDb = 10 * Math.log10((speechEnergy + 1e-8) / (noiseEnergy + 1e-8));
 
-  const durationComponent = norm(durationSec, 8, 90);
-  const speechComponent = norm(speechFraction, 0.15, 0.9);
+  const durationComponent = norm(durationSec, 6, 20);
+  const speechComponent = norm(speechFraction, 0.10, 0.70);
   const clippingComponent = invNorm(clippingRatio, 0.005, 0.10);
-  const snrComponent = norm(snrProxyDb, 3, 24);
-  const textComponent = transcriptWordCount <= 0 ? 0.5 : norm(transcriptWordCount, 8, 180);
+  const snrComponent = norm(snrProxyDb, 0, 18);
+  const qualityComponents = [durationComponent, speechComponent, clippingComponent, snrComponent];
+  if (transcriptWordCount > 0) {
+    qualityComponents.push(norm(transcriptWordCount, 8, 180));
+  }
 
-  const score = clamp(mean([durationComponent, speechComponent, clippingComponent, snrComponent, textComponent]));
+  const score = clamp(mean(qualityComponents));
 
   const warnings = [];
   if (durationSec < 8) warnings.push("Короткая запись может снижать устойчивость маркеров.");
@@ -75,7 +78,7 @@ function evaluateQuality(samples, sampleRate, durationSec, speechFraction, speec
   if (snrProxyDb < 3) warnings.push("Низкий SNR proxy; фоновый шум может снижать надёжность.");
   if (transcriptWordCount > 0 && transcriptWordCount < 8) warnings.push("Низкое покрытие транскриптом; лексические маркеры слабые.");
 
-  const isOod = durationSec < 3 || speechFraction < 0.08 || clippingRatio > 0.15 || snrProxyDb < -2;
+  const isOod = durationSec < 3 || speechFraction < 0.08 || clippingRatio > 0.15 || snrProxyDb < -4;
 
   return {
     score: Number(score.toFixed(6)),

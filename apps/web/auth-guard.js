@@ -3,25 +3,15 @@
   'use strict';
 
   function getApiBase() {
-    var fromStorage = null;
-    try {
-      fromStorage = localStorage.getItem('emocog_api_base');
-    } catch (_) {}
-    if (fromStorage && fromStorage.trim()) return fromStorage.trim().replace(/\/$/, '');
-    return (global.location.origin + '/api').replace(/\/$/, '');
+    var base = global.EmocogApiBase
+      ? global.EmocogApiBase.resolve()
+      : (global.location.origin + '/api').replace(/\/$/, '');
+    global.API_BASE = base;
+    return base;
   }
 
-  function hasLocalAuth() {
-    try {
-      return (
-        sessionStorage.getItem('emocog_developer_auth') === '1' ||
-        localStorage.getItem('emocog_developer_auth') === '1' ||
-        !!localStorage.getItem('emocog_api_token')
-      );
-    } catch (_) {
-      return false;
-    }
-  }
+  // Resolve eagerly so scripts loaded after the guard use the same endpoint.
+  getApiBase();
 
   function persistAuthFlag() {
     try {
@@ -44,14 +34,6 @@
     global.location.replace(loginPath || 'developer/login.html');
   }
 
-  function getToken() {
-    try {
-      return localStorage.getItem('emocog_api_token') || '';
-    } catch (_) {
-      return '';
-    }
-  }
-
   function getCachedUser() {
     try {
       var raw = localStorage.getItem('emocog_api_user');
@@ -61,12 +43,10 @@
     }
   }
 
-  async function fetchCurrentUser(token) {
+  async function fetchCurrentUser() {
     var apiBase = getApiBase();
-    var headers = token ? { Authorization: 'Bearer ' + token } : {};
     var response = await fetch(apiBase + '/auth/me', {
       method: 'GET',
-      headers: headers,
       credentials: 'include'
     });
     if (!response.ok) {
@@ -115,35 +95,24 @@
     var loginPath = opts.loginPath || 'developer/login.html';
     var allowed = opts.allowedRoles || null;
     var needsRoleGate = Array.isArray(allowed) && allowed.length > 0;
-    var tokenOptional = opts.tokenOptional === true;
-
-    if (needsRoleGate && !tokenOptional) {
+    if (needsRoleGate) {
       try {
         document.documentElement.classList.add('emocog-auth-pending');
         document.documentElement.style.visibility = 'hidden';
       } catch (_) {}
     }
 
-    if (!hasLocalAuth()) {
+    var user = getCachedUser();
+    try {
+      // Local flags are only a UI cache. Access is always revalidated by the
+      // HttpOnly staff cookie and current server-side role/token version.
+      user = await fetchCurrentUser();
+      persistAuthFlag();
+    } catch (err) {
+      clearAuth();
       revealPageAfterAuth();
       redirectToLogin(loginPath);
       return { ok: false };
-    }
-
-    persistAuthFlag();
-    var token = getToken();
-    var user = getCachedUser();
-
-    if (!tokenOptional || token) {
-      try {
-        user = await fetchCurrentUser(token);
-      } catch (err) {
-        // Protected pages fail closed when the server cannot verify current role/token version.
-        clearAuth();
-        revealPageAfterAuth();
-        redirectToLogin(loginPath);
-        return { ok: false };
-      }
     }
 
     if (!roleAllowed(user, allowed)) {
@@ -165,7 +134,7 @@
     revealPageAfterAuth();
     return {
       ok: true,
-      token: token || '',
+      token: '',
       user: user || null,
       apiBase: getApiBase()
     };

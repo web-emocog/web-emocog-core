@@ -1,0 +1,200 @@
+name: Release gates
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: test
+  CI: 'true'
+
+jobs:
+  api-security:
+    name: API, RT and security contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: npm ci
+      - name: Audit production dependencies
+        working-directory: apps/api
+        run: npm audit --omit=dev --audit-level=high
+      - name: Static release audit
+        working-directory: apps/api
+        run: node scripts/release-audit.js
+      - name: API unit, contract and security tests
+        working-directory: apps/api
+        run: npm test
+      - name: RT Python smoke
+        working-directory: apps/api
+        run: npm run test:rt-python
+
+  postgres-release:
+    name: PostgreSQL, migration, restore and ingest load
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.10-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: emocog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d emocog_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
+      S2_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
+      RESTORE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_restore
+      JWT_SECRET: ci-only-random-secret-not-used-outside-workflow-1234567890
+      FORCE_HTTPS: 'false'
+      INGEST_RATE_LIMIT_PER_MINUTE: '1000'
+      DEFAULT_RATE_LIMIT_PER_MINUTE: '1000'
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_VERSION: ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            apps/api/package-lock.json
+            apps/autotests/package-lock.json
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: npm ci
+      - name: Create disposable restore database
+        run: PGPASSWORD=postgres createdb -h 127.0.0.1 -U postgres emocog_restore
+      - name: Verify migrations up, down and up
+        working-directory: apps/api
+        env:
+          MIGRATION_VERIFY_ALLOW_DOWN: 'YES'
+        run: npm run migrate:verify
+      - name: PostgreSQL concurrency and negative security tests
+        working-directory: apps/api
+        run: npm run test:postgres
+      - name: Start canonical API
+        working-directory: apps/api
+        run: |
+          npm start > /tmp/wecog-api.log 2>&1 &
+          echo $! > /tmp/wecog-api.pid
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:3000/ready && exit 0
+            sleep 1
+          done
+          cat /tmp/wecog-api.log
+          exit 1
+      - name: Real HTTP API contract
+        working-directory: apps/autotests
+        env:
+          RUN_API_CONTRACT: '1'
+          API_BASE: http://127.0.0.1:3000
+        run: |
+          npm ci
+          npm run test:api
+      - name: Idempotent ingest load profile
+        working-directory: apps/api
+        env:
+          LOAD_TEST_ALLOW_MUTATION: 'YES'
+          LOAD_TEST_REQUESTS: '100'
+          LOAD_TEST_CONCURRENCY: '10'
+          LOAD_TEST_MAX_ERROR_RATE: '0.01'
+        run: npm run load:ingest
+      - name: Backup and restore drill
+        working-directory: apps/api
+        run: npm run backup:verify
+      - name: Gracefully stop API
+        if: always()
+        run: |
+          if [[ -f /tmp/wecog-api.pid ]]; then
+            kill -TERM "$(cat /tmp/wecog-api.pid)" || true
+            for attempt in $(seq 1 30); do
+              kill -0 "$(cat /tmp/wecog-api.pid)" 2>/dev/null || break
+              sleep 1
+            done
+          fi
+          cat /tmp/wecog-api.log 2>/dev/null || true
+          if [[ "${{ job.status }}" == "success" ]]; then
+            grep -q 'api_shutdown_completed' /tmp/wecog-api.log
+          fi
+
+  browser-regression:
+    name: Chromium and Firefox critical paths
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/autotests/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: apps/autotests
+        run: npm ci
+      - name: Install supported browsers
+        working-directory: apps/autotests
+        run: npx playwright install --with-deps chromium firefox
+      - name: Typecheck browser contracts
+        working-directory: apps/autotests
+        run: npm run typecheck
+      - name: Run browser regression
+        working-directory: apps/autotests
+        run: npm test
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-failure-${{ github.run_id }}
+          path: |
+            apps/autotests/test-results
+            apps/autotests/playwright-report
+          retention-days: 7
+
+  release-gate:
+    name: Required release gate
+    if: always()
+    needs: [api-security, postgres-release, browser-regression]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every release job
+        env:
+          API_RESULT: ${{ needs.api-security.result }}
+          POSTGRES_RESULT: ${{ needs.postgres-release.result }}
+          BROWSER_RESULT: ${{ needs.browser-regression.result }}
+        run: |
+          [[ "$API_RESULT" == "success" ]]
+          [[ "$POSTGRES_RESULT" == "success" ]]
+          [[ "$BROWSER_RESULT" == "success" ]]

@@ -11,9 +11,6 @@
 import { EMOTION_CONFIG }  from './emotion-config.js';
 import { EmotionAnalyzer } from './emotion-analyzer.js';
 
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function num(v, fallback = 0) { return Number.isFinite(v) ? Number(v) : fallback; }
-
 /**
  * Singleton — один экземпляр на всё приложение.
  * _analyzer оставлен для обратной совместимости со старым кодом.
@@ -47,8 +44,9 @@ export function getEmotionSample(precheckResult) {
             ...result,
             valence,
             arousal,
-            dataQuality: 'high',
+            dataQuality: result.calibrationReady === false ? 'calibrating' : 'high',
             dataSource:  'landmarks',
+            degraded: result.calibrationReady === false,
         };
     }
 
@@ -64,52 +62,21 @@ export function getEmotionSample(precheckResult) {
         };
     }
 
-    // ── Путь 3: мета-данные precheck → эвристика ───────────────────────
-    const H        = C.heuristic;
-    const illumRaw = num(precheckResult?.illumination?.meanBrightness, 0.5);
-    const illumNorm= clamp(illumRaw <= 1 ? illumRaw : illumRaw / 255, 0, 1);
+    // Camera metadata can describe signal quality, but it cannot identify an
+    // emotion. Fail closed instead of turning brightness/head motion into a
+    // fabricated affect label.
     const faceOk   = precheckResult?.face?.detected !== false;
-    const pose     = precheckResult?.pose || {};
-    const poseMag  = clamp(
-        (Math.abs(num(pose.yaw, 0)) + Math.abs(num(pose.pitch, 0)) + Math.abs(num(pose.roll, 0))) / H.poseMagDivisor,
-        0, 1
-    );
-    const eyesOpen = precheckResult?.eyes?.bothOpen === true ? H.eyesOpenValue : H.eyesClosedValue;
-
-    const valence = clamp(
-        (illumNorm - 0.5) * H.illumValenceScale +
-        (faceOk ? H.faceOkBonus : H.faceFailPenalty) +
-        (eyesOpen - 0.5) * H.eyesValenceScale -
-        poseMag * H.posePenaltyScale,
-        -1, 1
-    );
-    const arousal = clamp(
-        poseMag * H.poseArousalScale + (1 - illumNorm) * H.illumArousalScale,
-        0, 1
-    );
-
-    const HS = H.hScores;
-    const hScores = {
-        neutral:   Math.max(0, 1 - Math.abs(valence) - arousal * HS.neutralArousalDamp),
-        happiness: Math.max(0, valence)  * (1 - arousal * HS.happinessArousalDamp),
-        sadness:   Math.max(0, -valence) * (1 - arousal * HS.sadnessArousalDamp),
-        anger:     arousal * Math.max(0, -valence) * HS.angerScale,
-        fear:      arousal * HS.fearBase,
-        surprise:  arousal * HS.surpriseBase,
-        disgust:   0,
-    };
-    const hTotal = Object.values(hScores).reduce((s, v) => s + v, 0) || 1;
-    for (const k in hScores) hScores[k] = +(hScores[k] / hTotal).toFixed(4);
-
     return {
-        valence:     +valence.toFixed(4),
-        arousal:     +arousal.toFixed(4),
-        dominant:    valence > 0.2 ? 'happiness' : valence < -0.2 ? 'sadness' : 'neutral',
-        scores:      hScores,
+        valence:     0,
+        arousal:     0,
+        dominant:    'unknown',
+        scores:      { neutral: 1, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
         confidence:  faceOk ? C.confidence.metadataFaceOk : C.confidence.metadataNoFace,
         dataQuality: 'low',
         dataSource:  'metadata',
         isHeuristic: true,
+        emotionInferred: false,
+        degraded: true,
     };
 }
 
@@ -211,13 +178,21 @@ export function appendEmotionSample(state, sample, t = Date.now(), tRelMs = null
     state.sessionData.emotionAccumulator.updatedAt = t;
 
     const start = state.sessionData.startTime || t;
+    const clockStamp = state.runtime?.sessionClock?.now?.() || null;
     state.sessionData.emotionSamples.push({
         t,
+        timeOriginMs: clockStamp?.timeOriginMs ?? null,
+        monotonicMs: clockStamp?.monotonicMs ?? t,
+        sessionTimeMs: clockStamp?.sessionTimeMs ?? Math.max(0, t - start),
         tRelMs:   tRelMs != null ? tRelMs : Math.max(0, t - start),
         valence,
         arousal,
         dominant: sample?.dominant || null,
         scores:   sample?.scores   || null,
+        confidence: Number.isFinite(sample?.confidence) ? sample.confidence : null,
+        dataQuality: sample?.dataQuality || null,
+        dataSource: sample?.dataSource || null,
+        degraded: false,
     });
 
     const cap = EMOTION_CONFIG.maxEmotionSamples;

@@ -8,6 +8,9 @@ const TOP_LEVEL_FIELDS = new Set([
   'blink_summary',
   'perclos_summary',
   'body_pose_summary',
+  'audio_summary',
+  'multimodal_summary',
+  'multimodal_heatmap',
   'blocks',
   'emotion_summary',
   'bpm_summary',
@@ -26,6 +29,52 @@ const TOP_LEVEL_FIELDS = new Set([
 const IDS_FIELDS = new Set(['session', 'participant', 'invitationCode']);
 const META_FIELDS = new Set(['user', 'tech']);
 const META_USER_FIELDS = new Set(['interfaceLanguage']);
+const AUDIO_SUMMARY_FIELDS = new Set([
+  'schemaVersion',
+  'algorithmVersion',
+  'status',
+  'enabled',
+  'consentGranted',
+  'permission',
+  'rawAudioStored',
+  'rawAudioTransmitted',
+  'sampleRate',
+  'windowDurationMs',
+  'windowCount',
+  'acceptedWindowCount',
+  'rejectedWindowCount',
+  'droppedWindowCount',
+  'durationMs',
+  'qualityMean',
+  'reliabilityMean',
+  'markers',
+  'windows',
+  'provenance',
+  'disclaimer',
+]);
+const MULTIMODAL_SUMMARY_FIELDS = new Set([
+  'schemaVersion',
+  'enabled',
+  'gamerMode',
+  'timebase',
+  'head',
+  'body',
+  'eventCount',
+  'rawVideoStored',
+  'rawLandmarksStored',
+  'disclaimer',
+]);
+const MULTIMODAL_HEATMAP_FIELDS = new Set([
+  'schemaVersion',
+  'coordinateSpace',
+  'presentationCountTotal',
+  'presentationCountStored',
+  'presentationsTruncated',
+  'alignmentP95Ms',
+  'presentations',
+  'legend',
+  'disclaimer',
+]);
 const LIFECYCLE_FIELDS = new Set([
   'schemaVersion',
   'state',
@@ -68,6 +117,9 @@ const OPTIONAL_OBJECT_FIELDS = [
   'blink_summary',
   'perclos_summary',
   'body_pose_summary',
+  'audio_summary',
+  'multimodal_summary',
+  'multimodal_heatmap',
   'emotion_summary',
   'bpm_summary',
   'rppg_summary',
@@ -82,6 +134,7 @@ const PII_KEY_TOKEN_PATTERN = /(?:^|_)(?:email|phone|telephone|tel|telegram|what
 const EMAIL_VALUE_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const URL_PII_PATTERN = /[?&](?:email|phone|name|address|passport|snils|oms)=/i;
 const PHONE_VALUE_PATTERN = /^\s*\+?(?:\d[\s().-]*){10,15}\s*$/;
+const RAW_MEDIA_KEY_PATTERN = /^(?:raw_?(?:audio|video|image|frame|landmarks|samples)|pcm_?samples|audio_?(?:blob|data|bytes|base64)|video_?(?:blob|data|bytes|base64|frames)|image_?(?:blob|data|bytes|base64))$/i;
 
 const DEFAULT_LIMITS = Object.freeze({
   maxDepth: 12,
@@ -296,6 +349,88 @@ function isPiiKey(key) {
   return PII_KEY_TOKEN_PATTERN.test(normalized);
 }
 
+function normalizedKey(key) {
+  return String(key)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .toLowerCase();
+}
+
+function validateResearchExtensions(payload, errors) {
+  if (isObject(payload.audio_summary)) {
+    validateKnownObjectFields(
+      payload.audio_summary,
+      AUDIO_SUMMARY_FIELDS,
+      '/audio_summary',
+      errors
+    );
+    if (payload.audio_summary.schemaVersion !== 'audio_session.v1') {
+      addError(errors, '/audio_summary/schemaVersion', 'const', 'audio_session.v1 is required');
+    }
+    if (
+      payload.audio_summary.rawAudioStored !== false
+      || payload.audio_summary.rawAudioTransmitted !== false
+    ) {
+      addError(errors, '/audio_summary', 'privacy', 'raw audio storage and transmission must be false');
+    }
+    if (
+      Array.isArray(payload.audio_summary.windows)
+      && payload.audio_summary.windows.length > 360
+    ) {
+      addError(errors, '/audio_summary/windows', 'maxItems', 'maximum audio windows is 360');
+    }
+  }
+  if (isObject(payload.multimodal_summary)) {
+    validateKnownObjectFields(
+      payload.multimodal_summary,
+      MULTIMODAL_SUMMARY_FIELDS,
+      '/multimodal_summary',
+      errors
+    );
+    if (payload.multimodal_summary.schemaVersion !== 'multimodal_session.v1') {
+      addError(
+        errors,
+        '/multimodal_summary/schemaVersion',
+        'const',
+        'multimodal_session.v1 is required'
+      );
+    }
+    if (
+      payload.multimodal_summary.rawVideoStored !== false
+      || payload.multimodal_summary.rawLandmarksStored !== false
+    ) {
+      addError(errors, '/multimodal_summary', 'privacy', 'raw video and landmarks storage must be false');
+    }
+  }
+  if (isObject(payload.multimodal_heatmap)) {
+    validateKnownObjectFields(
+      payload.multimodal_heatmap,
+      MULTIMODAL_HEATMAP_FIELDS,
+      '/multimodal_heatmap',
+      errors
+    );
+    if (payload.multimodal_heatmap.schemaVersion !== 'multimodal_heatmap.v1') {
+      addError(
+        errors,
+        '/multimodal_heatmap/schemaVersion',
+        'const',
+        'multimodal_heatmap.v1 is required'
+      );
+    }
+    if (
+      Array.isArray(payload.multimodal_heatmap.presentations)
+      && payload.multimodal_heatmap.presentations.length > 50
+    ) {
+      addError(
+        errors,
+        '/multimodal_heatmap/presentations',
+        'maxItems',
+        'maximum multimodal presentations is 50'
+      );
+    }
+  }
+}
+
 function walkPayload(value, path, depth, counters, limits, errors, key = '') {
   if (depth > limits.maxDepth) {
     addError(errors, path, 'maxDepth', `maximum depth is ${limits.maxDepth}`);
@@ -344,6 +479,10 @@ function walkPayload(value, path, depth, counters, limits, errors, key = '') {
     const childPath = `${path}/${childKey}`;
     if (isPiiKey(childKey)) {
       addError(errors, childPath, 'pii', 'PII field is not allowed');
+      continue;
+    }
+    if (RAW_MEDIA_KEY_PATTERN.test(normalizedKey(childKey))) {
+      addError(errors, childPath, 'rawMedia', 'raw media payload is not accepted');
       continue;
     }
     walkPayload(childValue, childPath, depth + 1, counters, limits, errors, childKey);
@@ -435,6 +574,7 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   }
   validateLifecycle(payload.lifecycle, errors);
   validateEvents(payload.events, limits, errors);
+  validateResearchExtensions(payload, errors);
 
   walkPayload(
     payload,

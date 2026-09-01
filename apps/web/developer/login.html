@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Вход — раздел разработчика</title>
+  <title>wecog — вход</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -69,15 +72,31 @@
       cursor: pointer;
     }
     button:hover { opacity: .92; }
-    .sep { margin: 16px 0; border-top: 1px solid rgba(92, 102, 189, 0.25); }
+    .portal-kicker {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 0 10px;
+      margin-bottom: 18px;
+      border: 1px solid var(--wc-line);
+      border-radius: 999px;
+      color: var(--wc-muted);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
     .back { display: block; text-align: center; margin-top: 16px; color: #94a3b8; font-size: 14px; text-decoration: none; }
     .back:hover { color: #5C66BD; }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
   <div class="box">
-    <h1>Вход в раздел разработчика</h1>
-    <p class="sub">Вход через API (researcher/developer/admin и др.)</p>
+    <div class="portal-kicker" id="portalKicker">wecog</div>
+    <h1 id="loginTitle">Вход</h1>
+    <p class="sub" id="loginSubtitle">Введите данные рабочей учётной записи.</p>
     <form id="form" method="post" action="../developer.html">
       <div class="error" id="error">Ошибка входа</div>
       <label for="login">Email</label>
@@ -89,24 +108,87 @@
       </div>
       <button type="submit">Войти</button>
     </form>
-    <div class="sep"></div>
-    <form id="registerForm">
-      <label for="regEmail">Регистрация участника</label>
-      <input type="email" id="regEmail" autocomplete="off" placeholder="new-user@example.com">
-      <label for="regPassword">Пароль</label>
-      <input type="password" id="regPassword" autocomplete="new-password" placeholder="Минимум 12 символов">
-      <p style="font-size:12px;color:#94a3b8;margin-bottom:12px;line-height:1.35;">Публичная регистрация создаёт роль <strong>участника</strong>. Доступ исследователя, разработчика и администратора выдаёт администратор проекта или платформы.</p>
-      <button type="submit">Создать аккаунт</button>
-    </form>
     <a href="../index.html" class="back">← На главную</a>
   </div>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../account-storage.js?v=20260829-1"></script>
   <script>
     (function () {
+      var requestedPortal = new URLSearchParams(window.location.search || '').get('portal');
+      if (requestedPortal !== 'researcher' && requestedPortal !== 'admin' && requestedPortal !== 'developer') requestedPortal = 'staff';
+      var portalCopy = {
+        researcher: {
+          kicker: 'Исследователь',
+          title: 'Вход исследователя',
+          subtitle: 'Проекты, протоколы, приглашения и аналитика.'
+        },
+        developer: {
+          kicker: 'Разработчик',
+          title: 'Вход разработчика',
+          subtitle: 'Диагностика и проверка исследовательских модулей.'
+        },
+        admin: {
+          kicker: 'Администратор',
+          title: 'Вход администратора',
+          subtitle: 'Управление организацией и вход в технические инструменты.'
+        },
+        staff: {
+          kicker: 'Рабочая область',
+          title: 'Вход в wecog',
+          subtitle: 'Введите данные рабочей учётной записи.'
+        }
+      }[requestedPortal];
+      document.getElementById('portalKicker').textContent = portalCopy.kicker;
+      document.getElementById('loginTitle').textContent = portalCopy.title;
+      document.getElementById('loginSubtitle').textContent = portalCopy.subtitle;
+      document.title = 'wecog — ' + portalCopy.title.toLowerCase();
+
+      function destinationForRole(role) {
+        var researcherRoles = ['org_admin', 'PI', 'researcher', 'analyst', 'assistant', 'admin'];
+        var developerRoles = ['developer', 'admin'];
+        if (requestedPortal === 'researcher') {
+          return researcherRoles.indexOf(role) >= 0 ? '../researcher.html' : null;
+        }
+        if (requestedPortal === 'developer') {
+          return developerRoles.indexOf(role) >= 0 ? '../developer.html' : null;
+        }
+        if (requestedPortal === 'admin') {
+          if (role === 'developer') return '../developer.html';
+          if (role === 'org_admin' || role === 'PI' || role === 'admin') return '../researcher.html#/admin';
+          return null;
+        }
+        if (developerRoles.indexOf(role) >= 0) return '../developer.html';
+        if (researcherRoles.indexOf(role) >= 0) return '../researcher.html';
+        return null;
+      }
+
+      function portalAccessError() {
+        if (requestedPortal === 'researcher') return 'У этой учётной записи нет доступа к интерфейсу исследователя.';
+        if (requestedPortal === 'developer') return 'У этой учётной записи нет доступа к модулям разработчика.';
+        if (requestedPortal === 'admin') return 'Учётная запись не является администратором организации или разработчиком.';
+        return 'У этой учётной записи нет доступа к рабочим разделам.';
+      }
+
+      function rejectAuthenticatedLogin(base, result, message) {
+        try {
+          sessionStorage.removeItem('emocog_developer_auth');
+          sessionStorage.removeItem('emocog_csrf_token');
+          localStorage.removeItem('emocog_developer_auth');
+          localStorage.removeItem('emocog_api_user');
+          localStorage.removeItem('emocog_selected_portal');
+        } catch (_) {}
+        return fetch(base + '/auth/logout', {
+          method: 'POST',
+          credentials: 'include'
+        }).catch(function () {}).then(function () {
+          throw new Error(message);
+        });
+      }
+
       function getApiBase() {
-        if (window.API_BASE) return window.API_BASE;
-        var path = window.location.pathname || '';
-        if (path.indexOf('/main/') === 0) {
-          return window.location.origin + '/main/api';
+        if (window.EmocogApiBase) {
+          // Passwords must never be routed by an untrusted localStorage override.
+          return window.EmocogApiBase.resolve({ useStorage: false });
         }
         return window.location.origin + '/api';
       }
@@ -156,29 +238,30 @@
           })
           .then(function (result) {
             if (!result || !result.user || result.user.role === 'respondent') {
-              return fetch(base + '/auth/logout', {
-                method: 'POST',
-                credentials: 'include'
-              }).then(function () {
-                throw new Error('Саморегистрация создаёт только аккаунт участника. Доступ исследователя выдаёт администратор проекта.');
-              });
+              return rejectAuthenticatedLogin(
+                base,
+                result,
+                'Участники входят по коду или ссылке приглашения с главной страницы.'
+              );
+            }
+            var role = (result && result.user && result.user.role) || '';
+            var destination = destinationForRole(role);
+            if (!destination) {
+              return rejectAuthenticatedLogin(base, result, portalAccessError());
             }
             try {
+              if (window.WecogAccountStorage && result && result.user) {
+                window.WecogAccountStorage.activate(result.user.id);
+              }
               sessionStorage.setItem('emocog_developer_auth', '1');
               localStorage.setItem('emocog_developer_auth', '1');
               localStorage.removeItem('emocog_api_token');
               if (result && result.csrf_token) sessionStorage.setItem('emocog_csrf_token', result.csrf_token);
               if (result && result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
               localStorage.setItem('emocog_api_base', base);
+              localStorage.setItem('emocog_selected_portal', requestedPortal);
             } catch (_) {}
-            var role = (result && result.user && result.user.role) || '';
-            if (role === 'admin' || role === 'developer') {
-              window.location.href = '../developer.html';
-            } else if (['PI', 'researcher', 'analyst', 'assistant'].indexOf(role) >= 0) {
-              window.location.href = '../researcher.html';
-            } else {
-              window.location.href = '../index.html';
-            }
+            window.location.href = destination;
           })
           .catch(function (err) {
             errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
@@ -186,63 +269,6 @@
           });
       });
 
-      document.getElementById('registerForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var email = (document.getElementById('regEmail').value || '').trim().toLowerCase();
-        var password = (document.getElementById('regPassword').value || '').trim();
-        var errEl = document.getElementById('error');
-        errEl.classList.remove('visible');
-        errEl.style.color = '';
-        if (!email || !password) {
-          errEl.textContent = 'Для регистрации укажите email и пароль';
-          errEl.classList.add('visible');
-          return;
-        }
-        var base = (getApiBase() || '').replace(/\/$/, '');
-        fetch(base + '/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Auth-Transport': 'cookie' },
-          credentials: 'include',
-          body: JSON.stringify({ email: email, password: password })
-        })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().catch(function () { return {}; }).then(function (j) {
-                throw new Error(j.error || (r.status + ' ' + r.statusText));
-              });
-            }
-            return r.json();
-          })
-          .then(function (result) {
-            // Public registration intentionally creates respondent-only accounts.
-            // Do not send them into a staff-only page or retain a staff auth flag.
-            return fetch(base + '/auth/logout', {
-              method: 'POST',
-              credentials: 'include'
-            }).catch(function () {}).then(function () {
-              try {
-                document.getElementById('regEmail').value = '';
-                document.getElementById('regPassword').value = '';
-                sessionStorage.removeItem('emocog_developer_auth');
-                localStorage.removeItem('emocog_developer_auth');
-                localStorage.removeItem('emocog_api_token');
-                localStorage.removeItem('emocog_api_user');
-                sessionStorage.removeItem('emocog_csrf_token');
-                localStorage.setItem('emocog_api_base', base);
-              } catch (_) {}
-              errEl.textContent = 'Аккаунт участника создан. Для прохождения исследования используйте ссылку-приглашение. Доступ исследователя выдаёт администратор проекта.';
-              errEl.classList.remove('visible');
-              errEl.style.color = '#10B981';
-              errEl.classList.add('visible');
-              document.getElementById('login').value = email;
-              document.getElementById('password').value = '';
-            });
-          })
-          .catch(function (err) {
-            errEl.textContent = 'Ошибка регистрации: ' + (err.message || err);
-            errEl.classList.add('visible');
-          });
-      });
     })();
   </script>
 </body>
