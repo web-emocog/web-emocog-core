@@ -21,7 +21,8 @@ if [[ -f "${BACKUP_INPUT}.sha256" ]]; then
   [[ "$expected" == "$actual" ]] || { echo "Backup checksum mismatch." >&2; exit 1; }
 fi
 
-PGDATABASE="$RESTORE_DATABASE_URL" pg_restore \
+pg_restore \
+  --dbname="$RESTORE_DATABASE_URL" \
   --clean \
   --if-exists \
   --no-owner \
@@ -29,5 +30,5 @@ PGDATABASE="$RESTORE_DATABASE_URL" pg_restore \
   --exit-on-error \
   "$BACKUP_INPUT"
 
-PGDATABASE="$RESTORE_DATABASE_URL" psql -v ON_ERROR_STOP=1 -Atc 'SELECT COUNT(*) FROM pgmigrations' >/dev/null
+psql --dbname="$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'SELECT COUNT(*) FROM pgmigrations' >/dev/null
 echo "Restore completed and pgmigrations is readable."

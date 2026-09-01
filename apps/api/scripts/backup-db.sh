@@ -10,7 +10,8 @@ mkdir -p "$(dirname "$output")"
 temporary="${output}.partial"
 trap 'rm -f "$temporary"' EXIT
 
-PGDATABASE="$DATABASE_URL" pg_dump \
+pg_dump \
+  --dbname="$DATABASE_URL" \
   --format=custom \
   --compress=6 \
   --no-owner \
