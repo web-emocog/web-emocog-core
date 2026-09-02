@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wecog — emotion test</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
+  <style>
+    :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --border:rgba(92,102,189,.25); --ok:#10B981; --warn:#F59E0B; --danger:#ef4444; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
+    .top a { color:var(--muted); text-decoration:none; font-size:14px; }
+    .top a:hover { color:var(--accent); }
+    .layout { display:grid; grid-template-columns:minmax(320px,480px) minmax(360px,1fr); gap:16px; max-width:1200px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; }
+    h1 { font-size:1.35rem; }
+    h2 { font-size:1rem; margin-bottom:10px; }
+    .video-wrap { position:relative; border-radius:12px; overflow:hidden; background:#000; border:1px solid var(--border); }
+    video { width:100%; display:block; aspect-ratio:4/3; object-fit:cover; transform:scaleX(-1); }
+    .metrics { display:grid; grid-template-columns:repeat(2,minmax(140px,1fr)); gap:10px; margin-top:10px; }
+    .metric { border:1px solid var(--border); border-radius:10px; padding:10px; background:rgba(0,0,0,.2); }
+    .metric .k { color:var(--muted); font-size:12px; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
+    .metric .v { font-size:1.25rem; font-weight:700; }
+    .metric .hint { font-size:11px; color:var(--muted); margin-top:4px; }
+    .controls { display:flex; gap:10px; margin-top:12px; }
+    button { border:none; background:var(--accent); color:#fff; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:600; }
+    button.secondary { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .status { margin-top:10px; font-size:13px; min-height:1.2em; color:var(--muted); }
+    .status.err { color:var(--danger); }
+    .timeline { width:100%; height:220px; border:1px solid var(--border); border-radius:10px; background:rgba(0,0,0,.18); }
+    .legend { font-size:12px; color:var(--muted); margin-top:8px; display:flex; gap:14px; }
+  </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
+</head>
+<body>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
+  <div class="top">
+    <h1>Emotion Test (valence / arousal)</h1>
+    <a href="../developer.html">← К тестам разработчика</a>
+  </div>
+  <div class="layout">
+    <section class="card">
+      <h2>Камера</h2>
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+      </div>
+      <div class="controls">
+        <button id="startBtn" type="button">Запустить</button>
+        <button id="stopBtn" type="button" class="secondary">Остановить</button>
+      </div>
+      <p id="status" class="status">Готов к запуску.</p>
+      <div class="metrics">
+        <div class="metric">
+          <div class="k">valence</div>
+          <div class="v" id="valenceV">0.000</div>
+          <div class="hint">Диапазон: -1..1</div>
+        </div>
+        <div class="metric">
+          <div class="k">arousal</div>
+          <div class="v" id="arousalV">0.000</div>
+          <div class="hint">Диапазон: 0..1</div>
+        </div>
+        <div class="metric">
+          <div class="k">brightness</div>
+          <div class="v" id="brightnessV">0.000</div>
+          <div class="hint">Нормализовано 0..1</div>
+        </div>
+        <div class="metric">
+          <div class="k">face detected</div>
+          <div class="v" id="faceV">unknown</div>
+          <div class="hint">FaceDetector API / fallback</div>
+        </div>
+        <div class="metric" style="grid-column:1/-1;">
+          <div class="k">доминирующая эмоция (FACS, с калибровкой)</div>
+          <div class="v" id="dominantV">—</div>
+          <div class="hint" id="scoresHint">Топ-3 по scores</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Таймлайн</h2>
+      <canvas id="timeline" class="timeline" width="760" height="220"></canvas>
+      <div class="legend">
+        <span>🟣 Valence</span>
+        <span>🟡 Arousal</span>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+    import { getEmotionSample, resetEmotionWiringState, startEmotionSession } from '../../participant-web/js/emotion-stub-new.js';
+    import { FilesetResolver, FaceLandmarker } from '../../participant-web/js/vendor/mediapipe/vision_bundle.mjs';
+
+    const video = document.getElementById('video');
+    const statusEl = document.getElementById('status');
+    const valenceEl = document.getElementById('valenceV');
+    const arousalEl = document.getElementById('arousalV');
+    const brightnessEl = document.getElementById('brightnessV');
+    const faceEl = document.getElementById('faceV');
+    const dominantEl = document.getElementById('dominantV');
+    const scoresHintEl = document.getElementById('scoresHint');
+    const canvas = document.getElementById('timeline');
+    const ctx = canvas.getContext('2d');
+
+    const workCanvas = document.createElement('canvas');
+    const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+    let stream = null;
+    let timer = null;
+    const points = [];
+    const MAX_POINTS = 180;
+    let faceLandmarker = null;
+    let lastVideoTime = -1;
+    let tickBusy = false;
+
+    function setStatus(text, isErr) {
+      statusEl.textContent = text;
+      statusEl.className = 'status' + (isErr ? ' err' : '');
+    }
+
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+    function drawTimeline() {
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(0,0,0,.2)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(148,163,184,.35)';
+      ctx.beginPath();
+      ctx.moveTo(0, h / 2);
+      ctx.lineTo(w, h / 2);
+      ctx.stroke();
+      if (points.length < 2) return;
+
+      function drawLine(key, color, mapper) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        points.forEach(function (p, i) {
+          const x = (i / Math.max(1, points.length - 1)) * w;
+          const y = mapper(p[key], h);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+      drawLine('valence', 'rgba(167,139,250,.95)', function (v, height) {
+        const normalized = clamp((v + 1) / 2, 0, 1);
+        return (1 - normalized) * height;
+      });
+      drawLine('arousal', 'rgba(251,191,36,.95)', function (v, height) {
+        const normalized = clamp(v, 0, 1);
+        return (1 - normalized) * height;
+      });
+    }
+
+    function meanBrightness() {
+      const targetW = 128;
+      const targetH = 96;
+      workCanvas.width = targetW;
+      workCanvas.height = targetH;
+      workCtx.drawImage(video, 0, 0, targetW, targetH);
+      const imageData = workCtx.getImageData(0, 0, targetW, targetH);
+      const data = imageData.data;
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722);
+      }
+      return clamp((sum / (targetW * targetH)) / 255, 0, 1);
+    }
+
+    async function initFaceLandmarker() {
+      if (faceLandmarker) return faceLandmarker;
+      const vision = await FilesetResolver.forVisionTasks('../../participant-web/js/vendor/mediapipe/wasm');
+      const common = {
+        runningMode: 'VIDEO', numFaces: 1,
+        minFaceDetectionConfidence: 0.55,
+        minFacePresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55,
+      };
+      const modelAssetPath = '../../participant-web/js/vendor/mediapipe/models/face_landmarker.task';
+      try {
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, { ...common, baseOptions:{ modelAssetPath, delegate:'GPU' } });
+      } catch (_) {
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, { ...common, baseOptions:{ modelAssetPath, delegate:'CPU' } });
+      }
+      return faceLandmarker;
+    }
+
+    async function tick() {
+      if (!stream || video.readyState < 2 || !faceLandmarker || tickBusy) return;
+      if (video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+      tickBusy = true;
+      const brightness = meanBrightness();
+      try {
+        const result = faceLandmarker.detectForVideo(video, performance.now());
+        const landmarks = result?.faceLandmarks?.[0] || null;
+        const sample = getEmotionSample(landmarks ? { landmarks } : { face:{ detected:false } });
+        valenceEl.textContent = Number.isFinite(sample.valence) ? sample.valence.toFixed(3) : '—';
+        arousalEl.textContent = Number.isFinite(sample.arousal) ? sample.arousal.toFixed(3) : '—';
+        brightnessEl.textContent = brightness.toFixed(3);
+        faceEl.textContent = landmarks ? 'yes' : 'no';
+        dominantEl.textContent = sample.dominant || 'unknown';
+        if (sample.calibrationReady === false) {
+          setStatus(`Калибровка нейтрального лица: ${sample.calibrationFrames || 0}/18. Смотрите спокойно в камеру.`);
+        } else if (!landmarks) {
+          setStatus('Результат не публикуется: лицо не обнаружено.', true);
+        } else {
+          setStatus('FACS-анализ активен. Слабые и неоднозначные сигналы остаются neutral.');
+        }
+        if (sample.scores && scoresHintEl) {
+          const top = Object.entries(sample.scores)
+            .sort(function (a, b) { return b[1] - a[1]; })
+            .slice(0, 3)
+            .map(function (e) { return e[0] + ' ' + (e[1] * 100).toFixed(0) + '%'; })
+            .join(' · ');
+          scoresHintEl.textContent = top || '—';
+        }
+        if (!sample.degraded && Number.isFinite(sample.valence) && Number.isFinite(sample.arousal)) {
+          points.push({ valence: sample.valence, arousal: sample.arousal });
+          if (points.length > MAX_POINTS) points.shift();
+          drawTimeline();
+        }
+      } finally {
+        tickBusy = false;
+      }
+    }
+
+    async function start() {
+      try {
+        if (!stream) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+          video.srcObject = stream;
+          await video.play();
+        }
+        setStatus('Загружаем локальную модель MediaPipe...');
+        await initFaceLandmarker();
+        resetEmotionWiringState();
+        startEmotionSession('developer-emotion-' + Date.now());
+        setStatus('Смотрите спокойно в камеру: идёт короткая персональная калибровка.');
+        if (timer) clearInterval(timer);
+        timer = setInterval(function () { tick().catch(function () {}); }, 350);
+      } catch (err) {
+        setStatus('Ошибка запуска камеры: ' + (err.message || err), true);
+      }
+    }
+
+    function stop() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (stream) {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        stream = null;
+      }
+      video.srcObject = null;
+      resetEmotionWiringState();
+      setStatus('Остановлено.');
+    }
+
+    document.getElementById('startBtn').addEventListener('click', start);
+    document.getElementById('stopBtn').addEventListener('click', stop);
+    window.addEventListener('beforeunload', stop);
+  </script>
+</body>
+</html>

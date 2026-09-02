@@ -1,3 +1,5 @@
+console.warn('[DEPRECATED] js/web-page/tests.js — official flow: tests-updated.js via mvp_with_precheck_1-updated.html');
+
 import {
     state,
     setSessionPhase,
@@ -42,15 +44,23 @@ export async function startCalibration() {
     };
     
     // === ИНИЦИАЛИЗАЦИЯ QC METRICS ===
+    // Ждём завершения dynamic import() ES-модуля ./qc-metrics/. Если он успешен —
+    // window.QCMetrics будет реальным модульным классом; иначе остаётся inline-fallback.
+    if (window.QCMetricsReady) {
+        await window.QCMetricsReady;
+    }
     state.runtime.qcMetrics = new QCMetrics({
         screenWidth: window.screen.width,
         screenHeight: window.screen.height
     });
-    state.runtime.qcMetrics.start(); 
+    state.runtime.qcMetrics.start();
     state.runtime.sessionStartTime = Date.now();
     console.log('[QC] QCMetrics инициализирован и запущен');
     
     // === ИНИЦИАЛИЗАЦИЯ GAZE TRACKER ===
+    if (window.GazeTrackerReady) {
+        await window.GazeTrackerReady;
+    }
     state.runtime.gazeTracker = new GazeTracker({
         screenWidth: window.innerWidth,
         screenHeight: window.innerHeight,
@@ -557,9 +567,15 @@ export function startGazeValidation() {
         if (fittedCorrection) {
             const correctedPoints = applyValidationAffineCorrection(filteredValidationPoints, fittedCorrection);
             const correctedMetrics = calculateValidationMetrics(correctedPoints);
-            const shouldApply = shouldApplyValidationCorrection(filteredMetrics, correctedMetrics);
+
+            // LOOCV-оценка обобщающей ошибки коррекции (fit на N-1 целях, проверка на N-й).
+            const loocv = evaluateAffineCorrectionLOOCV(filteredValidationPoints);
+
+            const shouldApply = shouldApplyValidationCorrection(filteredMetrics, correctedMetrics, loocv);
+            const correctionId = generateCorrectionId();
 
             postCalibrationCorrection = {
+                correctionId,
                 fitted: true,
                 applied: shouldApply,
                 source: fittedCorrection.source,
@@ -583,18 +599,22 @@ export function startGazeValidation() {
                     precisionPct: correctedMetrics.precisionPct,
                     biasXPct: correctedMetrics.biasXPct,
                     biasYPct: correctedMetrics.biasYPct
-                }
+                },
+                loocv: loocv || { available: false }
             };
 
             if (shouldApply) {
                 if (typeof state.runtime.gazeTracker.setPostCalibrationCorrection === 'function') {
-                    state.runtime.gazeTracker.setPostCalibrationCorrection(fittedCorrection);
+                    state.runtime.gazeTracker.setPostCalibrationCorrection({
+                        ...fittedCorrection,
+                        correctionId
+                    });
                 }
                 metrics = correctedMetrics;
                 qcValidationSamples = flattenValidationSamples(correctedPoints);
                 console.log('[Validation] Применена post-calibration коррекция:', postCalibrationCorrection);
             } else {
-                console.log('[Validation] Коррекция рассчитана, но не применена (улучшение недостаточное):', postCalibrationCorrection);
+                console.log('[Validation] Коррекция рассчитана, но не применена (улучшение недостаточное или held-out регрессия):', postCalibrationCorrection);
             }
         } else {
             console.log('[Validation] Affine-коррекция не рассчитана (недостаточно или некачественные данные)');
@@ -983,7 +1003,115 @@ function applyValidationAffineCorrection(points, correction) {
     }));
 }
 
-function shouldApplyValidationCorrection(rawMetrics, correctedMetrics) {
+/**
+ * Per-target медианы валидационных сэмплов.
+ * См. документацию в tests-updated.js — функция идентична.
+ */
+function computePerTargetMedians(points) {
+    const out = [];
+    for (const pointData of points || []) {
+        const valid = (pointData?.samples || []).filter(s =>
+            Number.isFinite(s?.gazeX) && Number.isFinite(s?.gazeY) &&
+            Number.isFinite(s?.targetX) && Number.isFinite(s?.targetY)
+        );
+        if (valid.length === 0) continue;
+        const xs = valid.map(s => s.gazeX).sort((a, b) => a - b);
+        const ys = valid.map(s => s.gazeY).sort((a, b) => a - b);
+        const mid = Math.floor(xs.length / 2);
+        const medianGazeX = xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+        const medianGazeY = ys.length % 2 ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
+        out.push({
+            medianGazeX,
+            medianGazeY,
+            targetX: valid[0].targetX,
+            targetY: valid[0].targetY,
+            n: valid.length
+        });
+    }
+    return out;
+}
+
+/**
+ * Фит affine-коррекции по per-target медианам. См. tests-updated.js.
+ */
+function fitAffineFromMedians(medians) {
+    if (!Array.isArray(medians) || medians.length < 4) return null;
+
+    let m00 = 0, m01 = 0, m02 = 0;
+    let m11 = 0, m12 = 0, m22 = 0;
+    let vx0 = 0, vx1 = 0, vx2 = 0;
+    let vy0 = 0, vy1 = 0, vy2 = 0;
+
+    for (const p of medians) {
+        const x = p.medianGazeX;
+        const y = p.medianGazeY;
+        const tx = p.targetX;
+        const ty = p.targetY;
+        m00 += x * x; m01 += x * y; m02 += x;
+        m11 += y * y; m12 += y;
+        m22 += 1;
+        vx0 += x * tx; vx1 += y * tx; vx2 += tx;
+        vy0 += x * ty; vy1 += y * ty; vy2 += ty;
+    }
+
+    const ridge = 1e-3;
+    const A = [
+        [m00 + ridge, m01, m02],
+        [m01, m11 + ridge, m12],
+        [m02, m12, m22 + ridge]
+    ];
+
+    const matrixX = solveLinear3x3(A, [vx0, vx1, vx2]);
+    const matrixY = solveLinear3x3(A, [vy0, vy1, vy2]);
+    if (!matrixX || !matrixY) return null;
+    return { matrixX, matrixY };
+}
+
+/**
+ * Leave-one-target-out оценка affine-коррекции. См. tests-updated.js.
+ */
+function evaluateAffineCorrectionLOOCV(filteredValidationPoints) {
+    const medians = computePerTargetMedians(filteredValidationPoints);
+    if (medians.length < 4) return null;
+
+    const heldOutErrors = [];
+    for (let i = 0; i < medians.length; i++) {
+        const heldOut = medians[i];
+        const trainSet = medians.filter((_, j) => j !== i);
+        const fit = fitAffineFromMedians(trainSet);
+        if (!fit) continue;
+        const predX = fit.matrixX[0] * heldOut.medianGazeX + fit.matrixX[1] * heldOut.medianGazeY + fit.matrixX[2];
+        const predY = fit.matrixY[0] * heldOut.medianGazeX + fit.matrixY[1] * heldOut.medianGazeY + fit.matrixY[2];
+        const err = Math.hypot(predX - heldOut.targetX, predY - heldOut.targetY);
+        if (Number.isFinite(err)) heldOutErrors.push(err);
+    }
+    if (heldOutErrors.length === 0) return null;
+
+    const rawErrors = medians.map(m => Math.hypot(m.medianGazeX - m.targetX, m.medianGazeY - m.targetY));
+
+    const rms = arr => Math.sqrt(arr.reduce((s, v) => s + v * v, 0) / arr.length);
+    const sortedHO = [...heldOutErrors].sort((a, b) => a - b);
+    const sortedRaw = [...rawErrors].sort((a, b) => a - b);
+    const median = arr => arr[Math.floor(arr.length / 2)];
+    const p95 = arr => arr[Math.min(arr.length - 1, Math.ceil(arr.length * 0.95) - 1)];
+
+    return {
+        loocvRmsHeldOutPx: Math.round(rms(heldOutErrors) * 10) / 10,
+        loocvMedianHeldOutPx: Math.round(median(sortedHO) * 10) / 10,
+        loocvP95HeldOutPx: Math.round(p95(sortedHO) * 10) / 10,
+        rawTargetRmsPx: Math.round(rms(rawErrors) * 10) / 10,
+        rawTargetMedianPx: Math.round(median(sortedRaw) * 10) / 10,
+        targetCount: medians.length
+    };
+}
+
+function generateCorrectionId() {
+    const t = Date.now().toString(36);
+    const r = Math.random().toString(36).slice(2, 6);
+    return `corr_${t}_${r}`;
+}
+
+function shouldApplyValidationCorrection(rawMetrics, correctedMetrics, loocv = null) {
     const rawAcc = rawMetrics?.accuracyPx;
     const rawPrec = rawMetrics?.precisionPx;
     const corrAcc = correctedMetrics?.accuracyPx;
@@ -1007,7 +1135,18 @@ function shouldApplyValidationCorrection(rawMetrics, correctedMetrics) {
         correctedMetrics.precisionPct <= 6 &&
         correctedMetrics.accuracyPct <= 12;
 
-    return (significant && noSeriousRegression) || crossesCommonGate;
+    const baseDecision = (significant && noSeriousRegression) || crossesCommonGate;
+    if (!baseDecision) return false;
+
+    // Held-out гейт: не применять, если LOOCV RMS заметно хуже raw target RMS.
+    if (loocv && Number.isFinite(loocv.loocvRmsHeldOutPx) && Number.isFinite(loocv.rawTargetRmsPx)) {
+        const HOLD_OUT_REGRESSION_TOLERANCE_PX = 5;
+        if (loocv.loocvRmsHeldOutPx > loocv.rawTargetRmsPx + HOLD_OUT_REGRESSION_TOLERANCE_PX) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
@@ -1317,9 +1456,13 @@ export async function finishSession() {
 
     // === Heatmap + attention analytics (research-only) ===
     try {
+        const validationRmsPx = Number.isFinite(state.sessionData?.gazeValidation?.metrics?.accuracyPx)
+            ? state.sessionData.gazeValidation.metrics.accuracyPx
+            : null;
         state.sessionData.heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
             gridWidth: 96,
-            gridHeight: 54
+            gridHeight: 54,
+            validationRmsPx
         });
     } catch (e) {
         console.warn('[finishSession] Ошибка расчёта heatmaps:', e);

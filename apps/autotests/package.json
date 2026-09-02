@@ -4,14 +4,18 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "typecheck": "tsc --noEmit",
     "test:ui": "playwright test --ui",
-    "test:headed": "playwright test --headed"
+    "test:headed": "playwright test --headed",
+    "test:api": "RUN_API_CONTRACT=1 playwright test tests/api-contract.spec.ts",
+    "test:researcher": "RUN_RESEARCHER_CONTRACT=1 playwright test tests/researcher-regression.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.0.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "5.9.3"
   },
   "dependencies": {
-    "js-yaml": "^4.1.1"
+    "js-yaml": "^4.3.1"
   }
 }

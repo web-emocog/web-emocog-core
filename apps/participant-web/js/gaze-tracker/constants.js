@@ -34,12 +34,18 @@ export const LANDMARKS = {
 // Минимально необходимое число landmarks (478 = полная модель с радужкой)
 export const MIN_LANDMARKS = 478;
 
-// Размер вектора признаков (16 признаков + 1 bias = 17)
-export const FEATURE_SIZE = 17;
+// Iris-only predictor: 11 признаков + bias. Head pose/translation is evaluated
+// independently as a confidence/OOD nuisance channel.
+export const FEATURE_SIZE = 12;
 
-// Конфигурация по умолчанию
+// Конфигурация по умолчанию.
+// The UI collects 25 targets x 2 clicks. Sixteen rows keep the 12-column
+// iris-only system identifiable in degraded/recovery scenarios.
 export const DEFAULTS = {
     ridgeLambda: 0.001,
-    smoothingFactor: 0.10,
-    minCalibrationPoints: 4
+    ridgeLambdaCandidates: [0.001, 0.01, 0.1, 1],
+    minCalibrationPoints: 16,
+    minCutoffHz: 1.35,
+    maxCutoffHz: 12,
+    velocityGain: 5.5
 };

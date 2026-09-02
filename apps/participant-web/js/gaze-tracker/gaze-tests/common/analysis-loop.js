@@ -1,6 +1,7 @@
 import { state } from '../../../web-page/state.js';
 import { extractEyeSignalSample } from '../../../web-page/eye-signal.js';
 import { ANALYSIS_LOOP } from '../constants.js';
+import { isContinuousSessionAnalysisRunning } from '../../../session-runtime/index.js';
 
 function getVideoTime(videoElement) {
     if (!videoElement || videoElement.readyState < 2) return -1;
@@ -49,6 +50,7 @@ async function runTick() {
         localState.lastVideoTime = videoTime;
 
         const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(localState.video);
+        state.runtime.lastPrecheckResult = precheckResult;
 
         if (precheckResult && precheckResult.pose) {
             state.runtime.lastPoseData = {
@@ -108,6 +110,7 @@ async function runTick() {
 }
 
 export function startGazeTestsAnalysisLoop() {
+    if (isContinuousSessionAnalysisRunning()) return true;
     if (localState.active) return true;
 
     const video = document.getElementById('precheckVideo');
@@ -134,6 +137,7 @@ export function startGazeTestsAnalysisLoop() {
 }
 
 export function stopGazeTestsAnalysisLoop() {
+    if (isContinuousSessionAnalysisRunning() && !localState.active) return;
     localState.active = false;
     clearLoopTimeout();
     localState.video = null;
@@ -143,6 +147,15 @@ export function stopGazeTestsAnalysisLoop() {
         clearTimeout(state.runtime.gazeTestsAnalysisInterval);
         state.runtime.gazeTestsAnalysisInterval = null;
     }
+
+    // Сбрасываем smoothing-буфер EMA и last-known gaze, чтобы следующая фаза
+    // не наследовала «прилипшую» точку у края canvas (drawing-test) или
+    // вообще последнюю позицию текущего теста. Без этого первые ~16 кадров
+    // (~480 мс при s=0.25) следующего predict'а плывут к старой точке.
+    if (state.runtime.gazeTracker && typeof state.runtime.gazeTracker.resetSmoothingState === 'function') {
+        state.runtime.gazeTracker.resetSmoothingState();
+    }
+    state.runtime.currentGaze = { x: null, y: null };
 }
 
 export function isGazeTestsAnalysisLoopRunning() {

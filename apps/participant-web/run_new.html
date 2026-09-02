@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>Emocog run</title>
+  <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
+</head>
+<body>
+  <script>
+    (function () {
+      var search = window.location.search || '';
+      var params = new URLSearchParams(search);
+      if (!params.get('code') && window.location.hash) {
+        var hm = window.location.hash.match(/^#\/?participant\/([^/?#]+)/i);
+        if (hm && hm[1]) {
+          params.set('code', decodeURIComponent(hm[1]).trim());
+          search = '?' + params.toString();
+        }
+      }
+      if (params.get('code')) {
+        window.location.replace('mvp_with_precheck_1-updated.html' + search + (window.location.hash || ''));
+        return;
+      }
+      var role = null;
+      try {
+        var raw = localStorage.getItem('emocog_api_user');
+        if (raw) role = JSON.parse(raw).role;
+      } catch (_) {}
+      if (role === 'developer' || role === 'admin') {
+        try { localStorage.setItem('emocog_dev_auto_precheck', '1'); } catch (_) {}
+        var u = new URL('mvp_with_precheck_1-updated.html', window.location.href);
+        u.searchParams.set('developer_module', 'precheck');
+        window.location.replace(u.pathname + u.search + (window.location.hash || ''));
+        return;
+      }
+      window.location.replace('invite.html' + search + (window.location.hash || ''));
+    })();
+  </script>
+</body>
+</html>

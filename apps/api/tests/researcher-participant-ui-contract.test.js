@@ -1,0 +1,465 @@
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+
+const root = path.resolve(__dirname, '../..');
+
+function read(relativePath) {
+  return fs.readFileSync(path.join(root, relativePath), 'utf8');
+}
+
+describe('researcher protocol builder contract', () => {
+  it('declares builderKey before analytics config is read', () => {
+    const source = read('web/researcher-builder.js');
+    const saveStart = source.indexOf('async function doSave()');
+    const builderKey = source.indexOf("const builderKey = experimentId || 'draft';", saveStart);
+    const analyticsRead = source.indexOf('getExperimentAnalyticsConfig(builderKey)', saveStart);
+    assert.ok(saveStart >= 0);
+    assert.ok(builderKey > saveStart);
+    assert.ok(analyticsRead > builderKey);
+  });
+
+  it('exports background measurements without standalone BPM or emotion flags', () => {
+    const source = read('web/researcher-builder.js');
+    assert.match(source, /testHubMetrics:\s*\[\]/);
+    assert.doesNotMatch(source, /useBPM:\s*!!/);
+    assert.doesNotMatch(source, /useEmotionTracking:\s*!!/);
+    assert.match(source, /Фоновые сигналы сессии/);
+    assert.match(source, /featureFlags:\s*sessionFeatureFlags/);
+    assert.match(source, /class="session-feature"/);
+  });
+});
+
+describe('participant test hub contract', () => {
+  it('keeps every participant preparation stage mandatory for legacy definitions', async () => {
+    const utilsPath = path.join(
+      root,
+      'participant-web/js/web-page/protocol-invite-utils.js'
+    );
+    const { getParticipantShell } = await import(
+      pathToFileURL(utilsPath).href + `?t=${Date.now()}`
+    );
+    const expected = {
+      consent: true,
+      questionnaire: true,
+      precheck: true,
+      calibration: true,
+    };
+    assert.deepEqual(getParticipantShell({
+      participantShell: {
+        consent: false,
+        questionnaire: false,
+        precheck: false,
+        calibration: false,
+      },
+    }), expected);
+
+    const { normalizeMandatoryParticipantShell } = require('../protocol/participant-shell');
+    assert.deepEqual(
+      normalizeMandatoryParticipantShell({ participantShell: { calibration: false } }).participantShell,
+      expected
+    );
+  });
+
+  it('filters legacy BPM cards while retaining background BPM collection', async () => {
+    const utilsPath = path.join(
+      root,
+      'participant-web/js/web-page/protocol-invite-utils.js'
+    );
+    const { deriveInvitationHubMetrics } = await import(pathToFileURL(utilsPath).href);
+    assert.deepEqual(
+      deriveInvitationHubMetrics({
+        testHubMetrics: ['rt', 'bpm', 'vpc'],
+      }),
+      ['rt', 'vpc']
+    );
+
+    const html = read('participant-web/mvp_with_precheck_1-updated.html');
+    assert.doesNotMatch(html, /hubRunBpmBtn|bpmTestScreen/);
+    const runtime = read('participant-web/js/session-runtime/index.js');
+    for (const moduleName of [
+      'gaze',
+      'blinks',
+      'rt',
+      'bpm',
+      'emotion',
+      'bodyPose',
+      'audio',
+      'multimodal',
+    ]) {
+      assert.match(runtime, new RegExp(`'${moduleName}'`));
+    }
+  });
+
+  it('reserves before testing and removes the invitation bearer from the URL', () => {
+    const ui = read('participant-web/js/web-page/ui-updated.js');
+    const app = read('participant-web/js/web-page/app-updated.js');
+    assert.match(ui, /await primeParticipantSession/);
+    // Admission is the security boundary; checkpoint persistence must not hold
+    // the consent button on slow IndexedDB implementations.
+    assert.match(ui, /void state\.runtime\?\.sessionRuntime\?\.saveCheckpoint/);
+    assert.match(ui, /searchParams\.delete\('code'\)/);
+    assert.match(ui, /history\.replaceState/);
+    assert.match(app, /invitationCodeFromUrl \|\| state\.sessionData\.ids\.invitationCode/);
+  });
+
+  it('maps yaw and pitch to matching head-pose guidance in both locales', async () => {
+    const translationsPath = path.join(root, 'participant-web/translations.js');
+    const { translations } = await import(pathToFileURL(translationsPath).href);
+    assert.equal(translations.ru.precheck_all_good, '✅ Проверка пройдена! Можно начинать калибровку');
+    assert.equal(translations.ru.status_error, '❌ Ошибка');
+    assert.equal(translations.en.precheck_all_good, '✅ Check passed. You can start calibration');
+
+    for (const file of [
+      'participant-web/js/web-page/precheck.js',
+      'participant-web/js/web-page/precheck-updated.js',
+    ]) {
+      const source = read(file);
+      assert.match(source, /pose\.yaw > 0[\s\S]+tip_pose_turn_left[\s\S]+tip_pose_turn_right/);
+      assert.match(source, /pose\.pitch > 0[\s\S]+tip_pose_raise_head[\s\S]+tip_pose_lower_head/);
+    }
+    for (const file of [
+      'participant-web/js/web-page/app-updated.js',
+      'participant-web/js/web-page/ui-updated.js',
+      'participant-web/js/web-page/tests-updated.js',
+    ]) {
+      assert.doesNotMatch(read(file), /from '\.\/precheck-updated\.js';/);
+    }
+  });
+});
+
+describe('researcher navigation contract', () => {
+  it('isolates researcher drafts by staff account and verifies protocol links through the API', () => {
+    const accountStorage = read('web/account-storage.js');
+    const login = read('web/developer/login.html');
+    const researcher = read('web/researcher.html');
+    const experiments = read('web/researcher-experiments.js');
+    assert.match(accountStorage, /emocog_workspace_owner_v1/);
+    assert.match(accountStorage, /unscoped_workspace_migration/);
+    assert.match(login, /WecogAccountStorage\.activate\(result\.user\.id\)/);
+    assert.match(researcher, /WecogAccountStorage\.activateCachedUser/);
+    assert.match(experiments, /apiGet\('\/protocols\?project_id='/);
+    assert.match(experiments, /serverSyncComplete/);
+    assert.match(experiments, /invitation_code/);
+  });
+  it('resolves local and production API endpoints without trusting arbitrary origins', () => {
+    const resolver = require(path.join(root, 'web/api-base.js'));
+    assert.equal(
+      resolver.resolve({ pageUrl: 'http://127.0.0.1:8080/apps/web/developer/login.html', useStorage: false }),
+      'http://127.0.0.1:3000'
+    );
+    assert.equal(
+      resolver.resolve({ pageUrl: 'https://wecog.ru/main/apps/web/researcher.html', useStorage: false }),
+      'https://wecog.ru/main/api'
+    );
+    assert.equal(
+      resolver.resolve({
+        pageUrl: 'https://wecog.ru/apps/web/researcher.html',
+        configuredBase: 'https://attacker.example/collect',
+        useStorage: false,
+      }),
+      'https://wecog.ru/api'
+    );
+    const login = read('web/developer/login.html');
+    const invite = read('web/developer/invite.html');
+    assert.match(login, /EmocogApiBase\.resolve\(\{ useStorage: false \}\)/);
+    assert.match(invite, /EmocogApiBase\.resolve\(\{ configuredBase: fromField \|\| undefined \}\)/);
+    assert.doesNotMatch(invite, /if \(fromField\) return fromField/);
+  });
+
+  it('keeps the consolidated global navigation without duplicate project aliases', () => {
+    const html = read('web/researcher.html');
+    for (const label of [
+      'Главная',
+      'Исследования',
+      'Библиотека',
+      'Аналитика',
+      'Настройки',
+    ]) {
+      assert.match(html, new RegExp(`>${label}<`));
+    }
+    assert.doesNotMatch(html, /projectNavigationWrap/);
+    assert.doesNotMatch(html, /nav-project-(overview|protocols|participants|monitoring|results)/);
+    const core = read('web/researcher-core.js');
+    const bridge = read('web/researcher-api-bridge.js');
+    assert.doesNotMatch(core, /projectRouteMap/);
+    assert.doesNotMatch(core, /#\/projects\//);
+    assert.match(core, /apiPost\('\/projects'/);
+    assert.match(core, /window\.syncWelcomeProjects/);
+    assert.match(bridge, /global\.syncWelcomeProjects\(projects\)/);
+    assert.match(html, /id="projectSelect" data-no-auto-i18n/);
+    assert.match(html, /id="researcherNavSearch"/);
+    assert.equal((html.match(/data-wecog-theme-value=/g) || []).length, 6);
+    assert.match(html, /data-wecog-theme-value="auto"/);
+    assert.match(html, /data-wecog-theme-value="light"/);
+    assert.match(html, /data-wecog-theme-value="dark"/);
+    assert.match(html, /assets\/wecog-mark\.svg/);
+    assert.match(read('web/assets/researcher-redesign.css'), /#nav-billing \{ display: none !important; \}/);
+    assert.match(read('web/researcher-i18n.js'), /closest\('\[data-no-auto-i18n\]'\)/);
+    const syncStart = bridge.indexOf('async function syncProjectsFromApi()');
+    assert.ok(syncStart >= 0);
+    assert.ok(
+      bridge.indexOf("setSelectedProjectId(projects[0].id", syncStart)
+        < bridge.indexOf('populateProjectSelect(projects)', syncStart)
+    );
+  });
+
+  it('never enables fictional analytics outside explicit localhost preview', () => {
+    const html = read('web/researcher.html');
+    assert.match(html, /analyticsPreview/);
+    assert.match(html, /location\.hostname === 'localhost'/);
+    assert.doesNotMatch(
+      html,
+      /<script\s+src="researcher-analytics-preview-fixture\.js[^>]*><\/script>/
+    );
+  });
+
+  it('uses cookie credentials and restores CSRF without exposing the staff JWT', () => {
+    const guard = read('web/auth-guard.js');
+    const login = read('web/developer/login.html');
+    const authRoute = read('api/routes/auth.js');
+    assert.match(guard, /credentials:\s*'include'/);
+    assert.match(guard, /sessionStorage\.setItem\('emocog_csrf_token'/);
+    assert.match(guard, /delete safeUser\.csrf_token/);
+    assert.doesNotMatch(guard, /localStorage\.setItem\('emocog_api_user', JSON\.stringify\(payload\)\)/);
+    assert.match(login, /'X-Auth-Transport':\s*'cookie'/);
+    assert.doesNotMatch(login, /localStorage\.setItem\('emocog_api_token'/);
+    assert.match(authRoute, /req\.authTransport === 'cookie'[\s\S]+csrf_token/);
+    assert.doesNotMatch(guard, /getItem\(['"]emocog_api_token/);
+    assert.doesNotMatch(read('web/researcher-core.js'), /getItem\(['"]emocog_api_token/);
+    assert.doesNotMatch(read('web/index.html'), /getItem\(['"]emocog_api_token/);
+    assert.doesNotMatch(read('web/developer.html'), /getItem\(['"]emocog_api_token/);
+    assert.doesNotMatch(read('web/developer/experiments.html'), /getItem\(['"]emocog_api_token/);
+    assert.doesNotMatch(read('web/developer/accounts.html'), /emocog_api_token/);
+    assert.doesNotMatch(read('web/developer/invite.html'), /emocog_api_token/);
+  });
+
+  it('uses cookie auth on the landing page and serializes AOIs into protocol blocks', () => {
+    const landing = read('web/index.html');
+    const builder = read('web/researcher-builder.js');
+    const researcher = read('web/researcher.html');
+    assert.match(landing, /auth\/me'[\s\S]+credentials:\s*'include'/);
+    assert.match(landing, /sessionStorage\.setItem\('emocog_csrf_token'/);
+    assert.match(landing, /developer\/login\.html\?portal=researcher/);
+    assert.match(landing, /developer\/login\.html\?portal=admin/);
+    assert.doesNotMatch(landing, /id="siteNavigation"|id="landingFooter"|cardDeveloper/);
+    assert.match(landing, /\.\.\/participant-web\/invite\.html/);
+    assert.match(
+      read('web/assets/researcher-redesign.css'),
+      /data-theme="dark"[^}]+#welcomeScreen \.ws-logo[\s\S]+background:\s*#f5f5ec/
+    );
+    assert.match(researcher, /aoi-protocol\.js/);
+    assert.match(builder, /attachBlockAois\(out\.blockConfig, b\.content, out\.trials\)/);
+    assert.match(builder, /aoiSchemaVersion/);
+    assert.match(builder, /aoiDefinitions/);
+    assert.match(builder, /currentStep === 4\) renderStep4Aoi\(\)/);
+    assert.match(builder, /openAoiEditor\(stimulusId/);
+    assert.doesNotMatch(builder, /currentStep === 4[^\n]+renderPlaceholder/);
+  });
+
+  it('uses working static participant links and bilingual standard stimuli', () => {
+    const core = read('web/researcher-core.js');
+    const experiments = read('web/researcher-experiments.js');
+    const presets = read('web/cognitive-task-protocols.js');
+    assert.match(core, /run_new\.html\?code=/);
+    assert.doesNotMatch(core, /return \(window\.location\.origin \|\| ''\) \+ '\/invite\/'/);
+    assert.match(experiments, /exp\?\.invitationCode \|\| apiState\.invitationCode \|\| ''/);
+    assert.match(experiments, /!serverSyncComplete[\s\S]+!verifiedAt/);
+    assert.doesNotMatch(experiments, /apiState\.invitationCode \|\| protocolId/);
+    assert.match(experiments, /exp\?\.participantLink/);
+    assert.match(read('web/researcher-builder.js'), /invitationCode: pub\.invitation\.code/);
+    assert.match(presets, /nameEn/);
+    assert.match(presets, /infoEn/);
+    assert.match(presets, /Simple RT: black square/);
+    assert.match(presets, /localizedStimulusName/);
+    assert.match(presets, /WecogTemplateInstructionTranslations/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /cognitive-task-protocols\.js/);
+    assert.match(read('web/researcher-builder.js'), /titleEn/);
+    assert.match(read('web/researcher-builder.js'), /textEn/);
+  });
+
+  it('renders standard stimulus ids as visual content and exposes response controls', () => {
+    const standard = require(path.join(root, 'shared/standard-stimuli.js'));
+    assert.equal(standard.resolveStandardStimulus('std_flanker_left_incong').text, '>><>>');
+    assert.equal(standard.resolveStandardStimulus('std_flanker_right_incong').text, '<<><<');
+    assert.equal(
+      standard.resolveStandardStimulus('std_cpt_k', { name: 'std_cpt_k' }).text,
+      'K'
+    );
+    assert.equal(
+      standard.resolveStandardStimulus('std_switch_4g', { name: 'std_switch_4g' }).text,
+      '4G'
+    );
+    const runner = read('participant-web/js/web-page/experimental_task-updated.js');
+    assert.match(runner, /responseGuidanceForBlock/);
+    assert.match(runner, /runtime_response_pointer/);
+    assert.match(runner, /Blue background: classify the number/);
+    assert.match(runner, /nextBlock\?\.taskType/);
+    assert.match(runner, /переключение задач/);
+    assert.match(runner, /buildStandardInvitationTrials/);
+    assert.match(runner, /std_switch_4g/);
+    assert.doesNotMatch(runner, /\|\| block\?\.instructions\s*\|\|/);
+    const ui = read('participant-web/js/web-page/ui-updated.js');
+    assert.match(ui, /interface_language_changed/);
+    assert.match(ui, /wecog:languagechange/);
+    assert.match(runner, /refreshLocalizedInstructionScreen/);
+    assert.match(runner, /captureSurveyDraft/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260828-2/);
+  });
+
+  it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
+    const builder = read('web/researcher-builder.js');
+    for (const stimulusId of [
+      'std_stroop_red_red',
+      'std_flanker_right_incong',
+      'std_nback_circle',
+      'std_pvt_counter',
+      'std_cpt_a',
+      'std_switch_4g',
+    ]) {
+      assert.match(builder, new RegExp(stimulusId));
+    }
+    assert.match(builder, /taskType === 'task_switching'/);
+    assert.match(builder, /action: 'arrow_down'/);
+  });
+
+  it('supports secure researcher JSON result import without participant invitation reuse', () => {
+    const analytics = read('web/researcher-analytics-production.js');
+    const ingest = read('api/routes/ingest.js');
+    assert.match(analytics, /analyticsResultImportFile/);
+    assert.match(analytics, /buildAggregatesPayload\(source, \{ forIngest: true \}\)/);
+    assert.match(analytics, /delete payload\.ids\.invitationCode/);
+    assert.match(analytics, /Idempotency-Key/);
+    assert.match(analytics, /\/sessions\/start/);
+    assert.match(ingest, /return requireAuth\(req, res/);
+    assert.match(ingest, /canRolePerform\(req\.user\?\.role, OPERATIONS\.SESSION_WRITE\)/);
+  });
+
+  it('renders real session quality, readable exclusions, and nested technical details', () => {
+    const analytics = read('web/researcher-analytics-production.js');
+    const router = read('api/analytics/v1-router.js');
+    assert.match(analytics, /function dataQualityShellHtml/);
+    assert.match(analytics, /activeTab === 'data-quality'/);
+    assert.match(analytics, /Почему исключена/);
+    assert.match(analytics, /face_occluded/);
+    assert.match(analytics, /session\.cameraResolution/);
+    assert.match(router, /function sessionTechnicalDetails/);
+    assert.match(router, /payload\?\.meta\?\.tech/);
+    assert.match(router, /quality: sessionQualityDetails\(row\)/);
+  });
+
+  it('recovers an existing published protocol only by stable protocol identity', () => {
+    const source = read('web/researcher-core.js');
+    assert.match(source, /protocol\.definition\.protocolId/);
+    assert.match(source, /apiPatch\('\/protocols\/' \+ matching\.id/);
+    assert.doesNotMatch(source, /protocol\.name\s*===\s*payload\.name/);
+    assert.match(source, /\/invitations\?protocol_id=/);
+  });
+
+  it('does not route public respondents into staff UI or render API labels as HTML', () => {
+    const login = read('web/developer/login.html');
+    const experiments = read('web/developer/experiments.html');
+    const stimuli = read('web/researcher-stimuli.js');
+    assert.match(login, /destinationForRole\(role\)/);
+    assert.match(login, /requestedPortal === 'researcher'/);
+    assert.match(login, /requestedPortal === 'developer'/);
+    assert.match(login, /requestedPortal === 'admin'/);
+    assert.match(login, /result\.user\.role === 'respondent'/);
+    assert.match(login, /Участники входят по коду или ссылке приглашения/);
+    assert.doesNotMatch(login, /registerForm|Регистрация участника|regEmail|regPassword/);
+    assert.match(experiments, /escapeHtml\(r\.experiment_title/);
+    assert.match(experiments, /escapeHtml\(r\.participant_id/);
+    assert.match(stimuli, /localizedStimulusName\(s\)/);
+    assert.doesNotMatch(stimuli, /onclick="[^"]*deleteStimulusFromLibrary/);
+  });
+
+  it('escapes imported protocol, account and membership values before HTML rendering', () => {
+    const builder = read('web/researcher-builder.js');
+    const accounts = read('web/developer/accounts.html');
+    const invites = read('web/developer/invite.html');
+    const admin = read('web/researcher-admin-settings.js');
+    const experiments = read('web/researcher-experiments.js');
+    assert.match(builder, /previewEscape\(file\.name\)/);
+    assert.match(builder, /previewEscape\(b\.id\)/);
+    assert.match(builder, /previewEscape\(protocolMeta\.title/);
+    assert.match(builder, /previewEscape\(localizedBlockLabel/);
+    assert.match(accounts, /escapeHtml\(u\.email/);
+    assert.match(invites, /escapeHtml\(x\.code/);
+    assert.match(admin, /escapeAdminHtml\(u\.email/);
+    assert.match(experiments, /escapeUiHtml\(exp\.title/);
+    assert.match(experiments, /escapeUiHtml\(participantLink\)/);
+  });
+
+  it('ships one local brand system across public, participant and developer surfaces', () => {
+    const participant = read('participant-web/mvp_with_precheck_1-updated.html');
+    const translations = read('participant-web/translations.js');
+    const developerPages = [
+      'web/developer/accounts.html',
+      'web/developer/bpm-test.html',
+      'web/developer/body-pose-test.html',
+      'web/developer/audio-test.html',
+      'web/developer/emotion-test.html',
+      'web/developer/experiments.html',
+      'web/developer/invite.html',
+      'web/developer/login.html',
+      'web/developer/rt-test.html',
+    ];
+    assert.match(read('web/index.html'), /assets\/wecog-foundation\.css/);
+    assert.match(participant, /participant-redesign\.css/);
+    assert.match(participant, /id="participantLanguageSelect"/);
+    assert.match(translations, /participantLocales = \['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur'\]/);
+    assert.match(read('web/assets/wecog-mark.svg'), /A W-shaped gaze path with a focus point/);
+    assert.match(read('web/assets/wecog-foundation.css'), /Atkinson Hyperlegible Next/);
+    developerPages.forEach(file => {
+      const html = read(file);
+      assert.match(html, /wecog-foundation\.css/);
+      assert.match(html, /developer-redesign\.css/);
+      assert.match(html, /developer-shell\.js/);
+      if (/\/(bpm-test|body-pose-test|audio-test|emotion-test|rt-test)\.html$/.test(file)) {
+        assert.match(html, /auth-guard\.js/);
+        assert.match(html, /allowedRoles:\s*\['admin', 'developer'\]/);
+      } else if (file.endsWith('/accounts.html')) {
+        assert.match(html, /allowedRoles:\s*\['admin', 'org_admin', 'PI'\]/);
+      } else if (/\/(experiments|invite)\.html$/.test(file)) {
+        assert.match(html, /allowedRoles:\s*\['admin'\]/);
+      }
+    });
+  });
+
+  it('keeps Spanish throughout pre-check and fails closed for uncertain biometrics', async () => {
+    const translationsPath = path.join(root, 'participant-web/translations.js');
+    const { translations } = await import(pathToFileURL(translationsPath).href + `?t=${Date.now()}`);
+    assert.equal(translations.es.label_light, 'Iluminación');
+    assert.equal(translations.es.label_visibility, 'Visibilidad del rostro');
+    assert.equal(translations.es.status_needs_fix, 'Requiere corrección');
+    assert.match(translations.es.precheck_criteria_help, /indicador/);
+    for (const locale of ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur']) {
+      assert.ok(translations[locale].runtime_continuous_start_failed);
+      assert.ok(translations[locale].runtime_repeat_trials_title);
+    }
+    const participant = read('participant-web/mvp_with_precheck_1-updated.html');
+    assert.match(participant, /data-i18n="precheck_criteria_help"/);
+    const emotionApi = read('participant-web/js/emotion/public-api.js');
+    assert.match(emotionApi, /emotionInferred:\s*false/);
+    assert.doesNotMatch(emotionApi, /dominant:\s*valence\s*>/);
+    const bpmRuntime = read('participant-web/js/session-runtime/continuous-bpm.js');
+    assert.doesNotMatch(bpmRuntime, /bpmPublished \?\? output\.bpmSmoothed/);
+    assert.match(bpmRuntime, /publicationGate\.evaluate\(output\)/);
+    assert.doesNotMatch(read('web/developer/bpm-test.js'), /FallbackEngine/);
+  });
+
+  it('keeps browser errors inert and static pages protected from hostile framing', () => {
+    const analytics = read('web/researcher-analytics.js');
+    const bpm = read('web/developer/bpm-test.js');
+    const nginx = read('../deploy/nginx-participant-media.conf');
+    assert.doesNotMatch(analytics, /innerHTML\s*=\s*['"`][^\n]*e\.message/);
+    assert.doesNotMatch(bpm, /innerHTML\s*=\s*['"`][^\n]*err\.message/);
+    assert.match(analytics, /message\.textContent\s*=/);
+    assert.match(bpm, /errorLine\.textContent\s*=/);
+    assert.match(nginx, /location \^~ \/apps\/participant-web\/[\s\S]+frame-ancestors 'self'/);
+    assert.match(nginx, /location \^~ \/apps\/web\/[\s\S]+camera=\(\), microphone=\(\)/);
+    assert.match(nginx, /X-Frame-Options "SAMEORIGIN"/);
+  });
+});

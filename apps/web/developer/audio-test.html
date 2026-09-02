@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wecog — тест аудиомодуля</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260825-1">
+  <script src="../assets/wecog-theme.js?v=20260825-1"></script>
+  <style>
+    :root { --bg:#0f0f1a;--card:#16213e;--text:#eef2f7;--muted:#a5b0bf;--accent:#5c66bd;--border:rgba(92,102,189,.32);--ok:#10b981;--bad:#ef4444; }
+    :root[data-theme="light"] { --bg:#f4f3ec;--card:#fff;--text:#10211b;--muted:#59665f;--border:#d5d9d4; }
+    * { box-sizing:border-box; }
+    body { margin:0;min-height:100vh;padding:24px;background:var(--bg);color:var(--text);font-family:"Atkinson Hyperlegible Next","Segoe UI",sans-serif; }
+    .top { display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:980px;margin:0 auto 18px; }
+    .top h1 { margin:0;font-size:1.45rem; }
+    .top a { color:var(--muted);text-decoration:none; }
+    .layout { display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:16px;max-width:980px;margin:auto; }
+    .card { padding:20px;border:1px solid var(--border);border-radius:18px;background:var(--card); }
+    .meter { height:12px;margin:18px 0;border-radius:999px;background:color-mix(in srgb,var(--muted) 20%,transparent);overflow:hidden; }
+    .meter span { display:block;width:0;height:100%;background:var(--ok);transition:width .08s linear; }
+    .record-clock { display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:14px 0 8px;font-variant-numeric:tabular-nums; }
+    .record-clock strong { font-size:2rem;letter-spacing:-.04em; }
+    .record-clock span { color:var(--muted);font-size:13px; }
+    .controls { display:flex;gap:10px;flex-wrap:wrap; }
+    button { min-height:44px;padding:10px 16px;border:0;border-radius:999px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer; }
+    button.secondary { border:1px solid var(--border);background:transparent;color:var(--text); }
+    button:disabled { opacity:.45;cursor:not-allowed; }
+    .status { min-height:44px;margin:14px 0 0;color:var(--muted);line-height:1.45; }
+    .status.ok { color:var(--ok); }.status.bad { color:var(--bad); }
+    .metrics { display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px; }
+    .metric { min-height:96px;padding:13px;border:1px solid var(--border);border-radius:12px; }
+    .metric span { display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em; }
+    .metric strong { display:block;margin-top:8px;font-size:1.2rem;overflow-wrap:anywhere; }
+    .privacy { margin-top:16px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:13px; }
+    @media(max-width:760px){body{padding:16px}.layout{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
+  </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
+</head>
+<body>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script>
+    if (!window.EmocogAuthGuard) location.replace('login.html');
+    else window.EmocogAuthGuard.ensureProtectedPage({ loginPath: 'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied: true, roleDeniedRedirect: '../researcher.html' });
+  </script>
+  <header class="top"><h1>Аудиомодуль</h1><a href="../developer.html">← К диагностике</a></header>
+  <main class="layout">
+    <section class="card">
+      <h2>Речевое окно</h2>
+      <p>Говорите обычным голосом не менее 10 секунд. Анализ выполняется локально.</p>
+      <div class="record-clock" aria-live="polite"><strong id="recordTimer">00:10.0</strong><span>осталось</span></div>
+      <div class="meter" aria-label="Уровень микрофона"><span id="level"></span></div>
+      <div class="controls">
+        <button id="startBtn" type="button">Начать запись окна</button>
+        <button id="stopBtn" type="button" class="secondary" disabled>Завершить и оценить</button>
+      </div>
+      <p id="status" class="status" role="status">Микрофон ещё не запрашивался.</p>
+      <p class="privacy">Сырой PCM существует только в памяти текущей вкладки до завершения анализа. Запись в файл, localStorage и API отсутствует.</p>
+    </section>
+    <section class="card">
+      <h2>Результат QC</h2>
+      <div class="metrics">
+        <div class="metric"><span>Решение</span><strong id="accepted">—</strong></div>
+        <div class="metric"><span>Надёжность</span><strong id="reliability">—</strong></div>
+        <div class="metric"><span>Качество</span><strong id="quality">—</strong></div>
+        <div class="metric"><span>Длительность</span><strong id="duration">—</strong></div>
+        <div class="metric"><span>Pitch mean</span><strong id="pitch">—</strong></div>
+        <div class="metric"><span>Speech fraction</span><strong id="speech">—</strong></div>
+        <div class="metric"><span>Причины отклонения</span><strong id="reasons">—</strong></div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="audio-test.js?v=20260827-1"></script>
+</body>
+</html>

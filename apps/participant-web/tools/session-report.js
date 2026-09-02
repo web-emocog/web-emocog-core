@@ -364,11 +364,27 @@ async function onFileSelected(file) {
 
     try {
         const text = await file.text();
-        const session = JSON.parse(text);
-        renderSession(session);
-        elements.status.textContent = `Загружено: ${file.name}`;
+        try {
+            const session = JSON.parse(text);
+            renderSession(session);
+            elements.status.textContent = `Загружено: ${file.name}`;
+        } catch (e) {
+            // Более дружелюбная ошибка для файлов в формате JSONL (RT-логи),
+            // которые содержат несколько JSON-объектов построчно.
+            const msg = String(e?.message || e || '');
+            console.error('[session-report] parse error:', e);
+
+            if (/after JSON at position/i.test(msg) || /in JSON at position/i.test(msg)) {
+                elements.status.textContent =
+                    'Ошибка чтения файла: похоже, это лог в формате JSONL (несколько JSON-строк). ' +
+                    'Session Report принимает один JSON-объект сессии (web-MVP). ' +
+                    'Для логов Reaction Time используйте скрипт анализа rt_component.';
+            } else {
+                elements.status.textContent = `Ошибка чтения файла: ${msg}`;
+            }
+        }
     } catch (e) {
-        console.error('[session-report] parse error:', e);
+        console.error('[session-report] file read error:', e);
         elements.status.textContent = `Ошибка чтения файла: ${String(e?.message || e)}`;
     }
 }

@@ -2,6 +2,9 @@
 :root {
     --primary: #2563EB;
     --primary-hover: #1D4ED8;
+    --accent: #2563EB;
+    --accent2: #6366F1;
+    --stroke: #E5E7EB;
     --bg: #F3F4F6;
     --card-bg: #FFFFFF;
     --text-main: #111827;
@@ -104,10 +107,49 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
 
 .consent-box { background: #F8FAFC; padding: 20px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 14px; margin-bottom: 20px; border: 1px solid var(--border); }
 .checkbox-wrapper { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 15px; border: 2px solid var(--border); border-radius: 12px; }
+.audio-consent { margin-top: 10px; border-width: 1px; background: #F8FAFC; font-size: 13px; line-height: 1.45; }
+.audio-consent[hidden] { display: none; }
 
 .input-error {
     border-color: var(--error) !important;
     background-color: #FEF2F2 !important;
+}
+
+.input-ok {
+    border-color: var(--success) !important;
+    background-color: #F0FDF4 !important;
+}
+
+.final-qc-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 16px 0 20px;
+}
+
+.qc-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #F8FAFC;
+    text-align: center;
+}
+
+.qc-metric .qc-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.qc-metric .qc-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--primary);
 }
 
 .error-text {
@@ -248,9 +290,8 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     border-radius: 50%;
     cursor: pointer;
     z-index: 2001;
-    filter: drop-shadow(0 0 10px rgba(220, 38, 38, 0.8));
     transform: translate(-50%, -50%);
-    transition: all 0.3s ease;
+    transition: transform 0.12s ease, opacity 0.12s ease;
 }
 
 .fullscreen-calib-point:hover {
@@ -266,8 +307,78 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     font-size: 18px;
     text-align: center;
     z-index: 2002;
-    pointer-events: none;
     user-select: none;
+    pointer-events: none;
+}
+
+.calib-instruction > span,
+.calib-progress {
+    pointer-events: none;
+}
+
+.calibration-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 2004;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: #fff;
+}
+
+.calibration-intro[hidden] {
+    display: none;
+}
+
+.calibration-intro-card {
+    width: min(560px, 100%);
+    padding: clamp(28px, 5vw, 48px);
+    border: 1px solid #d5d9d4;
+    border-radius: 24px;
+    background: #fff;
+    color: #10211b;
+    text-align: left;
+}
+
+.calibration-intro-kicker {
+    margin-bottom: 16px;
+    color: #55635c;
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.calibration-intro-card h2 {
+    margin: 0 0 18px;
+    color: #10211b;
+}
+
+.calibration-intro-card p {
+    margin: 0 0 26px;
+    color: #55635c;
+    font-size: 19px;
+    line-height: 1.55;
+}
+
+.calibration-intro-card .btn {
+    width: auto;
+    margin: 0;
+}
+
+.calibration-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 18px;
+    pointer-events: auto;
+}
+
+.calibration-actions .btn {
+    width: auto;
+    min-width: 180px;
+    margin: 0;
 }
 
 .calib-progress {
@@ -276,21 +387,24 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     color: rgba(255,255,255,0.7);
 }
 
-/* pre-check */
+/* pre-check (PR #20 layout) */
 .precheck-container {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
     margin: 25px 0;
 }
 
 .camera-preview {
     position: relative;
     width: 100%;
-    max-width: 640px;
-    height: 360px;
-    margin: 0 auto 25px;
-    border-radius: 12px;
+    aspect-ratio: 4 / 3;
+    max-height: 62vh;
+    margin: 0 auto;
+    border-radius: 16px;
     overflow: hidden;
-    background: #1a1a2e;
-    border: 3px solid #E5E7EB;
+    background: #0a0a0f;
+    border: 1px solid var(--stroke);
     transition: border-color 0.3s ease;
 }
 
@@ -307,6 +421,14 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     height: 100%;
     object-fit: cover;
     transform: scaleX(-1);
+    pointer-events: none;
+    opacity: 1;
+}
+
+#precheckVideo::-webkit-media-controls,
+#precheckVideo::-webkit-media-controls-start-playback-button {
+    display: none !important;
+    -webkit-appearance: none;
 }
 
 #overlayCanvas {
@@ -316,47 +438,81 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     width: 100%;
     height: 100%;
     pointer-events: none;
+    z-index: 2;
 }
 
 .face-guide {
     position: absolute;
-    top: 20%;
-    left: 20%;
-    right: 20%;
-    bottom: 20%;
-    border: 2px dashed rgba(255, 255, 255, 0.4);
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 36%;
+    height: 54%;
+    border: 3px solid rgba(16, 185, 129, 0.75);
     border-radius: 10px;
     pointer-events: none;
     transition: border-color 0.3s ease;
+    display: none;
+}
+
+.calibration-head-pose-guide {
+    position: fixed;
+    width: 138px;
+    height: 104px;
+    padding: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 18px;
+    background: rgba(8, 17, 31, 0.84);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(8px);
+    z-index: 10060;
+    display: none;
+    pointer-events: none;
+}
+
+.calibration-head-pose-guide.active { display: block; }
+.calibration-head-pose-guide[data-corner="top-left"] { left: 18px; top: 18px; }
+.calibration-head-pose-guide[data-corner="top-right"] { right: 18px; top: 18px; }
+.calibration-head-pose-guide[data-corner="bottom-left"] { left: 18px; bottom: 18px; }
+.calibration-head-pose-guide[data-corner="bottom-right"] { right: 18px; bottom: 18px; }
+
+#calibrationHeadPoseCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 14px;
 }
 
 .guide-text {
     position: absolute;
-    top: 15%;
     left: 50%;
+    bottom: 10px;
     transform: translateX(-50%);
-    color: white;
-    font-size: 14px;
-    background: rgba(0,0,0,0.5);
-    padding: 5px 10px;
-    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
     transition: all 0.3s ease;
+    z-index: 3;
 }
 
 /* Индикаторы (pre-check) */
 .indicators {
-    display: flex;
-    justify-content: center;
-    gap: 20px;
-    margin: 25px 0;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 0;
 }
 
 .indicator {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    width: 100px;
+    align-items: stretch;
+    gap: 6px;
+    width: auto;
+    padding: 10px;
+    border: 1px solid var(--stroke);
+    border-radius: 12px;
+    background: var(--card-bg);
 }
 
 .indicator .icon {
@@ -376,16 +532,22 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
 .progress-container {
     width: 100%;
     height: 6px;
-    background: #E5E7EB;
-    border-radius: 3px;
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 99px;
     overflow: hidden;
 }
 
 .progress-bar {
     height: 100%;
     width: 0%;
-    background: #9CA3AF;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
     transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (max-width: 800px) {
+    .indicators {
+        grid-template-columns: 1fr;
+    }
 }
 
 .indicator .status {
@@ -882,19 +1044,15 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     margin-top: 0;
 }
 
-.visuospatial-canvas-wrap {
-    position: relative;
-    width: 100%;
-    height: min(68vh, 560px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background:
-        repeating-linear-gradient(
-            to bottom,
-            #ffffff 0px,
-            #ffffff 28px,
-            #f3f4f6 29px
-        );
+/* Полноэкранный overlay для рисования. Включается при display:block после клика
+   "Начать рисование" в introCard, паттерн от .tracking-test-area. */
+.visuospatial-drawing-overlay {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #ffffff;
+    z-index: 2000;
     overflow: hidden;
 }
 
@@ -902,9 +1060,16 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     width: 100%;
     height: 100%;
     display: block;
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            #ffffff 0px,
+            #ffffff 28px,
+            #f3f4f6 29px
+        );
 }
 
-#visuospatialGazeDot {
+.visuospatial-gaze-dot {
     position: absolute;
     width: 14px;
     height: 14px;
@@ -914,6 +1079,51 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     pointer-events: none;
     transform: translate(-50%, -50%);
     display: none;
+}
+
+/* Pen-down: красный, чтобы было ясно "сейчас рисуется". */
+.visuospatial-gaze-dot.is-pen-down {
+    background: rgba(220, 38, 38, 0.85);
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.55);
+}
+
+/* Мини-плашка с заголовком задания, левый верх. */
+.visuospatial-prompt-hud {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    max-width: 38vw;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    pointer-events: none;
+}
+
+/* Индикатор pen-down/pen-up, левый низ. */
+.visuospatial-pen-status {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    pointer-events: none;
+}
+
+/* Кнопка "Завершить", правый верх, выше overlay'а чтобы клик ловился. */
+.visuospatial-finish-floating {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: auto;
+    padding: 10px 18px;
+    z-index: 2001;
 }
 
 @media (max-width: 900px) {

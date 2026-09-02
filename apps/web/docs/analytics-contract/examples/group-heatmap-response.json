@@ -1,0 +1,74 @@
+{
+  "contractVersion": "1.0",
+  "kind": "heatmap",
+  "generatedAt": "2026-08-04T18:36:00.000Z",
+  "snapshot": {
+    "id": "snapshot-group-2026-08-04-001",
+    "datasetHash": "sha256:36162d781b2b67cf52f46069a1fc30b0",
+    "createdAt": "2026-08-04T18:34:00.000Z",
+    "queryEcho": {
+      "schemaVersion": "1.0",
+      "mode": "group",
+      "analysisLevel": "level_1",
+      "projectId": 12,
+      "protocolId": 25,
+      "protocolVersion": "1.0.0",
+      "metricIds": ["viz.heatmap"],
+      "filters": {
+        "participantIds": [],
+        "sessionIds": [],
+        "groupIds": ["control"],
+        "conditionIds": ["condition-a"],
+        "blockIds": ["main-block"],
+        "stimulusIds": ["stimulus-42"],
+        "aoiIds": [],
+        "qcMode": "valid_and_borderline",
+        "qcChannels": ["gaze"],
+        "minValidFraction": 0.7,
+        "minSignalConfidence": 0.65,
+        "dateFrom": null,
+        "dateTo": null,
+        "includeIncompleteSessions": false
+      }
+    },
+    "includedParticipantIds": ["P-001", "P-002", "P-003"],
+    "includedSessionIds": [101, 102, 103],
+    "excludedSessions": [],
+    "versions": {
+      "protocol": "1.0.0",
+      "stimulus": "stimulus-42@1",
+      "aoiSchema": "1.2",
+      "metricsCatalog": "1.0",
+      "qcRules": "qc-rules-1.0.0",
+      "frontend": "researcher-web-1.0.0",
+      "backend": "analytics-api-1.0.0"
+    }
+  },
+  "data": {
+    "aggregationLevel": "group",
+    "stimulus": {
+      "id": "stimulus-42",
+      "version": "1",
+      "name": "Target image",
+      "type": "image",
+      "contentUrl": "/stimuli/42/content",
+      "intrinsicWidth": 1600,
+      "intrinsicHeight": 900
+    },
+    "coordinateSpace": "stimulus_normalized_0_1",
+    "normalizationMode": "fixation_duration_weighted",
+    "smoothing": { "method": "gaussian", "bandwidthNorm": 0.04 },
+    "equalParticipantWeight": true,
+    "grid": {
+      "width": 3,
+      "height": 2,
+      "values": [0.02, 0.22, 0.08, 0.05, 1, 0.17],
+      "maxValue": 1
+    },
+    "nParticipants": 3,
+    "nSessions": 3,
+    "nFixations": 184,
+    "validObservationDurationMs": 159840,
+    "algorithm": { "id": "fixation-heatmap", "version": "1.0.0", "parametersHash": "sha256:heatmap-default-v1" }
+  }
+}

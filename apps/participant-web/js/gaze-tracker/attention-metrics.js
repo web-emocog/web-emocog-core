@@ -675,6 +675,11 @@ function summarizeBlinks(closureEvents, blinkEvents, eyeDurationMs, config, blin
 
 function getGazePoints(gazeSamples) {
     return (gazeSamples || [])
+        .map(sample => ({
+            ...sample,
+            x: Number.isFinite(sample?.correctedX) ? sample.correctedX : sample?.x,
+            y: Number.isFinite(sample?.correctedY) ? sample.correctedY : sample?.y
+        }))
         .filter(s => Number.isFinite(s?.x) && Number.isFinite(s?.y) && Number.isFinite(s?.t))
         .sort((a, b) => a.t - b.t);
 }
@@ -1078,11 +1083,25 @@ function uniq(values) {
 export function buildAttentionMetrics(sessionData) {
     const rawEyeSignals = Array.isArray(sessionData?.eyeSignals) ? sessionData.eyeSignals : [];
     const rawGazeSamples = Array.isArray(sessionData?.eyeTracking) ? sessionData.eyeTracking : [];
-    const filtered = filterPostCalibrationSamples(rawEyeSignals, rawGazeSamples);
-    const eyeSignals = filtered.eyeSignals;
-    const gazeSamples = filtered.gazeSamples;
-    const scopeMeta = filtered.scope;
+    const eyeSignals = rawEyeSignals;
+    const gazeSamples = rawGazeSamples;
+    const firstTimestamp = [
+        ...eyeSignals.map(sample => sample?.t),
+        ...gazeSamples.map(sample => sample?.t)
+    ].filter(Number.isFinite).sort((a, b) => a - b)[0] ?? null;
+    const scopeMeta = {
+        scopeStartPhase: 'session_first_measured_frame',
+        scopeStartMs: firstTimestamp,
+        scopeFilterApplied: false
+    };
     const global = computeMetricsForSubset(eyeSignals, gazeSamples, DEFAULTS, scopeMeta);
+    const postCalibrationSamples = filterPostCalibrationSamples(rawEyeSignals, rawGazeSamples);
+    const postCalibration = computeMetricsForSubset(
+        postCalibrationSamples.eyeSignals,
+        postCalibrationSamples.gazeSamples,
+        DEFAULTS,
+        postCalibrationSamples.scope
+    );
 
     const phases = uniq([
         ...eyeSignals.map(s => s?.phase).filter(Boolean),
@@ -1124,7 +1143,7 @@ export function buildAttentionMetrics(sessionData) {
     return {
         version: ATTENTION_ALGO_VERSION,
         computedAt: Date.now(),
-        scope: 'research_only',
+        scope: 'whole_measured_session',
         windows: ['30s', '60s'],
         sampleCounts: {
             eyeSignals: eyeSignals.length,
@@ -1138,6 +1157,7 @@ export function buildAttentionMetrics(sessionData) {
         scopeStartMs: scopeMeta.scopeStartMs,
         scopeFilterApplied: scopeMeta.scopeFilterApplied,
         global,
+        postCalibration,
         perPhase,
         perBlock,
         focus

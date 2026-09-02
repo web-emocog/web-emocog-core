@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>wecog — исследование</title>
+    <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
+
+    <link rel="stylesheet" href="style.css?v=20260820-3">
+    <link rel="stylesheet" href="participant-redesign.css?v=20260820-3">
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search || '');
+        if (params.get('code')) return;
+        var m = (window.location.hash || '').match(/^#\/?participant\/([^/?#]+)/i);
+        if (!m || !m[1]) return;
+        var u = new URL(window.location.href);
+        u.searchParams.set('code', decodeURIComponent(m[1]).trim());
+        u.hash = '';
+        window.location.replace(u.pathname + u.search);
+      })();
+    </script>
+
+    <!-- MediaPipe Vision (Face Landmarker) -->
+    <script>
+        // Загрузка MediaPipe как глобальных объектов для non-module скриптов
+        import('./js/vendor/mediapipe/vision_bundle.mjs')
+            .then(vision => {
+                window.FilesetResolver = vision.FilesetResolver;
+                window.FaceLandmarker = vision.FaceLandmarker;
+                window.ImageSegmenter = vision.ImageSegmenter;
+                console.log('[MediaPipe] Vision modules loaded (self-hosted)');
+            })
+            .catch(err => {
+                window.__WECOG_MEDIAPIPE_LOAD_ERROR__ = String(err?.message || err);
+                console.error('[MediaPipe] Self-hosted runtime load error:', err);
+            });
+    </script>
+    
+    <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
+    <script src="js/precheck-analyzer.js?v=2.1.2"></script>
+    <!-- Face Segmenter Module (проверка видимости частей лица) -->
+    <script src="js/face-segmenter.js?v=1.2.2"></script>
+    <!-- QC Metrics Module -->
+    <script src="js/qc-metrics.js?v=3.5.0"></script>
+    <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
+    <script src="js/gaze-tracker.js?v=2.2.0"></script>
+    <script src="js/face-mask-collector.js?v=1.0.0"></script>
+    <script src="js/web-page/consent-signature.js"></script>
+    
+    
+</head>
+<body>
+    <!-- Fullscreen калибровка -->
+    <div id="fullscreenCalibration" class="fullscreen-calibration">
+        <div id="calibrationIntro" class="calibration-intro" hidden>
+            <div class="calibration-intro-card" role="dialog" aria-modal="true" aria-labelledby="calibrationIntroTitle">
+                <div class="calibration-intro-kicker" id="calibrationIntroKicker">Калибровка взгляда</div>
+                <h2 id="calibrationIntroTitle">Перед началом</h2>
+                <p id="calibrationIntroText">Сядьте удобно и сохраняйте естественное положение головы. Смотрите на каждую красную точку и нажимайте только на неё.</p>
+                <button type="button" id="calibrationIntroStartBtn" class="btn">Начать калибровку</button>
+            </div>
+        </div>
+        <div class="calib-instruction">
+            <span id="calibInstructionText">👆 Кликайте на красную точку, смотря на неё</span>
+            <div class="calib-progress">
+                <span id="calibProgressText">Точка 1 из 25</span>
+            </div>
+            <div id="calibrationActions" class="calibration-actions" style="display:none;">
+                <button type="button" id="recalibrateGazeBtn" class="btn btn-secondary">Повторить калибровку</button>
+                <button type="button" id="continueAfterValidationBtn" class="btn">Продолжить</button>
+            </div>
+        </div>
+        <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
+    </div>
+
+    <!-- Область теста слежения за фигурами (fullscreen) -->
+    <div id="trackingTestArea" class="tracking-test-area">
+        <div class="test-progress">
+            <span id="testProgressText">Следите глазами за фигурой</span>
+            <div class="test-progress-bar">
+                <div class="test-progress-fill" id="testProgressFill" style="width: 0%"></div>
+            </div>
+            <div id="trackingEmotionHud" class="tracking-emotion-hud" style="margin-top:10px;font-size:14px;opacity:0.92;text-align:center;"></div>
+        </div>
+        <div id="testShape" class="test-shape circle"></div>
+    </div>
+
+    <!-- Наша точка для отображения реального взгляда -->
+    <div id="customGazeDot"></div>
+
+    <!-- Шапка -->
+    <div class="top-bar">
+        <div class="header-left">wecog</div>
+        <div class="header-right">
+            <div id="idDisplay" class="id-badge" onclick="copyIds()" title="Copy ID">ID: ...</div>
+            
+            <!-- Переключатель языка -->
+            <div class="lang-switch">
+                <label class="participant-language-label" for="participantLanguageSelect">
+                    <span class="sr-only" data-i18n="language_label">Язык интерфейса</span>
+                    <select id="participantLanguageSelect" aria-label="Язык интерфейса" data-i18n-aria-label="language_label">
+                        <option value="ru">Русский</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                        <option value="es">Español</option>
+                        <option value="hi">हिन्दी</option>
+                        <option value="ar">العربية</option>
+                        <option value="fr">Français</option>
+                        <option value="bn">বাংলা</option>
+                        <option value="pt">Português</option>
+                        <option value="ur">اردو</option>
+                    </select>
+                </label>
+                <div class="legacy-language-controls" aria-hidden="true">
+                    <button type="button" class="lang-btn active" id="langRu">RU</button>
+                    <button type="button" class="lang-btn" id="langEn">EN</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        
+        <!-- ШАГ 1: Лэндинг (Фаза 0.3: политика конфиденциальности) -->
+        <div id="step1" class="step active">
+            <h1 data-i18n="welcome_title">Добро пожаловать</h1>
+            <p class="text-center" data-i18n="welcome_subtitle">Платформа оценки внимания и эмоций</p>
+            
+            <div class="warning-container">
+                <strong class="warning-title" data-i18n="warning_title">⚠️ Важно:</strong>
+                <ul class="warning-list">
+                    <li data-i18n="warning_1">Вам понадобится веб-камера</li>
+                    <li data-i18n="warning_2">Данные о взгляде обрабатываются на вашем устройстве</li>
+                    <li data-i18n="warning_3">Мы не сохраняем видео вашего лица</li>
+                </ul>
+            </div>
+            <p class="privacy-policy-short" data-i18n="privacy_policy_short">Видео не записывается и не передаётся; все расчёты — на вашем устройстве; на сервер отправляются только обезличенные сводки.</p>
+
+            <div style="margin:16px auto 8px;max-width:620px;padding:14px;border:1px solid var(--border);border-radius:12px;background:rgba(92,102,189,.06);text-align:left;">
+                <div style="font-weight:700;margin-bottom:6px;" data-i18n="invite_link_title">Ссылка-приглашение</div>
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;" data-i18n="invite_link_desc">Вставьте полную ссылку приглашения или только код, чтобы продолжить как участник.</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <input type="text" id="inviteLinkInput" placeholder="Ссылка или код приглашения" data-i18n-placeholder="invite_link_placeholder" style="flex:1;min-width:260px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);" />
+                    <button class="btn" type="button" id="applyInviteLinkBtn" data-i18n="invite_link_apply" style="width:auto;padding:10px 16px;">Применить ссылку</button>
+                </div>
+                <div id="inviteLinkHint" style="margin-top:8px;font-size:12px;color:var(--text-secondary);"></div>
+            </div>
+
+            <button class="btn" id="btnStartIntro" data-i18n="btn_start">Начать исследование</button>
+        </div>
+
+        <!-- ШАГ 2: Согласие (Фаза 0.3: политика) -->
+        <div id="step2" class="step">
+            <h2 data-i18n="consent_header">Информированное согласие</h2>
+            <div class="consent-box">
+                <h4 data-i18n="consent_1_title">1. Цель исследования</h4>
+                <p data-i18n="consent_1_text">Мы проводим научное исследование когнитивных реакций. Ваше участие поможет нам понять, как люди воспринимают информацию.</p>
+                <h4 data-i18n="consent_2_title">2. Конфиденциальность</h4>
+                <p data-i18n="consent_2_text">Мы собираем обезличенные данные. Видеопоток обрабатывается локально.</p>
+                <p class="privacy-policy-short" data-i18n="privacy_policy_short">Видео не записывается и не передаётся; все расчёты — на вашем устройстве; на сервер отправляются только обезличенные сводки.</p>
+                <p><a href="documents/informed-consent-v1.0.html" target="_blank" data-i18n="consent_link">Полный текст согласия</a></p>
+                <p><a href="documents/privacy-policy-v1.0.html" target="_blank" data-i18n="privacy_policy_link">Политика конфиденциальности</a></p>
+            </div>
+            <label class="checkbox-wrapper">
+                <input type="checkbox" id="consentCheck">
+                <span data-i18n="consent_checkbox">Я прочитал(а), мне есть 18 лет, и я согласен(а).</span>
+            </label>
+            <label class="checkbox-wrapper audio-consent" id="audioConsentBlock" hidden>
+                <input type="checkbox" id="audioConsentCheck">
+                <span data-i18n="audio_consent_checkbox">
+                    Разрешить анализ голоса во время сессии. Микрофон включается только после
+                    этого согласия; аудиозапись не сохраняется и не передаётся, отправляются
+                    только обезличенные признаки и показатели качества.
+                </span>
+            </label>
+            <p id="consentError" class="form-error" role="alert" aria-live="assertive" hidden></p>
+            <button class="btn" id="consentBtn" data-i18n="btn_confirm" disabled>Подтвердить и продолжить</button>
+        </div>
+
+        <!-- ШАГ 3: Email -->
+        <div id="step3" class="step">
+            <h2 data-i18n="reg_title">Регистрация участника</h2>
+            <p data-i18n="reg_desc">Пожалуйста, укажите ваш Email для связи (опционально для респондента по приглашению).</p>
+            
+            <div class="form-group">
+                <label data-i18n="email_label">Email</label>
+                <input type="email" id="userEmail" placeholder="name@example.com" onblur="validateEmailField()">
+            </div>
+            
+            <div class="email-field-info">
+                <span id="generatedIdPreview"></span>
+            </div>
+
+            <button class="btn" data-i18n="btn_next" id="step3NextBtn">Далее</button>
+        </div>
+
+        <!-- ШАГ 4: Анкета -->
+         <div id="step4" class="step">
+            <h2 data-i18n="form_title">Анкета участника</h2>
+            <form id="userForm">
+                <h3 data-i18n="form_section_user">👤 О вас</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_age">Возраст</label>
+                        <input type="number" id="age" min="18" max="99" required>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_gender">Пол</label>
+                        <select id="gender" required>
+                            <option value="" disabled selected data-i18n="opt_select">Выбрать...</option>
+                            <option value="m" data-i18n="opt_m">Мужской</option>
+                            <option value="f" data-i18n="opt_f">Женский</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_lang">Родной язык</label>
+                        <select id="language">
+                            <option value="ru" data-i18n="opt_ru">Русский</option>
+                            <option value="en" data-i18n="opt_en">English</option>
+                            <option value="other" data-i18n="opt_other">Другой</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_edu">Образование</label>
+                        <select id="education">
+                            <option value="student" data-i18n="opt_edu_school">Среднее</option>
+                            <option value="student" data-i18n="opt_edu_student">Студент</option>
+                            <option value="higher" data-i18n="opt_edu_higher">Высшее</option>
+                            <option value="degree" data-i18n="opt_edu_degree">Ученая степень</option>
+                        </select>
+                    </div>
+                </div>
+
+                <h3 data-i18n="form_section_tech">👁️ Зрение и Оборудование</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_vision">Зрение</label>
+                        <select id="vision">
+                            <option value="normal" data-i18n="opt_vis_norm">Норма</option>
+                            <option value="glasses" data-i18n="opt_vis_glass">Очки</option>
+                            <option value="lenses" data-i18n="opt_vis_lens">Линзы</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_pathology">Патологии</label>
+                        <select id="visionIssues">
+                            <option value="none" data-i18n="opt_path_none">Нет</option>
+                            <option value="hemianopsia" data-i18n="opt_path_hemi">Гемианопсия</option>
+                            <option value="scotoma" data-i18n="opt_path_scot">Скотома</option>
+                            <option value="colorblind" data-i18n="opt_path_color">Дальтонизм</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_hand">Ведущая рука</label>
+                        <select id="hand">
+                            <option value="right" data-i18n="opt_hand_r">Правая</option>
+                            <option value="left" data-i18n="opt_hand_l">Левая</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="label_device">Устройство ввода</label>
+                        <select id="inputDevice">
+                            <option value="mouse" data-i18n="opt_dev_mouse">Мышь</option>
+                            <option value="touchpad" data-i18n="opt_dev_touch">Тачпад</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="label_keyboard">Клавиатура</label>
+                         <select id="keyboardType">
+                            <option value="internal" data-i18n="opt_kb_int">Встроенная</option>
+                            <option value="external" data-i18n="opt_kb_ext">Внешняя</option>
+                        </select>
+                    </div>
+                </div>
+            </form>
+            <button class="btn" id="formBtn" data-i18n="btn_next" disabled>Далее</button>
+        </div>
+
+        <!-- ШАГ 5: настройка камеры (pre-check) -->
+        <div id="step5" class="step">
+            <h2 data-i18n="calib_title">Настройка камеры</h2>
+            <p data-i18n="calib_desc">Сначала проверим условия для участия в исследовании, затем начнём калибровку.</p>
+            
+            <div id="precheckContainer" class="precheck-container">
+                <!-- Превью камеры -->
+                <div id="cameraPreview" class="camera-preview">
+                    <video id="precheckVideo" autoplay playsinline muted></video>
+                    <canvas id="overlayCanvas"></canvas>
+                    <div class="face-guide"></div>
+                    <div class="guide-text" data-i18n="guide_text">Расположите лицо внутри рамки</div>
+                </div>
+                
+                <!-- Индикаторы -->
+                <div class="indicators">
+                    <div class="indicator" id="LightIndicator">
+                        <div class="icon">💡</div>
+                        <div class="label" data-i18n="label_light">Освещение</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="LightProgress"></div>
+                        </div>
+                        <div class="status" id="LightStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                    
+                    <div class="indicator" id="FaceIndicator">
+                        <div class="icon">👤</div>
+                        <div class="label" data-i18n="label_face">Лицо</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="FaceProgress"></div>
+                        </div>
+                        <div class="status" id="FaceStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                    
+                    <div class="indicator" id="PoseIndicator">
+                        <div class="icon">🎯</div>
+                        <div class="label" data-i18n="label_pose">Поза головы</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="PoseProgress"></div>
+                        </div>
+                        <div class="status" id="PoseStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                    
+                    <div class="indicator" id="VisibilityIndicator">
+                        <div class="icon">👁️</div>
+                        <div class="label" data-i18n="label_visibility">Видимость лица</div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="VisibilityProgress"></div>
+                        </div>
+                        <div class="status" id="VisibilityStatus" data-i18n="status_waiting">Ожидание...</div>
+                    </div>
+                </div>
+                
+                <!-- Статус -->
+                <div class="precheck-status">
+                    <p class="status-message" id="statusMessage" data-i18n="precheck_initial">
+                        Нажмите "Начать проверку" чтобы включить камеру
+                    </p>
+                    <p class="status-hint" data-i18n="precheck_criteria_help">
+                        Как только индикатор становится зелёным, данный критерий считается выполненным —
+                        длина полоски и проценты не важны. Если индикатор жёлтый или красный, следуйте подсказкам ниже.
+                    </p>
+                </div>
+            </div>
+            
+            
+            <!-- Кнопки действий -->
+            <div class="action-buttons">
+                <button class="btn" id="startPrecheckBtn" data-i18n="btn_start_precheck">
+                    🎥 Начать проверку
+                </button>
+                <button class="btn hidden" id="startCalibBtn" data-i18n="btn_start_calib">
+                    ✅ Начать калибровку
+                </button>
+            </div>
+        </div>
+
+        <!-- ШАГ 6: Финал -->
+        <div id="step6" class="step">
+            <div id="testHubContainer" class="test-hub-container" style="display: none;">
+                <h2 data-i18n="test_hub_title">Выбор теста</h2>
+                <p id="testHubSubtitle" class="text-center" data-i18n="test_hub_subtitle">
+                    Выберите тест для запуска. После завершения можно запустить следующий.
+                </p>
+                <div id="testHubEmotionPreview" class="test-hub-emotion-preview" style="margin:0 auto 14px;max-width:520px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--text-secondary);text-align:center;"></div>
+
+                <div class="test-hub-grid">
+                    <button class="test-card-btn" id="hubRunRtBtn" data-i18n="test_card_rt_title">RT test (Go/NoGo)</button>
+                    <button class="test-card-btn" id="hubRunTrackingBtn" data-i18n="test_card_tracking_title">Tracking test</button>
+                    <button class="test-card-btn" id="hubRunVpcBtn" data-i18n="test_card_vpc_title">VPC (Felidae)</button>
+                    <button class="test-card-btn" id="hubRunVisuospatialBtn" data-i18n="test_card_visuospatial_title">Visuospatial drawing</button>
+                </div>
+
+                <div id="testHubLastResult" class="test-hub-last-result"></div>
+
+                <div class="test-hub-actions">
+                    <button class="btn btn-secondary" id="hubFinishSessionBtn" data-i18n="test_hub_finish">Завершить сессию</button>
+                </div>
+            </div>
+
+            <div id="gazeTestsContainer" class="gaze-tests-container" style="display: none;">
+                <div id="vpcTestScreen" class="gaze-test-screen vpc-screen" style="display: none;">
+                    <h2 data-i18n="test_card_vpc_title">VPC (Felidae)</h2>
+                    <p class="text-center" data-i18n="vpc_instruction">
+                        Смотрите на изображения естественно. Нажимать ничего не нужно.
+                    </p>
+                    <div id="vpcProgressText" class="test-meta"></div>
+                    <div id="vpcPhaseText" class="test-meta"></div>
+
+                    <div id="vpcFixationMark" class="vpc-fixation">+</div>
+                    <img id="vpcCenterImage" class="vpc-center-image" alt="" style="display: none;">
+
+                    <div class="vpc-pair-row">
+                        <img id="vpcLeftImage" class="vpc-side-image" alt="" style="display: none;">
+                        <img id="vpcRightImage" class="vpc-side-image" alt="" style="display: none;">
+                    </div>
+                </div>
+
+                <!--
+                    Visuospatial drawing test состоит из двух секций:
+                      1) #visuospatialTestScreen — intro-карточка с промптом и кнопкой "Начать".
+                         Отображается обычной частью карточки тестов.
+                      2) #visuospatialDrawingOverlay — fullscreen overlay с canvas + плавающими
+                         плашками. Появляется после клика "Начать". Позиционируется fixed,
+                         z-index выше остального UI (см. .visuospatial-drawing-overlay в style.css).
+                -->
+                <div id="visuospatialTestScreen" class="gaze-test-screen visuospatial-screen" style="display: none;">
+                    <h2 data-i18n="test_card_visuospatial_title">Visuospatial drawing</h2>
+                    <h3 id="visuospatialPromptTitle"></h3>
+                    <p id="visuospatialPromptText" class="text-center"></p>
+                    <p id="visuospatialStatusText" class="test-meta" data-i18n="visuospatial_hint_hold_space">
+                        Удерживайте ПРОБЕЛ, чтобы рисовать. Отпустите — пауза. Завершить — кнопка в правом верхнем углу.
+                    </p>
+
+                    <div class="visuospatial-controls">
+                        <button class="btn" id="visuospatialStartBtn" data-i18n="visuospatial_btn_start">Начать рисование</button>
+                    </div>
+                </div>
+
+                <div id="visuospatialDrawingOverlay" class="visuospatial-drawing-overlay" style="display: none;">
+                    <canvas id="visuospatialCanvas"></canvas>
+                    <div id="visuospatialGazeDot" class="visuospatial-gaze-dot"></div>
+                    <div id="visuospatialPromptHud" class="visuospatial-prompt-hud">
+                        <span id="visuospatialPromptHudText"></span>
+                    </div>
+                    <div id="visuospatialPenStatus" class="visuospatial-pen-status" data-i18n="visuospatial_status_pen_up">
+                        Пауза (Пробел отпущен)
+                    </div>
+                    <button class="btn btn-secondary visuospatial-finish-floating"
+                            id="visuospatialFinishBtn"
+                            data-i18n="visuospatial_btn_finish">
+                        Завершить
+                    </button>
+                </div>
+
+            </div>
+
+            <div id="cognitiveContainer" class="cognitive-container">
+                
+                <div id="cognitiveInstruction" class="card p-4">
+                    <h2 id="cogTitle" class="mb-4">Инструкция</h2>
+                    <div id="cogText" class="text-secondary mb-4" style="text-align: center; white-space: pre-wrap;">
+                        </div>
+
+                    <div id="cogCheckContainer" class="consent-block mb-4" style="display: none;">
+                        <label class="checkbox-wrapper">
+                            <input type="checkbox" id="cogCheck">
+                            <span id="cogCheckText">Я внимательно прочитал(а) правила и мне всё понятно</span>
+                        </label>
+                    </div>
+
+                    <div class="text-center">
+                        <button class="btn" id="cogStartBtn">Далее</button>
+                    </div>
+                </div>
+
+                <div id="cognitiveStimulusArea" class="cognitive-stimulus-area" style="display: none;">
+                    <div id="cognitiveEmotionHud" style="position:absolute;top:8px;left:8px;right:8px;text-align:center;font-size:13px;z-index:25;pointer-events:none;color:#333;"></div>
+                    <div id="cogShape" class="cog-shape"></div>
+                    <img id="cogImage" class="cog-image" style="display: none;">
+                    <div id="cogFixation" class="cog-fixation">+</div>
+                    <div id="cogFeedback" class="cog-feedback" style="display: none;"></div>
+                </div>
+                
+            </div>
+        </div>
+
+        <!-- ШАГ 7: Финал (Фаза 0.2: опция «Только сводка») -->
+        <div id="step7" class="step">
+            <h2 data-i18n="final_title">Сессия завершена!</h2>
+            <p data-i18n="final_desc">Спасибо за участие. Данные сформированы.</p>
+            
+            <div id="qcStatusBlock">
+                <div class="qc-status-passed">
+                    <span data-i18n="qc_passed">✅ Данные валидны (QC Passed)</span>
+                </div>
+            </div>
+            <div id="finalQcSummary" class="final-qc-summary" aria-live="polite"></div>
+            
+            <label class="checkbox-wrapper" style="display: block; margin-bottom: 10px;">
+                <input type="checkbox" id="aggregatesOnlyCheckbox">
+                <span data-i18n="label_aggregates_only">Только сводка (без сырых массивов)</span>
+            </label>
+            <button class="btn" id="downloadBtn" data-i18n="btn_download">📥 Скачать JSON</button>
+            <button class="btn btn-secondary" id="restartBtn" data-i18n="btn_restart">Начать заново</button>
+        </div>
+
+    </div>
+
+    <script src="js/web-page/debug-runtime.js"></script>
+    <script src="js/web-page/debug-hud.js"></script>
+    <script>
+      if (!window.WECOG_DEBUG) {
+        console.error('[WECOG_DEBUG] debug-runtime.js failed to load — using no-op stub');
+        window.WECOG_DEBUG = {
+          enabled: false,
+          isEnabled: function () { return false; },
+          log: function () {},
+          warn: function () {},
+          error: function () {},
+          mark: function () {},
+          dump: function () { return []; },
+          clear: function () {},
+          exportJson: function () {
+            return { enabled: false, events: [], error: 'debug-runtime.js not loaded' };
+          },
+          exportDebugBundle: function () {
+            return { enabled: false, error: 'debug-runtime.js not loaded' };
+          },
+          downloadDebugBundle: function () {},
+          find: function () { return []; }
+        };
+      }
+    </script>
+    <script src="../shared/standard-stimuli.js?v=20260828-2"></script>
+    <script src="../web/cognitive-task-protocols.js?v=20260828-2"></script>
+    <script src="../shared/survey-contract.js?v=20260828-2"></script>
+    <script type="module" src="js/web-page/app-updated.js?v=20260828-2"></script>
+    <script>
+      (function () {
+        const ru = document.getElementById('langRu');
+        const en = document.getElementById('langEn');
+        const switcher = document.querySelector('.lang-switch');
+        const localeSelect = document.getElementById('participantLanguageSelect');
+        const supportedLocales = ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur'];
+
+        if (switcher) {
+          switcher.style.pointerEvents = 'auto';
+          switcher.style.position = 'relative';
+          switcher.style.zIndex = '1001';
+        }
+        if (ru) ru.style.pointerEvents = 'auto';
+        if (en) en.style.pointerEvents = 'auto';
+        if (localeSelect) localeSelect.style.pointerEvents = 'auto';
+
+        function applyLanguageWithRetry(lang, retriesLeft) {
+          if (typeof window.setLanguage === 'function') {
+            try {
+              window.setLanguage(lang);
+              try { localStorage.setItem('emocog_participant_lang', lang); } catch (_) {}
+            } catch (_) {}
+            return true;
+          }
+          if (retriesLeft > 0) {
+            setTimeout(function () {
+              applyLanguageWithRetry(lang, retriesLeft - 1);
+            }, 60);
+          } else {
+            window.__EMOCOG_PENDING_LANG__ = lang;
+          }
+          return false;
+        }
+
+        function onLangClick(lang, ev) {
+          if (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+          }
+          applyLanguageWithRetry(lang, 20);
+        }
+
+        if (ru) ru.addEventListener('click', function (ev) { onLangClick('ru', ev); }, true);
+        if (en) en.addEventListener('click', function (ev) { onLangClick('en', ev); }, true);
+        if (localeSelect) localeSelect.addEventListener('change', function (ev) {
+          applyLanguageWithRetry(ev.target.value, 20);
+        });
+
+        try {
+          const persistedLang = localStorage.getItem('emocog_participant_lang');
+          if (supportedLocales.indexOf(persistedLang) >= 0) {
+            if (localeSelect) localeSelect.value = persistedLang;
+            applyLanguageWithRetry(persistedLang, 20);
+          }
+        } catch (_) {}
+      })();
+    </script>
+    
+</body>
+</html>

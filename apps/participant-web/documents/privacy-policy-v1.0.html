@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Политика конфиденциальности</title>
+    <link rel="icon" href="../../web/assets/wecog-mark.svg" type="image/svg+xml">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.8;
+            color: #1F2937;
+            background: #F9FAFB;
+        }
+        h1 {
+            color: #111827;
+            font-size: 28px;
+            margin-bottom: 10px;
+            border-bottom: 3px solid #3B82F6;
+            padding-bottom: 12px;
+        }
+        h2 {
+            color: #374151;
+            font-size: 20px;
+            margin-top: 32px;
+            margin-bottom: 12px;
+        }
+        p, li {
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+        ul {
+            padding-left: 24px;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid #E5E7EB;
+            padding: 12px;
+            text-align: left;
+        }
+        .data-table th {
+            background: #F3F4F6;
+            font-weight: 600;
+        }
+        .highlight {
+            background: #DBEAFE;
+            padding: 16px;
+            border-left: 4px solid #3B82F6;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Политика конфиденциальности</h1>
+    
+    <p><strong>Версия документа:</strong> 1.0<br>
+    <strong>Дата публикации:</strong> 15 марта 2026 г.</p>
+
+    <h2>1. Какие данные мы собираем</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Тип данных</th>
+                <th>Примеры</th>
+                <th>Цель сбора</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Демографические</strong></td>
+                <td>Возраст, пол, родной язык</td>
+                <td>Анализ групп участников</td>
+            </tr>
+            <tr>
+                <td><strong>Технические</strong></td>
+                <td>Разрешение экрана, тип браузера, ОС</td>
+                <td>Контроль качества данных</td>
+            </tr>
+            <tr>
+                <td><strong>Поведенческие</strong></td>
+                <td>Координаты взгляда, время реакции, моргания</td>
+                <td>Оценка внимания и когнитивных функций</td>
+            </tr>
+            <tr>
+                <td><strong>Контактные</strong></td>
+                <td>Email (зашифрован SHA-256)</td>
+                <td>Связь с участником по результатам</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="highlight">
+        <strong>🔒 Мы НЕ собираем:</strong>
+        <ul style="margin: 8px 0 0 0;">
+            <li>Видеозаписи вашего лица</li>
+            <li>Фотографии</li>
+            <li>Аудиозаписи</li>
+            <li>Данные банковских карт</li>
+            <li>Паспортные данные</li>
+        </ul>
+    </div>
+
+    <h2>2. Как мы защищаем ваши данные</h2>
+    <ul>
+        <li><strong>Шифрование:</strong> Все данные передаются по HTTPS/TLS</li>
+        <li><strong>Обезличивание:</strong> Email хешируется (SHA-256), ID генерируется случайно (UUID v4)</li>
+        <li><strong>Локальная обработка:</strong> Видео анализируется в браузере, не отправляется на сервер</li>
+        <li><strong>Ограниченный доступ:</strong> Только авторизованные исследователи видят обезличенные данные</li>
+        <li><strong>Раздельное хранение:</strong> Email хранится отдельно от данных исследования</li>
+    </ul>
+
+    <h2>3. Ваши права (GDPR)</h2>
+    <p>Вы имеете право:</p>
+    <ul>
+        <li>📄 <strong>Доступ:</strong> Запросить копию ваших данных</li>
+        <li>✏️ <strong>Исправление:</strong> Исправить неточные данные</li>
+        <li>🗑️ <strong>Удаление:</strong> Запросить удаление данных (в течение 30 дней после сессии)</li>
+        <li>⛔ <strong>Ограничение:</strong> Ограничить обработку ваших данных</li>
+        <li>📤 <strong>Портируемость:</strong> Получить данные в машиночитаемом формате (JSON)</li>
+    </ul>
+    <p>Для реализации своих прав напишите на: <a href="mailto:privacy@emocog.com">privacy@emocog.com</a></p>
+
+    <h2>4. Срок хранения данных</h2>
+    <ul>
+        <li><strong>Данные сессий:</strong> 5 лет (для научных публикаций)</li>
+        <li><strong>Email:</strong> До вашего запроса на удаление или завершения проекта</li>
+        <li><strong>Агрегированные данные:</strong> Бессрочно (полностью обезличены)</li>
+    </ul>
+
+    <h2>5. Контакты</h2>
+    <p>
+        <strong>Ответственный за обработку ПДн:</strong> [АВТОЗАПОЛНЕНИЕ]<br>
+        <strong>Email:</strong> <a href="mailto:privacy@emocog.com">privacy@emocog.com</a>
+    </p>
+
+    <hr style="margin: 40px 0; border: none; border-top: 1px solid #E5E7EB;">
+    
+    <p style="text-align: center; color: #6B7280; font-size: 14px;">
+        Версия: 1.0 | Дата: 15.03.2026
+    </p>
+</body>
+</html>

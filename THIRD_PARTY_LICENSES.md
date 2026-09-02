@@ -1,8 +1,8 @@
 # Third-Party Licenses
 
-**Project:** web-emocog-core (EmoCog — Cognitive Research Web Platform)  
-**Main License:** Apache License 2.0  
-**Last Updated:** 2026-06-30
+**Project:** web-emocog-core (EmoCog — Cognitive Research Web Platform)
+**Main License:** Apache License 2.0
+**Last Updated:** 2026-08-26
 
 ---
 
@@ -22,11 +22,11 @@ This document contains the licenses of all third-party software components used 
 
 ### 1. js-yaml
 
-**Package:** `js-yaml`  
-**Version:** 4.1.1  
-**License:** MIT  
-**Repository:** https://github.com/nodeca/js-yaml  
-**Author:** Vladimir Zapparov, Vitaly Puzrin  
+**Package:** `js-yaml`
+**Version:** 4.3.1
+**License:** MIT
+**Repository:** https://github.com/nodeca/js-yaml
+**Author:** Vladimir Zapparov, Vitaly Puzrin
 **Description:** YAML 1.2 parser and serializer
 
 **Usage in project:** `apps/autotests/` — parsing YAML configuration files
@@ -63,12 +63,12 @@ THE SOFTWARE.
 
 ### 2. argparse (transitive dependency of js-yaml)
 
-**Package:** `argparse`  
-**Version:** 2.0.1  
-**License:** Python-2.0  
-**Repository:** https://github.com/nodeca/argparse  
+**Package:** `argparse`
+**Version:** 2.0.1
+**License:** Python-2.0
+**Repository:** https://github.com/nodeca/argparse
 **Description:** CLI arguments parser. Native port of Python's argparse.
-**Imported by:** js-yaml  
+**Imported by:** js-yaml
 
 **Usage in project:** Indirectly used through js-yaml for configuration parsing
 
@@ -113,11 +113,11 @@ are retained in Python alone or in any derivative version prepared by Licensee.
 
 ### 3. @playwright/test
 
-**Package:** `@playwright/test`  
-**Version:** ^1.0.0  
-**License:** Apache 2.0  
-**Repository:** https://github.com/microsoft/playwright  
-**Author:** Microsoft  
+**Package:** `@playwright/test`
+**Version:** ^1.0.0
+**License:** Apache 2.0
+**Repository:** https://github.com/microsoft/playwright
+**Author:** Microsoft
 **Description:** Testing framework for Playwright browser automation
 
 **Usage in project:** `apps/autotests/` — end-to-end testing
@@ -130,11 +130,11 @@ are retained in Python alone or in any derivative version prepared by Licensee.
 
 ### 4. @types/node
 
-**Package:** `@types/node`  
-**Version:** ^20.0.0  
-**License:** MIT  
-**Repository:** https://github.com/DefinitelyTyped/DefinitelyTyped  
-**Author:** Microsoft and DefinitelyTyped contributors  
+**Package:** `@types/node`
+**Version:** ^20.0.0
+**License:** MIT
+**Repository:** https://github.com/DefinitelyTyped/DefinitelyTyped
+**Author:** Microsoft and DefinitelyTyped contributors
 **Description:** TypeScript type definitions for Node.js
 
 **Usage in project:** `apps/autotests/` — TypeScript development support
@@ -149,8 +149,8 @@ are retained in Python alone or in any derivative version prepared by Licensee.
 
 ### rppg_alg_qc_test_web_alg_test_v10/ (rPPG SAFE Engine)
 
-**Status:** Part of main project (Apache 2.0)  
-**Type:** Research algorithm for heart rate and respiration estimation  
+**Status:** Part of main project (Apache 2.0)
+**Type:** Research algorithm for heart rate and respiration estimation
 
 **Referenced (not bundled):**
 
@@ -171,9 +171,9 @@ are retained in Python alone or in any derivative version prepared by Licensee.
 
 ### rt_component-/ (RT-Component for Web Orchestra)
 
-**Status:** Part of main project (Apache 2.0)  
-**Type:** Real-time analysis component (Python)  
-**Dependencies:** Python Standard Library only  
+**Status:** Part of main project (Apache 2.0)
+**Type:** Real-time analysis component (Python)
+**Dependencies:** Python Standard Library only
 
 **External Notes:**
 - No third-party dependencies
@@ -266,12 +266,12 @@ When adding new third-party dependencies:
 
 ## Contact
 
-**Repository:** https://github.com/web-emocog/web-emocog-core  
-**Issues:** https://github.com/web-emocog/web-emocog-core/issues  
+**Repository:** https://github.com/web-emocog/web-emocog-core
+**Issues:** https://github.com/web-emocog/web-emocog-core/issues
 
 For license questions, please open an issue or contact the maintainers.
 
 ---
 
-**Generated:** 2026-06-30  
+**Generated:** 2026-08-26
 **Status:** Audit Complete ✅

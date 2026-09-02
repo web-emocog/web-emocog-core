@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wecog — движение корпуса</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260825-1">
+  <script src="../assets/wecog-theme.js?v=20260825-1"></script>
+  <style>
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;padding:24px;background:var(--bg,#f4f3ec);color:var(--text,#10211b);font-family:"Atkinson Hyperlegible Next","Segoe UI",sans-serif}
+    .top,.layout{width:min(1040px,100%);margin:auto}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}.top h1{margin:0;font-size:1.45rem}.top a{color:var(--muted);text-decoration:none}
+    .layout{display:grid;grid-template-columns:minmax(320px,1.35fr) minmax(260px,.65fr);gap:16px}.card{padding:18px;border:1px solid var(--stroke);border-radius:18px;background:var(--card-bg);box-shadow:var(--shadow)}
+    .stage{position:relative;aspect-ratio:4/3;overflow:hidden;padding:0;background:#07130f}.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.stage canvas{pointer-events:none}
+    .controls{display:flex;gap:10px;margin-top:14px}.controls button{min-height:44px;padding:10px 18px;border:1px solid var(--stroke);border-radius:999px;background:var(--accent);color:#fff;font-weight:800;cursor:pointer}.controls button[disabled]{opacity:.45;cursor:not-allowed}.controls .secondary{background:transparent;color:var(--text)}
+    .status{min-height:42px;margin:12px 0 0;color:var(--muted);line-height:1.4}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}.metric{padding:12px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel2)}.metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.metric strong{display:block;margin-top:7px;font-size:1.15rem;font-variant-numeric:tabular-nums}.note{margin:14px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
+    @media(max-width:760px){body{padding:16px}.layout{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}}
+  </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
+</head>
+<body>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script>
+    if (!window.EmocogAuthGuard) location.replace('login.html');
+    else window.EmocogAuthGuard.ensureProtectedPage({ loginPath:'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied:true, roleDeniedRedirect:'../researcher.html' });
+  </script>
+  <header class="top"><h1>Движение корпуса</h1><a href="../developer.html">← К диагностике</a></header>
+  <main class="layout">
+    <section class="card">
+      <div class="stage"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas></div>
+      <div class="controls"><button id="startBtn" type="button">Начать</button><button id="stopBtn" class="secondary" type="button" disabled>Остановить</button></div>
+      <p id="status" class="status" role="status">Камера ещё не запрашивалась.</p>
+    </section>
+    <section class="card">
+      <div class="metrics">
+        <div class="metric"><span>Состояние</span><strong id="valid">—</strong></div>
+        <div class="metric"><span>Уверенность</span><strong id="confidence">—</strong></div>
+        <div class="metric"><span>Скорость</span><strong id="velocity">—</strong></div>
+        <div class="metric"><span>Всплески</span><strong id="bursts">0</strong></div>
+        <div class="metric"><span>Наклон корпуса</span><strong id="lean">—</strong></div>
+        <div class="metric"><span>Линия плеч</span><strong id="roll">—</strong></div>
+      </div>
+      <p class="note">MediaPipe Pose отслеживает плечи и таз. В сессию сохраняются только нормализованные координаты, наклоны, скорость и события движения. Видео и исходные landmarks не сохраняются.</p>
+    </section>
+  </main>
+  <script type="module" src="body-pose-test.js?v=20260827-1"></script>
+</body>
+</html>

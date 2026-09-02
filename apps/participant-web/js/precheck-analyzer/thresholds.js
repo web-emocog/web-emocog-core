@@ -21,7 +21,7 @@ export const ILLUMINATION_THRESHOLDS = {
  */
 export const FACE_THRESHOLDS = {
     minSize: 5,        // % от кадра
-    maxSize: 60,       // % от кадра
+    maxSize: 72,       // % от кадра (чуть выше — комфортная дистанция + предчек)
     minConfidence: 0.5,
     validZone: {
         minX: 0.15,

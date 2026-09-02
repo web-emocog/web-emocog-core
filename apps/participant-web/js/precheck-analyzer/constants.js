@@ -34,6 +34,15 @@ export const LANDMARKS = {
 };
 
 /**
+ * Индексы лэндмарок для eye ROI illumination (LEFT_EYE + RIGHT_EYE).
+ * Используется в analyzeIllumination() для расчёта яркости отдельно по зоне глаз.
+ */
+export const EYE_LANDMARK_INDICES = {
+    left: LANDMARKS.LEFT_EYE,
+    right: LANDMARKS.RIGHT_EYE
+};
+
+/**
  * Минимальное количество лэндмарок для полного анализа
  */
 export const MIN_LANDMARKS_FULL = 478;

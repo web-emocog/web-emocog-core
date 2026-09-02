@@ -1,126 +1,130 @@
-# Gaze Tracker Module v2.2.0
+# Gaze Tracker Module v3
 
-Модуль оценки направления взгляда на основе **MediaPipe Face Landmarker** iris landmarks (468-477).
+Браузерная оценка point-of-gaze по 478 landmarks MediaPipe Face Landmarker.
+Модуль использует калибровку конкретного участника и не подменяет измерение
+положением цели.
 
 ## Архитектура
 
-```
-gaze-tracker.js          ← Browser wrapper (window.GazeTracker)
+```text
+gaze-tracker.js                 window-wrapper без второго analyze loop
 gaze-tracker/
-  ├── index.js           ← ES module entry point
-  ├── GazeTracker.js     ← Main class
-  ├── constants.js       ← Landmark indices, defaults
-  ├── features.js        ← Iris feature extraction (17-dim vector)
-  ├── ridge.js           ← Ridge regression solver
-  ├── attention-metrics.js ← Research-only аналитика: blink/PERCLOS/saccade/micro-shift/hippus
-  └── README.md
+  GazeTracker.js               target-blind iris predictor и signal contract
+  features.js                  iris, head и eye признаки
+  ridge.js                     ridge regression
+  signal-processing.mjs        confidence/OOD gate и adaptive display filter
+  viewport-coordinates.mjs     content viewport coordinates
+  attention-metrics.js         blinks, PERCLOS и research-only метрики
 ```
 
-## Принцип работы
+Все модули сессии получают один face frame из
+`session-runtime/frame-pipeline.js`. Автономный `startTracking()` удален:
+параллельный анализ тех же кадров создавал задержку и дублированный маршрут.
 
-1. **Калибровка**: пользователь смотрит на точки экрана (сетка задаётся приложением; в `participant-web` используется расширенная 21-точечная схема с 2 кликами на точку) → для каждой точки извлекаются iris features из 478 landmarks → собирается обучающая выборка
-2. **Обучение**: ridge regression `w = (XᵀX + λI)⁻¹ Xᵀy` — два набора весов (для X и Y координат), λ=0.001
-3. **Standardization**: z-score нормализация фич перед обучением и prediction
-4. **Prediction**: iris features → standardize → dot product с весами → координаты экрана (x, y)
-5. **Сглаживание**: exponential moving average (α=0.10) для баланса стабильности и задержки
+## Predictor
 
-## Feature Vector (17 элементов)
+Калибровочная выборка содержит два независимых набора признаков:
 
-| Индекс | Описание |
-|--------|----------|
-| 0-1 | Нормализованная позиция левого iris (x, y) относительно глаза |
-| 2-3 | Нормализованная позиция правого iris (x, y) |
-| 4-5 | Среднее iris двух глаз (x, y) |
-| 6-7 | Head pose proxies: yaw, pitch |
-| 8-9 | Head position in frame (x, y) — 0..1 |
-| 10-11 | Eye aspect ratio (left, right) — openness |
-| 12 | irisX × yaw — interaction: horizontal gaze × head turn |
-| 13 | irisY × pitch — interaction: vertical gaze × head tilt |
-| 14 | irisX × headX — interaction: iris position × head position |
-| 15 | irisY × headY — interaction: iris position × head position |
-| 16 | Bias term (1.0) |
+- `iris`: нормализованные координаты обеих радужек относительно глаз, разница
+  между глазами и bias;
+- `head`: yaw/pitch/roll proxy, translation, face scale и interocular distance.
 
-Interaction terms (12-15) capture non-linear dependency between iris position
-and head pose, especially important for screen corners/edges.
+Ridge-модель обучается только на `iris`. Head-признаки не получают target и не
+могут тянуть прогноз к калибровочной точке. Для iris и head отдельно
+оценивается распределение калибровочных значений. Во время сессии
+`confidence/OOD gate` отклоняет:
+
+- закрытые или плохо различимые глаза;
+- iris, значительно вышедший за calibration distribution;
+- позу или translation головы далеко за пределами calibration distribution.
+
+Естественные движения головы допускаются. Если кадр невалиден, display point
+становится `null`; модуль не продолжает рисовать последнюю правдоподобную
+траекторию.
+
+## Signal contract
+
+Каждый accepted/rejected prediction явно разделен на три сигнала:
+
+| Signal | Поля | Назначение |
+| --- | --- | --- |
+| Raw | `rawX`, `rawY` | Непосредственный iris-only ridge prediction |
+| Corrected | `correctedX`, `correctedY` | Raw с LOOCV-approved affine correction; heatmap и аналитика |
+| Display | `displayX`, `displayY`, совместимые `x`, `y` | Только визуальный overlay и gaze-brush |
+
+Adaptive filter измеряет скорость между соседними `corrected` inputs. Он не
+сравнивает вход с запаздывающим display output, поэтому сглаженная траектория
+не подается обратно в расчет скорости и не дублирует маршрут.
+
+## Content viewport coordinates
+
+Калибровка и prediction используют CSS pixels внутри видимой области страницы:
+
+```js
+const rect = target.getBoundingClientRect();
+const vv = window.visualViewport;
+const x = rect.left + rect.width / 2 - vv.offsetLeft;
+const y = rect.top + rect.height / 2 - vv.offsetTop;
+```
+
+Панель вкладок, адресная строка и рамка браузера не входят в page viewport, и
+вычитать их высоту вручную нельзя. `visualViewport` нужен для смещения и
+масштаба при mobile/pinch zoom; на обычном desktop его offsets равны нулю.
+
+## Calibration и validation
+
+1. Основная калибровка обучает iris-only ridge.
+2. Отдельный correction set собирает raw prediction на девяти целях.
+3. Affine correction выбирается только при LOOCV минимум по пяти целям и
+   held-out улучшении не менее `max(3 px, 2%)`.
+4. Пять benchmark targets не используются ни для fitting, ни для выбора
+   correction.
+5. В `gazeValidation.baselineVsNew` сохраняются независимые raw,
+   corrected и display metrics.
+
+Такой benchmark не выдает in-sample ошибку за точность на новых данных.
 
 ## API
 
 ```js
 const tracker = new GazeTracker({
-    screenWidth: window.innerWidth,
-    screenHeight: window.innerHeight,
-    smoothingFactor: 0.10,      // 0 = нет сглаживания, 1 = максимум
-    ridgeLambda: 0.001,         // регуляризация
-    onGazeUpdate: (gaze) => {}, // callback
-    onCalibrationComplete: (info) => {}
+    screenWidth: viewport.width,
+    screenHeight: viewport.height,
+    ridgeLambda: 0.001
 });
 
-// Калибровка (single frame)
-tracker.addCalibrationPoint(landmarks, screenX, screenY);
+tracker.addCalibrationPoint(landmarks, targetX, targetY);
+tracker.addAveragedCalibrationPoint(landmarksFrames, targetX, targetY);
+tracker.calibrate();
 
-// Калибровка (multi-frame averaged — preferred)
-tracker.addAveragedCalibrationPoint(landmarksArray, screenX, screenY);
+const prediction = tracker.predict(landmarks, {
+    timestamp: frame.timestamp,
+    wallTimestamp: Date.now()
+});
 
-tracker.calibrate();           // → boolean (min 4 точки, рекомендуется 32+)
-
-// Prediction
-tracker.predict(landmarks);    // → { x, y, rawX, rawY, confidence, timestamp } | null
-
-// Tracking (автономный режим)
-tracker.startTracking(analyzer, videoElement, 33);
-tracker.stopTracking();
-
-// Утилиты
-tracker.isCalibrated();        // → boolean
-tracker.isTracking();          // → boolean
-tracker.getStatus();           // → { isCalibrated, calibrationPoints, totalPredictions, ... }
-tracker.updateScreenSize(w, h);
+tracker.setPostCalibrationCorrection({
+    matrixX,
+    matrixY,
+    source: 'loocv_affine'
+});
+tracker.updateScreenSize(viewport.width, viewport.height);
+tracker.resetSmoothingState();
 tracker.reset();
-tracker.clearCalibrationData();
 ```
 
-## Changelog
+## Ограничения
 
-- **v2.2.0**: 17-feature vector with 4 iris×head interaction terms for better corner/edge accuracy. 4×4 calibration grid (32 points). z-score standardization.
-- **v2.1.1**: 13-feature vector, z-score standardization, `addAveragedCalibrationPoint()`.
-- **v2.1.0**: 13-feature vector, λ=0.001, smoothing=0.10.
+- Обычная RGB-камера не обеспечивает точность лабораторного IR eye tracker.
+- Метрики саккад, микросдвигов и hippus являются webcam proxies и не должны
+  использоваться как клинический диагноз.
+- При выходе head/iris за calibration distribution кадр намеренно теряется,
+  а не экстраполируется.
+- Изменение положения камеры или окна после калибровки требует повторной
+  validation и, при необходимости, калибровки.
 
-## Attention Metrics Scope
+## Лицензии и источники
 
-`attention-metrics.js` теперь находится в `js/gaze-tracker/` и отвечает за research-only метрики:
-- blink dynamics;
-- PERCLOS episodes + window stats (30s/60s);
-- saccade/fixation;
-- micro-shift proxy;
-- hippus proxy.
-
-Важно: слой attention-метрик не используется как gate для `qcSummary.overallPass`.
-
-## Потенциальная чистка (без изменений сейчас)
-
-Ниже зафиксированы кандидаты на будущий рефакторинг; сейчас они сохранены намеренно, чтобы не менять формат JSON и поведение.
-
-1. `rawBlinkEvents` в blink-детекции.
-Причина: сейчас это отладочное поле, но вне `attention-metrics.js` не потребляется; можно убрать или вынести под debug-flag для уменьшения payload.
-
-2. Дублирование `durationMs` и `eyeDurationMs` в subset-метриках.
-Причина: оба поля сейчас равны; можно оставить одно поле и алиас для совместимости.
-
-3. Дублирование `closedThresholdNorm` и `closedThresholdRel`.
-Причина: оба поля несут одно и то же значение порога; можно оставить один канонический ключ.
-
-4. Дублирование `perclosEpisodeMinMs` и `perclosCriteria.minDurationMs`.
-Причина: значение одно и то же; можно сохранить только критерии в одном объекте.
-
-5. Объёмные диагностические payload-поля (`blinkDynamics.blinks`, `blinkDynamics.closureEvents`, расширенный `bothOpenDiagnostics`).
-Причина: полезны для R&D-разборов, но заметно увеличивают JSON; можно делать условную сериализацию (summary-only vs debug).
-
-## Зависимости
-
-- **MediaPipe Face Landmarker** (Apache-2.0) — уже загружен в проекте
-- **PrecheckAnalyzer** — используется для получения 478 landmarks через `analyzeFrame()`
-
-## Лицензия
-
-- MediaPipe: Apache-2.0
-- Этот код: MIT
+- MediaPipe: Apache-2.0.
+- Код проекта: Apache-2.0.
+- Научные и web-platform основания перечислены в
+  `docs/research/gaze-blink-body-methods.md`.
