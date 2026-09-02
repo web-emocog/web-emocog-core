@@ -124,18 +124,12 @@ jobs:
       - name: Export short-lived OS Login certificate
         run: |
           ssh_directory="${RUNNER_TEMP}/yc-ssh"
-          install --directory --mode 0700 "${ssh_directory}"
-          certificate_output="$({
-            yc compute ssh certificate export \
-              --login "${YC_VM_LOGIN}" \
-              --organization-id "${YC_ORGANIZATION_ID}" \
-              --directory "${ssh_directory}"
-          })"
-          ssh_identity="$(sed -n 's/^Identity: //p' <<< "${certificate_output}")"
-          test -n "${ssh_identity}"
-          test -f "${ssh_identity}"
-          test -f "${ssh_identity}-cert.pub"
-          chmod 0600 "${ssh_identity}" "${ssh_identity}-cert.pub"
+          ssh_identity="$(
+            bash deploy/production/export-oslogin-identity.sh \
+              "${ssh_directory}" \
+              "${YC_VM_LOGIN}" \
+              "${YC_ORGANIZATION_ID}"
+          )"
           printf 'SSH_IDENTITY=%s\n' "${ssh_identity}" >> "${GITHUB_ENV}"
 
       - name: Pin and verify the production VM host key
