@@ -192,6 +192,11 @@ The workflow must complete these visible stages in order:
 6. migrations and container deployment;
 7. public HTTPS checks.
 
+The OS Login export step locates the generated private key and certificate in
+a newly created protected directory. It does not parse the CLI's
+human-readable output, which may be written to a different stream or change
+between CLI versions.
+
 Do not switch host Nginx to the web container before that first workflow is green.
 
 ## Retention and cost controls
