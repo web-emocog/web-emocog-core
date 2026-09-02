@@ -344,6 +344,16 @@ describe('S1 typed transport boundary', () => {
 });
 
 describe('S2-01 route-specific HTTP controls', () => {
+  it('does not log expected client rejections as internal stack traces', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const corsBranch = source.indexOf("err?.code === 'cors_origin_denied'");
+    const invalidJsonBranch = source.indexOf('err instanceof SyntaxError');
+    const unexpectedLog = source.indexOf('console.error(err);');
+    assert.ok(corsBranch >= 0);
+    assert.ok(invalidJsonBranch > corsBranch);
+    assert.ok(unexpectedLog > invalidJsonBranch);
+  });
+
   it('classifies auth, ingest and default independently', () => {
     assert.equal(classifyRoute('/auth/login'), 'auth');
     assert.equal(classifyRoute('/ingest'), 'ingest');
@@ -621,6 +631,20 @@ describe('S2-01 transactional ingest contracts', () => {
     assert.ok(calls.some(call => call[0] === 'addColumns' && call[1] === 'users'));
     assert.ok(calls.some(call => call[0] === 'addConstraint' && call[1] === 'users'));
     assert.ok(calls.some(call => call[0] === 'dropColumns' && call[1] === 'users'));
+  });
+
+  it('organization admin migration is reversible without retaining an unknown role', () => {
+    const migration = require('../migrations/1699000000015_organization_admin_role');
+    const calls = [];
+    const pgm = new Proxy({}, {
+      get(_target, property) {
+        return (...args) => calls.push([property, ...args]);
+      },
+    });
+    migration.up(pgm);
+    migration.down(pgm);
+    assert.ok(calls.some(call => call[0] === 'addConstraint' && /org_admin/.test(String(call[3]))));
+    assert.ok(calls.some(call => call[0] === 'sql' && /UPDATE users SET role = 'PI'/.test(call[1])));
   });
 
   it('locks session creation and checks tenant scope before insert', () => {

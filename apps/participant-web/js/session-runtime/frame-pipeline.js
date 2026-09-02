@@ -12,6 +12,7 @@ import {
 } from '../emotion-stub-new.js';
 import { ContinuousBodyPoseCollector } from './continuous-body-pose.js';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
+import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js';
 
 const TARGET_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -45,11 +46,15 @@ export class SessionFramePipeline {
                 const fps = this.state.sessionData?.tech?.cameraFPS;
                 return Number.isFinite(fps) && fps > 0 ? fps : 30;
             },
-            onError: error => this._reportBpmError(error)
+            onError: error => this._reportBpmError(error),
+            onRecovered: () => this._recoverBpm()
         });
         this.bodyPose = new ContinuousBodyPoseCollector({
             state: this.state,
-            onError: error => this._reportBodyPoseError(error)
+            onError: error => this._reportBodyPoseError(error),
+            enabled: this.controller.featureFlags?.bodyMovement !== false,
+            gamerMode: this.controller.featureFlags?.gamerMode === true,
+            clock: this.controller.sessionClock
         });
         this.boundTrackEnded = () => {
             this.controller.reportIssue({
@@ -82,7 +87,10 @@ export class SessionFramePipeline {
         this.controller.setModuleStatus('bodyPose', 'initializing');
         this.bodyPose.start().then(ready => {
             if (this.active) {
-                this.controller.setModuleStatus('bodyPose', ready ? 'running' : 'failed');
+                this.controller.setModuleStatus(
+                    'bodyPose',
+                    ready ? 'running' : (this.bodyPose.enabled ? 'failed' : 'disabled')
+                );
             }
         });
         this._schedule(0);
@@ -112,6 +120,7 @@ export class SessionFramePipeline {
             const frame = await this.state.runtime.localAnalyzer.analyzeFrame(this.video);
             if (!this.active) return;
             this.state.runtime.lastPrecheckResult = frame;
+            updateHeadPoseGuide(frame);
             this.state.runtime.lastPoseData = frame?.pose
                 ? {
                     yaw: frame.pose.yaw ?? null,
@@ -120,6 +129,7 @@ export class SessionFramePipeline {
                 }
                 : null;
 
+            let gaze = null;
             if (
                 this.state.runtime.gazeTracker?.isCalibrated?.()
                 && Array.isArray(frame?.landmarks)
@@ -129,7 +139,7 @@ export class SessionFramePipeline {
                     viewport.width,
                     viewport.height
                 );
-                const gaze = this.state.runtime.gazeTracker.predict(frame.landmarks, {
+                gaze = this.state.runtime.gazeTracker.predict(frame.landmarks, {
                     timestamp: frame.timestamp,
                     wallTimestamp: frame.wallTimestamp,
                     pose: frame.pose,
@@ -146,7 +156,8 @@ export class SessionFramePipeline {
             }
 
             this._processEmotion(frame);
-            this._processBodyPose();
+            const body = this._processBodyPose();
+            this.controller.captureMultimodalFrame({ frame, gaze, body });
             this._scheduleSegmentation(frame);
 
             if (this.state.runtime.qcMetrics?.isRunning?.()) {
@@ -224,9 +235,9 @@ export class SessionFramePipeline {
 
     _processBodyPose() {
         this.bodyPoseCounter += 1;
-        if (this.bodyPoseCounter < this.bodyPoseStride) return;
+        if (this.bodyPoseCounter < this.bodyPoseStride) return null;
         this.bodyPoseCounter = 0;
-        this.bodyPose.process(this.video, performance.now());
+        return this.bodyPose.process(this.video, performance.now());
     }
 
     _reportBpmError(error) {
@@ -236,8 +247,17 @@ export class SessionFramePipeline {
             kind: ERROR_KINDS.TECHNICAL,
             code: 'bpm_module_failed',
             message: `Модуль BPM недоступен: ${error?.message || String(error)}`,
-            recoverable: false
+            recoverable: true,
+            invalidatesBlock: false
         });
+        this.controller.setModuleStatus('bpm', 'failed');
+    }
+
+    _recoverBpm() {
+        if (!this.active || !this.bpmErrorReported) return;
+        this.bpmErrorReported = false;
+        this.controller.resolveIssue('bpm_module_failed');
+        this.controller.setModuleStatus('bpm', 'running');
     }
 
     _reportBodyPoseError(error) {

@@ -24,10 +24,10 @@ const router = express.Router();
 const PUBLIC_REGISTER_ROLE = 'respondent';
 const TENANT_SCOPED_STAFF_ROLES = new Set([
   'PI',
+  'org_admin',
   'researcher',
   'analyst',
   'assistant',
-  'developer',
 ]);
 const PASSWORD_MIN_LENGTH = 12;
 const BCRYPT_MAX_PASSWORD_BYTES = 72;
@@ -131,7 +131,8 @@ async function canManageRole(actor, targetRole, targetEmail) {
     return isDeveloperEmailAllowed(targetEmail);
   }
   if (platform) return true;
-  if (actor.role === 'PI') return true;
+  if (targetRole === 'org_admin') return actor.role === 'org_admin';
+  if (actor.role === 'PI' || actor.role === 'org_admin') return true;
   return false;
 }
 
@@ -286,12 +287,15 @@ router.get('/me', requireAuth, async (req, res) => {
 
 router.get('/permissions', requireAuth, async (req, res) => {
   const platformAdmin = isPlatformAdmin(req.user);
+  const organizationAdmin = req.user?.role === 'org_admin' || req.user?.role === 'PI';
   res.json({
     ...buildPermissionSnapshot(req.user),
-    is_project_lead: req.user?.role === 'PI',
+    is_project_lead: organizationAdmin,
     is_platform_admin: platformAdmin,
-    is_admin: platformAdmin || req.user?.role === 'PI',
-    can_open_admin_panel: platformAdmin,
+    is_organization_admin: organizationAdmin,
+    is_admin: platformAdmin || organizationAdmin,
+    can_open_admin_panel: platformAdmin || organizationAdmin,
+    can_manage_organization_members: platformAdmin || organizationAdmin,
     can_grant_developer: platformAdmin,
     can_grant_admin: platformAdmin,
   });
@@ -439,25 +443,8 @@ router.post(
             { status: 404, code: 'user_not_found' }
           );
         }
-        const membership = await client.query(
-          `SELECT up.project_id
-           FROM users u
-           INNER JOIN user_projects up ON up.user_id = u.id
-           INNER JOIN projects p ON p.id = up.project_id
-           INNER JOIN user_organizations uo
-             ON uo.user_id = u.id
-            AND uo.organization_id = p.organization_id
-           WHERE u.id = $1
-           LIMIT 1
-           FOR KEY SHARE OF u, up, p, uo`,
-          [target.rows[0].id]
-        );
-        if (!membership.rows[0]) {
-          throw Object.assign(
-            new Error('Developer requires organization and project membership'),
-            { status: 400, code: 'staff_membership_required' }
-          );
-        }
+        await client.query('DELETE FROM user_projects WHERE user_id = $1', [target.rows[0].id]);
+        await client.query('DELETE FROM user_organizations WHERE user_id = $1', [target.rows[0].id]);
         const updated = await client.query(
           `UPDATE users
            SET role = 'developer',
@@ -540,7 +527,13 @@ router.get(
            COALESCE(
              ARRAY_AGG(DISTINCT uo.organization_id) FILTER (WHERE uo.organization_id IS NOT NULL),
              '{}'
-           ) AS organization_ids
+           ) AS organization_ids,
+           COALESCE(
+             (SELECT ARRAY_AGG(up.project_id ORDER BY up.project_id)
+              FROM user_projects up
+              WHERE up.user_id = u.id),
+             '{}'
+           ) AS project_ids
          FROM users u
          ${scopeJoins}
          ${organizationJoin}
@@ -554,6 +547,188 @@ router.get(
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to load users' });
+    }
+  }
+);
+
+router.put(
+  '/users/:id/memberships',
+  requireAuth,
+  requireRole('admin', 'PI'),
+  requireOperation(OPERATIONS.USER_MANAGE),
+  [
+    param('id').isInt({ min: 1 }),
+    body('role').optional().isIn(ROLES),
+    body('organization_ids').isArray({ max: 100 }),
+    body('organization_ids.*').isInt({ min: 1 }),
+    body('project_ids').isArray({ max: 1000 }),
+    body('project_ids.*').isInt({ min: 1 }),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      const targetUserId = parseInt(req.params.id, 10);
+      const requestedOrgIds = [...new Set(req.body.organization_ids.map(Number))];
+      let requestedProjectIds = [...new Set(req.body.project_ids.map(Number))];
+
+      const result = await withTransaction(pool, async client => {
+        const target = await client.query(
+          'SELECT id, role, email FROM users WHERE id = $1 FOR UPDATE',
+          [targetUserId]
+        );
+        if (!target.rows[0]) {
+          throw Object.assign(new Error('User not found'), { status: 404, code: 'user_not_found' });
+        }
+        const currentRole = target.rows[0].role;
+        const targetRole = req.body.role || currentRole;
+        if (!isPlatformAdmin(req.user)) {
+          if (currentRole === 'admin' || currentRole === 'PI' || currentRole === 'developer') {
+            throw Object.assign(new Error('Only platform administrator can manage this user'), {
+              status: 403,
+              code: 'platform_admin_required',
+            });
+          }
+          if (!(await hasContainedTenantScope(client, req.user.sub, targetUserId))) {
+            throw Object.assign(new Error('User scope is outside your organization'), {
+              status: 403,
+              code: 'user_scope_not_contained',
+            });
+          }
+        }
+        if (
+          req.body.role !== undefined
+          && !(await canManageRole(req.user, targetRole, target.rows[0].email))
+        ) {
+          throw Object.assign(new Error('Insufficient role to assign target role'), {
+            status: 403,
+            code: 'role_assignment_denied',
+          });
+        }
+        if (targetRole === 'developer' && (requestedOrgIds.length || requestedProjectIds.length)) {
+          throw Object.assign(new Error('Developer cannot receive tenant memberships'), {
+            status: 400,
+            code: 'developer_tenant_scope_forbidden',
+          });
+        }
+
+        const allowedOrganizations = isPlatformAdmin(req.user)
+          ? await client.query(
+            'SELECT id FROM organizations WHERE id = ANY($1::int[]) FOR KEY SHARE',
+            [requestedOrgIds]
+          )
+          : await client.query(
+            `SELECT organization_id AS id
+             FROM user_organizations
+             WHERE user_id = $1 AND organization_id = ANY($2::int[])
+             FOR KEY SHARE`,
+            [req.user.sub, requestedOrgIds]
+          );
+        if (allowedOrganizations.rows.length !== requestedOrgIds.length) {
+          throw Object.assign(new Error('Cannot assign a foreign organization'), {
+            status: 403,
+            code: 'organization_assignment_denied',
+          });
+        }
+
+        if (targetRole === 'org_admin' && requestedOrgIds.length > 0) {
+          const allProjects = await client.query(
+            'SELECT id FROM projects WHERE organization_id = ANY($1::int[]) FOR KEY SHARE',
+            [requestedOrgIds]
+          );
+          requestedProjectIds = allProjects.rows.map(row => Number(row.id));
+        }
+        const selectedProjects = requestedProjectIds.length
+          ? await client.query(
+            `SELECT id, organization_id
+             FROM projects
+             WHERE id = ANY($1::int[])
+             FOR KEY SHARE`,
+            [requestedProjectIds]
+          )
+          : { rows: [] };
+        if (selectedProjects.rows.length !== requestedProjectIds.length) {
+          throw Object.assign(new Error('One or more projects do not exist'), {
+            status: 400,
+            code: 'project_not_found',
+          });
+        }
+        if (selectedProjects.rows.some(row => !requestedOrgIds.includes(Number(row.organization_id)))) {
+          throw Object.assign(new Error('Every project requires its organization membership'), {
+            status: 400,
+            code: 'project_organization_membership_required',
+          });
+        }
+        if (!isPlatformAdmin(req.user) && req.user.role !== 'org_admin') {
+          const actorProjects = requestedProjectIds.length
+            ? await client.query(
+              `SELECT project_id AS id
+               FROM user_projects
+               WHERE user_id = $1 AND project_id = ANY($2::int[])
+               FOR KEY SHARE`,
+              [req.user.sub, requestedProjectIds]
+            )
+            : { rows: [] };
+          if (actorProjects.rows.length !== requestedProjectIds.length) {
+            throw Object.assign(new Error('Cannot assign a foreign project'), {
+              status: 403,
+              code: 'project_assignment_denied',
+            });
+          }
+        }
+        if (TENANT_SCOPED_STAFF_ROLES.has(targetRole)) {
+          const requiresProjects = targetRole !== 'org_admin';
+          if (!requestedOrgIds.length || (requiresProjects && !requestedProjectIds.length)) {
+            throw Object.assign(new Error('Staff memberships cannot be empty'), {
+              status: 400,
+              code: 'staff_membership_required',
+            });
+          }
+        }
+
+        await client.query('DELETE FROM user_projects WHERE user_id = $1', [targetUserId]);
+        await client.query('DELETE FROM user_organizations WHERE user_id = $1', [targetUserId]);
+        if (requestedOrgIds.length) {
+          await client.query(
+            `INSERT INTO user_organizations (user_id, organization_id, role)
+             SELECT $1, value, $3 FROM unnest($2::int[]) AS value`,
+            [targetUserId, requestedOrgIds, targetRole === 'org_admin' ? 'admin' : 'member']
+          );
+        }
+        if (requestedProjectIds.length) {
+          await client.query(
+            `INSERT INTO user_projects (user_id, project_id, role)
+             SELECT $1, value, $3 FROM unnest($2::int[]) AS value`,
+            [targetUserId, requestedProjectIds, targetRole]
+          );
+        }
+        if (targetRole !== currentRole) {
+          await client.query(
+            `UPDATE users
+             SET role = $1,
+                 token_version = token_version + 1,
+                 updated_at = current_timestamp
+             WHERE id = $2`,
+            [targetRole, targetUserId]
+          );
+        }
+        return {
+          user_id: targetUserId,
+          role: targetRole,
+          organization_ids: requestedOrgIds,
+          project_ids: requestedProjectIds,
+        };
+      }, { isolationLevel: 'SERIALIZABLE' });
+      res.json(result);
+    } catch (err) {
+      if (err.status && err.code) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      if (err.code === '40001') {
+        return res.status(409).json({ error: 'Memberships changed concurrently; retry', code: 'membership_conflict' });
+      }
+      console.error(err);
+      res.status(500).json({ error: 'Failed to update memberships' });
     }
   }
 );
@@ -586,11 +761,24 @@ router.post(
       const orgIds = Array.isArray(organization_ids)
         ? [...new Set(organization_ids.map((v) => parseInt(v, 10)).filter(Number.isInteger))]
         : [];
-      const projectIds = Array.isArray(project_ids)
+      let projectIds = Array.isArray(project_ids)
         ? [...new Set(project_ids.map((v) => parseInt(v, 10)).filter(Number.isInteger))]
         : [];
+      if (role === 'developer' && (orgIds.length > 0 || projectIds.length > 0)) {
+        return res.status(400).json({
+          error: 'Developer accounts cannot belong to organizations or projects',
+          code: 'developer_tenant_scope_forbidden',
+        });
+      }
+      if (role === 'org_admin' && orgIds.length === 0) {
+        return res.status(400).json({
+          error: 'Organization administrator requires an organization membership',
+          code: 'organization_membership_required',
+        });
+      }
       if (
         TENANT_SCOPED_STAFF_ROLES.has(role)
+        && role !== 'org_admin'
         && (orgIds.length === 0 || projectIds.length === 0)
       ) {
         return res.status(400).json({
@@ -619,6 +807,16 @@ router.post(
               { status: 403, code: 'organization_assignment_denied' }
             );
           }
+        }
+        if (role === 'org_admin') {
+          const allOrganizationProjects = await client.query(
+            `SELECT id
+             FROM projects
+             WHERE organization_id = ANY($1::int[])
+             FOR KEY SHARE`,
+            [orgIds]
+          );
+          projectIds = allOrganizationProjects.rows.map(row => Number(row.id));
         }
         let projectAccessRows = [];
         if (projectIds.length > 0) {
@@ -674,9 +872,9 @@ router.post(
         if (orgIds.length > 0) {
           await client.query(
             `INSERT INTO user_organizations (user_id, organization_id, role)
-             SELECT $1, value, 'member'
+             SELECT $1, value, $3
              FROM unnest($2::int[]) AS value`,
-            [createdUser.id, orgIds]
+            [createdUser.id, orgIds, role === 'org_admin' ? 'admin' : 'member']
           );
         }
         if (projectIds.length > 0) {
@@ -750,7 +948,7 @@ router.patch(
           );
         }
         const targetRow = target.rows[0];
-        const targetElevated = targetRow.role === 'admin' || targetRow.role === 'PI';
+        const targetElevated = targetRow.role === 'admin' || targetRow.role === 'PI' || targetRow.role === 'developer';
         if (targetElevated && !isPlatformAdmin(req.user)) {
           throw Object.assign(
             new Error('Only platform administrator can manage this user'),
@@ -768,17 +966,24 @@ router.patch(
               { status: 403, code: 'role_assignment_denied' }
             );
           }
+          if (req.body.role === 'developer') {
+            await client.query('DELETE FROM user_projects WHERE user_id = $1', [targetUserId]);
+            await client.query('DELETE FROM user_organizations WHERE user_id = $1', [targetUserId]);
+          }
           if (TENANT_SCOPED_STAFF_ROLES.has(req.body.role)) {
             const scopedMembership = await client.query(
               `SELECT 1
-               FROM user_projects up
-               INNER JOIN projects p ON p.id = up.project_id
-               INNER JOIN user_organizations uo
-                 ON uo.user_id = up.user_id
-                AND uo.organization_id = p.organization_id
-               WHERE up.user_id = $1
+               FROM user_organizations uo
+               WHERE uo.user_id = $1
+                 AND ($2::boolean OR EXISTS (
+                   SELECT 1
+                   FROM user_projects up
+                   INNER JOIN projects p ON p.id = up.project_id
+                   WHERE up.user_id = uo.user_id
+                     AND p.organization_id = uo.organization_id
+                 ))
                LIMIT 1`,
-              [targetUserId]
+              [targetUserId, req.body.role === 'org_admin']
             );
             if (!scopedMembership.rows[0]) {
               throw Object.assign(
@@ -786,6 +991,21 @@ router.patch(
                 { status: 400, code: 'staff_membership_required' }
               );
             }
+          }
+          if (req.body.role === 'org_admin') {
+            await client.query(
+              `UPDATE user_organizations SET role = 'admin' WHERE user_id = $1`,
+              [targetUserId]
+            );
+            await client.query(
+              `INSERT INTO user_projects (user_id, project_id, role)
+               SELECT $1, p.id, 'org_admin'
+               FROM projects p
+               INNER JOIN user_organizations uo
+                 ON uo.organization_id = p.organization_id AND uo.user_id = $1
+               ON CONFLICT (user_id, project_id) DO UPDATE SET role = EXCLUDED.role`,
+              [targetUserId]
+            );
           }
           updates.push(`role = $${i++}`);
           values.push(req.body.role);

@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  <title>EmoCog — приглашение участника</title>
+  <title>wecog — приглашение участника</title>
+  <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
   <style>
     :root {
       --bg: #0f0f1a;
@@ -72,22 +73,103 @@
     #err { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 1.2em; }
     .hint { font-size: 12px; color: var(--muted); margin-top: 14px; line-height: 1.4; }
   </style>
+  <link rel="stylesheet" href="participant-redesign.css?v=20260819-1">
+  <style>
+    body { padding: 28px; align-items: center; }
+    .box {
+      max-width: 620px;
+      padding: clamp(28px, 6vw, 56px);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      background: #fff;
+      color: var(--text-main);
+      box-shadow: 0 24px 70px rgba(16,33,27,.09);
+    }
+    .invite-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 52px; }
+    .invite-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--text-main); text-decoration: none; font-size: 22px; font-weight: 780; letter-spacing: -.045em; }
+    .invite-brand img { width: 38px; height: 38px; }
+    h1 { text-align: start; font-size: clamp(2.4rem, 8vw, 4.5rem); margin-bottom: 16px; }
+    .sub { margin-bottom: 28px; font-size: 17px; }
+    label { color: var(--text-main); font-size: 15px; font-weight: 680; }
+    textarea { min-height: 118px; margin-top: 8px; resize: vertical; }
+    .row button { width: 100%; }
+    #err { color: #b42318; font-size: 14px; }
+    @media (max-width: 560px) {
+      body { padding: 10px; }
+      .box { padding: 28px 20px; border-radius: 20px; }
+      .invite-top { margin-bottom: 38px; }
+    }
+  </style>
 </head>
 <body>
   <div class="box">
-    <h1>Участник</h1>
-    <p class="sub">Вставьте полную ссылку-приглашение от исследователя (с параметром <code style="background:rgba(0,0,0,.3);padding:2px 6px;border-radius:4px;">?code=…</code>) или только код приглашения.</p>
-    <label for="inviteRaw">Ссылка или код</label>
+    <div class="invite-top">
+      <span class="invite-brand"><img src="../web/assets/wecog-mark.svg" alt="">wecog</span>
+      <select id="participantLanguageSelect" aria-label="Язык интерфейса">
+        <option value="ru">Русский</option><option value="en">English</option><option value="zh">中文</option>
+        <option value="es">Español</option><option value="hi">हिन्दी</option><option value="ar">العربية</option>
+        <option value="fr">Français</option><option value="bn">বাংলা</option><option value="pt">Português</option><option value="ur">اردو</option>
+      </select>
+    </div>
+    <h1 id="inviteTitle">Приглашение</h1>
+    <p class="sub" id="inviteDescription">Вставьте ссылку или код, полученный от исследователя.</p>
+    <label for="inviteRaw" id="inviteLabel">Ссылка или код</label>
     <textarea id="inviteRaw" placeholder="https://…/run_new.html?code=ABC123&#10;или: ABC123"></textarea>
     <div class="row">
       <button type="button" id="goBtn">Продолжить</button>
-      <a class="home" href="../web/index.html">← На главную</a>
     </div>
     <div id="err"></div>
-    <p class="hint">Если вы разработчик или администратор платформы, войдите через раздел «Разработчик» — сессия откроется сразу с пречеком без приглашения.</p>
   </div>
   <script>
     (function () {
+      var inviteLocales = {
+        ru: ['Приглашение', 'Вставьте ссылку или код, полученный от исследователя.', 'Ссылка или код', 'Продолжить', 'Не удалось распознать код. Проверьте ссылку или код приглашения.'],
+        en: ['Invitation', 'Paste the link or code provided by the researcher.', 'Link or code', 'Continue', 'The invitation code could not be recognized. Check the link or code.'],
+        zh: ['邀请', '粘贴研究人员提供的链接或代码。', '链接或代码', '继续', '无法识别邀请码，请检查链接或代码。'],
+        es: ['Invitación', 'Pegue el enlace o código proporcionado por el investigador.', 'Enlace o código', 'Continuar', 'No se pudo reconocer el código. Revise el enlace o código.'],
+        hi: ['आमंत्रण', 'शोधकर्ता द्वारा दिया गया लिंक या कोड पेस्ट करें।', 'लिंक या कोड', 'आगे बढ़ें', 'आमंत्रण कोड पहचाना नहीं जा सका।'],
+        ar: ['دعوة', 'الصق الرابط أو الرمز الذي أرسله الباحث.', 'الرابط أو الرمز', 'متابعة', 'تعذر التعرّف على رمز الدعوة.'],
+        fr: ['Invitation', 'Collez le lien ou le code fourni par le chercheur.', 'Lien ou code', 'Continuer', 'Le code d’invitation n’a pas été reconnu.'],
+        bn: ['আমন্ত্রণ', 'গবেষকের দেওয়া লিংক বা কোড পেস্ট করুন।', 'লিংক বা কোড', 'এগিয়ে যান', 'আমন্ত্রণ কোড শনাক্ত করা যায়নি।'],
+        pt: ['Convite', 'Cole o link ou código fornecido pelo pesquisador.', 'Link ou código', 'Continuar', 'Não foi possível reconhecer o código do convite.'],
+        ur: ['دعوت', 'محقق کا دیا ہوا لنک یا کوڈ پیسٹ کریں۔', 'لنک یا کوڈ', 'جاری رکھیں', 'دعوتی کوڈ کی شناخت نہیں ہو سکی۔']
+      };
+      var languageLabels = {
+        ru: 'Язык интерфейса', en: 'Interface language', zh: '界面语言',
+        es: 'Idioma de la interfaz', hi: 'इंटरफ़ेस की भाषा', ar: 'لغة الواجهة',
+        fr: 'Langue de l’interface', bn: 'ইন্টারফেসের ভাষা',
+        pt: 'Idioma da interface', ur: 'انٹرفیس کی زبان'
+      };
+      var alternativeLabels = {
+        ru: 'или', en: 'or', zh: '或', es: 'o', hi: 'या', ar: 'أو',
+        fr: 'ou', bn: 'অথবা', pt: 'ou', ur: 'یا'
+      };
+      var localeSelect = document.getElementById('participantLanguageSelect');
+      var currentLocale = 'ru';
+      function applyLocale(locale) {
+        currentLocale = inviteLocales[locale] ? locale : 'ru';
+        var copy = inviteLocales[currentLocale];
+        document.documentElement.lang = currentLocale;
+        document.documentElement.dir = currentLocale === 'ar' || currentLocale === 'ur' ? 'rtl' : 'ltr';
+        document.getElementById('inviteTitle').textContent = copy[0];
+        document.getElementById('inviteDescription').textContent = copy[1];
+        document.getElementById('inviteLabel').textContent = copy[2];
+        document.getElementById('goBtn').textContent = copy[3];
+        localeSelect.setAttribute('aria-label', languageLabels[currentLocale] || languageLabels.en);
+        document.getElementById('inviteRaw').setAttribute(
+          'placeholder',
+          'https://…/run_new.html?code=ABC123\n' + (alternativeLabels[currentLocale] || alternativeLabels.en) + ': ABC123'
+        );
+        document.title = 'wecog — ' + copy[0];
+        try { localStorage.setItem('emocog_participant_lang', currentLocale); } catch (_) {}
+      }
+      localeSelect.addEventListener('change', function () { applyLocale(localeSelect.value); });
+      try {
+        var savedLocale = localStorage.getItem('emocog_participant_lang');
+        if (inviteLocales[savedLocale]) localeSelect.value = savedLocale;
+      } catch (_) {}
+      applyLocale(localeSelect.value || 'ru');
+
       function extractCode(raw) {
         var value = String(raw || '').trim();
         if (!value) return null;
@@ -129,7 +211,7 @@
         err.textContent = '';
         var code = extractCode(ta.value);
         if (!code) {
-          err.textContent = 'Не удалось распознать код. Нужна ссылка с ?code=… или корректный код приглашения.';
+          err.textContent = inviteLocales[currentLocale][4];
           return;
         }
         window.location.href = 'run_new.html?code=' + encodeURIComponent(code);

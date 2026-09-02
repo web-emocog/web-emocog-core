@@ -11,9 +11,23 @@ export const EMOTION_CONFIG = {
     // ── Общие параметры анализатора ──────────────────────────────────────
     fps:                    10,
     confidenceThreshold:    0.40,
-    smoothingWindow:        5,
+    smoothingWindow:        4,
     temporalWindowSize:     10,
     minLandmarks:           468,
+    dominantMinScore:       0.50,
+    dominantMinMargin:      0.09,
+    dominantHoldFrames:     2,
+    neutralPublishedFloor:  0.65,
+
+    // Person-specific neutral baseline prevents static facial geometry from
+    // being interpreted as a persistent expression (notably happiness).
+    baseline: {
+        minFrames:          18,
+        deadzone:           0.012,
+        gain:               4.0,
+        adaptiveRate:       0.006,
+        adaptiveMaxActivity:0.08,
+    },
 
     // ── Лимиты памяти ────────────────────────────────────────────────────
     maxEvents:              1000,

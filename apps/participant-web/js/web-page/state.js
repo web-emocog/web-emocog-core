@@ -35,6 +35,17 @@ export const state = {
         bodyPoseSamples: [],
         bodyPoseAccumulator: null,
         bodyPoseSummary: null,
+        audioConsent: {
+            schemaVersion: 'audio_consent.v1',
+            offered: false,
+            required: false,
+            granted: false,
+            rawCaptureGranted: false
+        },
+        audioSummary: null,
+        multimodal: null,
+        multimodalSummary: null,
+        multimodalHeatmap: null,
         emotionEvents: [],
         testHub: {
             version: '1.0.0',
@@ -68,6 +79,7 @@ export const state = {
     // Runtime данные (временные данные, нужные только в моменте)
     runtime: {
         precheckData: null,
+        headPoseReference: null,
 
         cameraStream: null,    // Объект MediaStream
         analysisFrameId: null, // ID таймера setTimeout
@@ -85,12 +97,15 @@ export const state = {
         currentGazePrediction: null, // raw/corrected/display signal for validation
         lastEmotionSample: null,
         lastBodyPoseSample: null,
+        lastMultimodalSample: null,
         lastPoseData: null,    // Последние данные позы из анализа (для QC gaze inference)
         lastEyeSignal: null,   // Последний eye-signal sample (EAR/iris proxy)
         currentPhase: 'init',
         taskContext: {
             blockId: null,
+            attempt: null,
             trialId: null,
+            presentationId: null,
             stimulusId: null,
             stimulusType: null,
             expectedResponse: null
@@ -103,6 +118,9 @@ export const state = {
         qcMetrics: null,
         gazeTracker: null,        // GazeTracker instance
         sessionRuntime: null,      // Единый lifecycle и непрерывные модули сессии
+        sessionClock: null,
+        sessionFeatureFlags: null,
+        audioStream: null,
 
         
         // Временные массивы
@@ -167,6 +185,14 @@ export function setSessionPhase(phase, payload = {}) {
     if (!phase) return;
     if (state.runtime.currentPhase === phase && !payload.force) return;
     state.runtime.currentPhase = phase;
+    if (typeof document !== 'undefined') {
+        document.documentElement.dataset.sessionPhase = phase;
+    }
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('wecog:session-phase-change', {
+            detail: { phase }
+        }));
+    }
     recordSessionEvent('phase_change', { phase, ...payload });
 }
 
@@ -181,7 +207,9 @@ export function setTaskContext(contextPatch = {}) {
 export function clearTaskContext() {
     state.runtime.taskContext = {
         blockId: null,
+        attempt: null,
         trialId: null,
+        presentationId: null,
         stimulusId: null,
         stimulusName: null,
         stimulusType: null,

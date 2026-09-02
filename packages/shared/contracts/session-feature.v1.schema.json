@@ -36,6 +36,79 @@
     "blink_summary": { "type": ["object", "null"] },
     "perclos_summary": { "type": ["object", "null"] },
     "body_pose_summary": { "type": ["object", "null"] },
+    "audio_summary": {
+      "type": ["object", "null"],
+      "properties": {
+        "schemaVersion": { "const": "audio_session.v1" },
+        "algorithmVersion": { "type": "string" },
+        "status": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "consentGranted": { "type": "boolean" },
+        "permission": { "type": "string" },
+        "rawAudioStored": { "const": false },
+        "rawAudioTransmitted": { "const": false },
+        "sampleRate": { "type": ["number", "null"] },
+        "windowDurationMs": { "type": ["number", "null"] },
+        "windowCount": { "type": "number" },
+        "acceptedWindowCount": { "type": "number" },
+        "rejectedWindowCount": { "type": "number" },
+        "droppedWindowCount": { "type": "number" },
+        "durationMs": { "type": "number" },
+        "qualityMean": { "type": ["number", "null"] },
+        "reliabilityMean": { "type": ["number", "null"] },
+        "markers": { "type": "array", "maxItems": 32, "items": { "type": "object" } },
+        "windows": { "type": "array", "maxItems": 360, "items": { "type": "object" } },
+        "provenance": { "type": "object" },
+        "disclaimer": { "type": "string", "maxLength": 512 }
+      },
+      "required": [
+        "schemaVersion",
+        "enabled",
+        "consentGranted",
+        "rawAudioStored",
+        "rawAudioTransmitted",
+        "windows"
+      ],
+      "additionalProperties": false
+    },
+    "multimodal_summary": {
+      "type": ["object", "null"],
+      "properties": {
+        "schemaVersion": { "const": "multimodal_session.v1" },
+        "enabled": { "type": "boolean" },
+        "gamerMode": { "type": "boolean" },
+        "timebase": { "type": "object" },
+        "head": { "type": "object" },
+        "body": { "type": "object" },
+        "eventCount": { "type": "number" },
+        "rawVideoStored": { "const": false },
+        "rawLandmarksStored": { "const": false },
+        "disclaimer": { "type": "string", "maxLength": 512 }
+      },
+      "required": [
+        "schemaVersion",
+        "enabled",
+        "rawVideoStored",
+        "rawLandmarksStored"
+      ],
+      "additionalProperties": false
+    },
+    "multimodal_heatmap": {
+      "type": ["object", "null"],
+      "properties": {
+        "schemaVersion": { "const": "multimodal_heatmap.v1" },
+        "coordinateSpace": { "const": "stimulus_normalized_0_1" },
+        "presentationCountTotal": { "type": "number" },
+        "presentationCountStored": { "type": "number" },
+        "presentationsTruncated": { "type": "boolean" },
+        "alignmentP95Ms": { "type": ["number", "null"], "maximum": 100 },
+        "presentations": { "type": "array", "maxItems": 50, "items": { "type": "object" } },
+        "legend": { "type": "array", "maxItems": 8, "items": { "type": "object" } },
+        "disclaimer": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["schemaVersion", "coordinateSpace", "presentations"],
+      "additionalProperties": false
+    },
     "blocks": { "type": "array", "maxItems": 200, "items": { "type": "object" } },
     "emotion_summary": { "type": ["object", "null"] },
     "bpm_summary": { "type": ["object", "null"] },

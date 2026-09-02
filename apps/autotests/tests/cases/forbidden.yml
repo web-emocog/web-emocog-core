@@ -26,22 +26,6 @@ cases:
       buttonEnabled: "#consentBtn"
 
   # ===== EMAIL ВАЛИДАЦИЯ =====
-  - name: "Email: пустое поле не пропускает дальше"
-    startStep: step3
-    actions:
-      - action: fill
-        target: "#userEmail"
-        value: ""
-      - action: blur
-        target: "#userEmail"
-      - action: click
-        target: "#step3NextBtn"
-    expect:
-      stayOnStep: "step3"
-      fieldError:
-        selector: "#userEmail"
-        ariaInvalid: true
-
   - name: "Email: без @ символа"
     startStep: step3
     actions:

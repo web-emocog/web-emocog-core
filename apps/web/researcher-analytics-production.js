@@ -6,6 +6,8 @@
   const PROTOCOL_KEY = 'emocog_selected_protocol_id';
   const SESSION_KEY = 'emocog_selected_session_db_id';
   const QUERY_KEY = 'emocog_analytics_query_draft_v1';
+  const RESULT_IMPORT_MAX_BYTES = 128 * 1024 * 1024;
+  const INGEST_PAYLOAD_MAX_BYTES = 1750 * 1024;
 
   const TABS = [
     { id: 'session-card', ru: 'Сессия', en: 'Session' },
@@ -20,6 +22,117 @@
 
   function tr(ru, en) {
     return isEnglish() ? en : ru;
+  }
+
+  function parseApiError(response, fallback) {
+    return response.json().catch(() => null).then(body => {
+      const message = body && (body.message || body.error);
+      const error = new Error(`${response.status}${message ? ` — ${message}` : ` — ${fallback}`}`);
+      error.status = response.status;
+      error.code = body && body.code || null;
+      return error;
+    });
+  }
+
+  function importApiUrl(path) {
+    const base = String(global.API_BASE || '').replace(/\/$/, '');
+    return base ? `${base}${path}` : path;
+  }
+
+  function resultImportHeaders(idempotencyKey) {
+    const headers = typeof global.apiRequestHeaders === 'function'
+      ? global.apiRequestHeaders(true)
+      : { 'Content-Type': 'application/json' };
+    headers['Idempotency-Key'] = idempotencyKey;
+    return headers;
+  }
+
+  function resultImportId(payload) {
+    const existing = payload?.lifecycle?.finishAttemptId;
+    if (existing) return String(existing);
+    const random = global.crypto?.randomUUID
+      ? global.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `result-import-${random}`;
+  }
+
+  async function buildResultImportPayload(source) {
+    if (source?.schemaVersion === 'session_feature.v1') return source;
+    const moduleUrl = new URL(
+      '../participant-web/js/unified-aggregates-new.js?v=20260828-2',
+      global.location.href
+    );
+    const aggregates = await import(moduleUrl.href);
+    const payload = aggregates.buildAggregatesPayload(source, { forIngest: true });
+    if (!payload) throw new Error(tr('Файл не похож на результат сессии','The file is not a session result'));
+    return payload;
+  }
+
+  async function importResultJson(file, state) {
+    if (!file || !file.name?.toLowerCase().endsWith('.json')) {
+      throw new Error(tr('Выберите файл JSON','Select a JSON file'));
+    }
+    if (file.size > RESULT_IMPORT_MAX_BYTES) {
+      throw new Error(tr('Файл превышает допустимый размер 128 МБ','The file exceeds the 128 MB limit'));
+    }
+    const projectId = Number(state.query.projectId);
+    const protocolId = Number(state.query.protocolId);
+    if (!Number.isInteger(projectId) || !Number.isInteger(protocolId)) {
+      throw new Error(tr('Сначала выберите проект и протокол','Select a project and protocol first'));
+    }
+
+    let source;
+    try {
+      source = JSON.parse(await file.text());
+    } catch (_) {
+      throw new Error(tr('JSON повреждён или имеет неверный формат','The JSON is damaged or malformed'));
+    }
+    const payload = await buildResultImportPayload(source);
+    payload.ids = payload.ids && typeof payload.ids === 'object' ? { ...payload.ids } : {};
+    delete payload.ids.invitationCode;
+
+    const sessionId = String(payload.ids.session || '').trim();
+    if (!sessionId || sessionId.length > 64) {
+      throw new Error(tr('В файле отсутствует корректный ID сессии','The file has no valid session ID'));
+    }
+    const participantId = payload.ids.participant == null
+      ? null
+      : String(payload.ids.participant).slice(0, 64);
+    const idempotencyKey = resultImportId(payload);
+    const completedAt = payload?.lifecycle?.completedAt || new Date().toISOString();
+    payload.lifecycle = {
+      ...(payload.lifecycle || {}),
+      schemaVersion: 'session_lifecycle.v1',
+      state: 'completed',
+      status: 'completed',
+      completedAt,
+      finishAttemptId: idempotencyKey,
+    };
+
+    const encoded = JSON.stringify(payload);
+    const payloadBytes = new TextEncoder().encode(encoded).byteLength;
+    if (payloadBytes > INGEST_PAYLOAD_MAX_BYTES) {
+      throw new Error(tr(
+        'После безопасного сокращения результат всё ещё слишком велик для API',
+        'The safely compacted result is still too large for the API'
+      ));
+    }
+
+    await global.apiPost('/sessions/start', {
+      session_id: sessionId,
+      participant_id: participantId,
+      project_id: projectId,
+      protocol_id: protocolId,
+    });
+    const response = await global.fetch(importApiUrl('/ingest'), {
+      method: 'POST',
+      headers: resultImportHeaders(idempotencyKey),
+      credentials: 'include',
+      body: encoded,
+    });
+    if (!response.ok) throw await parseApiError(response, tr('Импорт отклонён','Import rejected'));
+    const result = await response.json();
+    return { sessionId, payloadBytes, result };
   }
 
   function localizedName(value, fallback) {
@@ -87,6 +200,20 @@
       : `${tr('Неизвестный канал','Unknown channel')}: ${String(value)}`;
   }
 
+  function deviceClassLabel(value) {
+    const code = String(value || '').trim().toLowerCase();
+    const labels = {
+      computer_webcam: ['Компьютер с веб-камерой', 'Computer with webcam'],
+      desktop_browser: ['Компьютер, браузерная сессия', 'Computer, browser session'],
+      desktop_webcam: ['Настольный компьютер с веб-камерой', 'Desktop with webcam'],
+      laptop_webcam: ['Ноутбук со встроенной камерой', 'Laptop with built-in camera'],
+      mobile_browser: ['Мобильное устройство', 'Mobile device'],
+      unknown: ['Тип устройства не определён', 'Device type not detected']
+    };
+    const pair = labels[code] || labels.unknown;
+    return pair[isEnglish() ? 1 : 0];
+  }
+
   function reasonLabel(value) {
     const code = String(value || '').trim().toLowerCase();
     const labels = {
@@ -101,10 +228,38 @@
       group_is_confounded_with_camera_model: ['Группа полностью совпадает с моделью камеры', 'Group is fully confounded with camera model'],
       camera_model_segregated_by_group: ['Модели камер распределены по группам неравномерно', 'Camera models are segregated by group'],
       borderline_gaze_sessions_included: ['Включены сессии с пограничным качеством взгляда', 'Borderline gaze-quality sessions are included'],
-      insufficient_participants: ['Недостаточно участников для выбранного сравнения', 'Insufficient participants for the selected comparison']
+      insufficient_participants: ['Недостаточно участников для выбранного сравнения', 'Insufficient participants for the selected comparison'],
+      face_occluded: ['Лицо было частично закрыто или не полностью видно', 'The face was partly covered or not fully visible'],
+      head_pose: ['Положение головы вышло за допустимый диапазон', 'Head position moved outside the allowed range'],
+      quality_invalid: ['Проба не прошла контроль качества записи', 'The trial did not pass recording quality checks'],
+      low_pose_ok_pct: ['Положение головы было стабильным недостаточную часть сессии', 'Head position was stable for too little of the session'],
+      low_fps_time: ['Частота обработки кадров временно снижалась', 'Frame processing rate temporarily dropped'],
+      consecutive_low_fps: ['Зафиксирован непрерывный эпизод низкой частоты кадров', 'A continuous low-frame-rate episode was detected'],
+      high_omission_rate: ['В задании пропущено много требуемых ответов', 'Too many required responses were missed'],
+      high_rt_outlier_frac: ['Слишком много ответов имеют нетипичное время реакции', 'Too many responses have atypical reaction times']
     };
     const pair = labels[code];
     return pair ? pair[isEnglish() ? 1 : 0] : String(value || tr('Причина не указана','Reason unavailable')).replace(/_/g, ' ');
+  }
+
+  function qualityCheckLabel(value) {
+    const labels = {
+      duration: ['Длительность записи', 'Recording duration'],
+      faceVisible: ['Лицо обнаружено', 'Face detected'],
+      faceOk: ['Лицо полностью видно', 'Face fully visible'],
+      poseOk: ['Положение головы', 'Head position'],
+      illuminationOk: ['Освещение', 'Lighting'],
+      eyesOpen: ['Глаза доступны для анализа', 'Eyes available for analysis'],
+      occlusion: ['Нет перекрытия лица', 'Face is not occluded'],
+      gazeValid: ['Валидность взгляда', 'Gaze validity'],
+      gazeOnScreen: ['Взгляд в области экрана', 'Gaze within screen area'],
+      lowFps: ['Стабильность FPS', 'FPS stability'],
+      consecutiveLowFps: ['Нет длительного падения FPS', 'No prolonged FPS drop'],
+      gazeAccuracy: ['Точность калибровки взгляда', 'Gaze calibration accuracy'],
+      gazePrecision: ['Стабильность точки взгляда', 'Gaze-point stability']
+    };
+    const pair = labels[value];
+    return pair ? pair[isEnglish() ? 1 : 0] : String(value || '').replace(/_/g, ' ');
   }
 
   function qcModeLabel(value) {
@@ -745,7 +900,9 @@
       groupHeatmapError: null,
       comparisonStatus: 'idle',
       comparisonResponse: null,
-      comparisonError: null
+      comparisonError: null,
+      importStatus: 'idle',
+      importMessage: ''
     },
     listeners: new Set(),
     requestId: 0,
@@ -815,6 +972,42 @@
       } catch (error) {
         if (requestId !== this.requestId) return;
         this.handleError(error);
+      }
+    },
+
+    async importResult(file) {
+      this.state.importStatus = 'loading';
+      this.state.importMessage = tr('Проверяем и отправляем результат…','Validating and uploading the result…');
+      this.emit();
+      try {
+        const imported = await importResultJson(file, this.state);
+        const importedQc = String(imported.result?.qc_validity || '').toLowerCase();
+        if (importedQc === 'invalid') this.state.query.qcMode = 'all';
+        else if (importedQc === 'borderline' && this.state.query.qcMode === 'valid_only') {
+          this.state.query.qcMode = 'valid_and_borderline';
+        }
+        this.persist();
+        const qcSuffix = importedQc
+          ? ` · QC: ${statusLabel(importedQc)}`
+          : '';
+        this.state.importStatus = 'success';
+        this.state.importMessage = `${tr('Результат принят и добавлен','Result accepted and imported')} · ${imported.sessionId}${qcSuffix}`;
+        await this.initialize(true);
+        const importedRow = this.state.sessions.find(row => (
+          String(row.session_id || '') === imported.sessionId
+        ));
+        if (importedRow) {
+          this.state.query.sessionId = String(importedRow.id);
+          storeSelected(SESSION_KEY, this.state.query.sessionId);
+          this.persist();
+        }
+        this.state.importStatus = 'success';
+        this.state.importMessage = `${tr('Результат принят и добавлен','Result accepted and imported')} · ${imported.sessionId}${qcSuffix}`;
+        this.emit();
+      } catch (error) {
+        this.state.importStatus = 'error';
+        this.state.importMessage = `${tr('Не удалось импортировать','Import failed')}: ${error.message}`;
+        this.emit();
       }
     },
 
@@ -1048,6 +1241,12 @@
         this.emit();
       } catch (error) {
         if (requestId !== this.summaryRequestId) return;
+        if (global.console && typeof global.console.error === 'function') {
+          global.console.error(
+            '[analytics][session-summary] request failed:',
+            error && error.message ? String(error.message) : String(error)
+          );
+        }
         this.state.summaryResponse = null;
         this.state.summaryStatus = 'error';
         this.state.summaryError = error;
@@ -1349,7 +1548,9 @@
         ${selectHtml('analyticsProtocolFilter', tr('Протокол','Protocol'), state.protocols, state.query.protocolId, 'protocol', disabled)}
         ${simpleSelectHtml('analyticsVersionFilter', tr('Версия','Version'), versions, state.query.protocolVersion, disabled, null)}
         ${state.query.mode === 'session' ? selectHtml('analyticsSessionFilter', tr('Сессия','Session'), state.sessions, state.query.sessionId, 'session', disabled) : ''}
+        ${state.query.mode === 'session' ? `<div style="display:flex;flex-direction:column;gap:5px;min-width:180px;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">${tr('Локальный результат','Local result')}</span><input id="analyticsResultImportFile" type="file" accept="application/json,.json" hidden><button id="analyticsResultImport" type="button" class="quick-btn" ${disabled || state.importStatus === 'loading' ? 'disabled' : ''}>${tr('Добавить JSON','Import JSON')}</button></div>` : ''}
       </div>
+      ${state.query.mode === 'session' && state.importMessage ? `<div id="analyticsResultImportStatus" role="status" aria-live="polite" style="font-size:10px;color:${state.importStatus === 'error' ? 'var(--bad)' : state.importStatus === 'success' ? 'var(--good)' : 'var(--muted)'};">${escapeHtml(state.importMessage)}</div>` : ''}
       ${state.query.mode === 'group' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--stroke);padding-top:10px;"><button type="button" class="quick-btn analytics-level" data-level="level-1" style="${state.groupLevel==='level-1'?'background:rgba(92,102,189,.12);color:var(--accent);border-color:rgba(92,102,189,.3);':''}">${tr('Уровень 1 · Описание','Level 1 · Descriptive')}</button><button type="button" class="quick-btn analytics-level" data-level="level-2" style="${state.groupLevel==='level-2'?'background:rgba(92,102,189,.12);color:var(--accent);border-color:rgba(92,102,189,.3);':''}">${tr('Уровень 2 · Сравнение','Level 2 · Comparison')}</button><button type="button" class="quick-btn" disabled style="opacity:.55;">${tr('Уровень 3 · Модели','Level 3 · Models')} · 🔒</button></div>` : ''}
       <details ${state.query.groupId || state.query.conditionId || state.query.comparisonId || state.query.blockId || state.query.stimulusId || state.query.aoiId || state.query.dateFrom || state.query.dateTo || state.query.includeIncompleteSessions || state.query.qcMode !== defaultDraft.qcMode || state.query.qcChannels.join(',') !== defaultDraft.qcChannels.join(',') ? 'open' : ''} style="border-top:1px solid var(--stroke);padding-top:10px;">
         <summary style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text);">${tr('Уточнить выборку','Refine selection')}</summary>
@@ -1598,9 +1799,35 @@
     </section>`;
   }
 
+  function resolutionLabel(value) {
+    return value && value.width && value.height
+      ? `${value.width}×${value.height}`
+      : tr('Нет данных','No data');
+  }
+
+  function technicalDetailsHtml(session, algorithms) {
+    const rows = [
+      [tr('Устройство','Device'), deviceClassLabel(session.deviceClass)],
+      [tr('Экран','Screen'), resolutionLabel(session.resolution)],
+      [tr('Камера','Camera'), resolutionLabel(session.cameraResolution)],
+      [tr('Измеренный FPS','Measured FPS'), session.actualFps],
+      [tr('FPS камеры','Camera FPS'), session.cameraFps],
+      [tr('FPS анализа','Analysis FPS'), session.analysisFps],
+      [tr('Браузер','Browser'), session.browserFamily],
+      [tr('Язык браузера','Browser language'), session.browserLanguage],
+      [tr('Плотность пикселей','Pixel ratio'), session.pixelRatio],
+      [tr('Класс процессора','Processor class'), session.processorClass]
+    ].filter(([, value]) => value !== null && value !== undefined && value !== '');
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:10px;">${rows.map(([label, value]) => `<div style="padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;background:rgba(100,116,139,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(label)}</div><div style="font-size:10px;font-weight:650;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div><div style="font-size:9px;color:var(--muted);margin-top:9px;line-height:1.5;">${tr('Версии алгоритмов','Algorithm versions')}: ${escapeHtml(algorithms || '—')}</div>`;
+  }
+
+  function exclusionRowsHtml(exclusions) {
+    return exclusions.map((item, index) => `<div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;"><span style="font-weight:700;color:var(--text);">${tr('Проба','Trial')} ${index + 1}</span><span style="color:var(--muted);line-height:1.45;">${escapeHtml(reasonLabel(item.reasonCode))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
+  }
+
   function sessionShellHtml(state) {
     if (state.summaryStatus === 'loading' || state.summaryStatus === 'idle') return stateCard('loading', tr('Загружаем карточку сессии','Loading session dashboard'), tr('Получаем task metrics и channel QC для зафиксированного snapshot.','Fetching task metrics and channel QC for the fixed snapshot.'));
-    if (state.summaryStatus === 'error') return `<div class="card" style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div style="max-width:520px;"><h2 style="font-size:16px;color:var(--text);margin:0;">${tr('Карточка сессии недоступна','Session dashboard is unavailable')}</h2><p style="font-size:11px;line-height:1.55;color:var(--muted);">${escapeHtml(state.summaryError && state.summaryError.message || '')}</p><button id="analyticsSummaryRetry" class="quick-btn" type="button" style="margin:14px auto 0;background:rgba(92,102,189,.12);color:var(--accent);">${tr('Повторить загрузку','Retry loading')}</button></div></div>`;
+    if (state.summaryStatus === 'error') return `<div class="card" style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div style="max-width:520px;"><h2 style="font-size:16px;color:var(--text);margin:0;">${tr('Карточка сессии недоступна','Session dashboard is unavailable')}</h2><button id="analyticsSummaryRetry" class="quick-btn" type="button" style="margin:14px auto 0;background:rgba(92,102,189,.12);color:var(--accent);">${tr('Повторить загрузку','Retry loading')}</button></div></div>`;
     const response = state.summaryResponse;
     const data = response && response.data;
     if (!data || !data.session) return stateCard('empty', tr('Нет данных карточки сессии','No session dashboard data'), tr('Backend вернул snapshot без session summary. Это не нулевой результат.','Backend returned a snapshot without a session summary. This is not a zero result.'));
@@ -1614,7 +1841,6 @@
     const channels = Array.isArray(data.qcChannels) ? data.qcChannels : [];
     const protocol = selectedProtocol(state);
     const algorithms = [...new Set(metrics.map(metric => metric.algorithm && metric.algorithm.version).filter(Boolean))].join(', ') || '—';
-    const resolution = session.resolution ? `${session.resolution.width}×${session.resolution.height}` : tr('Нет данных','No data');
     return `<div class="card" style="padding:0;overflow:hidden;">
       <header style="padding:16px 18px;border-bottom:1px solid var(--stroke);display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;">
         <div><div style="font-size:10px;color:var(--muted);">${tr('Участник','Participant')} ${escapeHtml(session.participantAlias)}</div><h2 style="font-size:17px;margin:4px 0 0;color:var(--text);">${tr('Сессия','Session')} ${escapeHtml(session.sessionId)}</h2><div style="font-size:10px;color:var(--muted);margin-top:5px;">${escapeHtml(localizedName(protocol, protocol && protocol.name || session.protocolId))} · v${escapeHtml(session.protocolVersion)}</div></div>
@@ -1623,9 +1849,9 @@
       <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}<div style="font-size:8px;opacity:.75;margin-top:5px;">${escapeHtml(channel.ruleVersion || '—')}</div></article>`; }).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Выполнение задачи','Task performance')}</div>${taskMetrics.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${taskMetrics.map(metricCardHtml).join('')}</div>` : `<div style="font-size:11px;color:var(--muted);">${tr('Метрики задачи не настроены для этого протокола.','Task metrics are not configured for this protocol.')}</div>`}</section>
       ${qcMetrics.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Показатели качества данных','Data quality metrics')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${qcMetrics.map(metricCardHtml).join('')}</div></section>` : ''}
-      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${trialValid && trialValid.status === 'computed' ? escapeHtml(trialValid.value) : '—'}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${trialExcluded && trialExcluded.status === 'computed' ? escapeHtml(trialExcluded.value) : exclusions.length}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;">${exclusions.map(item => `<div style="display:grid;grid-template-columns:90px 1fr 140px;gap:8px;padding:8px 10px;border-top:1px solid var(--stroke);font-size:9px;color:var(--muted);"><span>${escapeHtml(item.entityId)}</span><span>${escapeHtml(reasonLabel(item.reasonCode))}</span><span>${escapeHtml(item.channel ? channelLabel(item.channel) : '—')}</span></div>`).join('')}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
+      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${trialValid && trialValid.status === 'computed' ? escapeHtml(trialValid.value) : '—'}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${trialExcluded && trialExcluded.status === 'computed' ? escapeHtml(trialExcluded.value) : exclusions.length}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
       ${visualAnalyticsHtml(state)}
-      <details style="padding:12px 18px;border-bottom:1px solid var(--stroke);"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Технические данные сессии','Session technical details')}</summary><div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${tr('Устройство','Device')}: ${escapeHtml(session.deviceClass || '—')}</span><span>${tr('Разрешение','Resolution')}: ${escapeHtml(resolution)}</span><span>FPS: ${session.actualFps == null ? '—' : escapeHtml(session.actualFps)}</span><span>${tr('Версии алгоритмов','Algorithm versions')}: ${escapeHtml(algorithms)}</span></div></details>
+      <details style="padding:12px 18px;border-bottom:1px solid var(--stroke);"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Технические данные сессии','Session technical details')}</summary>${technicalDetailsHtml(session, algorithms)}</details>
       <footer style="padding:10px 18px;font-size:9px;color:var(--muted);">snapshot ${escapeHtml(response.snapshot.id)} · ${escapeHtml(response.snapshot.datasetHash)} · contract ${escapeHtml(response.contractVersion)} · ${tr('сформировано','generated')} ${escapeHtml(formatDateTime(response.generatedAt))}</footer>
     </div>`;
   }
@@ -1755,11 +1981,60 @@
     return `<div class="card" style="padding:0;overflow:hidden;">${level==='level-1'?groupDashboardHtml(state):comparisonDashboardHtml(state)}</div>`;
   }
 
+  function dataQualityShellHtml(state) {
+    if (state.summaryStatus === 'loading' || state.summaryStatus === 'idle') {
+      return stateCard('loading', tr('Загружаем качество данных','Loading data quality'), tr('Получаем QC, технические параметры и причины исключения для зафиксированной сессии.','Fetching QC, technical details, and exclusion reasons for the fixed session.'));
+    }
+    if (state.summaryStatus === 'error') {
+      return `<div class="card" style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div><h2 style="font-size:16px;color:var(--text);margin:0;">${tr('Качество данных недоступно','Data quality is unavailable')}</h2><button id="analyticsSummaryRetry" class="quick-btn" type="button" style="margin:14px auto 0;">${tr('Повторить загрузку','Retry loading')}</button></div></div>`;
+    }
+    const response = state.summaryResponse;
+    const data = response && response.data;
+    if (!data || !data.session) {
+      return stateCard('empty', tr('Нет данных о качестве','No quality data'), tr('Backend не вернул QC для выбранной сессии. Нулевые значения не подставляются.','The backend returned no QC for the selected session. Zero values are not substituted.'));
+    }
+    const session = data.session;
+    const quality = data.quality || {};
+    const channels = Array.isArray(data.qcChannels) ? data.qcChannels : [];
+    const exclusions = Array.isArray(data.exclusions) ? data.exclusions : [];
+    const metrics = Array.isArray(data.metrics) ? data.metrics : [];
+    const algorithms = [...new Set(metrics.map(metric => metric.algorithm && metric.algorithm.version).filter(Boolean))].join(', ') || '—';
+    const checks = Object.entries(quality.checks || {});
+    const percentages = [
+      ['faceVisible', tr('Лицо обнаружено','Face detected')],
+      ['faceOk', tr('Лицо полностью видно','Face fully visible')],
+      ['poseOk', tr('Положение головы','Head position')],
+      ['illuminationOk', tr('Освещение','Lighting')],
+      ['eyesOpen', tr('Глаза доступны','Eyes available')],
+      ['gazeValid', tr('Валидный взгляд','Valid gaze')],
+      ['gazeOnScreen', tr('Взгляд на экране','Gaze on screen')],
+      ['lowFps', tr('Кадры с низким FPS','Low-FPS frames')]
+    ].filter(([key]) => Number.isFinite(Number(quality.percentages && quality.percentages[key])));
+    const duration = Number.isFinite(Number(quality.durationMs))
+      ? `${Math.round(Number(quality.durationMs) / 1000)} ${tr('с','s')}`
+      : tr('Нет данных','No data');
+    const overview = [
+      [tr('Статус','Status'), statusLabel(quality.status)],
+      [tr('QC-оценка','QC score'), Number.isFinite(Number(quality.score)) ? `${quality.score}%` : tr('Нет данных','No data')],
+      [tr('Пройдено проверок','Checks passed'), quality.passedChecks != null && quality.totalChecks != null ? `${quality.passedChecks}/${quality.totalChecks}` : tr('Нет данных','No data')],
+      [tr('Длительность','Duration'), duration]
+    ];
+    return `<div class="card" style="padding:0;overflow:hidden;">
+      <header style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:10px;color:var(--muted);">${tr('Сессия','Session')} ${escapeHtml(session.sessionId)}</div><h2 style="font-size:17px;color:var(--text);margin:4px 0 0;">${tr('Качество данных','Data quality')}</h2></header>
+      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;">${overview.map(([label,value], index) => `<article style="padding:12px;border:1px solid var(--stroke);border-radius:11px;background:${index === 0 ? qcTone(quality.status).bg : 'rgba(100,116,139,.04)'};"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:18px;font-weight:770;color:${index === 0 ? qcTone(quality.status).color : 'var(--text)'};margin-top:5px;">${escapeHtml(value)}</div></article>`).join('')}</div></section>
+      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('QC по каналам','QC by channel')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); return `<article style="padding:11px;border:1px solid var(--stroke);border-radius:11px;background:${tone.bg};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;color:${tone.color};"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;color:var(--muted);margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? tr('Нет данных','No data') : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${(channel.reasons || []).length ? `<div style="font-size:9px;color:${tone.color};margin-top:5px;">${escapeHtml(channel.reasons.map(reasonLabel).join('; '))}</div>` : ''}</article>`; }).join('') || `<div style="font-size:10px;color:var(--muted);">${tr('Каналы QC не выбраны','No QC channels selected')}</div>`}</div></section>
+      ${percentages.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Доля качественных кадров','Share of quality frames')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">${percentages.map(([key,label]) => { const value = Number(quality.percentages[key]); const inverse = key === 'lowFps'; const good = inverse ? value <= 5 : value >= 80; return `<article style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="display:flex;justify-content:space-between;gap:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(label)}</span><strong style="color:${good ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(value)}%</strong></div><div style="height:6px;border-radius:999px;background:rgba(100,116,139,.12);margin-top:7px;overflow:hidden;"><span style="display:block;height:100%;width:${Math.max(0,Math.min(100,value))}%;background:${good ? 'var(--good)' : 'var(--warn)'};"></span></div></article>`; }).join('')}</div></section>` : ''}
+      ${checks.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Проверки условий записи','Recording-condition checks')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${checks.map(([key,passed]) => `<div style="padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;display:flex;justify-content:space-between;gap:9px;align-items:center;"><span style="font-size:9px;color:var(--text);">${escapeHtml(qualityCheckLabel(key))}</span><strong style="font-size:9px;color:${passed ? 'var(--good)' : 'var(--warn)'};">${passed ? tr('Пройдено','Passed') : tr('Требует внимания','Needs attention')}</strong></div>`).join('')}</div></section>` : ''}
+      ${(quality.failReasons || []).length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Что требует внимания','What needs attention')}</div>${quality.failReasons.map(reason => `<div style="margin-top:7px;padding:9px 10px;border-radius:9px;background:rgba(245,158,11,.08);color:var(--text);font-size:10px;line-height:1.45;">${escapeHtml(reasonLabel(reason))}</div>`).join('')}</section>` : ''}
+      ${exclusions.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Исключённые пробы','Excluded trials')} (${exclusions.length})</div><div style="border:1px solid var(--stroke);border-radius:10px;overflow:hidden;">${exclusionRowsHtml(exclusions)}</div></section>` : ''}
+      <details style="padding:12px 18px;border-bottom:1px solid var(--stroke);"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Технические данные сессии','Session technical details')}</summary>${technicalDetailsHtml(session, algorithms)}</details>
+      <footer style="padding:10px 18px;font-size:9px;color:var(--muted);">snapshot ${escapeHtml(response.snapshot.id)} · ${escapeHtml(response.snapshot.datasetHash)} · contract ${escapeHtml(response.contractVersion)} · ${tr('сформировано','generated')} ${escapeHtml(formatDateTime(response.generatedAt))}</footer>
+    </div>`;
+  }
+
   function roadmapShellHtml(tab) {
-    const title = tab === 'data-quality' ? tr('Качество данных','Data quality') : tr('Связанность','Connectedness');
-    const text = tab === 'data-quality'
-      ? tr('Здесь появятся channel-level QC, причины исключения и различение low confidence, off-screen и no data.','Channel-level QC, exclusion reasons, and separate low-confidence, off-screen, and no-data states will appear here.')
-      : tr('Модуль связанности зарезервирован в roadmap и не показывает условных или демонстрационных коэффициентов.','The connectedness module is reserved in the roadmap and does not show placeholder or demo coefficients.');
+    const title = tr('Связанность','Connectedness');
+    const text = tr('Модуль связанности зарезервирован в roadmap и не показывает условных или демонстрационных коэффициентов.','The connectedness module is reserved in the roadmap and does not show placeholder or demo coefficients.');
     return `<div class="card" style="min-height:310px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div style="max-width:520px;"><h2 style="font-size:16px;color:var(--text);margin:0;">${title}</h2><p style="font-size:12px;line-height:1.6;color:var(--muted);margin:9px 0 0;">${text}</p><span style="display:inline-block;margin-top:14px;padding:5px 9px;border-radius:999px;background:rgba(245,158,11,.10);color:var(--warn);font-size:10px;font-weight:750;">ROADMAP</span></div></div>`;
   }
 
@@ -1852,7 +2127,7 @@
       if (typeof global.setChips === 'function') {
         const statusLabel = global.EmocogAnalyticsPreviewFixture
           ? (state.query.mode === 'group' ? tr('Предпросмотр · 12 участников','Preview · 12 participants') : tr('Предпросмотр · 1 сессия','Preview · 1 session'))
-          : (state.status === 'ready' ? tr('Данные API','API data') : tr('Без demo','No demo'));
+          : (state.status === 'ready' ? tr('Данные API','API data') : tr('Данные не загружены','Data not loaded'));
         global.setChips([statusLabel]);
       }
       if (state.status === 'unauthorized') {
@@ -1871,12 +2146,14 @@
           const title = state.emptyKind === 'projects' ? tr('Нет доступных проектов','No projects available') : tr('По выбранным фильтрам нет сессий','No sessions match the filters');
           const description = state.emptyKind === 'projects' ? tr('Создайте проект или попросите предоставить к нему доступ.','Create a project or request access to one.') : tr('Это состояние «нет данных», а не нулевой результат. Измените протокол или QC-фильтр.','This is a no-data state, not a zero result. Change the protocol or QC filter.');
           body.insertAdjacentHTML('beforeend', stateCard('empty', title, description));
-        } else if ((activeTab === 'session-card' || activeTab === 'group-comparison') && (!state.snapshot || state.dirty)) {
+        } else if ((activeTab === 'session-card' || activeTab === 'group-comparison' || activeTab === 'data-quality') && (!state.snapshot || state.dirty)) {
           body.insertAdjacentHTML('beforeend', stateCard('empty', tr('Примените фильтры','Apply the filters'), tr('Дашборд появится после того, как backend зафиксирует единую выборку. Это защищает карточки, графики и будущий export от расхождения.','The dashboard appears after the backend fixes one selection. This keeps cards, charts, and future exports aligned.')));
         } else if (activeTab === 'session-card') {
           body.insertAdjacentHTML('beforeend', sessionShellHtml(state));
         } else if (activeTab === 'group-comparison') {
           body.insertAdjacentHTML('beforeend', groupShellHtml(state));
+        } else if (activeTab === 'data-quality') {
+          body.insertAdjacentHTML('beforeend', dataQualityShellHtml(state));
         } else {
           body.insertAdjacentHTML('beforeend', roadmapShellHtml(activeTab));
         }
@@ -1904,6 +2181,12 @@
       body.querySelectorAll('.analytics-qc-channel').forEach(input => input.addEventListener('change', () => store.toggleChannel(input.value, input.checked)));
       body.querySelector('#analyticsResetFilters')?.addEventListener('click', () => store.resetFilters());
       body.querySelector('#analyticsApplyFilters')?.addEventListener('click', () => store.apply());
+      body.querySelector('#analyticsResultImport')?.addEventListener('click', () => body.querySelector('#analyticsResultImportFile')?.click());
+      body.querySelector('#analyticsResultImportFile')?.addEventListener('change', event => {
+        const file = event.target.files && event.target.files[0];
+        if (file) store.importResult(file);
+        event.target.value = '';
+      });
       body.querySelector('#analyticsOpenExport')?.addEventListener('click', () => global.navigate && global.navigate('#/export'));
       body.querySelector('#analyticsSummaryRetry')?.addEventListener('click', () => store.loadSessionSummary());
       body.querySelector('#analyticsVisualRetry')?.addEventListener('click', () => store.loadVisualAnalytics());
@@ -1924,7 +2207,7 @@
     return wrapper;
   }
 
-  global.EmocogAnalyticsProduction = { api, store, view: AnalyticsProductionView, exportView: AnalyticsExportView, hasAuth, buildAnalyticsQuery, buildExportBundle, validateExportBundle, exportBundleCsv };
+  global.EmocogAnalyticsProduction = { api, store, view: AnalyticsProductionView, exportView: AnalyticsExportView, hasAuth, buildAnalyticsQuery, buildExportBundle, validateExportBundle, exportBundleCsv, importResultJson };
   global.AnalyticsView = AnalyticsProductionView;
   global.SessionCardView = function () { return AnalyticsProductionView('session-card'); };
 })(typeof window !== 'undefined' ? window : globalThis);

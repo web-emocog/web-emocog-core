@@ -150,10 +150,7 @@ function OverviewView(){
         if(typeof state !== 'undefined') state.project = card.dataset.proj;
         const sel = document.getElementById('projectSelect');
         if(sel) { for(let i=0;i<sel.options.length;i++){ if(sel.options[i].textContent.trim()===card.dataset.proj){sel.selectedIndex=i;break;} } }
-        const projectId = typeof getSelectedProjectRouteId === 'function'
-          ? getSelectedProjectRouteId()
-          : null;
-        navigate(projectId ? `#/projects/${projectId}/overview` : '#/experiments');
+        navigate('#/experiments');
       });
     });
     root.appendChild(projSection);
@@ -167,13 +164,135 @@ function ExperimentsListView() {
   document.getElementById('pageTitle').textContent = t('experimentsListTitle');
 
   setChips([]);
+  let serverSyncComplete = false;
+
+  function selectedProjectId() {
+    const value = parseInt(localStorage.getItem('emocog_selected_project_id') || '', 10);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+
+  function localProjectId(exp) {
+    const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(exp?.id || 'draft') : {};
+    const value = parseInt(exp?.projectId || apiState.projectId || '', 10);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+
+  function readLocalExperiments() {
+    try {
+      const value = JSON.parse(localStorage.getItem('emocog_my_experiments') || '[]');
+      return Array.isArray(value) ? value : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function serverExperiment(protocol, local) {
+    const definition = protocol?.definition && typeof protocol.definition === 'object'
+      ? protocol.definition
+      : {};
+    const id = local?.id || ('api_' + protocol.id);
+    const activeCode = String(protocol?.invitation_code || '');
+    const entry = {
+      ...(local || {}),
+      id,
+      apiProtocolId: Number(protocol.id),
+      projectId: Number(protocol.project_id),
+      title: protocol.name || local?.title || (CURRENT_LANG === 'en' ? 'Untitled' : 'Без названия'),
+      protocolId: definition.protocolId || local?.protocolId || '',
+      metadata: {
+        ...(local?.metadata || {}),
+        title: protocol.name || local?.metadata?.title || '',
+        protocolId: definition.protocolId || local?.metadata?.protocolId || '',
+        description: definition.description || local?.metadata?.description || '',
+        participantShell: definition.participantShell || local?.metadata?.participantShell
+      },
+      blocks: Array.isArray(definition.blocks) ? definition.blocks : (local?.blocks || []),
+      createdAt: protocol.created_at || local?.createdAt || new Date().toISOString(),
+      updatedAt: protocol.updated_at || local?.updatedAt || new Date().toISOString(),
+      status: activeCode ? 'active' : 'draft'
+    };
+    delete entry.publishError;
+    if (activeCode) {
+      entry.invitationCode = activeCode;
+      entry.publishVerifiedAt = protocol.invitation_created_at || new Date().toISOString();
+      entry.participantLink = typeof window.buildParticipantRunLink === 'function'
+        ? window.buildParticipantRunLink(activeCode)
+        : (window.location.origin || '') + '/apps/participant-web/run_new.html?code=' + encodeURIComponent(activeCode);
+    } else {
+      delete entry.invitationCode;
+      delete entry.publishVerifiedAt;
+      delete entry.participantLink;
+    }
+    if (typeof saveBuilderApiState === 'function') {
+      saveBuilderApiState(id, {
+        apiProtocolId: Number(protocol.id),
+        projectId: Number(protocol.project_id),
+        invitationCode: activeCode || null,
+        publishVerifiedAt: activeCode ? entry.publishVerifiedAt : null
+      });
+    }
+    return entry;
+  }
+
+  async function syncExperimentsFromApi() {
+    if (typeof apiGet !== 'function' || (typeof hasResearcherApiToken === 'function' && !hasResearcherApiToken())) return;
+    const projectId = selectedProjectId();
+    if (!projectId) return;
+    try {
+      const protocols = await apiGet('/protocols?project_id=' + encodeURIComponent(String(projectId)));
+      const serverRows = Array.isArray(protocols) ? protocols : [];
+      const localRows = readLocalExperiments();
+      const localByApiId = new Map();
+      localRows.forEach(function (entry) {
+        const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(entry?.id || 'draft') : {};
+        const apiId = parseInt(entry?.apiProtocolId || apiState.apiProtocolId || '', 10);
+        if (Number.isInteger(apiId) && apiId > 0) localByApiId.set(apiId, entry);
+      });
+
+      const selectedEntries = serverRows.map(function (protocol) {
+        return serverExperiment(protocol, localByApiId.get(Number(protocol.id)) || null);
+      });
+      const serverIds = new Set(serverRows.map(function (protocol) { return Number(protocol.id); }));
+      localRows.forEach(function (entry) {
+        const entryProjectId = localProjectId(entry);
+        if (entryProjectId && entryProjectId !== projectId) return;
+        const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(entry?.id || 'draft') : {};
+        const apiId = parseInt(entry?.apiProtocolId || apiState.apiProtocolId || '', 10);
+        if (Number.isInteger(apiId) && apiId > 0) return;
+        const localDraft = { ...entry, projectId, status: 'draft' };
+        delete localDraft.invitationCode;
+        delete localDraft.publishVerifiedAt;
+        delete localDraft.participantLink;
+        selectedEntries.push(localDraft);
+      });
+      const otherProjectEntries = localRows.filter(function (entry) {
+        const entryProjectId = localProjectId(entry);
+        if (!entryProjectId || entryProjectId === projectId) return false;
+        const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(entry?.id || 'draft') : {};
+        const apiId = parseInt(entry?.apiProtocolId || apiState.apiProtocolId || '', 10);
+        return !Number.isInteger(apiId) || !serverIds.has(apiId) || entryProjectId !== projectId;
+      });
+      localStorage.setItem('emocog_my_experiments', JSON.stringify(otherProjectEntries.concat(selectedEntries)));
+      serverSyncComplete = true;
+      if (root.isConnected) renderActiveTab();
+    } catch (_) {
+      serverSyncComplete = false;
+      if (root.isConnected) renderActiveTab();
+    }
+  }
 
   function participantLinkForExperiment(exp) {
-    const protocolId = (exp?.metadata?.protocolId || exp?.protocolId || exp?.id || 'protocol').trim();
+    const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(exp?.id || 'draft') : {};
+    const apiProtocolId = parseInt(exp?.apiProtocolId || apiState.apiProtocolId || '', 10);
+    const verifiedAt = exp?.publishVerifiedAt || apiState.publishVerifiedAt;
+    const invitationCode = exp?.invitationCode || apiState.invitationCode || '';
+    if (!serverSyncComplete || !Number.isInteger(apiProtocolId) || apiProtocolId <= 0 || !verifiedAt) return '';
+    if (exp?.participantLink) return exp.participantLink;
+    if (!invitationCode) return '';
     if (typeof window.buildParticipantRunLink === 'function') {
-      return window.buildParticipantRunLink(protocolId);
+      return window.buildParticipantRunLink(invitationCode);
     }
-    return (window.location.origin || '') + '/invite/' + encodeURIComponent(protocolId);
+    return (window.location.origin || '') + '/apps/participant-web/run_new.html?code=' + encodeURIComponent(invitationCode);
   }
 
   const root = document.createElement('div');
@@ -183,8 +302,37 @@ function ExperimentsListView() {
   content.style.cssText = 'flex:1; overflow-y:auto; min-height:0; padding:20px;';
   root.appendChild(content);
 
+  if (window.WecogAccountStorage && window.WecogAccountStorage.hasRecoverableArchive()) {
+    const recovery = document.createElement('div');
+    recovery.style.cssText = 'margin:20px 20px 0;padding:14px 16px;border:1px solid var(--stroke);border-radius:14px;background:var(--surface);display:flex;align-items:center;justify-content:space-between;gap:16px;';
+    recovery.innerHTML = `
+      <div style="min-width:0;">
+        <div style="font-size:13px;font-weight:750;color:var(--text);">${CURRENT_LANG === 'en' ? 'Local drafts from a previous version were found' : 'Найдены локальные черновики из предыдущей версии'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px;">${CURRENT_LANG === 'en' ? 'They can be restored without old participant links.' : 'Их можно восстановить без старых ссылок участников.'}</div>
+      </div>
+      <button type="button" class="quick-btn" id="recoverLegacyDrafts" style="flex:0 0 auto;">${CURRENT_LANG === 'en' ? 'Restore drafts' : 'Восстановить черновики'}</button>
+    `;
+    root.insertBefore(recovery, content);
+    recovery.querySelector('#recoverLegacyDrafts').addEventListener('click', function () {
+      let user = null;
+      try { user = JSON.parse(localStorage.getItem('emocog_api_user') || 'null'); } catch (_) {}
+      const result = window.WecogAccountStorage.recoverLatestArchive(user && user.id);
+      recovery.remove();
+      serverSyncComplete = false;
+      renderActiveTab();
+      syncExperimentsFromApi();
+      toast(result && result.restored
+        ? (CURRENT_LANG === 'en' ? 'Local drafts restored' : 'Локальные черновики восстановлены')
+        : (CURRENT_LANG === 'en' ? 'No drafts to restore' : 'Черновики для восстановления не найдены'));
+    });
+  }
+
   function renderActiveTab() {
-    let experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+    const projectId = selectedProjectId();
+    let experiments = readLocalExperiments().filter(function (entry) {
+      const entryProjectId = localProjectId(entry);
+      return !projectId || !entryProjectId || entryProjectId === projectId;
+    });
 
     if (experiments.length === 0) {
       content.innerHTML = `
@@ -198,10 +346,12 @@ function ExperimentsListView() {
 
     content.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px; max-width:1200px; margin:0 auto;">
-        ${experiments.map(exp => `
+        ${experiments.map(exp => {
+          const participantLink = participantLinkForExperiment(exp);
+          return `
           <div class="card exp-card" data-id="${escapeUiHtml(exp.id)}" style="padding:20px;cursor:pointer;transition:transform 0.1s;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
-              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${escapeUiHtml(exp.title || (CURRENT_LANG === 'en' ? 'Untitled' : 'Без названия'))}</div>
+              <div data-no-auto-i18n style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${escapeUiHtml(exp.title || (CURRENT_LANG === 'en' ? 'Untitled' : 'Без названия'))}</div>
               <span style="font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;background:${exp.status==='active'?'rgba(16,185,129,.15)':'rgba(92,102,189,.1)'};color:${exp.status==='active'?'var(--good)':'var(--muted)'};">
                 ${exp.status === 'active' ? t('active') : t('draft')}
               </span>
@@ -211,13 +361,13 @@ function ExperimentsListView() {
     </div>
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;flex-wrap:wrap;">
               <button class="quick-btn edit-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
-              <button class="quick-btn copy-exp-link-btn" data-link="${escapeUiHtml(participantLinkForExperiment(exp))}" style="flex:1;justify-content:center;font-size:12px;background:rgba(92,102,189,.08);border-color:rgba(92,102,189,.24);color:var(--accent);font-weight:700;">
-                ${autoTranslateString('Скопировать ссылку', CURRENT_LANG)}
+              <button class="quick-btn copy-exp-link-btn" data-link="${escapeUiHtml(participantLink)}" style="flex:1;justify-content:center;font-size:12px;background:rgba(92,102,189,.08);border-color:rgba(92,102,189,.24);color:${participantLink ? 'var(--accent)' : 'var(--muted)'};font-weight:700;" ${participantLink ? '' : 'disabled'}>
+                ${participantLink ? autoTranslateString('Скопировать ссылку', CURRENT_LANG) : (CURRENT_LANG === 'en' ? 'Publish first' : 'Сначала опубликуйте')}
               </button>
               <button class="quick-btn del-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
       </div>
     </div>
-        `).join('')}
+        `; }).join('')}
     </div>
   `;
 
@@ -262,6 +412,7 @@ function ExperimentsListView() {
   setExperimentsActiveMode(true);
   setExperimentsConstructorMode(false);
   renderActiveTab();
+  syncExperimentsFromApi();
 
   return root;
 }

@@ -377,23 +377,26 @@ function tG(g){ return ((I18N[CURRENT_LANG]||{}).groups||{})[g] || I18N.ru.group
 function tM(k){ return ((I18N[CURRENT_LANG]||{}).metrics||{})[k] || I18N.ru.metrics[k] || {}; }
 
 function setLang(lang){
-  if(lang === CURRENT_LANG) return;
+  if(lang !== 'ru' && lang !== 'en') return;
+  if(lang === CURRENT_LANG) {
+    window.dispatchEvent(new CustomEvent('wecog:languagechange', { detail: { lang } }));
+    return;
+  }
   CURRENT_LANG = lang;
+  document.documentElement.lang = lang;
+  try { localStorage.setItem('wecog_researcher_language', lang); } catch (_) {}
   const btnRu = document.getElementById('langRu');
   const btnEn = document.getElementById('langEn');
   if(btnRu && btnEn){
-    btnRu.style.background  = lang==='ru' ? 'rgba(92,102,189,.12)' : 'transparent';
-    btnRu.style.color       = lang==='ru' ? 'var(--accent)' : 'var(--muted2)';
-    btnRu.style.borderColor = lang==='ru' ? 'rgba(92,102,189,.28)' : 'var(--stroke)';
-    btnEn.style.background  = lang==='en' ? 'rgba(92,102,189,.12)' : 'transparent';
-    btnEn.style.color       = lang==='en' ? 'var(--accent)' : 'var(--muted2)';
-    btnEn.style.borderColor = lang==='en' ? 'rgba(92,102,189,.28)' : 'var(--stroke)';
+    btnRu.classList.toggle('active', lang === 'ru');
+    btnEn.classList.toggle('active', lang === 'en');
   }
   render(); // re-render current page in new language
   // Apply best-effort translation to any remaining static text
   setTimeout(()=>{
     applyAutoI18n(document.body);
     updateRoleBadgeLabel();
+    window.dispatchEvent(new CustomEvent('wecog:languagechange', { detail: { lang } }));
   }, 0);
 }
 // ─── end i18n ───────────────────────────────────────────────────────────────
@@ -969,6 +972,8 @@ function applyAutoI18n(root=document.body){
       if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
       // Skip code-like blocks
       if(p.closest('pre, code')) return NodeFilter.FILTER_REJECT;
+      // Names, identifiers and imported study content are data, not UI labels.
+      if(p.closest('[data-no-auto-i18n]')) return NodeFilter.FILTER_REJECT;
       const v = node.nodeValue;
       if(!v || !v.trim()) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
@@ -985,6 +990,7 @@ function applyAutoI18n(root=document.body){
 
   // Common attributes
   root.querySelectorAll('[title],[placeholder],[aria-label]').forEach(el=>{
+    if(el.closest('[data-no-auto-i18n]')) return;
     if(el.hasAttribute('title')){
       const v = el.getAttribute('title');
       const next = autoTranslateString(v, CURRENT_LANG);

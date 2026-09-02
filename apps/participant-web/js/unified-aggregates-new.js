@@ -34,6 +34,97 @@ function mean(nums) {
     return c > 0 ? s / c : null;
 }
 
+const RAW_SERIES_KEYS = new Set([
+    'landmarks',
+    'samples',
+    'values',
+    'points',
+    'benchmarkPoints',
+    'trajectory',
+    'blinks',
+    'closureEvents',
+    'fpsHistory',
+    'durationsMs'
+]);
+
+/**
+ * Keep scientific summaries while removing frame-level series. The full local
+ * session can still be downloaded, but /ingest must stay below the route limit
+ * and must never transport raw face landmarks.
+ */
+function compactMetricObject(value, depth = 0) {
+    if (value == null || typeof value !== 'object') return value;
+    if (depth > 8) return null;
+    if (Array.isArray(value)) {
+        if (value.length <= 32 && value.every(item => (
+            item == null || ['string', 'number', 'boolean'].includes(typeof item)
+        ))) {
+            return value.slice();
+        }
+        return undefined;
+    }
+
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+        if (Array.isArray(item)) {
+            if (RAW_SERIES_KEYS.has(key) || item.some(entry => entry && typeof entry === 'object')) {
+                out[`${key}Count`] = item.length;
+                continue;
+            }
+            if (item.length <= 32) out[key] = item.slice();
+            else out[`${key}Count`] = item.length;
+            continue;
+        }
+        if (RAW_SERIES_KEYS.has(key) && item && typeof item === 'object') continue;
+        const compacted = compactMetricObject(item, depth + 1);
+        if (compacted !== undefined) out[key] = compacted;
+    }
+    return out;
+}
+
+function compactPrecheck(precheck) {
+    return precheck && typeof precheck === 'object'
+        ? compactMetricObject(precheck)
+        : {};
+}
+
+function compactAttentionMetrics(metrics) {
+    return metrics && typeof metrics === 'object'
+        ? compactMetricObject(metrics)
+        : null;
+}
+
+function compactBlinkSummary(summary) {
+    return summary && typeof summary === 'object'
+        ? compactMetricObject(summary)
+        : null;
+}
+
+function compactPerclosSummary(summary) {
+    return summary && typeof summary === 'object'
+        ? compactMetricObject(summary)
+        : null;
+}
+
+function compactGazeValidation(validation) {
+    return validation && typeof validation === 'object'
+        ? compactMetricObject(validation)
+        : null;
+}
+
+function compactAudioSummary(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    return {
+        ...summary,
+        markers: Array.isArray(summary.markers)
+            ? summary.markers.slice(0, 32).map(item => compactMetricObject(item))
+            : [],
+        windows: Array.isArray(summary.windows)
+            ? summary.windows.slice(-360).map(item => compactMetricObject(item))
+            : []
+    };
+}
+
 function extractBlockOrder(events) {
     const list = Array.isArray(events) ? events : [];
     const starts = list
@@ -304,14 +395,32 @@ const INGEST_EVENT_TYPES = new Set([
     'invitation_auto_start_cognitive'
 ]);
 
-function trimEventsForIngest(events) {
+export function trimEventsForIngest(events) {
     const list = Array.isArray(events) ? events : [];
     const filtered = list.filter((e) => e && (
         INGEST_EVENT_TYPES.has(e.type)
         || (e.schemaVersion === 'session_event.v1' && e.category !== 'input')
     ));
     const picked = filtered.length ? filtered : list;
-    return picked.length > 250 ? picked.slice(-250) : picked;
+    const limit = 250;
+    if (picked.length <= limit) return picked;
+
+    // Survey answers are research data, not disposable diagnostics. Keep every
+    // response that fits the transport limit, then fill remaining slots with
+    // the newest non-survey events while preserving chronological order.
+    const requiredIndexes = [];
+    picked.forEach((event, index) => {
+        if (event?.type === 'survey_response') requiredIndexes.push(index);
+    });
+    const retainedRequired = requiredIndexes.slice(-limit);
+    const selectedIndexes = new Set(retainedRequired);
+    let remaining = limit - selectedIndexes.size;
+    for (let index = picked.length - 1; index >= 0 && remaining > 0; index -= 1) {
+        if (selectedIndexes.has(index)) continue;
+        selectedIndexes.add(index);
+        remaining--;
+    }
+    return picked.filter((_, index) => selectedIndexes.has(index));
 }
 
 function buildGazeAnalyticsPayload(sessionData) {
@@ -321,12 +430,13 @@ function buildGazeAnalyticsPayload(sessionData) {
         : [];
     const presentations = allPresentations.slice(0, 200).map(entry => ({
             blockId: entry.blockId ?? null,
+            attempt: entry.attempt ?? null,
             trialId: entry.trialId ?? null,
             stimulusId: entry.stimulusId ?? null,
             stimulusName: entry.stimulusName ?? null,
             stimulusType: entry.stimulusType ?? null,
             stimulusVersion: entry.stimulusVersion || '1',
-            presentationId: entry.presentationId || `${String(entry.blockId)}:${String(entry.trialId ?? 'trial')}:${String(entry.stimulusId)}`,
+            presentationId: entry.presentationId || `${String(entry.blockId)}:${String(entry.attempt ?? 'attempt')}:${String(entry.trialId ?? 'trial')}:${String(entry.stimulusId)}`,
             intrinsicWidth: Number.isFinite(entry.intrinsicWidth) ? entry.intrinsicWidth : null,
             intrinsicHeight: Number.isFinite(entry.intrinsicHeight) ? entry.intrinsicHeight : null,
             grid: entry.grid || { width: 0, height: 0, values: [] },
@@ -391,12 +501,19 @@ export function buildAggregatesPayload(sessionData, options = {}) {
             },
             tech: sessionData.tech ? { ...sessionData.tech } : {}
         },
-        precheck: sessionData.precheck ? { ...sessionData.precheck } : {},
+        precheck: compactPrecheck(sessionData.precheck),
         qcSummary: sessionData.qcSummary ? { ...sessionData.qcSummary } : null,
-        attentionMetrics: sessionData.attentionMetrics ? { ...sessionData.attentionMetrics } : null,
-        blink_summary: sessionData.blinkSummary ? { ...sessionData.blinkSummary } : null,
-        perclos_summary: sessionData.perclosSummary ? { ...sessionData.perclosSummary } : null,
+        attentionMetrics: compactAttentionMetrics(sessionData.attentionMetrics),
+        blink_summary: compactBlinkSummary(sessionData.blinkSummary),
+        perclos_summary: compactPerclosSummary(sessionData.perclosSummary),
         body_pose_summary: sessionData.bodyPoseSummary ? { ...sessionData.bodyPoseSummary } : null,
+        audio_summary: compactAudioSummary(sessionData.audioSummary),
+        multimodal_summary: sessionData.multimodalSummary
+            ? { ...sessionData.multimodalSummary }
+            : null,
+        multimodal_heatmap: sessionData.multimodalHeatmap
+            ? { ...sessionData.multimodalHeatmap }
+            : null,
         blocks,
         emotion_summary: emotionSummaryPayload,
         bpm_summary,
@@ -406,7 +523,7 @@ export function buildAggregatesPayload(sessionData, options = {}) {
             ? { experimentMeta: { ...sessionData.experimentMeta } }
             : {}),
         cognitiveResults: Array.isArray(sessionData.cognitiveResults) ? [...sessionData.cognitiveResults] : [],
-        gazeValidation: sessionData.gazeValidation ? { ...sessionData.gazeValidation } : null,
+        gazeValidation: compactGazeValidation(sessionData.gazeValidation),
         gaze_analytics,
         events: forIngest
             ? trimEventsForIngest(sessionData.events)

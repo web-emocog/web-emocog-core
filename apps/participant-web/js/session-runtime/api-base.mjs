@@ -31,6 +31,22 @@ function parseCandidate(value, pageUrl) {
     }
 }
 
+function localApiOrigin(pageUrl) {
+    const hostname = String(pageUrl.hostname || '').replace(/^\[|\]$/g, '');
+    const host = hostname.includes(':') ? `[${hostname}]` : hostname;
+    return `${pageUrl.protocol}//${host}:3000`;
+}
+
+function defaultApiBase(pageUrl) {
+    if (isLoopback(pageUrl.hostname)) {
+        return pageUrl.port === '3000' ? pageUrl.origin : localApiOrigin(pageUrl);
+    }
+    if ((pageUrl.pathname || '').startsWith('/main/')) {
+        return `${pageUrl.origin}/main/api`;
+    }
+    return new URL('/api', pageUrl.origin).href;
+}
+
 export function isAllowedApiBase(candidate, options = {}) {
     if (!candidate) return false;
     const pageUrl = options.pageUrl instanceof URL
@@ -58,7 +74,7 @@ export function resolveParticipantApiBase(options = {}) {
     const pageUrl = options.pageUrl instanceof URL
         ? options.pageUrl
         : new URL(options.pageUrl || runtime.location?.href || 'http://localhost/');
-    const defaultBase = trimTrailingSlash(new URL('/api', pageUrl.origin).href);
+    const defaultBase = trimTrailingSlash(defaultApiBase(pageUrl));
     const allowedOrigins = options.allowedOrigins
         ?? runtime.WECOG_API_ORIGINS
         ?? [];
@@ -90,5 +106,6 @@ export function resolveParticipantApiBase(options = {}) {
 export const __test = {
     isLoopback,
     normalizeAllowedOrigins,
-    parseCandidate
+    parseCandidate,
+    defaultApiBase
 };

@@ -5,11 +5,13 @@
 `apps/participant-web/js/session-runtime/` управляет единой измерительной
 сессией участника. После precheck и до начала калибровки запускается один
 видеопайплайн, который непрерывно обслуживает gaze, blinks/PERCLOS, emotions,
-body pose/movement, QC и BPM. Без калибровки координаты gaze не считаются
+body pose/movement, QC и BPM. Опциональный аудиопайплайн запускается только
+после отдельного согласия участника и не блокирует видеопайплайн при отказе в
+доступе к микрофону. Без калибровки координаты gaze не считаются
 достоверными и не публикуются, остальные сигналы продолжают собираться. RT
 фиксируется глобальными обработчиками ввода только внутри активного испытания.
 
-Сырое видео не отправляется на API. В итоговый `SessionFeature` входят
+Сырые видео и аудио не сохраняются и не отправляются на API. В итоговый `SessionFeature` входят
 агрегаты, типизированные события, состояние lifecycle и признаки качества.
 Emotion и body pose используют online accumulators всей сессии; ограничение
 размера диагностического массива не меняет итоговые средние.
@@ -148,8 +150,37 @@ Token mismatch на `/ingest` возвращает `409`, отсутствующ
 | body pose | около 5 Hz | torso movement, bursts, lean, confidence |
 | BPM/respiration | непрерывный rPPG | run и session summaries |
 | RT | input events в trial | typed input events и protocol RT features |
+| audio | окна по 10 секунд | локальные biomarker/QC aggregates, без PCM |
+| multimodal | каждый принятый gaze frame | gaze + emotion + head/body по общему времени |
 
-Сырые video frames не включаются в payload.
+Все непрерывные сигналы получают время из одного monotonic clock. Multimodal
+сопоставление принимает ближайший сигнал только в пределах 100 мс, не
+подставляет эмоцию при отсутствии/низкой уверенности и хранит gaze в
+нормализованных координатах конкретного стимула. Gamer/head-body слой включается
+отдельным protocol feature flag.
+
+Сырые video frames и audio PCM не включаются в payload. Аудиоанализ имеет
+таймаут, а отказ `AudioWorklet` переключает сбор на `ScriptProcessor`, поэтому
+ошибка необязательного модуля не блокирует завершение сессии.
+
+## Feature flags и согласие
+
+Исследователь задаёт флаги в `protocol.settings.featureFlags`:
+
+```json
+{
+  "audio": false,
+  "multimodal": true,
+  "bodyMovement": true,
+  "gamerMode": false
+}
+```
+
+`audio=true` только показывает участнику отдельный необязательный пункт
+согласия. Без явного `audioConsent.granted=true` браузер не запрашивает
+микрофон. Отказ или отсутствие поддержки переводят аудио в degraded status,
+но не бракуют остальные измерения. Debug/raw capture запрещён независимо от
+feature flags.
 
 ## Интеграция нового теста
 
@@ -212,6 +243,11 @@ CDN fallback в каноническом participant flow отсутствует
 Participant entry pages задают `Referrer-Policy: no-referrer`, поскольку код
 приглашения является bearer credential и находится в URL.
 
+Production nginx должен отдавать `.mjs` как JavaScript и разрешать
+`camera=(self), microphone=(self)` только participant-страницам. Готовый
+фрагмент: `deploy/nginx-participant-media.conf`. API и researcher routes не
+должны получать доступ к media devices.
+
 ## Тесты
 
 ```bash
@@ -221,14 +257,17 @@ npm test
 cd ../autotests
 npm ci
 npx playwright install chromium
-npx playwright test tests/smoke.spec.ts tests/session-runtime.spec.ts
+npx playwright install firefox
+npx playwright test
 ```
 
 Unit/contract-набор проверяет повторный finish, конфликт ключей, восстановление
 после reload, потерю сети, ошибки модулей, debounce качества и JSON Schema.
-Playwright проверяет запрет паузы во время испытания, повтор невалидного блока,
+Playwright в Chromium и Firefox проверяет запрет паузы во время испытания, повтор невалидного блока,
 reload/offline/module failures, непрерывные blink dynamics/PERCLOS и emotion,
-остановку камеры, повтор финальной отправки и стабильный `Idempotency-Key`.
+остановку камеры/микрофона, повтор финальной отправки, стабильный
+`Idempotency-Key`, отдельное audio consent, отсутствие raw media,
+multimodal-синхронизацию и допустимое влияние аудиоанализа на FPS.
 
 ## Незакрытые production gates
 

@@ -10,6 +10,10 @@ function importGazeModule(name) {
   return import(pathToFileURL(path.join(gazeRoot, name)).href);
 }
 
+function importParticipantModule(relativePath) {
+  return import(pathToFileURL(path.resolve(gazeRoot, '..', relativePath)).href);
+}
+
 function importAttentionModule() {
   const source = fs.readFileSync(path.join(gazeRoot, 'attention-metrics.js'), 'utf8');
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
@@ -24,12 +28,22 @@ function makeLandmarks(irisX, irisY) {
   set(263, 0.8, 0.5);
   set(386, 0.7, 0.45);
   set(374, 0.7, 0.55);
-  set(468, 0.7 + irisX * 0.1, 0.5 + irisY * 0.05);
+  const leftIrisX = 0.7 + irisX * 0.1;
+  const leftIrisY = 0.5 + irisY * 0.05;
+  for (const [index, dx, dy] of [
+    [468, 0, 0], [469, -0.008, 0], [470, 0, -0.008],
+    [471, 0.008, 0], [472, 0, 0.008],
+  ]) set(index, leftIrisX + dx, leftIrisY + dy);
   set(133, 0.4, 0.5);
   set(33, 0.2, 0.5);
   set(159, 0.3, 0.45);
   set(145, 0.3, 0.55);
-  set(473, 0.3 + irisX * 0.1, 0.5 + irisY * 0.05);
+  const rightIrisX = 0.3 + irisX * 0.1;
+  const rightIrisY = 0.5 + irisY * 0.05;
+  for (const [index, dx, dy] of [
+    [473, 0, 0], [474, -0.008, 0], [475, 0, -0.008],
+    [476, 0.008, 0], [477, 0, 0.008],
+  ]) set(index, rightIrisX + dx, rightIrisY + dy);
   set(1, 0.5, 0.58);
   set(234, 0.1, 0.55);
   set(454, 0.9, 0.55);
@@ -39,6 +53,46 @@ function makeLandmarks(irisX, irisY) {
 }
 
 describe('gaze signal semantics', () => {
+  it('resets post-validation gaze availability without discarding validation', async () => {
+    const { QCMetrics } = await importParticipantModule('qc-metrics/index.js');
+    const qc = new QCMetrics({ screenWidth: 1000, screenHeight: 700 });
+    qc._counters.gazeTotal = 1;
+    qc._counters.gazeValid = 1;
+    qc._counters.gazeOnScreen = 1;
+    qc.setValidationData([
+      { gazeX: 100, gazeY: 100, targetX: 100, targetY: 100 },
+      { gazeX: 200, gazeY: 200, targetX: 200, targetY: 200 },
+      { gazeX: 300, gazeY: 300, targetX: 300, targetY: 300 },
+    ]);
+    qc.resetGazeAvailability();
+    assert.equal(qc._counters.gazeTotal, 0);
+    assert.equal(qc._validationState.isComplete, true);
+  });
+  it('keeps repeated attempts separate in the legacy gaze heatmap path', async () => {
+    const { buildHeatmaps } = await importParticipantModule('web-page/heatmap.js');
+    const base = {
+      correctedX: 150,
+      correctedY: 75,
+      valid: true,
+      onScreen: true,
+      confidence: 0.9,
+      phase: 'cognitive_stimulus',
+      blockId: 'vpc',
+      trialId: 'trial-1',
+      stimulusId: 'cat-1',
+      screenWidth: 1000,
+      screenHeight: 700,
+      stimulusRect: { left: 100, top: 50, width: 200, height: 100 },
+    };
+    const result = buildHeatmaps([
+      { ...base, attempt: 1, t: 1000 },
+      { ...base, attempt: 2, t: 1100 },
+    ], { screenWidth: 1000, screenHeight: 700 });
+    assert.equal(result.perStimulus.length, 2);
+    assert.deepEqual(result.perStimulus.map(item => item.attempt), [1, 2]);
+    assert.notEqual(result.perStimulus[0].presentationId, result.perStimulus[1].presentationId);
+  });
+
   it('uses corrected input velocity instead of feeding display lag back into smoothing', async () => {
     const { AdaptiveGazeFilter } = await importGazeModule('signal-processing.mjs');
     const filter = new AdaptiveGazeFilter({
@@ -126,10 +180,15 @@ describe('gaze signal semantics', () => {
     }
     assert.equal(tracker.calibrate(), true);
     assert.equal(tracker.setPostCalibrationCorrection({
-      matrixX: [1, 0, 10],
-      matrixY: [0, 1, 20],
+      kind: 'residual_bias',
+      offsetX: 10,
+      offsetY: 20,
       source: 'test',
     }), true);
+    assert.equal(tracker.setPostCalibrationCorrection({
+      matrixX: [1, 0, 0],
+      matrixY: [0, 1, 0],
+    }), false);
     const before = tracker.predict(makeLandmarks(0.25, -0.25), { timestamp: 0 });
     tracker.updateScreenSize(2000, 1000);
     const after = tracker.predict(makeLandmarks(0.25, -0.25), { timestamp: 33 });
@@ -139,6 +198,58 @@ describe('gaze signal semantics', () => {
     assert.ok(Math.abs(after.rawY - before.rawY * 2) <= 1);
     assert.ok(Math.abs(after.correctedX - before.correctedX * 2) <= 1);
     assert.ok(Math.abs(after.correctedY - before.correctedY * 2) <= 1);
+  });
+
+  it('applies residual bias only when LOOCV lowers every held-out target error', async () => {
+    const {
+      applyResidualBiasCorrection,
+      evaluateResidualBiasLOOCV,
+      fitResidualBias,
+      shouldApplyResidualBiasCorrection,
+      evaluateIndependentCorrectionBenchmark,
+    } = await importGazeModule('bias-correction.mjs');
+    const targets = [
+      [120, 100], [500, 100], [880, 100],
+      [120, 400], [500, 400], [880, 400],
+    ];
+    const points = targets.map(([targetX, targetY]) => ({
+      samples: Array.from({ length: 12 }, (_, index) => ({
+        gazeX: targetX - 40 + (index % 3) - 1,
+        gazeY: targetY + 25 + (index % 3) - 1,
+        targetX,
+        targetY,
+      })),
+    }));
+    const correction = fitResidualBias(points, { width: 1000, height: 500 });
+    assert.ok(Math.abs(correction.offsetX - 40) < 1);
+    assert.ok(Math.abs(correction.offsetY + 25) < 1);
+    assert.ok(correction.trajectory.every(step => step.rmsAfterPx <= step.rmsBeforePx));
+    const corrected = applyResidualBiasCorrection(points, correction);
+    assert.ok(Math.abs(corrected[0].samples[0].gazeX - targets[0][0]) <= 1);
+    const loocv = evaluateResidualBiasLOOCV(points, { width: 1000, height: 500 });
+    assert.equal(loocv.worsenedTargetCount, 0);
+    assert.ok(loocv.loocvRmsHeldOutPx < loocv.rawTargetRmsPx);
+    assert.equal(shouldApplyResidualBiasCorrection(loocv), true);
+
+    points[5].samples.forEach(sample => {
+      sample.gazeX = sample.targetX + 160;
+      sample.gazeY = sample.targetY - 120;
+    });
+    const inconsistent = evaluateResidualBiasLOOCV(points, { width: 1000, height: 500 });
+    assert.ok(inconsistent.worsenedTargetCount > 0);
+    assert.equal(shouldApplyResidualBiasCorrection(inconsistent), false);
+
+    const rollback = evaluateIndependentCorrectionBenchmark(
+      { accuracyPx: 90, precisionPx: 18, biasX: 40, biasY: 10 },
+      { accuracyPx: 96, precisionPx: 18, biasX: 45, biasY: 12 },
+    );
+    assert.equal(rollback.accepted, false);
+    assert.equal(rollback.reason, 'independent_benchmark_regression');
+    const accepted = evaluateIndependentCorrectionBenchmark(
+      { accuracyPx: 90, precisionPx: 18, biasX: 40, biasY: 10 },
+      { accuracyPx: 82, precisionPx: 18.2, biasX: 20, biasY: 5 },
+    );
+    assert.equal(accepted.accepted, true);
   });
 
   it('calibrates targets in visual content viewport coordinates', async () => {

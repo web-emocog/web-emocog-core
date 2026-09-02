@@ -347,17 +347,17 @@ export function collectTips() {
                 if (pose.issues.includes('yaw_exceeded')) {
                     // yaw > 0 — голова повёрнута вправо, нужно повернуть влево
                     if (pose.yaw > 0) {
-                        tips.push(translations[state.currentLang].tip_pose_turn_down);
+                        tips.push(translations[state.currentLang].tip_pose_turn_left);
                     } else {
-                        tips.push(translations[state.currentLang].tip_pose_turn_up);
+                        tips.push(translations[state.currentLang].tip_pose_turn_right);
                     }
                 }
                 if (pose.issues.includes('pitch_exceeded')) {
                     // pitch > 0 — голова опущена, нужно поднять
                     if (pose.pitch > 0) {
-                        tips.push(translations[state.currentLang].tip_pose_tilt_right);
+                        tips.push(translations[state.currentLang].tip_pose_raise_head);
                     } else {
-                        tips.push(translations[state.currentLang].tip_pose_tilt_left);
+                        tips.push(translations[state.currentLang].tip_pose_lower_head);
                     }
                 }
                 if (pose.issues.includes('roll_exceeded')) {

@@ -1,0 +1,51 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CODEQL_ENABLED: ${{ github.event.repository.private == false || vars.CODEQL_ENABLED == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - name: Checkout
+        if: env.CODEQL_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Initialize CodeQL
+        if: env.CODEQL_ENABLED == 'true'
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - name: Analyze
+        if: env.CODEQL_ENABLED == 'true'
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          category: /language:${{ matrix.language }}
+      - name: Explain unavailable CodeQL integration
+        if: env.CODEQL_ENABLED != 'true'
+        run: |
+          echo "::notice title=CodeQL unavailable::This private repository does not have GitHub Code Security enabled. Security contract tests, dependency audit and release audit still run in Release gates."
+          echo "Enable GitHub Code Security, then set the repository variable CODEQL_ENABLED=true to activate CodeQL uploads."

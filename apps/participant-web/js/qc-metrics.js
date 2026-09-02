@@ -600,6 +600,19 @@ class QCMetricsInline {
 
         console.log(`[QCMetrics] Validation data set: ${errors.length} points`);
     }
+
+    resetGazeAvailability() {
+        this._counters.gazeTotal = 0;
+        this._counters.gazeValid = 0;
+        this._counters.gazeOnScreen = 0;
+        this._gazeState = {
+            valid: false,
+            onScreen: null,
+            validTimeMs: 0,
+            onScreenTimeMs: 0,
+            hasData: false
+        };
+    }
 }
 
 // CommonJS export (для тестов под node)

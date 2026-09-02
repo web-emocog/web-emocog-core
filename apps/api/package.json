@@ -5,14 +5,20 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "start:phase4": "node server_phase4_updated.js",
     "dev": "node --watch server.js",
     "migrate": "node-pg-migrate",
     "migrate:up": "node-pg-migrate up",
     "migrate:down": "node-pg-migrate down",
     "migrate:create": "node-pg-migrate create",
+    "migrate:verify": "bash scripts/verify-migrations.sh",
+    "backup:db": "bash scripts/backup-db.sh",
+    "restore:db": "bash scripts/restore-db.sh",
+    "backup:verify": "bash scripts/verify-backup-restore.sh",
+    "load:ingest": "node scripts/load-ingest.js",
     "admin:bootstrap": "node scripts/bootstrap-admin.js",
     "test": "node --test tests/*.test.js",
+    "test:postgres": "node --test tests/s2-postgres.integration.test.js",
+    "test:release": "node --test tests/server-lifecycle.test.js tests/bulk-insert.test.js tests/release-hardening.test.js",
     "test:rt-python": "python3 ../../rt_component-/scripts/analyze_events_json.py < ../../rt_component-/tests/smoke_input.json"
   },
   "engines": {
