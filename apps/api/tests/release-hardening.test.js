@@ -1,6 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -68,5 +69,65 @@ describe('S3-01 release hardening', () => {
     assert.doesNotMatch(workflow, /npm start > \/tmp\/wecog-api\.log 2>&1 &/);
     assert.match(workflow, /kill -TERM "\$\(cat \/tmp\/wecog-api\.pid\)"/);
     assert.match(workflow, /grep -q 'api_shutdown_completed' \/tmp\/wecog-api\.log/);
+  });
+
+  it('discovers exported OS Login credentials from files instead of CLI text', () => {
+    const repositoryRoot = path.resolve(apiRoot, '../..');
+    const helper = path.join(repositoryRoot, 'deploy/production/export-oslogin-identity.sh');
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wecog-oslogin-'));
+    const binaryDirectory = path.join(temporaryRoot, 'bin');
+    const credentialDirectory = path.join(temporaryRoot, 'credentials');
+    const fakeYc = path.join(binaryDirectory, 'yc');
+
+    try {
+      fs.mkdirSync(binaryDirectory);
+      fs.writeFileSync(fakeYc, `#!/usr/bin/env bash
+set -Eeuo pipefail
+directory=''
+while (( $# > 0 )); do
+  if [[ $1 == --directory ]]; then
+    directory=$2
+    shift 2
+  else
+    shift
+  fi
+done
+test -n "\${directory}"
+: > "\${directory}/generated-identity"
+: > "\${directory}/generated-identity-cert.pub"
+`);
+      fs.chmodSync(fakeYc, 0o755);
+
+      const result = spawnSync('bash', [
+        helper,
+        credentialDirectory,
+        'wecog-deploy',
+        'test-organization',
+      ], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          PATH: `${binaryDirectory}:${process.env.PATH}`,
+        },
+        encoding: 'utf8',
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      const identity = result.stdout.trim();
+      assert.equal(identity, path.join(credentialDirectory, 'generated-identity'));
+      assert.equal(fs.statSync(identity).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(`${identity}-cert.pub`).mode & 0o777, 0o600);
+
+      for (const workflowName of ['deploy-production.yml', 'rollback-production.yml']) {
+        const workflow = fs.readFileSync(
+          path.join(repositoryRoot, '.github/workflows', workflowName),
+          'utf8',
+        );
+        assert.match(workflow, /deploy\/production\/export-oslogin-identity\.sh/);
+        assert.doesNotMatch(workflow, /certificate_output|s\/\^Identity:/);
+      }
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 });
