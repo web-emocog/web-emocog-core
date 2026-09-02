@@ -31,6 +31,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       - name: Install Yandex Cloud CLI
         run: |
           curl --fail --silent --show-error --location \
@@ -68,17 +71,12 @@ jobs:
           yc config set folder-id "${YC_FOLDER_ID}" >/dev/null
 
           ssh_directory="${RUNNER_TEMP}/yc-ssh"
-          install --directory --mode 0700 "${ssh_directory}"
-          certificate_output="$({
-            yc compute ssh certificate export \
-              --login "${YC_VM_LOGIN}" \
-              --organization-id "${YC_ORGANIZATION_ID}" \
-              --directory "${ssh_directory}"
-          })"
-          ssh_identity="$(sed -n 's/^Identity: //p' <<< "${certificate_output}")"
-          test -f "${ssh_identity}"
-          test -f "${ssh_identity}-cert.pub"
-          chmod 0600 "${ssh_identity}" "${ssh_identity}-cert.pub"
+          ssh_identity="$(
+            bash deploy/production/export-oslogin-identity.sh \
+              "${ssh_directory}" \
+              "${YC_VM_LOGIN}" \
+              "${YC_ORGANIZATION_ID}"
+          )"
 
           known_hosts="${RUNNER_TEMP}/known_hosts"
           ssh-keyscan -T 10 -t ed25519 "${YC_VM_IP}" > "${known_hosts}"
