@@ -1,5 +1,5 @@
 {
-  "title": "go_nogo",
+  "title": "Go_NoGo",
   "version": "v2.0_universal",
   "settings": {
     "backgroundColor": "#1a1a2e",
@@ -7,85 +7,77 @@
   },
   "blocks": [
     {
-      "id": "welcome",
+      "id": "consent_1772186317504",
+      "type": "consent"
+    },
+    {
+      "id": "questionnaire_1772186318490",
+      "type": "questionnaire"
+    },
+    {
+      "id": "precheck_1772186319456",
+      "type": "precheck"
+    },
+    {
+      "id": "calibration_1772186321906",
+      "type": "calibration"
+    },
+    {
+      "id": "instruction_1772186322841",
       "type": "instruction",
       "content": {
-        "title": "Добро пожаловать!",
-        "text": "Добро пожаловать в эксперимент! Калибровка завершена. Далее вы перейдете к основной задаче.\n\nНе волнуйтесь — мы подробно рассмотрим все правила сразу после этого экрана.\n\nКогда будете готовы, нажмите кнопку ДАЛЕЕ.",
+        "title": "Инструкция",
+        "text": "Привет! пупу",
         "buttonText": "Далее"
       }
     },
     {
-      "id": "instruction",
-      "type": "instruction",
-      "content": {
-        "title": "Инструкция к задаче",
-        "text": "Перед вами будут появляться круги двух цветов:\n\nЗЕЛЕНЫЙ круг -> БЫСТРО нажмите ПРОБЕЛ\n\nКРАСНЫЙ круг -> НЕ нажимайте пробел\n\n\nСначала появится крестик фиксации (+), затем круг.\nВ тренировочной серии вы будете видеть обратную связь (Верно/Ошибка).",
-        "buttonText": "Начать тренировку"
-      }
-    },
-    {
-      "id": "practice_trials",
+      "id": "cognitive_task_1772186337855",
       "type": "cognitive_task",
       "blockConfig": {
         "showFeedback": true,
-        "fixation": { "content": "+", "duration": 500 },
-        "stimulusDuration": 1000
+        "feedbackConfig": {
+          "correctText": "Верно!",
+          "incorrectText": "Ошибка!"
+        },
+        "useRT": true,
+        "stimulusDuration": 1000,
+        "rtWindow": 1000,
+        "responseType": "keys",
+        "omissionRule": "flag",
+        "commissionRule": "flag",
+        "targetAOI": "",
+        "stimuliSource": "folder",
+        "stimuliFolder": "folder_1772186289895",
+        "randomize": true,
+        "fixation": {
+          "content": "+",
+          "duration": 500
+        }
       },
       "trials": [
-        { 
-          "id": "p1", "condition": "go", "correctResponse": "Space", 
-          "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } 
+        {
+          "stimulusId": "1772186298189.0808",
+          "condition": "nogo",
+          "correctResponse": "",
+          "duration": 1000,
+          "repetitions": 4
         },
-        { 
-          "id": "p2", "condition": "nogo", "correctResponse": null, 
-          "stimulus": { "type": "shape", "style": { "backgroundColor": "#EF4444", "borderRadius": "50%", "width": "150px", "height": "150px" } } 
-        },
-        { 
-          "id": "p3", "condition": "go", "correctResponse": "Space", 
-          "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } 
-        },
-        { 
-          "id": "p4", "condition": "nogo", "correctResponse": null, 
-          "stimulus": { "type": "shape", "style": { "backgroundColor": "#EF4444", "borderRadius": "50%", "width": "150px", "height": "150px" } } 
+        {
+          "stimulusId": "1772186298190.3623",
+          "condition": "go",
+          "correctResponse": "Space",
+          "duration": 1000,
+          "repetitions": 3
         }
       ]
     },
     {
-      "id": "main_instr",
-      "type": "instruction",
+      "id": "finish_1772186346761",
+      "type": "finish",
       "content": {
-        "title": "Основная серия",
-        "text": "Отлично! Тренировка завершена.\n\nТеперь обратная связь показываться НЕ будет.\nВ остальном задача остается прежней:\n\nЗЕЛЕНЫЙ -> Пробел\nКРАСНЫЙ -> Ничего не делать",
-        "buttonText": "Начать эксперимент"
-      }
-    },
-    {
-      "id": "trials",
-      "type": "cognitive_task",
-      "blockConfig": {
-        "showFeedback": false,
-        "fixation": { "content": "+", "duration": 500 },
-        "stimulusDuration": 1000
-      },
-      "trials": [
-        { "id": "m1", "condition": "go", "correctResponse": "Space", "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m2", "condition": "nogo", "correctResponse": null, "stimulus": { "type": "shape", "style": { "backgroundColor": "#EF4444", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m3", "condition": "go", "correctResponse": "Space", "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m4", "condition": "go", "correctResponse": "Space", "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m5", "condition": "nogo", "correctResponse": null, "stimulus": { "type": "shape", "style": { "backgroundColor": "#EF4444", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m6", "condition": "go", "correctResponse": "Space", "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m7", "condition": "nogo", "correctResponse": null, "stimulus": { "type": "shape", "style": { "backgroundColor": "#EF4444", "borderRadius": "50%", "width": "150px", "height": "150px" } } },
-        { "id": "m8", "condition": "go", "correctResponse": "Space", "stimulus": { "type": "shape", "style": { "backgroundColor": "#22C55E", "borderRadius": "50%", "width": "150px", "height": "150px" } } }
-      ]
-    },
-    {
-      "id": "goodbye_screen",
-      "type": "instruction",
-      "content": {
-        "title": "Эксперимент завершен",
-        "text": "Спасибо за участие!\nВаши данные успешно записаны.",
-        "buttonText": "Завершить"
+        "title": "Эксперимент завершён",
+        "text": "Спасибо за участие!"
       }
     }
   ]

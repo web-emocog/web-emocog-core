@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ingest_session_feature_response.v1",
+  "title": "POST /ingest response",
+  "type": "object",
+  "required": [
+    "session_id",
+    "ingested",
+    "idempotent",
+    "idempotency_key",
+    "qc_validity",
+    "proxy_ready",
+    "lifecycle_status",
+    "completed_at"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "ingested": { "const": true },
+    "idempotent": { "type": "boolean" },
+    "idempotency_key": { "type": ["string", "null"] },
+    "qc_validity": { "type": ["string", "null"] },
+    "proxy_ready": { "type": "boolean" },
+    "lifecycle_status": { "enum": ["in_progress", "completed"] },
+    "completed_at": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "additionalProperties": false
+}

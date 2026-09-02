@@ -1,1 +1,51 @@
+# OS
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Env / secrets (keep .env.example tracked)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+.venv/
+venv/
+env/
+
+# Test / coverage artifacts
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Build / temp
+dist/
+build/
+*.log
+*.tmp
+*.dump
+*.dump.sha256
+backups/
+_audit_*.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

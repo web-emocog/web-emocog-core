@@ -20,6 +20,12 @@ export default defineConfig({
   },
 
   outputDir: 'test-results',
+  webServer: {
+    command: 'python3 -m http.server 4173 --bind 127.0.0.1 --directory ../../',
+    port: 4173,
+    reuseExistingServer: true,
+    timeout: 120_000,
+  },
 
   reporter: [
     ['html', { outputFolder: 'playwright-report' }],
@@ -31,6 +37,10 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
     },
   ],
 });

@@ -1,0 +1,42 @@
+{
+  "id": "snapshot-2026-08-04-001",
+  "datasetHash": "sha256:7c3e00e9062ad4dfe7429d80dc4f312e",
+  "createdAt": "2026-08-04T18:30:00.000Z",
+  "queryEcho": {
+    "schemaVersion": "1.0",
+    "mode": "session",
+    "analysisLevel": "level_1",
+    "projectId": 12,
+    "protocolId": 25,
+    "protocolVersion": "1.0.0",
+    "metricIds": ["aoi.dwell_time_ms", "aoi.ttff_ms", "aoi.target_reached", "task.accuracy_pct", "qc.valid_gaze_pct"],
+    "filters": {
+      "participantIds": ["P-042"],
+      "sessionIds": [105],
+      "groupIds": [],
+      "conditionIds": [],
+      "blockIds": ["main-block"],
+      "stimulusIds": ["stimulus-42"],
+      "aoiIds": ["aoi-target"],
+      "qcMode": "valid_and_borderline",
+      "qcChannels": ["task", "gaze"],
+      "minValidFraction": 0.7,
+      "minSignalConfidence": 0.65,
+      "dateFrom": null,
+      "dateTo": null,
+      "includeIncompleteSessions": false
+    }
+  },
+  "includedParticipantIds": ["P-042"],
+  "includedSessionIds": [105],
+  "excludedSessions": [],
+  "versions": {
+    "protocol": "1.0.0",
+    "stimulus": "stimulus-42@1",
+    "aoiSchema": "1.2",
+    "metricsCatalog": "1.0",
+    "qcRules": "qc-rules-1.0.0",
+    "frontend": "researcher-web-1.0.0",
+    "backend": "analytics-api-1.0.0"
+  }
+}

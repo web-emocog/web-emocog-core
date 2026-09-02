@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/api/package-lock.json
+            apps/autotests/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: npm ci
+
+      - name: Run API tests
+        working-directory: apps/api
+        run: npm test
+
+      - name: Run Python analyzer smoke test
+        working-directory: apps/api
+        run: npm run test:rt-python
+
+      - name: Install autotest dependencies
+        working-directory: apps/autotests
+        run: npm ci
+
+      - name: Type-check autotests
+        working-directory: apps/autotests
+        run: npm run typecheck
+
+      - name: Validate deployment shell scripts
+        run: bash -n deploy/production/*.sh deploy/production/wecog-release
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build the production API image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: docker/api/Dockerfile
+          build-args: VCS_REF=${{ github.sha }}
+          push: false
+          load: true
+          tags: wecog-api:ci
+          cache-from: type=gha,scope=wecog-api
+          cache-to: type=gha,mode=max,scope=wecog-api
+          provenance: false
+
+      - name: Build the production web image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: docker/web/Dockerfile
+          build-args: VCS_REF=${{ github.sha }}
+          push: false
+          load: true
+          tags: wecog-web:ci
+          cache-from: type=gha,scope=wecog-web
+          cache-to: type=gha,mode=max,scope=wecog-web
+          provenance: false
+
+      - name: Validate production Compose file
+        run: |
+          printf 'DATABASE_URL=postgres://localhost:5432/emocog\nJWT_SECRET=ci-only-secret-that-is-longer-than-thirty-two-characters\n' \
+            > "${RUNNER_TEMP}/wecog-ci.env"
+          WECOG_REGISTRY_ID=ci-registry \
+          WECOG_IMAGE_TAG="${GITHUB_SHA}" \
+          WECOG_ENV_FILE="${RUNNER_TEMP}/wecog-ci.env" \
+            docker compose --file compose.production.yaml config --quiet
+
+      - name: Smoke-test the production web image
+        run: bash deploy/production/smoke-test-web-image.sh wecog-web:ci

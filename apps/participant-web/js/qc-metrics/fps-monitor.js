@@ -275,12 +275,28 @@ export class VideoFpsMonitor {
     }
 
     /**
-     * Проверка низкого FPS
+     * Проверка низкого FPS.
+     *
+     * Если задан absoluteMin — FPS ниже него всегда считается low,
+     * даже до завершения warmup'а (чтобы не маскировать совсем плохие условия).
+     *
+     * @param {number} factor
+     * @param {number} absCap
+     * @param {number} absFloor
+     * @param {number} [absoluteMin]
      */
-    isLowFps(factor = 0.5, absCap = 10, absFloor = 6) {
-        if (!this._baselineFps || this._currentFps === 0) return false;
+    isLowFps(factor = 0.5, absCap = 10, absFloor = 6, absoluteMin = 0) {
+        const fps = this._cameraFps > 0 ? this._cameraFps : this._currentFps;
+        if (fps === 0) return false;
+
+        // Абсолютный минимум — если ниже, всегда low.
+        if (absoluteMin > 0 && fps < absoluteMin) return true;
+
+        // Без baseline остаёмся только на абсолютном пороге.
+        if (!this._baselineFps) return false;
+
         const threshold = Math.max(absFloor, Math.min(absCap, this._baselineFps * factor));
-        return this._currentFps < threshold;
+        return fps < threshold;
     }
 
     /**

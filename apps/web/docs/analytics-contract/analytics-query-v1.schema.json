@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emocog.local/schemas/analytics-query-v1.schema.json",
+  "title": "Emocog analytics query v1",
+  "description": "Canonical filtered dataset request used to create an immutable analysis snapshot for UI, statistics and export.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "mode",
+    "analysisLevel",
+    "projectId",
+    "protocolId",
+    "protocolVersion",
+    "metricIds",
+    "filters"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "mode": {
+      "enum": ["session", "group"]
+    },
+    "analysisLevel": {
+      "enum": ["level_1", "level_2", "level_3"]
+    },
+    "projectId": {
+      "$ref": "#/$defs/id"
+    },
+    "protocolId": {
+      "$ref": "#/$defs/id"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "metricIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/metricId"
+      }
+    },
+    "filters": {
+      "$ref": "#/$defs/filters"
+    },
+    "comparison": {
+      "$ref": "#/$defs/comparison"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": { "const": "session" }
+        }
+      },
+      "then": {
+        "properties": {
+          "filters": {
+            "properties": {
+              "sessionIds": {
+                "minItems": 1,
+                "maxItems": 1
+              }
+            },
+            "required": ["sessionIds"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "analysisLevel": { "const": "level_2" }
+        }
+      },
+      "then": {
+        "required": ["comparison"]
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "string", "minLength": 1, "maxLength": 128 }
+      ]
+    },
+    "metricId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+    },
+    "idArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    },
+    "filters": {
+      "type": "object",
+      "required": ["qcMode", "qcChannels"],
+      "properties": {
+        "participantIds": { "$ref": "#/$defs/idArray" },
+        "sessionIds": { "$ref": "#/$defs/idArray" },
+        "groupIds": { "$ref": "#/$defs/idArray" },
+        "conditionIds": { "$ref": "#/$defs/idArray" },
+        "blockIds": { "$ref": "#/$defs/idArray" },
+        "stimulusIds": { "$ref": "#/$defs/idArray" },
+        "aoiIds": { "$ref": "#/$defs/idArray" },
+        "deviceClasses": { "$ref": "#/$defs/idArray" },
+        "qcMode": {
+          "enum": ["valid_only", "valid_and_borderline", "all"]
+        },
+        "qcChannels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["task", "gaze", "blink", "face", "head_hands", "rppg", "respiration"]
+          }
+        },
+        "minValidFraction": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minSignalConfidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dateFrom": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "dateTo": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "deviceClasses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        },
+        "includeIncompleteSessions": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["factorIds", "contrastIds"],
+      "properties": {
+        "factorIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        },
+        "contrastIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,3 +1,6 @@
+// DEPRECATED: use mvp_with_precheck_1-updated.html with app-updated.js / tests-updated.js
+console.warn('[DEPRECATED] js/web-page/app.js — official entrypoint: mvp_with_precheck_1-updated.html + app-updated.js');
+
 // 1. Импорты всех модулей
 import { state, getCurrentTaskContext, getRelativeSessionTimeMs } from './state.js';
 import { 
@@ -64,7 +67,11 @@ export function handleGazeUpdate(gazeData) {
     const taskContext = getCurrentTaskContext();
     const screenWidth = window.innerWidth || 1;
     const screenHeight = window.innerHeight || 1;
-    const onScreen = x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight;
+    // Берём честный onScreen из gaze-tracker (считается по correctedX/correctedY до clamp).
+    const onScreen = typeof gazeData.onScreen === 'boolean'
+        ? gazeData.onScreen
+        : (x >= 0 && x <= screenWidth && y >= 0 && y <= screenHeight);
+    const clipped = typeof gazeData.clipped === 'boolean' ? gazeData.clipped : !onScreen;
     const confidence = Number.isFinite(gazeData.confidence) ? gazeData.confidence : null;
 
     // Визуализация 
@@ -90,17 +97,21 @@ export function handleGazeUpdate(gazeData) {
             stimulusType: taskContext.stimulusType ?? null,
             expectedResponse: taskContext.expectedResponse ?? null,
             onScreen,
+            clipped,
             confidence,
-            rawX: Number.isFinite(gazeData.rawX) ? gazeData.rawX : null,
-            rawY: Number.isFinite(gazeData.rawY) ? gazeData.rawY : null,
+            modelX: Number.isFinite(gazeData.modelX) ? gazeData.modelX : null,
+            modelY: Number.isFinite(gazeData.modelY) ? gazeData.modelY : null,
+            correctedX: Number.isFinite(gazeData.correctedX) ? gazeData.correctedX : null,
+            correctedY: Number.isFinite(gazeData.correctedY) ? gazeData.correctedY : null,
             screenWidth,
             screenHeight
         });
     }
 
-    // Отправка в QC Metrics (с данными позы для pose-based offscreen inference)
+    // Отправка в QC Metrics (с данными позы для pose-based offscreen inference).
+    // Передаём честный onScreen, чтобы счётчики не пересчитывались на зажатых координатах.
     if (state.runtime.qcMetrics && state.runtime.qcMetrics.isRunning()) {
-        state.runtime.qcMetrics.addGazePoint({ x, y }, state.runtime.lastPoseData);
+        state.runtime.qcMetrics.addGazePoint({ x, y, onScreen }, state.runtime.lastPoseData);
     }
 }
 

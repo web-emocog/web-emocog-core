@@ -4,7 +4,10 @@ import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js';
 import { measureRenderFPS } from './camera.js';
 
 export function setLanguage(lang) {
-    state.currentLang = lang;
+    const nextLang = Object.prototype.hasOwnProperty.call(translations, lang) ? lang : 'ru';
+    state.currentLang = nextLang;
+    document.documentElement.lang = nextLang;
+    document.documentElement.dir = (nextLang === 'ar' || nextLang === 'ur') ? 'rtl' : 'ltr';
     
     // Обновляем кнопки языка
     document.getElementById('langRu').classList.toggle('active', lang === 'ru');
@@ -13,17 +16,17 @@ export function setLanguage(lang) {
     // Обновляем все текстовые элементы
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
-        if (translations[lang][key]) {
-            el.innerText = translations[lang][key];
+        if (translations[nextLang][key]) {
+            el.innerText = translations[nextLang][key];
         }
     });
 
     // Обновляем ID если сгенерирован
     if (state.sessionData.ids.participant) {
         document.getElementById('generatedIdPreview').innerText = 
-            `${translations[lang].id_participant} ${state.sessionData.ids.participant}`;
+            `${translations[nextLang].id_participant} ${state.sessionData.ids.participant}`;
     } else {
-            document.getElementById('idDisplay').innerText = translations[lang].id_not_generated;
+            document.getElementById('idDisplay').innerText = translations[nextLang].id_not_generated;
     }
 
     if (state.flags.isPrecheckRunning && state.runtime.precheckData) {
@@ -252,8 +255,6 @@ export async function collectTechDataAndProceed() {
     const errorMsg = document.getElementById('emailError');
     if (errorMsg) errorMsg.remove();
     
-    if (email) state.sessionData.user.email = email; 
-
     state.sessionData.tech.screen = {
         width: window.screen.width,
         height: window.screen.height,
@@ -263,11 +264,8 @@ export async function collectTechDataAndProceed() {
     };
 
     state.sessionData.tech.browser = {
-        userAgent: navigator.userAgent,
-        language: navigator.language,
-        platform: navigator.platform,
-        cores: navigator.hardwareConcurrency || 'unknown',
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        language: navigator.language || null,
+        mobile: /Android|iPhone|iPad|Mobile/i.test(String(navigator.userAgent || ''))
     };
 
     // Измеряем FPS рендеринга (для справки)

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wecog — вход</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #e8e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .box {
+      width: 100%;
+      max-width: 360px;
+      background: #16213e;
+      border: 1px solid rgba(92, 102, 189, 0.25);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    h1 { font-size: 1.25rem; margin-bottom: 8px; }
+    .sub { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+    label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(92, 102, 189, 0.3);
+      border-radius: 8px;
+      background: #0f0f1a;
+      color: #e8e8f0;
+      font-size: 15px;
+    }
+    input:focus { outline: none; border-color: #5C66BD; }
+    .password-wrap { position: relative; margin-bottom: 16px; }
+    .password-wrap input { margin-bottom: 0; padding-right: 48px; }
+    .password-wrap .toggle-pwd {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      width: auto;
+    }
+    .password-wrap .toggle-pwd:hover { color: #e8e8f0; background: rgba(92,102,189,.2); }
+    .error { color: #EF4444; font-size: 13px; margin-bottom: 12px; display: none; }
+    .error.visible { display: block; }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #5C66BD;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { opacity: .92; }
+    .portal-kicker {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 0 10px;
+      margin-bottom: 18px;
+      border: 1px solid var(--wc-line);
+      border-radius: 999px;
+      color: var(--wc-muted);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .back { display: block; text-align: center; margin-top: 16px; color: #94a3b8; font-size: 14px; text-decoration: none; }
+    .back:hover { color: #5C66BD; }
+  </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
+</head>
+<body>
+  <div class="box">
+    <div class="portal-kicker" id="portalKicker">wecog</div>
+    <h1 id="loginTitle">Вход</h1>
+    <p class="sub" id="loginSubtitle">Введите данные рабочей учётной записи.</p>
+    <form id="form" method="post" action="../developer.html">
+      <div class="error" id="error">Ошибка входа</div>
+      <label for="login">Email</label>
+      <input type="email" id="login" name="login" autocomplete="username" required autofocus placeholder="name@example.com">
+      <label for="password">Пароль</label>
+      <div class="password-wrap">
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <button type="button" class="toggle-pwd" id="togglePwd" title="Показать пароль">Показать</button>
+      </div>
+      <button type="submit">Войти</button>
+    </form>
+    <a href="../index.html" class="back">← На главную</a>
+  </div>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../account-storage.js?v=20260829-1"></script>
+  <script>
+    (function () {
+      var requestedPortal = new URLSearchParams(window.location.search || '').get('portal');
+      if (requestedPortal !== 'researcher' && requestedPortal !== 'admin' && requestedPortal !== 'developer') requestedPortal = 'staff';
+      var portalCopy = {
+        researcher: {
+          kicker: 'Исследователь',
+          title: 'Вход исследователя',
+          subtitle: 'Проекты, протоколы, приглашения и аналитика.'
+        },
+        developer: {
+          kicker: 'Разработчик',
+          title: 'Вход разработчика',
+          subtitle: 'Диагностика и проверка исследовательских модулей.'
+        },
+        admin: {
+          kicker: 'Администратор',
+          title: 'Вход администратора',
+          subtitle: 'Управление организацией и вход в технические инструменты.'
+        },
+        staff: {
+          kicker: 'Рабочая область',
+          title: 'Вход в wecog',
+          subtitle: 'Введите данные рабочей учётной записи.'
+        }
+      }[requestedPortal];
+      document.getElementById('portalKicker').textContent = portalCopy.kicker;
+      document.getElementById('loginTitle').textContent = portalCopy.title;
+      document.getElementById('loginSubtitle').textContent = portalCopy.subtitle;
+      document.title = 'wecog — ' + portalCopy.title.toLowerCase();
+
+      function destinationForRole(role) {
+        var researcherRoles = ['org_admin', 'PI', 'researcher', 'analyst', 'assistant', 'admin'];
+        var developerRoles = ['developer', 'admin'];
+        if (requestedPortal === 'researcher') {
+          return researcherRoles.indexOf(role) >= 0 ? '../researcher.html' : null;
+        }
+        if (requestedPortal === 'developer') {
+          return developerRoles.indexOf(role) >= 0 ? '../developer.html' : null;
+        }
+        if (requestedPortal === 'admin') {
+          if (role === 'developer') return '../developer.html';
+          if (role === 'org_admin' || role === 'PI' || role === 'admin') return '../researcher.html#/admin';
+          return null;
+        }
+        if (developerRoles.indexOf(role) >= 0) return '../developer.html';
+        if (researcherRoles.indexOf(role) >= 0) return '../researcher.html';
+        return null;
+      }
+
+      function portalAccessError() {
+        if (requestedPortal === 'researcher') return 'У этой учётной записи нет доступа к интерфейсу исследователя.';
+        if (requestedPortal === 'developer') return 'У этой учётной записи нет доступа к модулям разработчика.';
+        if (requestedPortal === 'admin') return 'Учётная запись не является администратором организации или разработчиком.';
+        return 'У этой учётной записи нет доступа к рабочим разделам.';
+      }
+
+      function rejectAuthenticatedLogin(base, result, message) {
+        try {
+          sessionStorage.removeItem('emocog_developer_auth');
+          sessionStorage.removeItem('emocog_csrf_token');
+          localStorage.removeItem('emocog_developer_auth');
+          localStorage.removeItem('emocog_api_user');
+          localStorage.removeItem('emocog_selected_portal');
+        } catch (_) {}
+        return fetch(base + '/auth/logout', {
+          method: 'POST',
+          credentials: 'include'
+        }).catch(function () {}).then(function () {
+          throw new Error(message);
+        });
+      }
+
+      function getApiBase() {
+        if (window.EmocogApiBase) {
+          // Passwords must never be routed by an untrusted localStorage override.
+          return window.EmocogApiBase.resolve({ useStorage: false });
+        }
+        return window.location.origin + '/api';
+      }
+
+      var pwdInput = document.getElementById('password');
+      var toggleBtn = document.getElementById('togglePwd');
+      toggleBtn.addEventListener('click', function () {
+        if (pwdInput.type === 'password') {
+          pwdInput.type = 'text';
+          toggleBtn.textContent = 'Скрыть';
+          toggleBtn.title = 'Скрыть пароль';
+        } else {
+          pwdInput.type = 'password';
+          toggleBtn.textContent = 'Показать';
+          toggleBtn.title = 'Показать пароль';
+        }
+      });
+
+      document.getElementById('form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var login = (document.getElementById('login').value || '').trim().toLowerCase();
+        var password = (document.getElementById('password').value || '').trim();
+        var errEl = document.getElementById('error');
+        errEl.classList.remove('visible');
+        errEl.style.color = '';
+
+        if (!login || !password) {
+          errEl.textContent = 'Введите email и пароль';
+          errEl.classList.add('visible');
+          return;
+        }
+
+        var base = (getApiBase() || '').replace(/\/$/, '');
+        fetch(base + '/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Transport': 'cookie' },
+          credentials: 'include',
+          body: JSON.stringify({ email: login, password: password })
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return {}; }).then(function (j) {
+                throw new Error(j.error || (r.status + ' ' + r.statusText));
+              });
+            }
+            return r.json();
+          })
+          .then(function (result) {
+            if (!result || !result.user || result.user.role === 'respondent') {
+              return rejectAuthenticatedLogin(
+                base,
+                result,
+                'Участники входят по коду или ссылке приглашения с главной страницы.'
+              );
+            }
+            var role = (result && result.user && result.user.role) || '';
+            var destination = destinationForRole(role);
+            if (!destination) {
+              return rejectAuthenticatedLogin(base, result, portalAccessError());
+            }
+            try {
+              if (window.WecogAccountStorage && result && result.user) {
+                window.WecogAccountStorage.activate(result.user.id);
+              }
+              sessionStorage.setItem('emocog_developer_auth', '1');
+              localStorage.setItem('emocog_developer_auth', '1');
+              localStorage.removeItem('emocog_api_token');
+              if (result && result.csrf_token) sessionStorage.setItem('emocog_csrf_token', result.csrf_token);
+              if (result && result.user) localStorage.setItem('emocog_api_user', JSON.stringify(result.user));
+              localStorage.setItem('emocog_api_base', base);
+              localStorage.setItem('emocog_selected_portal', requestedPortal);
+            } catch (_) {}
+            window.location.href = destination;
+          })
+          .catch(function (err) {
+            errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
+            errEl.classList.add('visible');
+          });
+      });
+
+    })();
+  </script>
+</body>
+</html>

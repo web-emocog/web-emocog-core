@@ -1,4 +1,4 @@
-import { state, CONSTANTS, BACKEND_CONFIG } from './state.js';
+import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js';
 import { translations } from '../../translations.js';
 import { measureCameraFPS } from './camera.js';
 
@@ -52,7 +52,6 @@ export async function startPreCheck() {
                         width: settings.width,
                         height: settings.height,
                         frameRate: settings.frameRate,
-                        deviceId: settings.deviceId,
                         facingMode: settings.facingMode
                     };
                 }
@@ -135,7 +134,10 @@ export function startContinuousAnalysis() {
         
         // Интервал анализа 
         if (state.flags.isPrecheckRunning) {
-            state.runtime.analysisFrameId = setTimeout(analyzeFrame, BACKEND_CONFIG.SEND_INTERVAL);
+            state.runtime.analysisFrameId = setTimeout(
+                analyzeFrame,
+                LOCAL_ANALYSIS_CONFIG.FRAME_INTERVAL_MS
+            );
         }
     }
 
@@ -345,17 +347,17 @@ export function collectTips() {
                 if (pose.issues.includes('yaw_exceeded')) {
                     // yaw > 0 — голова повёрнута вправо, нужно повернуть влево
                     if (pose.yaw > 0) {
-                        tips.push(translations[state.currentLang].tip_pose_turn_down);
+                        tips.push(translations[state.currentLang].tip_pose_turn_left);
                     } else {
-                        tips.push(translations[state.currentLang].tip_pose_turn_up);
+                        tips.push(translations[state.currentLang].tip_pose_turn_right);
                     }
                 }
                 if (pose.issues.includes('pitch_exceeded')) {
                     // pitch > 0 — голова опущена, нужно поднять
                     if (pose.pitch > 0) {
-                        tips.push(translations[state.currentLang].tip_pose_tilt_right);
+                        tips.push(translations[state.currentLang].tip_pose_raise_head);
                     } else {
-                        tips.push(translations[state.currentLang].tip_pose_tilt_left);
+                        tips.push(translations[state.currentLang].tip_pose_lower_head);
                     }
                 }
                 if (pose.issues.includes('roll_exceeded')) {
@@ -683,14 +685,20 @@ export function drawFaceOverlay(faceData) {
 async function runLocalPrecheckAnalysis(videoElement) {
     // Инициализируем анализатор если ещё не создан
     if (!state.runtime.localAnalyzer) {
+        if (window.PrecheckAnalyzerReady) {
+            await window.PrecheckAnalyzerReady;
+        }
         state.runtime.localAnalyzer = new PrecheckAnalyzer({
             onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
             onError: (err) => console.error('[PreCheck] Ошибка анализатора:', err)
         });
     }
-    
+
     // Инициализируем FaceSegmenter если ещё не создан
     if (!state.runtime.faceSegmenter) {
+        if (window.FaceSegmenterReady) {
+            await window.FaceSegmenterReady;
+        }
         state.runtime.faceSegmenter = new FaceSegmenter({
             segmentationType: 'selfie_multiclass',
             onInitialized: () => console.log('[PreCheck] FaceSegmenter инициализирован'),

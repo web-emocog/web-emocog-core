@@ -54,7 +54,7 @@ APACHE LICENSE 2.0 COMPLIANCE:
   ✓ All required notices are preserved
 
 THIRD-PARTY COMPLIANCE:
-  ✓ MIT-licensed dependencies: js-yaml (v4.1.1)
+  ✓ MIT-licensed dependencies: js-yaml (v4.3.1)
   ✓ Python-2.0 licensed dependencies: argparse (v2.0.1)
   ✓ All licenses are compatible with Apache 2.0
   ✓ License terms are preserved in THIRD_PARTY_LICENSES.md
@@ -68,7 +68,7 @@ apps/autotests/:
   - Dependencies:
     * @playwright/test ^1.0.0 (Apache 2.0)
     * @types/node ^20.0.0 (MIT)
-    * js-yaml ^4.1.1 (MIT)
+    * js-yaml ^4.3.1 (MIT)
 
 rppg_alg_qc_test_web_alg_test_v10/:
   - rPPG SAFE Engine — Research code for HR and RR estimation from video
@@ -85,7 +85,7 @@ Dependency Tree
 =============================================================================
 
 NODE.JS DEPENDENCIES (apps/autotests/):
-  js-yaml@4.1.1
+  js-yaml@4.3.1
   ├─ License: MIT
   ├─ Repository: https://github.com/nodeca/js-yaml
   └─ Dependency:
@@ -149,5 +149,5 @@ For license questions or copyright inquiries, please open an issue or
 contact the project maintainers.
 
 =============================================================================
-Last Updated: 2026-06-30
+Last Updated: 2026-08-26
 =============================================================================

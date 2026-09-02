@@ -7,7 +7,7 @@
  * @module precheck-analyzer/PrecheckAnalyzer
  */
 
-import { LANDMARKS } from './constants.js';
+import { LANDMARKS, EYE_LANDMARK_INDICES } from './constants.js';
 import { createThresholds, HISTORY_SIZE } from './thresholds.js';
 import { analyzeIllumination } from './illumination.js';
 import { parseFaceResults, extractBlendShapes } from './face-parser.js';
@@ -48,13 +48,16 @@ class PrecheckAnalyzer {
                 throw new Error('MediaPipe Vision не загружен.');
             }
             
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-            );
+            const wasmRoot = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
+            const vision = await FilesetResolver.forVisionTasks(wasmRoot);
+            const modelPath = new URL(
+                '../vendor/mediapipe/models/face_landmarker.task',
+                import.meta.url
+            ).href;
             
             this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
                 baseOptions: {
-                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                    modelAssetPath: modelPath,
                     delegate: "GPU"
                 },
                 runningMode: this.runningMode,
@@ -99,16 +102,25 @@ class PrecheckAnalyzer {
             this._canvas.height = height;
             this._ctx.drawImage(videoElement, 0, 0, width, height);
             const imageData = this._ctx.getImageData(0, 0, width, height);
-            
-            const illumination = analyzeIllumination(imageData, this.thresholds.illumination);
-            
+
+            // Сначала запускаем MediaPipe — нужны landmarks, чтобы illumination
+            // считался по face ROI, а не по всему кадру (тёмный/светлый фон не должен
+            // штрафовать пользователя при нормальном освещении лица).
             const timestamp = performance.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
-            
+
             const faceData = parseFaceResults(mpResults, width, height, this.thresholds.face);
             const eyes = analyzeEyes(mpResults, width, height, this.thresholds.eyes);
             const pose = analyzePose(mpResults, this.thresholds.pose);
             const landmarks = mpResults.faceLandmarks?.[0] || null;
+
+            // Теперь — illumination по face ROI (если лицо найдено), иначе fallback на полный кадр.
+            const illumination = analyzeIllumination(
+                imageData,
+                this.thresholds.illumination,
+                landmarks,
+                EYE_LANDMARK_INDICES
+            );
             const eyesCentering = checkEyesCentering(landmarks, this.thresholds.pose);
             
             pose.eyesCentering = eyesCentering;
@@ -138,11 +150,14 @@ class PrecheckAnalyzer {
             
             const mouth = analyzeMouth(mpResults);
             const analysisTime = performance.now() - startTime;
-            
+            const blendShapes = extractBlendShapes(mpResults);
+
             this.lastResult = {
                 illumination, face: faceData, pose, eyes, mouth,
-                blendShapes: extractBlendShapes(mpResults),
-                landmarks, timestamp: Date.now(),
+                blendShapes,
+                landmarks,
+                timestamp,
+                wallTimestamp: Date.now(),
                 frameSize: { width, height },
                 analysisTime: Math.round(analysisTime)
             };
@@ -163,7 +178,8 @@ class PrecheckAnalyzer {
             eyes: { left: { isOpen: false }, right: { isOpen: false }, bothOpen: false },
             mouth: { isOpen: false },
             error: message,
-            timestamp: Date.now()
+            timestamp: performance.now(),
+            wallTimestamp: Date.now()
         };
     }
 

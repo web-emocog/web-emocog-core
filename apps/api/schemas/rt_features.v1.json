@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rt_features.v1",
+  "title": "RT features payload (session_features.rt_features)",
+  "type": "object",
+  "required": ["schema_version", "blocks"],
+  "properties": {
+    "schema_version": { "const": "rt_features.v1" },
+    "python_available": { "type": "boolean" },
+    "blocks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/blockFeature" }
+    },
+    "session_metrics": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/sessionMetric" }
+    }
+  },
+  "$defs": {
+    "metricValue": {
+      "type": "object",
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "reason": { "type": "string", "description": "e.g. insufficient_data when not computed" }
+      }
+    },
+    "blockFeature": {
+      "type": "object",
+      "required": ["block_id", "rt_task", "status", "selected_metrics", "computed_metrics"],
+      "properties": {
+        "block_id": { "type": ["string", "null"] },
+        "rt_task": { "type": "string" },
+        "analyzer_task": { "type": "string" },
+        "selected_metrics": { "type": "array", "items": { "type": "string" } },
+        "computed_metrics": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/metricValue" }
+        },
+        "status": {
+          "enum": ["ok", "no_events", "analyzer_unavailable"]
+        },
+        "error": { "type": "string" }
+      }
+    },
+    "sessionMetric": {
+      "type": "object",
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "blocks": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    }
+  },
+  "metricUnits": {
+    "rt_mean": "ms",
+    "rt_median": "ms",
+    "rt_sd": "ms",
+    "omission_rate": "ratio_0_1_in_computed_metrics_percent_in_proxy_jsonb",
+    "commission_rate": "ratio_0_1",
+    "speed_accuracy_index": "pearson_r",
+    "rt_outlier_frac": "ratio_0_1"
+  },
+  "notes": [
+    "Formulas are computed only by rt_component Python analyzer.",
+    "proxy_metrics.metrics JSONB uses platform metric_id keys; omission_rate may be stored as percent in JSONB layer.",
+    "Legacy sessions without selected_metrics use registry defaults at ingest."
+  ]
+}
