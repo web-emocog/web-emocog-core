@@ -17,6 +17,8 @@ COPY apps/participant-web /usr/share/nginx/html/apps/participant-web
 COPY apps/researcher-web /usr/share/nginx/html/apps/researcher-web
 COPY apps/shared /usr/share/nginx/html/apps/shared
 COPY apps/web /usr/share/nginx/html/apps/web
+COPY Audio_detection/browser/*.mjs /usr/share/nginx/html/Audio_detection/browser/
+COPY packages/shared/multimodal/*.mjs /usr/share/nginx/html/packages/shared/multimodal/
 COPY lib /usr/share/nginx/html/lib
 
 RUN chown -R nginx:nginx /usr/share/nginx/html
