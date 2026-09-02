@@ -566,21 +566,28 @@ S2_TEST_DATABASE_URL=postgres://... node --test tests/s2-postgres.integration.te
 
 Актуальная production-версия: [https://wecog.ru](https://wecog.ru).
 
-Типовая схема: nginx раздаёт статику из корня репозитория и проксирует `/api` на Node-процесс (порт `PORT`, по умолчанию 3000).
+Production работает через два неизменяемых Docker-образа. Host nginx завершает
+TLS и проксирует web-контейнер на `127.0.0.1:8080`, а `/api` — API-контейнеру
+на `127.0.0.1:3000`. API подключается к PostgreSQL только через loopback.
 
 ```mermaid
 flowchart LR
-  Internet --> NGINX
-  NGINX -->|/| STATIC[статика репозитория]
-  NGINX -->|/api| NODE[Node API :3000]
-  NODE --> PG[(PostgreSQL)]
+  Internet --> HOST_NGINX[Host nginx / TLS]
+  HOST_NGINX -->|/| WEB[Web container :8080]
+  HOST_NGINX -->|/api| API[API container :3000]
+  API --> PG[(Host PostgreSQL :5432)]
 ```
 
 - Каноническая точка входа API: `server.js` (`npm start`).
-- ES-модули из `lib/` требуют верного MIME — см. [deploy/nginx-snippet-emocog-lib.conf](deploy/nginx-snippet-emocog-lib.conf).
-- Доступ participant к камере/микрофону и MIME для S3-модулей — см. [deploy/nginx-participant-media.conf](deploy/nginx-participant-media.conf).
+- Browser runtime публикует только необходимые деревья `lib/`,
+  `Audio_detection/browser/*.mjs` и `packages/shared/multimodal/*.mjs`;
+  остальные исходники и служебные файлы возвращают `404`.
+- Доступ participant к камере/микрофону разрешён только participant-страницам;
+  для researcher и остальных страниц действует запрещающая policy.
 - Вход участника: `apps/participant-web/run_new.html?code=...`.
-- Метаданные последнего деплоя фиксируются в [DEPLOY_VERSION.txt](DEPLOY_VERSION.txt).
+- Merge в `main` запускает тесты, публикацию образов, дамп PostgreSQL, снимок
+  диска, миграции, deployment и HTTPS-проверки.
+- Полный runbook: [docs/operations/CICD_YANDEX_CLOUD.md](docs/operations/CICD_YANDEX_CLOUD.md).
 
 ---
 

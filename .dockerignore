@@ -12,12 +12,17 @@
 **/*.pyc
 **/*.log
 
-Audio_detection
+Audio_detection/**
+!Audio_detection/browser/
+!Audio_detection/browser/*.mjs
 db
 deploy
 docs
 ml
-packages
+packages/**
+!packages/shared/
+!packages/shared/multimodal/
+!packages/shared/multimodal/**/*.mjs
 scripts
 apps/autotests
 apps/api/tests
