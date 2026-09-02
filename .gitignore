@@ -38,6 +38,9 @@ dist/
 build/
 *.log
 *.tmp
+*.dump
+*.dump.sha256
+backups/
 _audit_*.txt
 
 # IDE

@@ -1,67 +1,66 @@
-# Контракт интеграции (Core Only)
+# Контракт интеграции аудиомодуля
 
 ## Назначение
 
-Модуль предоставляет функции локального эвристического анализа аудио.
+Локальный исследовательский анализ акустических признаков. Модуль не ставит
+диагноз и не заменяет клиническую оценку.
 
-Без UI, без backend, без хранения пользовательских данных.
+## Активация
 
-## Точка интеграции
+1. Исследователь включает `settings.featureFlags.audio` в протоколе.
+2. Участник отдельно соглашается на анализ голоса.
+3. Браузер запрашивает разрешение на микрофон.
+4. Отказ или отсутствие поддержки переводят модуль в degraded-состояние, но не
+   блокируют остальные испытания.
 
-CommonJS:
+Без всех трёх разрешений микрофон не запрашивается. Протокол не может включить
+сохранение сырого аудио.
 
-```js
-const core = require("/Users/valeriia_firs/Desktop/Audio_detection/core");
+## Жизненный цикл
+
+Интеграционный класс: `apps/participant-web/js/audio/session-audio.js`.
+
+- `start()` создаёт WebAudio graph и Worker анализа;
+- `pause()` закрывает текущее окно и приостанавливает контекст;
+- `resume()` начинает новое окно;
+- `stop(reason)` завершает анализ очереди и освобождает все ресурсы;
+- `dispose(reason)` эквивалентен безопасному `stop`;
+- повторный `stop` возвращает тот же итог без повторной записи.
+
+Нормальный путь использует `AudioWorklet`; `ScriptProcessor` оставлен только как
+совместимый fallback. Расчёт признаков выполняется в Worker.
+
+## Данные
+
+Сырое PCM существует только в оперативной памяти до анализа окна. Оно не
+попадает в `state`, checkpoint, `/ingest` или экспорт.
+
+На сервер передаётся `audio_summary` (`audio_session.v1`):
+
+- монотонные границы окна и контекст блока/стимула;
+- QC: silence, clipping, duration, sample rate, OOD;
+- reliability и версия алгоритма;
+- компактные признаки и marker scores только для принятых окон;
+- provenance и исследовательский disclaimer.
+
+## Отказы
+
+| Ситуация | Статус | Поведение сессии |
+| --- | --- | --- |
+| Флаг выключен | `disabled` | микрофон не запрашивается |
+| Нет согласия | `declined` | микрофон не запрашивается |
+| Permission denied | `permission_denied` | остальные модули продолжают работу |
+| API не поддерживается | `unsupported` | остальные модули продолжают работу |
+| Silence/clipping/short | rejected QC window | маркеры не формируются |
+| Worker failure | dropped window | finish продолжается, счётчик растёт |
+
+## Проверка
+
+```bash
+node Audio_detection/scripts/build-browser-bundle.mjs
+cd apps/api
+node --test tests/audio-session.test.js
 ```
 
-ESM:
-
-```js
-import * as core from "/Users/valeriia_firs/Desktop/Audio_detection/core/index.mjs";
-```
-
-## Вход
-
-### Базовый вход
-
-- `analyzePcmSamples(samples, sampleRate, runtimeConfig)`
-- `samples`: `Float32Array | TypedArray | number[]` (моно сигнал)
-- `sampleRate`: число (Гц)
-
-### Браузерный helper
-
-- `analyzeAudioFileBrowser(file, runtimeConfig)`
-- только для браузерной среды (`File/Blob` + WebAudio API)
-- `analyzeAudioArrayBufferBrowser(arrayBuffer, runtimeConfig)`
-- только для браузерной среды (`ArrayBuffer` + WebAudio API)
-
-## Runtime config
-
-- `max_audio_duration_sec`
-- `abstain_confidence_threshold`
-- `abstain_quality_threshold`
-- `strict_mode`
-
-## Выход
-
-- `markers[]`
-- `condition_flags[]`
-- `quality`
-- `decision`
-- `indicator_percentages`
-- `raw_features`
-- `notes[]`
-- `literature[]`
-
-Формат отчёта:
-- JSON-объект (plain object)
-- JSON-строка через:
-  - `toJsonReport(...)`
-  - `analyzePcmSamplesJson(...)`
-  - `analyzeAudioArrayBufferBrowserJson(...)`
-
-## Приватность
-
-- сетевые вызовы отсутствуют;
-- хранение данных отсутствует;
-- управление сохранением результатов полностью на стороне host-продукта.
+Для production дополнительно выполняется ручная Chrome/Firefox матрица с
+реальным микрофоном и сравнением FPS gaze pipeline до/после включения аудио.

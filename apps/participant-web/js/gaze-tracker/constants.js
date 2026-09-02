@@ -34,17 +34,17 @@ export const LANDMARKS = {
 // Минимально необходимое число landmarks (478 = полная модель с радужкой)
 export const MIN_LANDMARKS = 478;
 
-// Iris-only predictor: 8 признаков + bias. Head pose/translation is evaluated
+// Iris-only predictor: 11 признаков + bias. Head pose/translation is evaluated
 // independently as a confidence/OOD nuisance channel.
-export const FEATURE_SIZE = 9;
+export const FEATURE_SIZE = 12;
 
 // Конфигурация по умолчанию.
-// minCalibrationPoints = 16 — минимум для well-conditioned ridge-системы
-// при 17-feature векторе (16 не-bias признаков). Стандартная UI-сетка 5×5 × 2 клика
-// даёт 50 точек, так что порог срабатывает только для пустых edge-кейсов.
+// The UI collects 25 targets x 2 clicks. Sixteen rows keep the 12-column
+// iris-only system identifiable in degraded/recovery scenarios.
 export const DEFAULTS = {
     ridgeLambda: 0.001,
-    minCalibrationPoints: 12,
+    ridgeLambdaCandidates: [0.001, 0.01, 0.1, 1],
+    minCalibrationPoints: 16,
     minCutoffHz: 1.35,
     maxCutoffHz: 12,
     velocityGain: 5.5

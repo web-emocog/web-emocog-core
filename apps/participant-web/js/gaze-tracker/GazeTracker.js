@@ -3,7 +3,7 @@
  *
  * Signal contract:
  * - raw: iris-only ridge prediction;
- * - corrected: optional affine correction, used for analytics;
+ * - corrected: optional held-out residual correction, used for analytics;
  * - display: adaptive low-pass output, used only by the overlay.
  *
  * Head pose/translation is never given the calibration target and is not part
@@ -22,7 +22,11 @@ import {
     scalePointBetweenViewports
 } from './signal-processing.mjs';
 
-const IRIS_STD_FLOORS = [0.03, 0.04, 0.03, 0.04, 0.03, 0.04, 0.03, 0.04];
+const IRIS_STD_FLOORS = [
+    0.03, 0.04, 0.03, 0.04,
+    0.03, 0.04, 0.03, 0.04,
+    0.008, 0.008, 0.008
+];
 const HEAD_STD_FLOORS = [0.025, 0.025, 0.018, 0.025, 0.025, 0.025, 0.02];
 
 function averageVectors(vectors) {
@@ -44,11 +48,117 @@ function averageVectors(vectors) {
     return result;
 }
 
+function featureStatistics(rawFeatures) {
+    const count = rawFeatures.length;
+    const width = rawFeatures[0]?.length - 1;
+    if (
+        count < 2
+        || width !== IRIS_STD_FLOORS.length
+        || !rawFeatures.every(row => (
+            Array.isArray(row)
+            && row.length === width + 1
+            && row.every(Number.isFinite)
+        ))
+    ) return null;
+    const mean = new Array(width).fill(0);
+    const std = new Array(width).fill(0);
+    for (let j = 0; j < width; j++) {
+        mean[j] = rawFeatures.reduce((sum, row) => sum + row[j], 0) / count;
+        const variance = rawFeatures.reduce(
+            (sum, row) => sum + ((row[j] - mean[j]) ** 2),
+            0
+        ) / count;
+        std[j] = Math.max(Math.sqrt(variance), IRIS_STD_FLOORS[j]);
+    }
+    return { mean, std };
+}
+
+function standardizeFeatureRow(row, mean, std) {
+    if (
+        !Array.isArray(row)
+        || !Array.isArray(mean)
+        || !Array.isArray(std)
+        || row.length !== mean.length + 1
+        || std.length !== mean.length
+        || !row.every(Number.isFinite)
+    ) return null;
+    const standardized = new Array(row.length);
+    for (let j = 0; j < mean.length; j++) {
+        if (!Number.isFinite(mean[j]) || !Number.isFinite(std[j]) || std[j] <= 0) return null;
+        standardized[j] = (row[j] - mean[j]) / std[j];
+    }
+    standardized[mean.length] = 1;
+    return standardized;
+}
+
+function fitCalibrationRows(rows, lambda) {
+    const stats = featureStatistics(rows.map(row => row.irisFeatures));
+    if (!stats) return null;
+    const matrix = rows.map(row => standardizeFeatureRow(row.irisFeatures, stats.mean, stats.std));
+    if (!matrix.every(Boolean)) return null;
+    const targetsX = rows.map(row => row.screenX);
+    const targetsY = rows.map(row => row.screenY);
+    const modelX = ridgeRegression(matrix, targetsX, lambda);
+    const modelY = ridgeRegression(matrix, targetsY, lambda);
+    if (!modelX?.every(Number.isFinite) || !modelY?.every(Number.isFinite)) return null;
+    return { ...stats, matrix, targetsX, targetsY, modelX, modelY };
+}
+
+function targetGroups(rows) {
+    const groups = new Map();
+    for (const row of rows) {
+        const key = `${Number(row.screenX).toFixed(2)}:${Number(row.screenY).toFixed(2)}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+    }
+    return [...groups.values()];
+}
+
+function selectRidgeLambda(rows, candidates, fallback) {
+    const groups = targetGroups(rows);
+    if (groups.length < 6) return { lambda: fallback, targetCvRmsPx: null, targetCount: groups.length };
+    let best = null;
+    for (const lambda of candidates) {
+        if (!Number.isFinite(lambda) || lambda < 0) continue;
+        let sumSquared = 0;
+        let sampleCount = 0;
+        let failed = false;
+        for (const heldOut of groups) {
+            const heldOutSet = new Set(heldOut);
+            const train = rows.filter(row => !heldOutSet.has(row));
+            const fitted = fitCalibrationRows(train, lambda);
+            if (!fitted) {
+                failed = true;
+                break;
+            }
+            for (const row of heldOut) {
+                const features = standardizeFeatureRow(row.irisFeatures, fitted.mean, fitted.std);
+                if (!features) {
+                    failed = true;
+                    break;
+                }
+                const dx = dotProduct(features, fitted.modelX) - row.screenX;
+                const dy = dotProduct(features, fitted.modelY) - row.screenY;
+                sumSquared += dx * dx + dy * dy;
+                sampleCount += 1;
+            }
+            if (failed) break;
+        }
+        if (failed || sampleCount === 0) continue;
+        const rms = Math.sqrt(sumSquared / sampleCount);
+        if (!best || rms < best.targetCvRmsPx) {
+            best = { lambda, targetCvRmsPx: rms, targetCount: groups.length };
+        }
+    }
+    return best || { lambda: fallback, targetCvRmsPx: null, targetCount: groups.length };
+}
+
 export default class GazeTracker {
     constructor(options = {}) {
         this._isCalibrated = false;
         this._isTracking = false;
         this._ridgeLambda = options.ridgeLambda ?? DEFAULTS.ridgeLambda;
+        this._autoTuneRidge = options.ridgeLambda == null;
         this._calibrationData = [];
         this._modelX = null;
         this._modelY = null;
@@ -76,7 +186,9 @@ export default class GazeTracker {
             rejectedPredictions: 0,
             calibrationPoints: 0,
             lastCalibrationTime: null,
-            avgFeatureExtractionMs: 0
+            avgFeatureExtractionMs: 0,
+            selectedRidgeLambda: this._ridgeLambda,
+            calibrationTargetCvRmsPx: null
         };
     }
 
@@ -137,25 +249,28 @@ export default class GazeTracker {
                     && Number.isFinite(row.screenY)
                 )
             ) return false;
-            const featureMean = new Array(width).fill(0);
-            const featureStd = new Array(width).fill(0);
-            for (let j = 0; j < width; j++) {
-                featureMean[j] = rawFeatures.reduce((sum, row) => sum + row[j], 0) / count;
-                const variance = rawFeatures.reduce(
-                    (sum, row) => sum + ((row[j] - featureMean[j]) ** 2),
-                    0
-                ) / count;
-                featureStd[j] = Math.max(Math.sqrt(variance), IRIS_STD_FLOORS[j]);
-            }
-
-            const matrix = rawFeatures.map(row =>
-                this._standardizeFeatures(row, featureMean, featureStd)
-            );
-            if (!matrix.every(Boolean)) return false;
-            const targetsX = this._calibrationData.map(row => row.screenX);
-            const targetsY = this._calibrationData.map(row => row.screenY);
-            const modelX = ridgeRegression(matrix, targetsX, this._ridgeLambda);
-            const modelY = ridgeRegression(matrix, targetsY, this._ridgeLambda);
+            const lambdaSelection = this._autoTuneRidge
+                ? selectRidgeLambda(
+                    this._calibrationData,
+                    DEFAULTS.ridgeLambdaCandidates,
+                    this._ridgeLambda
+                )
+                : {
+                    lambda: this._ridgeLambda,
+                    targetCvRmsPx: null,
+                    targetCount: targetGroups(this._calibrationData).length
+                };
+            const fitted = fitCalibrationRows(this._calibrationData, lambdaSelection.lambda);
+            if (!fitted) return false;
+            const {
+                mean: featureMean,
+                std: featureStd,
+                matrix,
+                targetsX,
+                targetsY,
+                modelX,
+                modelY
+            } = fitted;
             const irisDistribution = fitDistribution(
                 rawFeatures.map(row => row.slice(0, -1)),
                 IRIS_STD_FLOORS
@@ -174,6 +289,7 @@ export default class GazeTracker {
             this._featureStd = featureStd;
             this._modelX = modelX;
             this._modelY = modelY;
+            this._ridgeLambda = lambdaSelection.lambda;
             this._irisDistribution = irisDistribution;
             this._headDistribution = headDistribution;
             this._isCalibrated = true;
@@ -181,6 +297,10 @@ export default class GazeTracker {
             this._calibrationViewport = { ...this._viewport };
             this.resetSmoothingState();
             this._stats.lastCalibrationTime = Date.now();
+            this._stats.selectedRidgeLambda = lambdaSelection.lambda;
+            this._stats.calibrationTargetCvRmsPx = Number.isFinite(lambdaSelection.targetCvRmsPx)
+                ? Math.round(lambdaSelection.targetCvRmsPx * 10) / 10
+                : null;
 
             const trainErrors = matrix.map((features, index) => ({
                 x: dotProduct(features, this._modelX) - targetsX[index],
@@ -194,6 +314,9 @@ export default class GazeTracker {
                 points: count,
                 timestamp: Date.now(),
                 trainMAE,
+                ridgeLambda: this._ridgeLambda,
+                targetCvRmsPx: this._stats.calibrationTargetCvRmsPx,
+                targetCvTargetCount: lambdaSelection.targetCount,
                 predictor: 'iris_only_ridge',
                 targetBlind: true
             });
@@ -205,23 +328,25 @@ export default class GazeTracker {
     }
 
     setPostCalibrationCorrection(correction) {
-        const matrixX = correction?.matrixX;
-        const matrixY = correction?.matrixY;
-        if (
-            !Array.isArray(matrixX) || matrixX.length !== 3
-            || !Array.isArray(matrixY) || matrixY.length !== 3
-            || !matrixX.every(Number.isFinite) || !matrixY.every(Number.isFinite)
-        ) return false;
-        this._postCalibrationCorrection = {
-            matrixX: [...matrixX],
-            matrixY: [...matrixY],
-            source: correction.source || 'loocv_affine',
-            correctionId: correction.correctionId || null,
-            viewport: { ...this._viewport },
-            appliedAt: Date.now()
-        };
-        this.resetSmoothingState();
-        return true;
+        const offsetX = correction?.offsetX;
+        const offsetY = correction?.offsetY;
+        if (Number.isFinite(offsetX) && Number.isFinite(offsetY)) {
+            const maxOffsetX = this._viewport.width * 0.18;
+            const maxOffsetY = this._viewport.height * 0.18;
+            if (Math.abs(offsetX) > maxOffsetX || Math.abs(offsetY) > maxOffsetY) return false;
+            this._postCalibrationCorrection = {
+                kind: 'residual_bias',
+                offsetX: Number(offsetX),
+                offsetY: Number(offsetY),
+                source: correction.source || 'validation_residual_bias_loocv',
+                correctionId: correction.correctionId || null,
+                viewport: { ...this._viewport },
+                appliedAt: Date.now()
+            };
+            this.resetSmoothingState();
+            return true;
+        }
+        return false;
     }
 
     clearPostCalibrationCorrection() {
@@ -340,23 +465,7 @@ export default class GazeTracker {
         featureMean = this._featureMean,
         featureStd = this._featureStd
     ) {
-        if (
-            !Array.isArray(rawFeatures)
-            || !Array.isArray(featureMean)
-            || !Array.isArray(featureStd)
-            || rawFeatures.length !== featureMean.length + 1
-            || featureStd.length !== featureMean.length
-            || !rawFeatures.every(Number.isFinite)
-        ) return null;
-        const width = rawFeatures.length - 1;
-        const result = new Array(width + 1);
-        for (let j = 0; j < width; j++) {
-            if (!Number.isFinite(featureMean[j]) || !Number.isFinite(featureStd[j])
-                || featureStd[j] <= 0) return null;
-            result[j] = (rawFeatures[j] - featureMean[j]) / featureStd[j];
-        }
-        result[width] = 1;
-        return result;
+        return standardizeFeatureRow(rawFeatures, featureMean, featureStd);
     }
 
     _applyCorrection(x, y) {
@@ -368,7 +477,6 @@ export default class GazeTracker {
                 this._viewport
             );
         }
-        const { matrixX, matrixY } = this._postCalibrationCorrection;
         const correctionViewport = this._postCalibrationCorrection.viewport
             || this._calibrationViewport;
         const correctionInput = scalePointBetweenViewports(
@@ -377,16 +485,11 @@ export default class GazeTracker {
             correctionViewport
         );
         if (!correctionInput) return null;
-        const correctionOutput = {
-            x: matrixX[0] * correctionInput.x
-                + matrixX[1] * correctionInput.y
-                + matrixX[2],
-            y: matrixY[0] * correctionInput.x
-                + matrixY[1] * correctionInput.y
-                + matrixY[2]
-        };
         return scalePointBetweenViewports(
-            correctionOutput,
+            {
+                x: correctionInput.x + this._postCalibrationCorrection.offsetX,
+                y: correctionInput.y + this._postCalibrationCorrection.offsetY
+            },
             correctionViewport,
             this._viewport
         );
@@ -415,7 +518,7 @@ export default class GazeTracker {
             targetBlind: true,
             confidenceGate: 'iris_head_ood',
             postCalibrationCorrection: this._postCalibrationCorrection
-                ? { ...this._postCalibrationCorrection, matrixX: undefined, matrixY: undefined }
+                ? { ...this._postCalibrationCorrection }
                 : { enabled: false },
             screenSize: { ...this._viewport },
             calibrationScreenSize: this._calibrationViewport

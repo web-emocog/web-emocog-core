@@ -44,6 +44,12 @@ export class EmotionAnalyzer {
         // Скользящее окно валидности кадров для динамического confidence
         this._recentFrames  = [];
         this._RECENT_WINDOW = 30;
+        this._auBaseline = null;
+        this._auBaselineFrames = 0;
+        this._auBaselineReady = false;
+        this._stableDominant = 'neutral';
+        this._dominantCandidate = 'neutral';
+        this._dominantCandidateFrames = 0;
 
         console.log('[EmotionAnalyzer] Инициализирован (FACS AU v4.1, без ONNX)');
     }
@@ -119,14 +125,17 @@ export class EmotionAnalyzer {
             const mask      = this._getMask(landmarks);
             this.currentFaceMask = mask;
 
-            const au        = extractActionUnits(landmarks, mask.geometry);
+            const rawActionUnits = extractActionUnits(landmarks, mask.geometry);
+            const auState = this._calibrateActionUnits(rawActionUnits);
+            const au = auState.actionUnits;
             const rawScores = classifyFACS(au);
             this._pushTemporalBuffer(rawScores);
-            const smoothed  = this._smoothScores(rawScores);
+            const modelScores = this._smoothScores(rawScores);
+            const dominant = this._dominant(modelScores);
+            const smoothed = this._publishScores(modelScores, dominant);
             const affective = calcAffective(smoothed);
             this.affectiveDimensions = affective;
 
-            const dominant   = this._dominant(smoothed);
             this._updateCategoryCount(dominant);
 
             // [FIX] confidence вычисляется здесь и сохраняется в событие
@@ -134,8 +143,11 @@ export class EmotionAnalyzer {
 
             this._recordEvent({
                 scores:     smoothed,
+                modelScores,
                 rawScores,
                 actionUnits: au,
+                rawActionUnits,
+                baselineReady: auState.ready,
                 affective,
                 dominant,
                 confidence,
@@ -161,12 +173,14 @@ export class EmotionAnalyzer {
 
         try {
             const mask      = this._getMask(landmarks);
-            const au        = extractActionUnits(landmarks, mask.geometry);
-            const raw       = classifyFACS(au);
+            const rawActionUnits = extractActionUnits(landmarks, mask.geometry);
+            const auState = this._calibrateActionUnits(rawActionUnits);
+            const raw = classifyFACS(auState.actionUnits);
             this._pushTemporalBuffer(raw);
-            const smoothed  = this._smoothScores(raw);
+            const modelScores = this._smoothScores(raw);
+            const dominant = this._dominant(modelScores);
+            const smoothed = this._publishScores(modelScores, dominant);
             const affective = calcAffective(smoothed);
-            const dominant  = this._dominant(smoothed);
 
             this.affectiveDimensions = affective;
             this._updateCategoryCount(dominant);
@@ -174,10 +188,13 @@ export class EmotionAnalyzer {
 
             return {
                 scores:     smoothed,
+                modelScores,
                 valence:    affective.valence,
                 arousal:    affective.arousal,
                 dominant,
                 confidence: this._calcLandmarksConfidence(landmarks),
+                calibrationReady: auState.ready,
+                calibrationFrames: this._auBaselineFrames,
             };
         } catch (err) {
             console.error('[EmotionAnalyzer] Ошибка analyzeLandmarks:', err);
@@ -231,6 +248,12 @@ export class EmotionAnalyzer {
         this.temporalBuffer      = [];
         this.currentFaceMask     = null;
         this._recentFrames       = [];
+        this._auBaseline         = null;
+        this._auBaselineFrames   = 0;
+        this._auBaselineReady    = false;
+        this._stableDominant = 'neutral';
+        this._dominantCandidate = 'neutral';
+        this._dominantCandidateFrames = 0;
         this.affectiveDimensions = { valence: 0, arousal: 0 };
         this._resetCategoryCounts();
         console.log('[EmotionAnalyzer] Данные очищены');
@@ -249,10 +272,97 @@ export class EmotionAnalyzer {
     }
 
     _dominant(scores) {
-        const best = this.emotionLabels.reduce(
-            (b, l) => (scores[l] > scores[b] ? l : b), 'neutral'
+        const ranked = this.emotionLabels
+            .map(label => [label, Number(scores[label]) || 0])
+            .sort((a, b) => b[1] - a[1]);
+        const [best, second] = ranked;
+        let candidate = best[0];
+        if (
+            !this._auBaselineReady
+            || best[0] === 'neutral'
+            || best[1] < this.config.dominantMinScore
+            || (best[1] - second[1]) < this.config.dominantMinMargin
+        ) {
+            candidate = 'neutral';
+        }
+
+        if (candidate === 'neutral') {
+            this._stableDominant = 'neutral';
+            this._dominantCandidate = 'neutral';
+            this._dominantCandidateFrames = 0;
+            return 'neutral';
+        }
+        if (candidate === this._stableDominant) {
+            this._dominantCandidate = candidate;
+            this._dominantCandidateFrames = 0;
+            return this._stableDominant;
+        }
+        if (candidate !== this._dominantCandidate) {
+            this._dominantCandidate = candidate;
+            this._dominantCandidateFrames = 1;
+        } else {
+            this._dominantCandidateFrames += 1;
+        }
+        if (this._dominantCandidateFrames >= this.config.dominantHoldFrames) {
+            this._stableDominant = candidate;
+            this._dominantCandidateFrames = 0;
+        }
+        return this._stableDominant;
+    }
+
+    _publishScores(scores, dominant) {
+        if (dominant !== 'neutral') return { ...scores };
+        const floor = clamp(this.config.neutralPublishedFloor, 0.5, 1);
+        const nonNeutral = this.emotionLabels.filter(label => label !== 'neutral');
+        const nonNeutralTotal = nonNeutral.reduce(
+            (sum, label) => sum + Math.max(0, Number(scores[label]) || 0),
+            0
         );
-        return scores[best] >= this.config.confidenceThreshold ? best : 'neutral';
+        const published = { neutral: floor };
+        for (const label of nonNeutral) {
+            published[label] = nonNeutralTotal > 0
+                ? (Math.max(0, Number(scores[label]) || 0) / nonNeutralTotal) * (1 - floor)
+                : 0;
+        }
+        return Object.fromEntries(
+            Object.entries(published).map(([label, value]) => [label, +value.toFixed(4)])
+        );
+    }
+
+    _calibrateActionUnits(rawActionUnits) {
+        const cfg = this.config.baseline;
+        const keys = Object.keys(rawActionUnits || {});
+        if (!this._auBaseline) {
+            this._auBaseline = Object.fromEntries(keys.map(key => [key, Number(rawActionUnits[key]) || 0]));
+            this._auBaselineFrames = 1;
+        } else if (!this._auBaselineReady) {
+            this._auBaselineFrames += 1;
+            const n = this._auBaselineFrames;
+            keys.forEach(key => {
+                const value = Number(rawActionUnits[key]) || 0;
+                this._auBaseline[key] += (value - this._auBaseline[key]) / n;
+            });
+            this._auBaselineReady = n >= cfg.minFrames;
+        }
+
+        if (!this._auBaselineReady) {
+            return {
+                ready: false,
+                actionUnits: Object.fromEntries(keys.map(key => [key, 0])),
+            };
+        }
+
+        const adjusted = Object.fromEntries(keys.map(key => {
+            const delta = (Number(rawActionUnits[key]) || 0) - (this._auBaseline[key] || 0) - cfg.deadzone;
+            return [key, clamp(delta * cfg.gain, 0, 1)];
+        }));
+        const activity = Object.values(adjusted).reduce((sum, value) => sum + value, 0) / Math.max(1, keys.length);
+        if (activity <= cfg.adaptiveMaxActivity) {
+            keys.forEach(key => {
+                this._auBaseline[key] += ((Number(rawActionUnits[key]) || 0) - this._auBaseline[key]) * cfg.adaptiveRate;
+            });
+        }
+        return { ready: true, actionUnits: adjusted };
     }
 
     _neutralResult() {
@@ -366,11 +476,12 @@ export class EmotionAnalyzer {
             trackingStability = clamp(1 - std * 2, 0, 1);
         }
 
-        return +clamp(
+        const confidence = clamp(
             C.landmarksBase +
             trackingStability * C.landmarksStabilityW +
             validFraction     * C.landmarksValidFramesW,
             0, 1
-        ).toFixed(3);
+        );
+        return +(this._auBaselineReady ? confidence : Math.min(0.35, confidence)).toFixed(3);
     }
 }

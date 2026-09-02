@@ -41,10 +41,12 @@ function hasOcclusion(segmenterResult) {
     const visibility = segmenterResult?.faceVisibility;
     if (!visibility) return false;
     const issues = segmenterResult?.issues || visibility.issues || [];
-    return visibility.handDetected === true
-        || (Array.isArray(issues) && issues.some(
-            issue => issue === 'hand_on_face' || String(issue).includes('hand_occluded')
-        ));
+    // Global body-skin classification is not specific enough to prove that a
+    // hand covers the face. Require a regional hand-occlusion signal; the
+    // temporal hold below then removes isolated segmentation noise.
+    return Array.isArray(issues) && issues.some(
+        issue => String(issue).includes('hand_occluded')
+    );
 }
 
 function hasAnalysisError(frame) {

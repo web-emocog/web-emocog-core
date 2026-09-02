@@ -23,6 +23,14 @@ const STROOP_WORDS = {
   en: { red: 'RED', blue: 'BLUE', green: 'GREEN' },
 };
 
+const FLANKER_TEXT = Object.freeze({
+  std_flanker_right_cong: '>>>>>',
+  std_flanker_left_cong: '<<<<<',
+  // The middle arrow is the target; the id names its direction.
+  std_flanker_right_incong: '<<><<',
+  std_flanker_left_incong: '>><>>',
+});
+
 const EMO_VISUAL = {
   neutral:  { emoji: '😐', bg: 'rgba(148,163,184,.22)', border: 'rgba(148,163,184,.45)' },
   happy:    { emoji: '😊', bg: 'rgba(245,158,11,.18)', border: 'rgba(245,158,11,.42)' },
@@ -151,7 +159,7 @@ function resolveStandardStimulus(stimulusId, meta, options) {
   }
 
   if (id.startsWith('std_flanker_')) {
-    const text = metaText || String(name).split(':').pop()?.trim() || id;
+    const text = FLANKER_TEXT[id] || metaText || String(name).split(':').pop()?.trim() || '';
     return textStimulus(text, {
       fontSize: 'clamp(54px, 10vw, 100px)',
       fontWeight: '900',
@@ -218,7 +226,13 @@ function resolveStandardStimulus(stimulusId, meta, options) {
   }
 
   if (id.startsWith('std_cpt_') || id.startsWith('std_switch_')) {
-    const text = metaText || String(name).split(':').pop()?.trim() || id;
+    const generatedText = id.startsWith('std_cpt_')
+      ? id.slice('std_cpt_'.length).toUpperCase()
+      : id.slice('std_switch_'.length).toUpperCase();
+    const candidate = metaText || String(name).split(':').pop()?.trim() || '';
+    const text = !candidate || candidate === id || candidate.startsWith('std_')
+      ? generatedText
+      : candidate;
     return textStimulus(text, {
       fontSize: 'clamp(58px, 11vw, 110px)',
       fontWeight: '900',

@@ -10,17 +10,12 @@ function ExperimentBuilderView(options = {}) {
   const DEFAULT_PARTICIPANT_SHELL = {
     consent: true,
     questionnaire: true,
-    precheck: false,
-    calibration: false
+    precheck: true,
+    calibration: true
   };
 
-  function normalizeParticipantShell(shell) {
-    return {
-      consent: shell?.consent !== false,
-      questionnaire: shell?.questionnaire !== false,
-      precheck: shell?.precheck === true,
-      calibration: shell?.calibration === true
-    };
+  function normalizeParticipantShell() {
+    return { ...DEFAULT_PARTICIPANT_SHELL };
   }
 
   function getParticipantShellMeta() {
@@ -30,8 +25,8 @@ function ExperimentBuilderView(options = {}) {
   function defaultExportTrialsForCognitiveBlock(content) {
     const existing = Array.isArray(content?.trials) ? content.trials : [];
     if (existing.length) return existing;
-    let taskType = normalizeAnalyzerTaskType(content?.taskType || content?.rt_task);
-    if (taskType === 'simple' || taskType === 'pvt') {
+    const taskType = String(content?.taskType || content?.rt_task || 'simple').toLowerCase();
+    if (taskType === 'simple' || taskType === 'simple_rt') {
       return [{
         stimulusId: 'std_simple_black_square',
         condition: 'target',
@@ -40,10 +35,61 @@ function ExperimentBuilderView(options = {}) {
         repetitions: 10
       }];
     }
+    if (taskType === 'pvt') {
+      return [{
+        stimulusId: 'std_pvt_counter',
+        condition: 'counter onset',
+        action: 'space',
+        duration: 10000,
+        repetitions: 5
+      }];
+    }
     if (taskType === 'go_nogo') {
       return [
         { stimulusId: 'std_go_green_circle', condition: 'Go', action: 'space', duration: 500, repetitions: 1 },
         { stimulusId: 'std_nogo_red_circle', condition: 'No-Go', action: '', duration: 500, repetitions: 1 }
+      ];
+    }
+    if (taskType === 'stroop') {
+      return [
+        { stimulusId: 'std_stroop_red_red', condition: 'congruent/red', action: 'arrow_left', duration: 2000, repetitions: 1 },
+        { stimulusId: 'std_stroop_blue_green', condition: 'incongruent/green ink', action: 'arrow_right', duration: 2000, repetitions: 1 },
+        { stimulusId: 'std_stroop_red_blue', condition: 'incongruent/blue ink', action: 'arrow_down', duration: 2000, repetitions: 1 }
+      ];
+    }
+    if (taskType === 'flanker') {
+      return [
+        { stimulusId: 'std_flanker_right_incong', condition: 'incongruent/right', action: 'arrow_right', duration: 1500, repetitions: 1 },
+        { stimulusId: 'std_flanker_left_incong', condition: 'incongruent/left', action: 'arrow_left', duration: 1500, repetitions: 1 }
+      ];
+    }
+    if (taskType === 'nback' || taskType === 'nback_2') {
+      return [
+        { stimulusId: 'std_nback_circle', condition: 'non-target', action: '', duration: 1000, repetitions: 1 },
+        { stimulusId: 'std_nback_square', condition: 'non-target', action: '', duration: 1000, repetitions: 1 },
+        { stimulusId: 'std_nback_circle', condition: 'target 2-back', action: 'space', duration: 1000, repetitions: 1 }
+      ];
+    }
+    if (taskType === 'cpt' || taskType === 'ax_cpt') {
+      return [
+        { stimulusId: 'std_cpt_a', condition: 'cue', action: '', duration: 500, repetitions: 1 },
+        { stimulusId: 'std_cpt_x', condition: 'AX target', action: 'space', duration: 500, repetitions: 1 },
+        { stimulusId: 'std_cpt_b', condition: 'non-target', action: '', duration: 500, repetitions: 1 },
+        { stimulusId: 'std_cpt_x', condition: 'non-target', action: '', duration: 500, repetitions: 1 }
+      ];
+    }
+    if (taskType === 'task_switching') {
+      return [
+        { stimulusId: 'std_switch_4g', condition: 'number/even', action: 'arrow_left', duration: 2000, repetitions: 1 },
+        { stimulusId: 'std_switch_7a', condition: 'number/odd', action: 'arrow_right', duration: 2000, repetitions: 1 },
+        { stimulusId: 'std_switch_2e', condition: 'letter/vowel', action: 'arrow_left', duration: 2000, repetitions: 1 },
+        { stimulusId: 'std_switch_9k', condition: 'letter/consonant', action: 'arrow_right', duration: 2000, repetitions: 1 }
+      ];
+    }
+    if (taskType === 'emotion_viewing') {
+      return [
+        { stimulusId: 'std_emo_neutral_01', condition: 'neutral', action: '', responseMode: 'none', duration: 4000, repetitions: 1 },
+        { stimulusId: 'std_emo_happy_01', condition: 'happy', action: '', responseMode: 'none', duration: 4000, repetitions: 1 }
       ];
     }
     return [{
@@ -72,10 +118,15 @@ function ExperimentBuilderView(options = {}) {
 
   function attachBlockAois(blockConfig, content, trials) {
     if (!content?.useAOI || !globalThis.EmocogAoiProtocol) return;
-    const definitions = globalThis.EmocogAoiProtocol.buildAoiDefinitions(
-      stimuliList,
-      stimulusIdsForAoiExport(content, trials)
-    );
+    const stimulusIds = new Set(stimulusIdsForAoiExport(content, trials).map(String));
+    const scopedDefinitions = content.aoiDefinitions && typeof content.aoiDefinitions === 'object'
+      ? Object.fromEntries(Object.entries(content.aoiDefinitions)
+        .filter(([stimulusId, aois]) => stimulusIds.has(String(stimulusId)) && Array.isArray(aois) && aois.length)
+        .map(([stimulusId, aois]) => [stimulusId, JSON.parse(JSON.stringify(aois))]))
+      : {};
+    const definitions = Object.keys(scopedDefinitions).length
+      ? scopedDefinitions
+      : globalThis.EmocogAoiProtocol.buildAoiDefinitions(stimuliList, [...stimulusIds]);
     if (!Object.keys(definitions).length) return;
     blockConfig.aoiSchemaVersion = globalThis.EmocogAoiProtocol.AOI_SCHEMA_VERSION;
     blockConfig.aoiDefinitions = definitions;
@@ -247,6 +298,109 @@ function ExperimentBuilderView(options = {}) {
       </select>`;
   }
 
+  function surveyContract() {
+    return globalThis.WecogSurveyContract || null;
+  }
+
+  function normalizedSurveyContent(content) {
+    const contract = surveyContract();
+    return contract?.normalizeSurveyContent
+      ? contract.normalizeSurveyContent(content || {})
+      : (content || defaultContent('survey'));
+  }
+
+  function surveyEditorValue(source, field) {
+    const value = source && typeof source === 'object' ? source : {};
+    if (CURRENT_LANG === 'en') return value[`${field}En`] || '';
+    return value[`${field}Ru`] || value[field] || '';
+  }
+
+  function setSurveyEditorValue(target, field, value) {
+    const next = { ...(target || {}) };
+    if (CURRENT_LANG === 'en') next[`${field}En`] = value;
+    else {
+      next[field] = value;
+      next[`${field}Ru`] = value;
+    }
+    return next;
+  }
+
+  function newSurveyQuestion() {
+    return {
+      id: `question_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+      text: '',
+      type: 'open',
+      required: false,
+      options: []
+    };
+  }
+
+  function newSurveyOption(questionId, index) {
+    return {
+      id: `${questionId}_option_${Date.now()}_${index + 1}`,
+      label: ''
+    };
+  }
+
+  function createProtocolBlockId(type) {
+    const suffix = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+    return `${type}_${suffix}`;
+  }
+
+  function surveyOptionsEditorHtml(question, questionIndex) {
+    if (question.type === 'open') return '';
+    const options = question.options.length >= 2
+      ? question.options
+      : [newSurveyOption(question.id, 0), newSurveyOption(question.id, 1)];
+    return `
+      <div class="survey-options-editor" style="display:flex;flex-direction:column;gap:6px;">
+        <div style="font-size:10px;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);">${trb('Варианты ответа', 'Answer options')}</div>
+        ${options.map((option, optionIndex) => `
+          <div class="survey-option-row" data-option-id="${previewEscape(option.id)}" style="display:flex;gap:6px;align-items:center;">
+            <input class="survey-option-label" value="${previewEscape(surveyEditorValue(option, 'label'))}" placeholder="${trb('Вариант ', 'Option ')}${optionIndex + 1}" maxlength="500" style="flex:1;min-width:0;padding:7px 9px;border-radius:8px;border:1px solid var(--stroke);background:var(--card-bg);color:var(--text);font-size:12px;">
+            <button type="button" class="survey-remove-option" data-question-index="${questionIndex}" data-option-index="${optionIndex}" aria-label="${trb('Удалить вариант', 'Remove option')}" style="width:30px;height:30px;border:1px solid var(--stroke);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;">×</button>
+          </div>`).join('')}
+        <button type="button" class="survey-add-option quick-btn" data-question-index="${questionIndex}" style="align-self:flex-start;font-size:11px;padding:6px 10px;">+ ${trb('Вариант', 'Option')}</button>
+      </div>`;
+  }
+
+  function buildSurveyInlineEditor(block) {
+    const survey = normalizedSurveyContent(block.content);
+    block.content = survey;
+    return `
+      <div class="proto-inline-editor survey-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:10px;">
+        <label style="font-size:11px;font-weight:650;color:var(--muted);">${trb('Название опроса', 'Survey title')}</label>
+        <input class="survey-title-field" value="${previewEscape(surveyEditorValue(survey, 'title'))}" maxlength="200" style="padding:7px 9px;border-radius:8px;border:1px solid var(--stroke);background:var(--card-bg);color:var(--text);font-size:12px;">
+        <label style="font-size:11px;font-weight:650;color:var(--muted);">${trb('Пояснение участнику', 'Participant description')}</label>
+        <textarea class="survey-description-field" rows="2" maxlength="1000" style="padding:7px 9px;border-radius:8px;border:1px solid var(--stroke);background:var(--card-bg);color:var(--text);font-size:12px;resize:vertical;">${previewEscape(surveyEditorValue(survey, 'description'))}</textarea>
+        <div style="padding:9px 10px;border-left:3px solid var(--warn);background:rgba(245,158,11,.08);border-radius:7px;color:var(--muted);font-size:10px;line-height:1.45;">
+          ${trb('Не запрашивайте ФИО, телефон, почту и другие прямые идентификаторы: ingest отклоняет PII.', 'Do not request names, phone numbers, email, or other direct identifiers: ingest rejects PII.')}
+        </div>
+        <div class="survey-question-list" style="display:flex;flex-direction:column;gap:10px;">
+          ${survey.questions.map((question, questionIndex) => `
+            <section class="survey-question-editor" data-question-id="${previewEscape(question.id)}" style="padding:11px;border:1px solid var(--stroke);border-radius:11px;background:rgba(255,255,255,.34);display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;gap:7px;align-items:center;">
+                <strong style="font-size:11px;color:var(--text);flex:1;">${trb('Вопрос', 'Question')} ${questionIndex + 1}</strong>
+                <select class="survey-question-type" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);background:var(--card-bg);color:var(--text);font-size:11px;">
+                  <option value="open" ${question.type === 'open' ? 'selected' : ''}>${trb('Открытый ответ', 'Open answer')}</option>
+                  <option value="single" ${question.type === 'single' ? 'selected' : ''}>${trb('Один из нескольких', 'Single choice')}</option>
+                  <option value="multiple" ${question.type === 'multiple' ? 'selected' : ''}>${trb('Несколько из нескольких', 'Multiple choice')}</option>
+                </select>
+                <label style="display:flex;align-items:center;gap:5px;color:var(--muted);font-size:10px;white-space:nowrap;">
+                  <input type="checkbox" class="survey-question-required" ${question.required ? 'checked' : ''}> ${trb('Обязательный', 'Required')}
+                </label>
+                <button type="button" class="survey-remove-question" data-question-index="${questionIndex}" aria-label="${trb('Удалить вопрос', 'Remove question')}" style="width:30px;height:30px;border:1px solid var(--stroke);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;">×</button>
+              </div>
+              <textarea class="survey-question-text" rows="2" maxlength="1000" placeholder="${trb('Введите текст вопроса', 'Enter the question')}" style="padding:7px 9px;border-radius:8px;border:1px solid var(--stroke);background:var(--card-bg);color:var(--text);font-size:12px;resize:vertical;">${previewEscape(surveyEditorValue(question, 'text'))}</textarea>
+              ${surveyOptionsEditorHtml(question, questionIndex)}
+            </section>`).join('')}
+        </div>
+        <button type="button" class="survey-add-question quick-btn" style="align-self:flex-start;font-size:11px;padding:7px 11px;">+ ${trb('Добавить вопрос', 'Add question')}</button>
+      </div>`;
+  }
+
   function buildBlockInlineEditor(block) {
     const c = block.content || {};
     const folderOpts = (folders || []).map(f =>
@@ -262,6 +416,9 @@ function ExperimentBuilderView(options = {}) {
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Кнопка', 'Button')}</label>
           <input class="proto-field" data-field="buttonText" value="${previewEscape(localizedInstructionValue(c, 'buttonText', 'Далее'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
         </div>`;
+    }
+    if (block.type === 'survey') {
+      return buildSurveyInlineEditor(block);
     }
     if (block.type === 'rest') {
       return `
@@ -336,7 +493,106 @@ function ExperimentBuilderView(options = {}) {
     localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
   }
 
+  function readSurveyEditor(block, card) {
+    const previous = normalizedSurveyContent(block.content);
+    const questions = [...card.querySelectorAll('.survey-question-editor')].map((questionEl, questionIndex) => {
+      const type = questionEl.querySelector('.survey-question-type')?.value || 'open';
+      const previousQuestion = previous.questions[questionIndex] || newSurveyQuestion();
+      const options = type === 'open' ? [] : [...questionEl.querySelectorAll('.survey-option-row')].map((optionEl, optionIndex) => {
+        const previousOption = previousQuestion.options[optionIndex]
+          || newSurveyOption(previousQuestion.id, optionIndex);
+        return setSurveyEditorValue({
+          ...previousOption,
+          id: optionEl.dataset.optionId || previousOption.id
+        }, 'label', optionEl.querySelector('.survey-option-label')?.value || '');
+      });
+      return setSurveyEditorValue({
+        ...previousQuestion,
+        id: questionEl.dataset.questionId || previousQuestion.id,
+        type,
+        required: !!questionEl.querySelector('.survey-question-required')?.checked,
+        options
+      }, 'text', questionEl.querySelector('.survey-question-text')?.value || '');
+    });
+    let nextContent = {
+      ...previous,
+      questions
+    };
+    nextContent = setSurveyEditorValue(
+      nextContent,
+      'title',
+      card.querySelector('.survey-title-field')?.value || ''
+    );
+    nextContent = setSurveyEditorValue(
+      nextContent,
+      'description',
+      card.querySelector('.survey-description-field')?.value || ''
+    );
+    block.content = normalizedSurveyContent(nextContent);
+    block.label = surveyEditorValue(block.content, 'title') || trb('Опрос', 'Survey');
+    block[CURRENT_LANG === 'en' ? 'labelEn' : 'labelRu'] = block.label;
+    localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+    return block.content;
+  }
+
+  function rerenderSurveyEditor(block, card, mutate) {
+    const survey = readSurveyEditor(block, card);
+    mutate(survey);
+    block.content = normalizedSurveyContent(survey);
+    block.label = surveyEditorValue(block.content, 'title') || trb('Опрос', 'Survey');
+    block[CURRENT_LANG === 'en' ? 'labelEn' : 'labelRu'] = block.label;
+    localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+    renderCanvasBlocks();
+  }
+
+  function wireSurveyEditor(card, block) {
+    card.querySelectorAll('.survey-inline-editor input, .survey-inline-editor textarea, .survey-inline-editor select, .survey-inline-editor button').forEach(el => {
+      el.addEventListener('click', event => event.stopPropagation());
+    });
+    card.querySelectorAll('.survey-title-field, .survey-description-field, .survey-question-text, .survey-question-required, .survey-option-label').forEach(el => {
+      el.addEventListener('change', () => readSurveyEditor(block, card));
+    });
+    card.querySelectorAll('.survey-question-type').forEach((select, questionIndex) => {
+      select.addEventListener('change', () => rerenderSurveyEditor(block, card, survey => {
+        const question = survey.questions[questionIndex];
+        if (!question || question.type === 'open') return;
+        while (question.options.length < 2) {
+          question.options.push(newSurveyOption(question.id, question.options.length));
+        }
+      }));
+    });
+    card.querySelector('.survey-add-question')?.addEventListener('click', () => {
+      rerenderSurveyEditor(block, card, survey => survey.questions.push(newSurveyQuestion()));
+    });
+    card.querySelectorAll('.survey-remove-question').forEach(button => {
+      button.addEventListener('click', () => {
+        const questionIndex = Number(button.dataset.questionIndex);
+        rerenderSurveyEditor(block, card, survey => survey.questions.splice(questionIndex, 1));
+      });
+    });
+    card.querySelectorAll('.survey-add-option').forEach(button => {
+      button.addEventListener('click', () => {
+        const questionIndex = Number(button.dataset.questionIndex);
+        rerenderSurveyEditor(block, card, survey => {
+          const question = survey.questions[questionIndex];
+          if (question) question.options.push(newSurveyOption(question.id, question.options.length));
+        });
+      });
+    });
+    card.querySelectorAll('.survey-remove-option').forEach(button => {
+      button.addEventListener('click', () => {
+        const questionIndex = Number(button.dataset.questionIndex);
+        const optionIndex = Number(button.dataset.optionIndex);
+        rerenderSurveyEditor(block, card, survey => {
+          const question = survey.questions[questionIndex];
+          if (question) question.options.splice(optionIndex, 1);
+        });
+      });
+    });
+  }
+
   function wireBlockCardInteractions(card, block) {
+    if (block.type === 'survey') wireSurveyEditor(card, block);
     const taskTypeSel = card.querySelector('.proto-task-type-sel');
     if (taskTypeSel) {
       taskTypeSel.addEventListener('click', e => e.stopPropagation());
@@ -368,18 +624,21 @@ function ExperimentBuilderView(options = {}) {
       el.addEventListener('click', e => e.stopPropagation());
     });
   }
-  const localizedInstructionValue = (content, field, fallback = '') => {
+  const instructionValueForLocale = (content, field, locale, fallback = '') => {
     const c = content || {};
-    if (CURRENT_LANG === 'en') {
+    if (locale === 'en') {
       const knownTranslations = typeof TEMPLATE_INSTRUCTION_TRANSLATIONS !== 'undefined' ? TEMPLATE_INSTRUCTION_TRANSLATIONS : {};
       const known = knownTranslations[c.titleRu || c.title] || null;
       if (field === 'title' && known?.title) return known.title;
       if (field === 'text' && known?.text) return known.text;
       if (field === 'buttonText' && (c.buttonTextRu || c.buttonText || fallback) === 'Начать') return 'Start';
-      return c[field + 'En'] || autoTranslateString(c[field] || c[field + 'Ru'] || fallback, CURRENT_LANG);
+      return c[field + 'En'] || autoTranslateString(c[field] || c[field + 'Ru'] || fallback, 'en');
     }
     return c[field + 'Ru'] || c[field] || fallback;
   };
+  const localizedInstructionValue = (content, field, fallback = '') => (
+    instructionValueForLocale(content, field, CURRENT_LANG, fallback)
+  );
   const localizedBlockLabel = (block, fallback = '') => {
     if (!block) return fallback;
     if (CURRENT_LANG === 'en') {
@@ -404,6 +663,7 @@ function ExperimentBuilderView(options = {}) {
       questionnaire: pack.blockQuestionnaire,
       precheck: pack.blockPrecheck,
       calibration: pack.blockCalibration,
+      survey: trb('Опрос', 'Survey'),
       cognitive_task: pack.blockTask,
       passive: pack.blockPassive,
       rest: pack.blockBreak,
@@ -415,7 +675,7 @@ function ExperimentBuilderView(options = {}) {
 
   function builderStepHint(stepIdx) {
     const hints = [
-      trb('Заполните базовые параметры протокола. Поля со звездочкой обязательны.', 'Fill in basic protocol parameters. Required fields are marked with an asterisk.'),
+      '',
       trb('Можно выбрать несколько задач: они будут добавлены в один эксперимент последовательно.', 'You can select multiple tasks: they will be added to one experiment sequentially.'),
       trb('Соберите последовательность блоков и настройте подготовительные этапы для участника.', 'Build the block sequence and configure participant preparation steps.'),
       trb('Настройте логику показа стимулов и таблицы проб для каждого блока.', 'Configure stimulus presentation and trial tables for each block.'),
@@ -447,6 +707,7 @@ function ExperimentBuilderView(options = {}) {
     { type:'precheck',       color:'#0ea5e9', icon:'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
     { type:'calibration',    color:'#10b981', icon:'M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z' },
     { type:'instruction',    color:'#f59e0b', icon:'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { type:'survey',         color:'#185cff', icon:'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11' },
     { type:'cognitive_task', color:'#ef4444', icon:'M13 10V3L4 14h7v7l9-11h-7z' },
     { type:'passive',        color:'#ec4899', icon:'M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z' },
     { type:'rest',           color:'#64748b', icon:'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z' },
@@ -461,6 +722,19 @@ function ExperimentBuilderView(options = {}) {
   function defaultContent(type) {
     switch(type) {
       case 'instruction':    return { title: trb('Инструкция', 'Instruction'), text:'', buttonText: trb('Далее', 'Next') };
+      case 'survey':         return {
+        schemaVersion: 'protocol_survey.v1',
+        title: trb('Опрос', 'Survey'),
+        description: '',
+        submitButtonText: trb('Продолжить', 'Continue'),
+        questions: [{
+          id: 'question_' + Date.now(),
+          text: '',
+          type: 'open',
+          required: false,
+          options: []
+        }]
+      };
       case 'cognitive_task': return { taskType:'simple_rt', showFeedback:true, useRT:true, responseMode:'keypress', stimulusDuration:1000, trials:[], stimuliSource:'library', stimuliFolder:'' };
       case 'questionnaire':  return { questions:[] };
       case 'passive':        return { slideDuration:5000, slides:[], stimuliSource:'library', stimuliFolder:'' };
@@ -981,6 +1255,7 @@ function ExperimentBuilderView(options = {}) {
     else if (currentStep === 1) renderStep0();
     else if (currentStep === 2) renderStep1();
     else if (currentStep === 3) renderStep2Stimuli();
+    else if (currentStep === 4) renderStep4Aoi();
     else renderPlaceholder(currentStep);
 
     setTimeout(() => applyAutoI18n(), 0);
@@ -1360,20 +1635,20 @@ function ExperimentBuilderView(options = {}) {
               </div>
               <div style="display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:10px;max-width:720px;">
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellConsent" ${shell.consent ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Согласие', 'Consent')}
+                  <input type="checkbox" id="shellConsent" checked disabled style="accent-color:var(--accent);">
+                  ${trb('Согласие · обязательно', 'Consent · required')}
                 </label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellQuestionnaire" ${shell.questionnaire ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Анкета', 'Questionnaire')}
+                  <input type="checkbox" id="shellQuestionnaire" checked disabled style="accent-color:var(--accent);">
+                  ${trb('Анкета · обязательно', 'Questionnaire · required')}
                 </label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellPrecheck" ${shell.precheck ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Проверка камеры', 'Camera pre-check')}
+                  <input type="checkbox" id="shellPrecheck" checked disabled style="accent-color:var(--accent);">
+                  ${trb('Проверка камеры · обязательно', 'Camera pre-check · required')}
                 </label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellCalibration" ${shell.calibration ? 'checked' : ''} style="accent-color:var(--accent);">
-                  ${trb('Калибровка взгляда', 'Gaze calibration')}
+                  <input type="checkbox" id="shellCalibration" checked disabled style="accent-color:var(--accent);">
+                  ${trb('Калибровка и LOOCV · обязательно', 'Calibration and LOOCV · required')}
                 </label>
               </div>
             </div>
@@ -1411,12 +1686,7 @@ function ExperimentBuilderView(options = {}) {
     renderCanvasBlocks();
 
     function syncParticipantShellFromForm() {
-      protocolMeta.participantShell = {
-        consent: !!canvasCol.querySelector('#shellConsent')?.checked,
-        questionnaire: !!canvasCol.querySelector('#shellQuestionnaire')?.checked,
-        precheck: !!canvasCol.querySelector('#shellPrecheck')?.checked,
-        calibration: !!canvasCol.querySelector('#shellCalibration')?.checked
-      };
+      protocolMeta.participantShell = { ...DEFAULT_PARTICIPANT_SHELL };
       const hint = canvasCol.querySelector('#participantShellHint');
       if (hint) hint.textContent = describeParticipantShellForUi(getParticipantShellMeta());
     }
@@ -1680,8 +1950,23 @@ function ExperimentBuilderView(options = {}) {
 
   function addBlock(type, insertAt) {
     const meta = getMeta(type);
-    const block = { id: type + '_' + Date.now(), type, label: meta.label, content: defaultContent(type) };
+    const block = { id: createProtocolBlockId(type), type, label: meta.label, content: defaultContent(type) };
     const idx = Number.isFinite(insertAt) ? Math.max(0, Math.min(insertAt, experimentBlocks.length)) : experimentBlocks.length;
+    if (type === 'survey' && surveyContract()?.isProtectedInstructionBoundary?.(experimentBlocks, idx)) {
+      toast(trb(
+        'Опрос нельзя поставить между инструкцией и связанным с ней заданием.',
+        'A survey cannot be placed between an instruction and its task.'
+      ));
+      return;
+    }
+    if (type === 'survey' && !getParticipantShellMeta().consent) {
+      protocolMeta.participantShell = { ...getParticipantShellMeta(), consent: true };
+      const consentToggle = canvasCol.querySelector('#shellConsent');
+      if (consentToggle) consentToggle.checked = true;
+      const hint = canvasCol.querySelector('#participantShellHint');
+      if (hint) hint.textContent = describeParticipantShellForUi(getParticipantShellMeta());
+      toast(trb('Для опроса включено согласие участника.', 'Participant consent was enabled for the survey.'));
+    }
     experimentBlocks.splice(idx, 0, block);
     localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
     renderCanvasBlocks();
@@ -1690,9 +1975,18 @@ function ExperimentBuilderView(options = {}) {
   function moveBlockToIndex(from, toIndex) {
     if (!Number.isFinite(from) || !Number.isFinite(toIndex) || from < 0 || from >= experimentBlocks.length) return;
     let target = Math.max(0, Math.min(toIndex, experimentBlocks.length));
-    const [moved] = experimentBlocks.splice(from, 1);
+    const moved = experimentBlocks[from];
+    const remaining = experimentBlocks.filter((_, index) => index !== from);
     if (from < target) target -= 1;
-    experimentBlocks.splice(target, 0, moved);
+    if (moved?.type === 'survey' && surveyContract()?.isProtectedInstructionBoundary?.(remaining, target)) {
+      toast(trb(
+        'Опрос нельзя поставить между инструкцией и связанным с ней заданием.',
+        'A survey cannot be placed between an instruction and its task.'
+      ));
+      return;
+    }
+    remaining.splice(target, 0, moved);
+    experimentBlocks = remaining;
     localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
     renderCanvasBlocks();
   }
@@ -1718,7 +2012,7 @@ function ExperimentBuilderView(options = {}) {
       const sel = b.id === selectedBlockId;
       const blockLabel = localizedBlockLabel(b, meta.label);
       const inlineEditor = sel ? buildBlockInlineEditor(b) : '';
-      const canEdit = ['instruction', 'rest', 'finish', 'cognitive_task', 'passive'].includes(b.type);
+      const canEdit = ['instruction', 'survey', 'rest', 'finish', 'cognitive_task', 'passive'].includes(b.type);
 
       parts.push(`
         <div class="proto-card ${sel ? 'proto-card-sel' : ''}" data-id="${previewEscape(b.id)}" data-idx="${i}"
@@ -2143,6 +2437,191 @@ function ExperimentBuilderView(options = {}) {
     setTimeout(() => applyAutoI18n(wrapper), 0);
   }
 
+  function aoiStimulusIdsForBlock(block) {
+    const ids = [];
+    const add = value => {
+      const id = String(value || '').trim();
+      if (id && !ids.includes(id)) ids.push(id);
+    };
+    const content = block?.content || {};
+    let trials = Array.isArray(content.trials) ? content.trials : [];
+    if (!trials.length && block?.type === 'cognitive_task') {
+      trials = defaultExportTrialsForCognitiveBlock(content);
+    }
+    trials.forEach(trial => add(trial?.stimulusId ?? trial?.id));
+    (content.stimuliIds || []).forEach(add);
+    (content.slides || []).forEach(slide => add(typeof slide === 'object' ? (slide?.stimulusId ?? slide?.id) : slide));
+    if (!ids.length && content.stimuliFolder) {
+      const folder = folders.find(item => String(item.id) === String(content.stimuliFolder));
+      (folder?.stimuliIds || []).forEach(add);
+    }
+    if (!ids.length && content.stimuliSource === 'library' && block?.type === 'passive') {
+      stimuliList.forEach(stimulus => add(stimulus.id));
+    }
+    return ids;
+  }
+
+  function syncProtocolAoiFlags() {
+    experimentBlocks.forEach(block => {
+      if (block.type !== 'cognitive_task' && block.type !== 'passive') return;
+      block.content = block.content || {};
+      if (block.content.useAOI === true) {
+        block.content.aoiSchemaVersion = globalThis.EmocogAoiProtocol?.AOI_SCHEMA_VERSION || '1.2';
+      } else {
+        delete block.content.aoiSchemaVersion;
+      }
+    });
+    localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+  }
+
+  function renderAoiStimulusThumbnail(stimulus, stimulusId) {
+    if (stimulus?.type === 'image' && stimulus.url) {
+      return `<img src="${previewEscape(stimulus.url)}" alt="${previewEscape(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : (stimulus.name || stimulusId))}" style="width:100%;height:100%;object-fit:contain;">`;
+    }
+    if (stimulus?.type === 'video' && stimulus.url) {
+      return `<video src="${previewEscape(stimulus.url)}" muted style="width:100%;height:100%;object-fit:contain;"></video>`;
+    }
+    return `<div style="transform:scale(.34);transform-origin:center;display:flex;align-items:center;justify-content:center;min-width:360px;min-height:240px;">${renderPreviewStimulus(stimulus, { stimulusId })}</div>`;
+  }
+
+  function renderStep4Aoi() {
+    const blockRows = experimentBlocks
+      .map((block, blockIndex) => ({ block, blockIndex, stimulusIds: aoiStimulusIdsForBlock(block) }))
+      .filter(row => (
+        (row.block.type === 'cognitive_task' || row.block.type === 'passive')
+        && row.block.content?.useAOI === true
+      ));
+    const uniqueStimulusIds = [...new Set(blockRows.flatMap(row => row.stimulusIds))];
+    const configuredCount = blockRows.reduce((count, row) => count + row.stimulusIds.filter(stimulusId => (
+      Array.isArray(row.block.content?.aoiDefinitions?.[stimulusId])
+      && row.block.content.aoiDefinitions[stimulusId].length > 0
+    )).length, 0);
+    const missingRows = blockRows.flatMap(row => row.stimulusIds
+      .filter(stimulusId => !Array.isArray(row.block.content?.aoiDefinitions?.[stimulusId])
+        || row.block.content.aoiDefinitions[stimulusId].length === 0)
+      .map(stimulusId => ({ ...row, stimulusId })));
+    const queueItems = blockRows.flatMap(row => row.stimulusIds.map(stimulusId => ({
+      blockIndex: row.blockIndex,
+      stimulusId
+    })));
+
+    canvasCol.innerHTML = `
+      <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:12px;overflow:hidden;">
+        ${builderStepHeader(4, `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <span style="font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);">${uniqueStimulusIds.length} ${trb('стимулов с включённым AOI','AOI-enabled stimuli')}</span>
+            <span style="font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;background:color-mix(in srgb,var(--good) 10%,transparent);color:var(--good);">${configuredCount} ${trb('настроек AOI для блоков','block AOI configurations')}</span>
+            ${missingRows.length ? `<span style="font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;background:color-mix(in srgb,var(--warn) 12%,transparent);color:var(--warn);">${missingRows.length} ${trb('требуют разметки','need markup')}</span>` : ''}
+          </div>`)}
+        <div style="font-size:12px;color:var(--muted);padding:10px 12px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);">
+          ${trb('Здесь показаны все визуальные материалы из блоков, для которых на предыдущем шаге включена отметка AOI. Разметьте каждый материал: AOI сохраняются отдельно для каждого блока, даже если блоки используют один stimulusId.','All visual materials from blocks marked AOI on the previous step are shown here. Mark up every material: AOIs are stored separately for each block, even when blocks share one stimulusId.')}
+        </div>
+        <div id="builderAoiBlocks" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:2px 2px 8px;">
+          ${blockRows.length ? blockRows.map(row => {
+            const block = row.block;
+            const meta = getMeta(block.type);
+            return `<section style="border:1px solid var(--stroke);border-radius:14px;background:var(--card-bg);padding:14px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+                <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+                  <div style="width:28px;height:28px;border-radius:8px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg></div>
+                  <div><div style="font-size:13px;font-weight:800;color:var(--text);">${previewEscape(localizedBlockLabel(block, meta.label))}</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">${row.stimulusIds.length} ${trb('выбранных стимулов','selected stimuli')}</div></div>
+                </div>
+                <span style="font-size:10px;font-weight:700;padding:4px 8px;border-radius:999px;background:${block.content?.useAOI ? 'color-mix(in srgb,var(--good) 10%,transparent)' : 'var(--panel2)'};color:${block.content?.useAOI ? 'var(--good)' : 'var(--muted)'};">AOI ${block.content?.useAOI ? 'ON' : 'OFF'}</span>
+              </div>
+              ${row.stimulusIds.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;">
+                ${row.stimulusIds.map(stimulusId => {
+                  const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
+                  const aois = block.content?.aoiDefinitions?.[stimulusId] || [];
+                  const targets = aois.filter(aoi => aoi.isTarget).length;
+                  const stimulusName = typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : (stimulus?.name || stimulusId);
+                  return `<article class="builder-aoi-card" data-aoi-ready="${aois.length ? 'true' : 'false'}" style="border:1px solid ${aois.length ? 'var(--good)' : 'var(--warn)'};border-radius:12px;overflow:hidden;background:var(--card-bg);display:flex;flex-direction:column;min-width:0;">
+                    <div style="height:112px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;border-bottom:1px solid var(--stroke);">${renderAoiStimulusThumbnail(stimulus, stimulusId)}</div>
+                    <div style="padding:10px;display:flex;flex-direction:column;gap:7px;flex:1;">
+                      <div style="font-size:12px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${previewEscape(stimulusName)}">${previewEscape(stimulusName)}</div>
+                      <code style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${previewEscape(stimulusId)}</code>
+                      <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:9px;font-weight:700;"><span style="padding:3px 6px;border-radius:999px;background:var(--panel2);color:${aois.length ? 'var(--accent)' : 'var(--warn)'};">${aois.length ? `AOI ${aois.length}` : trb('Требуется разметка','Markup required')}</span>${targets ? `<span style="padding:3px 6px;border-radius:999px;background:color-mix(in srgb,var(--good) 10%,transparent);color:var(--good);">${trb('целей','targets')} ${targets}</span>` : ''}</div>
+                      <button class="quick-btn builder-aoi-edit" data-block-index="${row.blockIndex}" data-stimulus-id="${previewEscape(stimulusId)}" style="margin-top:auto;width:100%;justify-content:center;background:var(--panel2);border-color:${aois.length ? 'var(--good)' : 'var(--accent)'};color:${aois.length ? 'var(--good)' : 'var(--accent)'};font-size:11px;font-weight:800;" ${stimulus ? '' : 'disabled'}>${aois.length ? trb('Редактировать AOI','Edit AOIs') : trb('Создать AOI','Create AOI')}</button>
+                    </div>
+                  </article>`;
+                }).join('')}
+              </div>` : `<div style="font-size:12px;color:var(--muted);padding:18px;border:1px dashed var(--stroke);border-radius:10px;text-align:center;">${trb('Для этого блока ещё не выбраны стимулы. Вернитесь на шаг «Стимулы / Слайды» и заполните таблицу проб.','No stimuli have been selected for this block. Return to “Stimuli / Slides” and fill in the trial table.')}</div>`}
+            </section>`;
+          }).join('') : `<div style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);border:1px dashed var(--stroke);border-radius:14px;padding:28px;">${trb('Нет блоков с включённой отметкой AOI. Вернитесь на шаг «Стимулы / Слайды», откройте таблицу проб нужного блока и включите AOI.','No blocks have AOI enabled. Return to “Stimuli / Slides”, open the required block trial table, and enable AOI.')}</div>`}
+        </div>
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-shrink:0;padding-top:10px;border-top:1px solid var(--stroke);">
+          <div style="display:flex;gap:8px;">
+            <button class="quick-btn" id="aoiStepBack" style="font-size:12px;">← ${trb('Назад','Back')}</button>
+            <button class="quick-btn" id="aoiQueueButton" style="background:var(--panel2);border-color:var(--accent);color:var(--accent);font-weight:700;font-size:12px;" ${queueItems.length ? '' : 'disabled'}>${trb('Очередь разметки','Markup queue')} · ${queueItems.length}</button>
+          </div>
+          <button class="quick-btn" id="aoiStepNext" style="background:var(--panel2);border-color:${missingRows.length ? 'var(--stroke)' : 'var(--accent)'};color:${missingRows.length ? 'var(--muted)' : 'var(--accent)'};font-weight:700;font-size:12px;" ${missingRows.length ? 'aria-disabled="true"' : ''}>${trb('Далее','Next')} →</button>
+        </div>
+      </div>`;
+
+    const openQueueItem = (item, queueIndex = null) => {
+        const stimulusId = item.stimulusId;
+        const block = experimentBlocks[parseInt(item.blockIndex, 10)];
+        if (!block) return;
+        block.content = block.content || {};
+        block.content.aoiDefinitions = block.content.aoiDefinitions || {};
+        if (typeof openAoiEditor !== 'function') {
+          toast(trb('Редактор AOI недоступен','AOI editor is unavailable'));
+          return;
+        }
+        openAoiEditor(stimulusId, {
+          previewHtml: renderPreviewStimulus(previewStimulusById(stimulusId), { stimulusId }),
+          initialAois: block.content.aoiDefinitions[stimulusId] || [],
+          onPersist: aois => {
+            if (aois.length) block.content.aoiDefinitions[stimulusId] = JSON.parse(JSON.stringify(aois));
+            else delete block.content.aoiDefinitions[stimulusId];
+            syncProtocolAoiFlags();
+          },
+          onChange: () => syncProtocolAoiFlags(),
+          onClose: () => {
+            syncProtocolAoiFlags();
+            if (currentStep === 4) renderStep4Aoi();
+          },
+          ...(queueIndex === null ? {} : {
+            queueIndex,
+            queueTotal: queueItems.length,
+            onSaveAndNext: () => {
+              syncProtocolAoiFlags();
+              const nextItem = queueItems[queueIndex + 1];
+              if (nextItem) openQueueItem(nextItem, queueIndex + 1);
+              else if (currentStep === 4) renderStep4Aoi();
+            }
+          })
+        });
+    };
+    canvasCol.querySelectorAll('.builder-aoi-edit').forEach(button => {
+      button.addEventListener('click', () => {
+        openQueueItem({
+          stimulusId: button.dataset.stimulusId,
+          blockIndex: parseInt(button.dataset.blockIndex, 10)
+        });
+      });
+    });
+    canvasCol.querySelector('#aoiQueueButton')?.addEventListener('click', () => {
+      if (queueItems.length) openQueueItem(queueItems[0], 0);
+    });
+    canvasCol.querySelector('#aoiStepBack').addEventListener('click', () => { currentStep = 3; renderStepper(); renderCanvas(); });
+    canvasCol.querySelector('#aoiStepNext').addEventListener('click', () => {
+      if (missingRows.length) {
+        const firstMissing = canvasCol.querySelector('.builder-aoi-card[data-aoi-ready="false"]');
+        firstMissing?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toast(trb(
+          `Разметьте AOI для всех выбранных материалов. Осталось: ${missingRows.length}`,
+          `Create AOIs for every selected material. Remaining: ${missingRows.length}`
+        ));
+        return;
+      }
+      syncProtocolAoiFlags();
+      currentStep = 5;
+      renderStepper();
+      renderCanvas();
+    });
+    setTimeout(() => applyAutoI18n(canvasCol), 0);
+  }
+
   function renderPlaceholder(stepIdx) {
     const s = i18nPack().builderSteps[stepIdx];
     const isLast = stepIdx === i18nPack().builderSteps.length - 1;
@@ -2199,14 +2678,14 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function participantProtocolLink() {
-    const protocolId = (protocolMeta.protocolId || 'protocol').trim();
     const builderKey = experimentId || 'draft';
     const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(builderKey) : {};
-    const code = apiState.invitationCode || protocolId;
+    const code = apiState.invitationCode;
+    if (!code || !apiState.publishVerifiedAt) return '';
     if (typeof window.buildParticipantRunLink === 'function') {
       return window.buildParticipantRunLink(code);
     }
-    return (window.location.origin || '') + '/invite/' + encodeURIComponent(code);
+    return getParticipantWebBasePath() + 'run_new.html?code=' + encodeURIComponent(code);
   }
 
   function showProtocolPreview() {
@@ -2265,8 +2744,8 @@ function ExperimentBuilderView(options = {}) {
           <div style="font-size:13px;font-weight:800;color:var(--text);">${trb('Ссылка для участников','Participant link')}</div>
           <div style="font-size:11px;color:var(--muted);line-height:1.45;">${previewEscape(shellLine)}</div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <input id="participantLinkInput" readonly value="${previewEscape(link)}" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.62);font-size:12px;color:var(--text);font-family:var(--mono);">
-            <button class="quick-btn" id="copyParticipantLinkBtn" style="font-size:12px;">${trb('Скопировать','Copy')}</button>
+            <input id="participantLinkInput" readonly value="${previewEscape(link)}" placeholder="${trb('Ссылка появится после публикации','The link will appear after publishing')}" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.62);font-size:12px;color:var(--text);font-family:var(--mono);">
+            <button class="quick-btn" id="copyParticipantLinkBtn" style="font-size:12px;" ${link ? '' : 'disabled'}>${trb('Скопировать','Copy')}</button>
           </div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:1px solid var(--stroke);">
@@ -2281,6 +2760,7 @@ function ExperimentBuilderView(options = {}) {
     canvasCol.querySelector('#finishBackBtn').addEventListener('click', () => { currentStep--; renderStepper(); renderCanvas(); });
     canvasCol.querySelector('#copyParticipantLinkBtn').addEventListener('click', async () => {
       const input = canvasCol.querySelector('#participantLinkInput');
+      if (!input.value) return toast(trb('Сначала опубликуйте протокол','Publish the protocol first'));
       try {
         await navigator.clipboard.writeText(input.value);
         toast(trb('Ссылка скопирована','Link copied'));
@@ -2839,6 +3319,16 @@ function ExperimentBuilderView(options = {}) {
       fpsStable: { enabled: true, threshold: 25, hardStop: false },
       lighting: { enabled: true, threshold: 60, hardStop: false },
     };
+    const featuresKey = 'emocog_session_features_' + (experimentId || 'draft');
+    const importedFeatureFlags = parsedExperimentData?.json?.settings?.featureFlags
+      || editingExp?.sessionFeatureFlags
+      || {};
+    const sessionFeatures = JSON.parse(localStorage.getItem(featuresKey) || 'null') || {
+      audio: importedFeatureFlags.audio === true,
+      multimodal: importedFeatureFlags.multimodal !== false,
+      bodyMovement: importedFeatureFlags.bodyMovement !== false,
+      gamerMode: importedFeatureFlags.gamerMode === true
+    };
 
     canvasCol.innerHTML = '';
     const wrap = document.createElement('div');
@@ -2846,6 +3336,16 @@ function ExperimentBuilderView(options = {}) {
     wrap.innerHTML = `
       ${builderStepHeader(6)}
       <div style="flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+        <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;">
+          <div style="font-size:13px;font-weight:700;color:var(--text);">${trb('Фоновые исследовательские модули','Background research modules')}</div>
+          <div style="font-size:11px;color:var(--muted);margin:4px 0 10px;line-height:1.45;">${trb('Аудио требует отдельного согласия участника. Сырые аудио, видео и landmarks не сохраняются.','Audio requires separate participant consent. Raw audio, video, and landmarks are not stored.')}</div>
+          ${[
+            { key:'audio', label:trb('Акустические признаки голоса','Acoustic voice features') },
+            { key:'multimodal', label:trb('Мультимодальная карта','Multimodal map') },
+            { key:'bodyMovement', label:trb('Движение корпуса','Body movement') },
+            { key:'gamerMode', label:trb('Расширенный режим для игровых исследований','Extended gamer research mode') }
+          ].map(item => `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:12px;color:var(--text);"><input type="checkbox" class="session-feature" data-key="${item.key}" ${sessionFeatures[item.key] ? 'checked' : ''} style="width:auto;"><span>${item.label}</span></label>`).join('')}
+        </div>
         ${[
           { key:'gazeValid', label:trb('Взгляд валиден','Gaze valid'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с валидным взглядом','Minimum % of frames with valid gaze'), yellowFrom:51, greenFrom:70 },
           { key:'faceDetected', label:trb('Лицо обнаружено','Face detected'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с обнаруженным лицом','Minimum % of frames with face detected'), yellowFrom:51, greenFrom:80 },
@@ -2867,7 +3367,7 @@ function ExperimentBuilderView(options = {}) {
               <span style="font-size:11px;color:var(--muted);min-width:60px;">${trb('Порог:','Threshold:')}</span>
               <input type="range" class="qc-range" data-key="${param.key}" min="${param.min}" max="${param.max}" step="1"
                 value="${qc[param.key].threshold}"
-                style="flex:1;height:8px;cursor:pointer;border-radius:999px;appearance:none;-webkit-appearance:none;background:linear-gradient(90deg,#ef4444 0%, #ef4444 ${(((param.yellowFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #f59e0b ${(((param.yellowFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #f59e0b ${(((param.greenFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #22c55e ${(((param.greenFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #22c55e 100%);"
+                style="flex:1;--qc-track:linear-gradient(90deg,#ef4444 0%, #ef4444 ${(((param.yellowFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #f59e0b ${(((param.yellowFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #f59e0b ${(((param.greenFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #22c55e ${(((param.greenFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #22c55e 100%);"
                 oninput="this.nextElementSibling.textContent=this.value+'${param.unit}'">
               <span style="font-size:13px;font-weight:700;color:var(--accent);min-width:48px;">${qc[param.key].threshold}${param.unit}</span>
             </div>
@@ -2890,6 +3390,11 @@ function ExperimentBuilderView(options = {}) {
       wrap.querySelectorAll('.qc-range').forEach(r => { qc[r.dataset.key].threshold = parseInt(r.value); });
       wrap.querySelectorAll('.qc-hardstop').forEach(cb => { qc[cb.dataset.key].hardStop = cb.checked; });
       localStorage.setItem(qcKey, JSON.stringify(qc));
+      wrap.querySelectorAll('.session-feature').forEach(cb => {
+        sessionFeatures[cb.dataset.key] = cb.checked;
+      });
+      if (!sessionFeatures.multimodal) sessionFeatures.gamerMode = false;
+      localStorage.setItem(featuresKey, JSON.stringify(sessionFeatures));
     }
     wrap.querySelectorAll('#qcBack2').forEach(b => b.addEventListener('click', () => { saveQC(); currentStep--; renderStepper(); renderCanvas(); }));
     wrap.querySelector('#qcNext').addEventListener('click', () => { saveQC(); currentStep++; renderStepper(); renderCanvas(); });
@@ -2984,12 +3489,22 @@ function ExperimentBuilderView(options = {}) {
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     const id = experimentId || 'exp_' + Date.now();
     const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
+    const sessionFeatureFlags = JSON.parse(
+      localStorage.getItem('emocog_session_features_' + (experimentId || 'draft')) || 'null'
+    ) || editingExp?.sessionFeatureFlags || {
+      audio: false,
+      multimodal: true,
+      bodyMovement: true,
+      gamerMode: false
+    };
 
     const entry = {
       id,
+      projectId: parseInt(localStorage.getItem('emocog_selected_project_id') || '', 10) || editingExp?.projectId || null,
       title: expTitle,
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
+      sessionFeatureFlags,
       blocks: userBlocks,
       version: editingExp?.status === 'active' ? protocolVersion : (editingExp?.version || '1.0'),
       history: editingExp?.history || [],
@@ -3038,7 +3553,37 @@ function ExperimentBuilderView(options = {}) {
 
   function saveProtocol() {
     const errors = [];
+    let hasBlockingErrors = false;
     validateProtocolMeta(protocolMeta).forEach(field => errors.push(trb('Заполните поле: ','Fill in field: ') + field));
+    const surveyValidation = surveyContract()?.validateProtocolSurveyBlocks?.({
+      participantShell: getParticipantShellMeta(),
+      blocks: experimentBlocks
+    });
+    if (surveyValidation && !surveyValidation.ok) {
+      hasBlockingErrors = true;
+      const surveyMessages = {
+        survey_requires_prior_consent: trb('Для опроса необходимо включить согласие участника.', 'Participant consent must be enabled for surveys.'),
+        survey_splits_instruction_and_task: trb('Опрос стоит между инструкцией и заданием.', 'A survey is placed between an instruction and its task.'),
+        survey_question_required: trb('Добавьте хотя бы один вопрос в каждый опрос.', 'Add at least one question to every survey.'),
+        survey_question_text_required: trb('Заполните текст каждого вопроса.', 'Enter text for every question.'),
+        survey_options_minimum: trb('Для выбора добавьте минимум два варианта ответа.', 'Choice questions require at least two options.'),
+        survey_option_text_required: trb('Заполните все варианты ответа.', 'Fill in every answer option.'),
+        survey_question_id_duplicate: trb('Идентификаторы вопросов должны быть уникальными.', 'Question identifiers must be unique.'),
+        survey_option_id_duplicate: trb('Идентификаторы вариантов должны быть уникальными.', 'Option identifiers must be unique.'),
+        survey_options_too_many: trb('В вопросе превышен безопасный лимит вариантов ответа.', 'A question exceeds the safe answer-option limit.'),
+        survey_field_invalid: trb('Одно из полей опроса превышает допустимую длину.', 'A survey field exceeds its allowed length.'),
+        survey_question_text_invalid: trb('Текст вопроса превышает допустимую длину.', 'Question text exceeds its allowed length.'),
+        survey_option_text_invalid: trb('Текст варианта ответа превышает допустимую длину.', 'Answer option text exceeds its allowed length.'),
+        survey_question_type_invalid: trb('Выбран неподдерживаемый тип вопроса.', 'An unsupported question type is selected.'),
+        survey_unknown_field: trb('Опрос содержит неподдерживаемое поле.', 'The survey contains an unsupported field.'),
+        survey_question_unknown_field: trb('Вопрос содержит неподдерживаемое поле.', 'A question contains an unsupported field.'),
+        survey_option_unknown_field: trb('Вариант ответа содержит неподдерживаемое поле.', 'An answer option contains an unsupported field.'),
+        protocol_too_many_surveys: trb('В протоколе превышен безопасный лимит опросов.', 'The protocol exceeds the safe survey limit.'),
+        survey_too_many_questions: trb('В опросе превышен безопасный лимит вопросов.', 'The survey exceeds the safe question limit.')
+      };
+      [...new Set(surveyValidation.errors.map(error => surveyMessages[error.code] || error.code))]
+        .forEach(message => errors.push(message));
+    }
 
     if (errors.length > 0) {
       const overlay = document.createElement('div');
@@ -3057,7 +3602,7 @@ function ExperimentBuilderView(options = {}) {
           ${errors.map(e => '<li style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--bad);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>'+e+'</li>').join('')}
         </ul>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="valIgnore" class="quick-btn" style="font-size:12px;color:var(--muted);">${trb('Сохранить всё равно','Save anyway')}</button>
+          ${hasBlockingErrors ? '' : `<button id="valIgnore" class="quick-btn" style="font-size:12px;color:var(--muted);">${trb('Сохранить всё равно','Save anyway')}</button>`}
           <button id="valClose" class="quick-btn" style="font-size:12px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;">${trb('Исправить','Fix')}</button>
         </div>
       `;
@@ -3065,7 +3610,7 @@ function ExperimentBuilderView(options = {}) {
       document.body.appendChild(overlay);
       setTimeout(() => applyAutoI18n(modal), 0);
       modal.querySelector('#valClose').addEventListener('click', () => document.body.removeChild(overlay));
-      modal.querySelector('#valIgnore').addEventListener('click', () => {
+      modal.querySelector('#valIgnore')?.addEventListener('click', () => {
         document.body.removeChild(overlay);
         runProtocolSave();
       });
@@ -3099,6 +3644,16 @@ function ExperimentBuilderView(options = {}) {
     const analyticsCfg = typeof getExperimentAnalyticsConfig === 'function'
       ? getExperimentAnalyticsConfig(builderKey)
       : null;
+    const sourceFeatureFlags = srcData.settings?.featureFlags || {};
+    const sessionFeatureFlags = JSON.parse(
+      localStorage.getItem('emocog_session_features_' + builderKey) || 'null'
+    ) || {
+      audio: sourceFeatureFlags.audio === true,
+      multimodal: sourceFeatureFlags.multimodal !== false,
+      bodyMovement: sourceFeatureFlags.bodyMovement !== false,
+      gamerMode: sourceFeatureFlags.gamerMode === true
+    };
+    if (!sessionFeatureFlags.multimodal) sessionFeatureFlags.gamerMode = false;
 
     const json = {
       title: expTitle,
@@ -3109,16 +3664,31 @@ function ExperimentBuilderView(options = {}) {
       testHubMetrics: [],
       analyticsConfig: analyticsCfg,
       version: 'v2.0_universal',
-      settings: srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' },
+      settings: {
+        ...(srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' }),
+        featureFlags: sessionFeatureFlags
+      },
       blocks: [
         ...systemBlocks,
         ...userBlocks.map(b => {
         const out = { id: b.id, type: b.type, label: localizedBlockLabel(b, b.label || b.type) };
         if (b.type === 'instruction') {
+          const titleRu = instructionValueForLocale(b.content, 'title', 'ru', b.label || 'Инструкция');
+          const textRu = instructionValueForLocale(b.content, 'text', 'ru', '');
+          const buttonTextRu = instructionValueForLocale(b.content, 'buttonText', 'ru', 'Далее');
+          const titleEn = instructionValueForLocale(b.content, 'title', 'en', titleRu);
+          const textEn = instructionValueForLocale(b.content, 'text', 'en', textRu);
+          const buttonTextEn = instructionValueForLocale(b.content, 'buttonText', 'en', 'Continue');
           out.content = {
             title: localizedInstructionValue(b.content, 'title', b.label),
             text: localizedInstructionValue(b.content, 'text', ''),
-            buttonText: localizedInstructionValue(b.content, 'buttonText', 'Далее')
+            buttonText: localizedInstructionValue(b.content, 'buttonText', 'Далее'),
+            titleRu,
+            textRu,
+            buttonTextRu,
+            titleEn,
+            textEn,
+            buttonTextEn
           };
         } else if (b.type === 'cognitive_task') {
           const taskType = b.content?.taskType || b.content?.rt_task || 'simple_rt';
@@ -3208,28 +3778,24 @@ function ExperimentBuilderView(options = {}) {
 
     const entry = {
       id,
+      projectId: parseInt(localStorage.getItem('emocog_selected_project_id') || '', 10) || editingExp?.projectId || null,
       title: json.title,
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
+      sessionFeatureFlags,
       blocks: userBlocks,
       version: protocolVersion,
       history: history,
       savedStep: 8,
       createdAt: editingExp?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      status: 'active'
+      status: 'draft'
     };
 
     const idx = experiments.findIndex(e => e.id === id);
     if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
     localStorage.setItem('emocog_active_experiment_id', id);
-    clearExperimentBuilderDraft();
-
-    const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=json.title+'.json';
-    document.body.appendChild(a); a.click();     document.body.removeChild(a); URL.revokeObjectURL(url);
 
     let toastMain = trb(
       'Сохранено локально в этом браузере. Участники по ссылке не увидят протокол, пока он не опубликован в API.',
@@ -3238,28 +3804,82 @@ function ExperimentBuilderView(options = {}) {
     if (typeof publishBuilderProtocolAndInvitation === 'function' && typeof hasResearcherApiToken === 'function' && hasResearcherApiToken()) {
       try {
         const pub = await publishBuilderProtocolAndInvitation(json, builderKey, protocolMeta.protocolId);
+        const publishedExperiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+        const publishedIndex = publishedExperiments.findIndex(item => item.id === id);
+        if (publishedIndex >= 0) {
+          publishedExperiments[publishedIndex] = {
+            ...publishedExperiments[publishedIndex],
+            invitationCode: pub.invitation.code,
+            participantLink: pub.link,
+            apiProtocolId: pub.protocol.id,
+            publishVerifiedAt: new Date().toISOString(),
+            status: 'active',
+            updatedAt: new Date().toISOString()
+          };
+          localStorage.setItem('emocog_my_experiments', JSON.stringify(publishedExperiments));
+        }
+        if (typeof saveBuilderApiState === 'function') {
+          saveBuilderApiState(id, {
+            apiProtocolId: pub.protocol.id,
+            projectId: pub.protocol.project_id,
+            invitationCode: pub.invitation.code,
+            publishVerifiedAt: new Date().toISOString()
+          });
+        }
         toastMain = trb(
           'Протокол опубликован в API. Код приглашения: ',
           'Protocol published to the API. Invitation code: '
         ) + pub.invitation.code + trb('. Ссылка обновлена.', ' Link updated.');
         const linkInput = document.getElementById('participantLinkInput');
         if (linkInput) linkInput.value = pub.link;
+        const copyLinkButton = document.getElementById('copyParticipantLinkBtn');
+        if (copyLinkButton) copyLinkButton.disabled = false;
+        clearExperimentBuilderDraft();
       } catch (e) {
         var apiErr = e?.message || String(e);
+        if (typeof saveBuilderApiState === 'function') {
+          saveBuilderApiState(builderKey, { invitationCode: null, publishVerifiedAt: null });
+          if (builderKey !== id) saveBuilderApiState(id, { invitationCode: null, publishVerifiedAt: null });
+        }
+        const failedExperiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+        const failedIndex = failedExperiments.findIndex(item => item.id === id);
+        if (failedIndex >= 0) {
+          delete failedExperiments[failedIndex].invitationCode;
+          delete failedExperiments[failedIndex].participantLink;
+          delete failedExperiments[failedIndex].publishVerifiedAt;
+          failedExperiments[failedIndex].status = 'draft';
+          failedExperiments[failedIndex].publishError = apiErr;
+          localStorage.setItem('emocog_my_experiments', JSON.stringify(failedExperiments));
+        }
+        const linkInput = document.getElementById('participantLinkInput');
+        if (linkInput) linkInput.value = '';
+        const copyLinkButton = document.getElementById('copyParticipantLinkBtn');
+        if (copyLinkButton) copyLinkButton.disabled = true;
         if (String(apiErr).indexOf('403') >= 0 && String(apiErr).toLowerCase().indexOf('forbidden') >= 0) {
           toastMain = trb(
-            'Сохранено локально. API отклонил публикацию (403). Войдите как исследователь/PI/admin. ',
-            'Saved locally. API publish denied (403). Sign in as researcher/PI/admin. '
+            'Протокол не опубликован: API отклонил доступ (403). Черновик сохранён, исправьте доступ и повторите публикацию. ',
+            'Protocol was not published: API denied access (403). The draft is saved; fix access and publish again. '
           ) + apiErr;
         } else {
-          toastMain = trb('Сохранено локально. Ошибка API: ', 'Saved locally. API error: ') + apiErr;
+          toastMain = trb(
+            'Протокол не опубликован. Черновик сохранён, несуществующая ссылка удалена. Ошибка API: ',
+            'Protocol was not published. The draft is saved and the invalid link was removed. API error: '
+          ) + apiErr;
         }
+        toast(toastMain);
+        return;
       }
     } else {
       toastMain = trb(
-        'Сохранено локально. Войдите в API (developer/login) и нажмите «Сохранить протокол» снова.',
-        'Saved locally. Sign in via developer/login and click “Save protocol” again.'
+        'Протокол сохранён как черновик, но не опубликован. Войдите как исследователь и повторите публикацию.',
+        'The protocol was saved as a draft but not published. Sign in as a researcher and publish again.'
       );
+      if (typeof saveBuilderApiState === 'function') {
+        saveBuilderApiState(builderKey, { invitationCode: null, publishVerifiedAt: null });
+        if (builderKey !== id) saveBuilderApiState(id, { invitationCode: null, publishVerifiedAt: null });
+      }
+      toast(toastMain);
+      return;
     }
 
     toast(toastMain);

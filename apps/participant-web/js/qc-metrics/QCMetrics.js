@@ -115,6 +115,13 @@ class QCMetrics {
         }
     }
 
+    resetGazeAvailability() {
+        this._counters.gazeTotal = 0;
+        this._counters.gazeValid = 0;
+        this._counters.gazeOnScreen = 0;
+        this._gazeState = createGazeState();
+    }
+
     setTrackingDeviationData(samples) {
         const next = setTrackingDeviationData(this._trackingDeviationState, samples);
         if (next.isComplete) {

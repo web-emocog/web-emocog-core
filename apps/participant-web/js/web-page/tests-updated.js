@@ -5,33 +5,60 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { translations } from '../../translations.js';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260807-1';
-import { stopPreCheck } from './precheck-updated.js';
+import { translations } from '../../translations.js?v=20260828-2';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260828-2';
+import { stopPreCheck } from './precheck-updated.js?v=20260828-2';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260828-2';
 import {
     deriveInvitationHubMetrics,
+    definitionForCognitiveRunner,
     getInvitationSessionPlan
 } from './protocol-invite-utils.js';
 import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
-import { startTestHub } from '../gaze-tracker/gaze-tests/index.js';
+import {
+    runProtocolTestSequence,
+    startTestHub
+} from '../gaze-tracker/gaze-tests/index.js?v=20260828-2';
+import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
 import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
 import {
     getContentViewport,
     targetCenterInContentViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
+
+import {
+    applyResidualBiasCorrection,
+    evaluateIndependentCorrectionBenchmark,
+    evaluateResidualBiasLOOCV,
+    fitResidualBias,
+    shouldApplyResidualBiasCorrection
+} from '../gaze-tracker/bias-correction.mjs';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
 } from '../session-runtime/index.js';
+import {
+    setHeadPoseGuideMode,
+    setCalibrationGuideTarget,
+    showCalibrationHeadPoseGuide
+} from '../gaze-tracker/head-pose-guide.js';
+
+function participantMessage(key, replacements = {}) {
+    const pack = translations[state.currentLang] || translations.en;
+    let value = String(pack[key] || translations.en[key] || key);
+    Object.entries(replacements).forEach(([name, replacement]) => {
+        value = value.replaceAll(`{${name}}`, String(replacement));
+    });
+    return value;
+}
 
 function dbg(scope, event, data) {
     try {
@@ -110,6 +137,28 @@ function ensureUploadStatusElement() {
     return el;
 }
 
+function ensureUploadRetryButton() {
+    const finalStep = document.getElementById('step7');
+    if (!finalStep) return null;
+    let button = document.getElementById('retryUploadBtn');
+    if (button) return button;
+    button = document.createElement('button');
+    button.id = 'retryUploadBtn';
+    button.type = 'button';
+    button.className = 'btn btn-secondary';
+    button.style.display = 'none';
+    button.textContent = participantMessage('runtime_upload_retry_action');
+    button.addEventListener('click', () => {
+        button.disabled = true;
+        finishSession().finally(() => {
+            button.disabled = false;
+        });
+    });
+    const downloadBtn = document.getElementById('downloadBtn');
+    finalStep.insertBefore(button, downloadBtn || null);
+    return button;
+}
+
 function setUploadStatus(message, tone) {
     const el = ensureUploadStatusElement();
     if (!el) return;
@@ -121,13 +170,15 @@ function setUploadStatus(message, tone) {
     } else {
         el.style.color = 'var(--text-secondary, #64748B)';
     }
+    const retryButton = ensureUploadRetryButton();
+    if (retryButton) retryButton.style.display = tone === 'error' ? '' : 'none';
 }
 
 async function uploadAggregatesWithRetry(payload, options = {}) {
     return sendSessionFeature(payload, {
         ...options,
         onAttempt: ({ attempt, retries }) => {
-            setUploadStatus(`Загрузка данных: попытка ${attempt}/${retries}...`, 'info');
+            setUploadStatus(participantMessage('runtime_upload_attempt', { attempt, retries }), 'info');
             recordSessionEvent('upload_attempt', { attempt, retries, endpoint: '/ingest' });
         },
         onRetry: ({ attempt, retries, delayMs, error }) => {
@@ -136,15 +187,22 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
                 retries,
                 message: error?.message || String(error)
             });
-            setUploadStatus(`Ошибка отправки. Повтор через ${Math.round(delayMs / 1000)} c...`, 'error');
+            setUploadStatus(participantMessage('runtime_upload_retry_wait', {
+                seconds: Math.round(delayMs / 1000)
+            }), 'error');
         },
         onSuccess: ({ attempt, status }) => {
             recordSessionEvent('upload_success', { attempt, status });
-            setUploadStatus('Данные успешно загружены на сервер.', 'success');
+            setUploadStatus(participantMessage('runtime_upload_success'), 'success');
         },
         onFailure: error => {
             recordSessionEvent('upload_failed', { message: error?.message || String(error) });
-            setUploadStatus('Не удалось загрузить данные автоматически. Проверьте сеть и сохраните JSON локально.', 'error');
+            console.error('[Final upload]', {
+                message: error?.message || String(error),
+                status: error?.httpStatus || null,
+                payload: error?.payload || null
+            });
+            setUploadStatus(participantMessage('runtime_upload_failure'), 'error');
         }
     });
 }
@@ -192,11 +250,32 @@ export async function continueInvitationSessionAfterShell() {
     const invitationCode = state.sessionData?.ids?.invitationCode
         || state.runtime?.invitationProtocolMeta?.code;
     state.flags.isRecording = true;
-    await getSessionRuntime()?.startContinuousModules();
+    const continuousStarted = await getSessionRuntime()?.startContinuousModules();
+    if (continuousStarted !== true) {
+        returnToMandatoryPreparation();
+        return false;
+    }
 
     if (!invitationCode && !inviteDef) {
         startTestHub(buildTestHubHandlers());
-        return;
+        return true;
+    }
+
+    if (invitationCode && !inviteDef) {
+        recordSessionEvent('invitation_protocol_missing_after_shell', {
+            category: 'technical',
+            severity: 'error',
+            invitationCode
+        });
+        loadAndStartCognitiveTask({
+            protocol: {
+                version: 'invalid-invitation',
+                title: participantMessage('runtime_generic_technical'),
+                blocks: []
+            },
+            autoFinishSession: false
+        });
+        return true;
     }
 
     const plan = inviteDef
@@ -223,21 +302,137 @@ export async function continueInvitationSessionAfterShell() {
             hasHub: plan.hasHub
         });
         loadAndStartCognitiveTask({
+            protocol: definitionForCognitiveRunner(inviteDef),
             autoFinishSession: !plan.hasHub,
-            onComplete: plan.hasHub ? () => startTestHub(hubHandlers) : undefined
+            onComplete: plan.hasHub
+                ? () => runProtocolTestSequence(plan.hubMetrics, hubHandlers)
+                : undefined
         });
         return;
     }
 
     if (plan.hasHub) {
-        startTestHub(hubHandlers);
+        runProtocolTestSequence(plan.hubMetrics, hubHandlers);
         return;
     }
 
-    finishSession();
+    recordSessionEvent('invitation_protocol_empty', {
+        category: 'technical',
+        severity: 'error',
+        invitationCode
+    });
+    loadAndStartCognitiveTask({
+        protocol: definitionForCognitiveRunner(inviteDef),
+        autoFinishSession: false
+    });
 }
 
-export async function startCalibration() {
+function returnToMandatoryPreparation() {
+    state.flags.isRecording = false;
+    document.getElementById('fullscreenCalibration')?.classList.remove('active');
+    const container = document.querySelector('.container');
+    const topBar = document.querySelector('.top-bar');
+    if (container) container.style.display = '';
+    if (topBar) topBar.style.display = '';
+    document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+    document.getElementById('step5')?.classList.add('active');
+    const precheck = document.getElementById('precheckContainer');
+    const start = document.getElementById('startPrecheckBtn');
+    if (precheck) precheck.style.display = '';
+    if (start) {
+        start.style.display = 'block';
+        start.disabled = false;
+    }
+    recordSessionEvent('continuous_modules_recovery_to_precheck', {
+        category: 'technical',
+        severity: 'warning'
+    });
+}
+
+function waitForCalibrationIntroduction(options = {}) {
+    const intro = document.getElementById('calibrationIntro');
+    const kicker = document.getElementById('calibrationIntroKicker');
+    const title = document.getElementById('calibrationIntroTitle');
+    const text = document.getElementById('calibrationIntroText');
+    const button = document.getElementById('calibrationIntroStartBtn');
+    if (!intro || !button) return Promise.resolve();
+
+    const t = translations[state.currentLang] || translations.en;
+    if (kicker) kicker.textContent = t.calib_progress;
+    const targeted = options.targeted === true;
+    if (title) {
+        title.textContent = targeted ? t.calib_progress : t.runtime_instruction_title;
+    }
+    if (text) {
+        text.textContent = targeted
+            ? `${t.qc_failed_full} ${t.calib_click_instruction}`
+            : `${t.runtime_policy_body} ${t.calib_click_instruction}`;
+    }
+    button.textContent = targeted ? t.runtime_recalibrate : t.runtime_instruction_action;
+    intro.hidden = false;
+    requestAnimationFrame(() => button.focus());
+
+    return new Promise((resolve) => {
+        button.onclick = () => {
+            button.onclick = null;
+            intro.hidden = true;
+            recordSessionEvent('calibration_instruction_acknowledged', {
+                category: 'block'
+            });
+            resolve();
+        };
+    });
+}
+
+function normalizeCalibrationTargets(targets) {
+    if (!Array.isArray(targets)) return [];
+    const unique = new Map();
+    for (const target of targets) {
+        const x = Number(target?.x);
+        const y = Number(target?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const normalized = {
+            x: Math.max(5, Math.min(95, x)),
+            y: Math.max(5, Math.min(95, y))
+        };
+        unique.set(`${normalized.x.toFixed(2)}:${normalized.y.toFixed(2)}`, normalized);
+    }
+    return [...unique.values()].slice(0, 6);
+}
+
+export function getWorstValidationTargets(points, viewport = getContentViewport(), limit = 4) {
+    const width = Math.max(1, Number(viewport?.width) || 1);
+    const height = Math.max(1, Number(viewport?.height) || 1);
+    return (points || [])
+        .map(pointData => {
+            const samples = (pointData?.samples || []).filter(sample =>
+                Number.isFinite(sample?.gazeX)
+                && Number.isFinite(sample?.gazeY)
+                && Number.isFinite(sample?.targetX)
+                && Number.isFinite(sample?.targetY)
+            );
+            if (!samples.length) return null;
+            const errorPx = samples.reduce((sum, sample) => (
+                sum + Math.hypot(sample.gazeX - sample.targetX, sample.gazeY - sample.targetY)
+            ), 0) / samples.length;
+            const targetX = Number(pointData?.targetX ?? samples[0].targetX);
+            const targetY = Number(pointData?.targetY ?? samples[0].targetY);
+            return {
+                x: Math.max(5, Math.min(95, targetX / width * 100)),
+                y: Math.max(5, Math.min(95, targetY / height * 100)),
+                errorPx: Math.round(errorPx * 10) / 10,
+                validSamples: samples.length
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.errorPx - a.errorPx)
+        .slice(0, Math.max(1, Math.min(6, Number(limit) || 4)));
+}
+
+export async function startCalibration(options = {}) {
+    const targetedPositions = normalizeCalibrationTargets(options.targetedPositions);
+    const targeted = targetedPositions.length > 0
+        && state.runtime?.gazeTracker?.isCalibrated?.() === true;
     const shell = state.runtime?.invitationParticipantShell;
     if (shell && shell.calibration === false) {
         continueInvitationSessionAfterShell();
@@ -252,7 +447,10 @@ export async function startCalibration() {
     }
     console.log('Запуск калибровки на основе MediaPipe Face Landmarker...');
     setSessionPhase('calibration', { source: 'startCalibration' });
-    recordSessionEvent('calibration_start');
+    recordSessionEvent(targeted ? 'calibration_targeted_start' : 'calibration_start', {
+        targetCount: targeted ? targetedPositions.length : 25,
+        repairAttempt: Number(options.repairAttempt) || 0
+    });
     clearTaskContext();
     
     // Сохраняем данные pre-check (сохраняем pass_fail / fail_reason из Фазы 1.1)
@@ -274,14 +472,16 @@ export async function startCalibration() {
         dbg('qc', 'module:ready:QCMetrics', { resolved: true });
     }
     const sessionViewport = getContentViewport();
-    state.runtime.qcMetrics = new QCMetrics({
-        screenWidth: sessionViewport.width,
-        screenHeight: sessionViewport.height
-    });
-    state.runtime.qcMetrics.start();
-    state.runtime.sessionStartTime = Date.now();
-    console.log('[QC] QCMetrics инициализирован и запущен');
-    dbg('qc', 'QCMetrics:instance:created', {});
+    if (!targeted) {
+        state.runtime.qcMetrics = new QCMetrics({
+            screenWidth: sessionViewport.width,
+            screenHeight: sessionViewport.height
+        });
+        state.runtime.qcMetrics.start();
+        state.runtime.sessionStartTime = Date.now();
+        console.log('[QC] QCMetrics инициализирован и запущен');
+        dbg('qc', 'QCMetrics:instance:created', {});
+    }
 
     // === ИНИЦИАЛИЗАЦИЯ GAZE TRACKER ===
     if (window.GazeTrackerReady) {
@@ -289,18 +489,21 @@ export async function startCalibration() {
         dbg('gaze', 'module:ready:GazeTracker', { resolved: true });
     }
     const contentViewport = sessionViewport;
-    state.runtime.gazeTracker = new GazeTracker({
-        screenWidth: contentViewport.width,
-        screenHeight: contentViewport.height,
-        onGazeUpdate: (gazeData) => {
-            // Передаём данные взгляда в единую точку входа
-            if (window.handleGazeUpdate) {
-                window.handleGazeUpdate(gazeData);
+    if (!targeted) {
+        state.runtime.gazeTracker = new GazeTracker({
+            screenWidth: contentViewport.width,
+            screenHeight: contentViewport.height,
+            onGazeUpdate: (gazeData) => {
+                if (window.handleGazeUpdate) {
+                    window.handleGazeUpdate(gazeData);
+                }
             }
-        }
-    });
-    console.log('[GazeTracker] Инициализирован');
-    dbg('gaze', 'GazeTracker:instance:created', {});
+        });
+        console.log('[GazeTracker] Инициализирован');
+        dbg('gaze', 'GazeTracker:instance:created', {});
+    } else {
+        state.runtime.gazeTracker.clearPostCalibrationCorrection?.();
+    }
 
     // Скрываем pre-check интерфейс
     document.getElementById('precheckContainer').style.display = 'none';
@@ -314,38 +517,57 @@ export async function startCalibration() {
     // С этого момента один frame pipeline ведёт gaze/blinks/emotion/BPM/body
     // без параллельных analyzeFrame loops. До камеры/пречека измерений нет.
     state.flags.isRecording = true;
-    await getSessionRuntime()?.startContinuousModules();
+    const continuousStarted = await getSessionRuntime()?.startContinuousModules();
+    if (continuousStarted !== true) {
+        returnToMandatoryPreparation();
+        return;
+    }
     
     // Показываем fullscreen калибровку
     const calibScreen = document.getElementById('fullscreenCalibration');
     const point = document.getElementById('fullscreenCalibPoint');
     const instructionText = document.getElementById('calibInstructionText');
     const progressText = document.getElementById('calibProgressText');
+    const calibrationActions = document.getElementById('calibrationActions');
+    const recalibrateButton = document.getElementById('recalibrateGazeBtn');
+    const continueButton = document.getElementById('continueAfterValidationBtn');
+    if (calibrationActions) calibrationActions.style.display = 'none';
+    if (recalibrateButton) recalibrateButton.onclick = null;
+    if (continueButton) continueButton.onclick = null;
     
     // Скрываем контейнер и шапку
     document.querySelector('.container').style.display = 'none';
     document.querySelector('.top-bar').style.display = 'none';
     
-    // Показываем fullscreen калибровку
+    // Показываем отдельную инструкцию до появления первой измерительной точки.
     calibScreen.classList.add('active');
+    point.style.display = 'none';
+    showCalibrationHeadPoseGuide(true);
+    const instructionPanel = instructionText?.closest('.calib-instruction');
+    if (instructionPanel) instructionPanel.style.display = 'none';
+    await waitForCalibrationIntroduction({ targeted });
+    if (instructionPanel) instructionPanel.style.display = '';
     point.style.display = 'block';
     
     instructionText.innerText = translations[state.currentLang].calib_click_instruction;
 
     // Усиленная калибровка по ВСЕМУ экрану: 5×5 сетка (25 точек) в snake-порядке.
     // Snake-маршрут уменьшает длинные скачки глаз и делает фиксацию стабильнее.
-    const positions = [
+    const fullCalibrationPositions = [
         { x: 5, y: 5 }, { x: 27.5, y: 5 }, { x: 50, y: 5 }, { x: 72.5, y: 5 }, { x: 95, y: 5 },
         { x: 95, y: 27.5 }, { x: 72.5, y: 27.5 }, { x: 50, y: 27.5 }, { x: 27.5, y: 27.5 }, { x: 5, y: 27.5 },
         { x: 5, y: 50 }, { x: 27.5, y: 50 }, { x: 50, y: 50 }, { x: 72.5, y: 50 }, { x: 95, y: 50 },
         { x: 95, y: 72.5 }, { x: 72.5, y: 72.5 }, { x: 50, y: 72.5 }, { x: 27.5, y: 72.5 }, { x: 5, y: 72.5 },
         { x: 5, y: 95 }, { x: 27.5, y: 95 }, { x: 50, y: 95 }, { x: 72.5, y: 95 }, { x: 95, y: 95 }
     ];
+    const positions = targeted ? targetedPositions : fullCalibrationPositions;
     
     const video = document.getElementById('precheckVideo');
     let i = 0;
-    const CLICKS_PER_POINT = 2; // 2 клика на каждую точку → 50 калибровочных точек (>> 17 фич)
-    const calibrationBuildTag = 'calib-grid-5x5-v3-robustval';
+    const CLICKS_PER_POINT = targeted ? 3 : 2;
+    const calibrationBuildTag = targeted
+        ? 'calib-targeted-repair-v1'
+        : 'calib-grid-5x5-v3-robustval';
     window.__gazeCalibrationDebug = {
         build: calibrationBuildTag,
         moduleUrl: import.meta.url,
@@ -364,6 +586,7 @@ export async function startCalibration() {
     const updatePoint = () => {
         point.style.left = `${positions[i].x}%`;
         point.style.top = `${positions[i].y}%`;
+        setCalibrationGuideTarget(positions[i].x, positions[i].y);
         progressText.innerText = `${translations[state.currentLang].calib_progress} ${i + 1} ${translations[state.currentLang].point_of} ${positions.length} (${clicksOnCurrentPoint}/${CLICKS_PER_POINT})`;
     };
 
@@ -523,9 +746,7 @@ export async function startCalibration() {
                         `[GazeTracker] Недостаточно стабильных кадров (${collectedLandmarks.length}/${minStableFrames}), ` +
                         `повторяем точку ${i + 1}, неудачных кликов подряд: ${pointFailureCounts[i]}`
                     );
-                    instructionText.innerText = state.currentLang === 'ru'
-                        ? `Точка ${i + 1}: кадр нестабилен, повторите клик и держите голову ровнее`
-                        : `Point ${i + 1}: unstable frame set, click again and keep your head steadier`;
+                    instructionText.innerText = `${translations[state.currentLang].tip_pose_unstable} ${translations[state.currentLang].calib_click_instruction}`;
                     setTimeout(() => {
                         if (i < positions.length) {
                             instructionText.innerText = translations[state.currentLang].calib_click_instruction;
@@ -538,9 +759,7 @@ export async function startCalibration() {
             }
         } catch (e) {
             console.error('[GazeTracker] Ошибка калибровки точки:', e);
-            instructionText.innerText = state.currentLang === 'ru'
-                ? 'Внутренняя ошибка калибровки, повторите клик'
-                : 'Calibration internal error, click again';
+            instructionText.innerText = `${participantMessage('runtime_generic_technical')} ${translations[state.currentLang].calib_click_instruction}`;
             setTimeout(() => {
                 if (i < positions.length) {
                     instructionText.innerText = translations[state.currentLang].calib_click_instruction;
@@ -561,9 +780,10 @@ export async function startCalibration() {
         
         if (i >= positions.length) {
             // Калибровка завершена
-            recordSessionEvent('calibration_complete', {
+            recordSessionEvent(targeted ? 'calibration_targeted_complete' : 'calibration_complete', {
                 calibrationPointCount: positions.length,
-                clicksPerPoint: CLICKS_PER_POINT
+                clicksPerPoint: CLICKS_PER_POINT,
+                repairAttempt: Number(options.repairAttempt) || 0
             });
             
             // === GAZE: Обучаем модель ===
@@ -609,10 +829,15 @@ export async function startCalibration() {
  */
 export function startGazeValidation() {
     setSessionPhase('validation', { source: 'startGazeValidation' });
+    setHeadPoseGuideMode('validation');
     const calibScreen = document.getElementById('fullscreenCalibration');
     const point = document.getElementById('fullscreenCalibPoint');
     const instructionText = document.getElementById('calibInstructionText');
     const progressText = document.getElementById('calibProgressText');
+    const calibrationActions = document.getElementById('calibrationActions');
+    const recalibrateButton = document.getElementById('recalibrateGazeBtn');
+    const continueButton = document.getElementById('continueAfterValidationBtn');
+    if (calibrationActions) calibrationActions.style.display = 'none';
     
     // Показываем экран валидации (используем тот же fullscreen)
     calibScreen.classList.add('active');
@@ -758,6 +983,7 @@ export function startGazeValidation() {
         const pos = activePositions[currentPoint];
         point.style.left = pos.x + '%';
         point.style.top = pos.y + '%';
+        setCalibrationGuideTarget(pos.x, pos.y);
         const target = targetCenterInContentViewport(point);
         const targetX = target?.x ?? (pos.x / 100) * screenW;
         const targetY = target?.y ?? (pos.y / 100) * screenH;
@@ -843,13 +1069,9 @@ export function startGazeValidation() {
             sampleFilter: filteredValidation.stats
         };
 
-        const fittedCorrection = fitValidationAffineCorrection(
-            filteredValidationPoints,
-            screenW,
-            screenH
-        );
+        const fittedCorrection = fitResidualBias(filteredValidationPoints, validationViewport);
         if (fittedCorrection) {
-            const correctedPoints = applyValidationAffineCorrection(
+            const correctedPoints = applyResidualBiasCorrection(
                 filteredValidationPoints,
                 fittedCorrection
             );
@@ -857,12 +1079,12 @@ export function startGazeValidation() {
                 correctedPoints,
                 validationViewport
             );
-            const loocv = evaluateAffineCorrectionLOOCV(filteredValidationPoints);
-            const shouldApply = shouldApplyValidationCorrection(
-                filteredMetrics,
-                correctedMetrics,
-                loocv
+            const loocv = evaluateResidualBiasLOOCV(
+                filteredValidationPoints,
+                validationViewport
             );
+            const shouldApply = correctedMetrics.accuracyPx <= filteredMetrics.accuracyPx
+                && shouldApplyResidualBiasCorrection(loocv);
             const correctionId = generateCorrectionId();
             postCalibrationCorrection = {
                 correctionId,
@@ -870,8 +1092,10 @@ export function startGazeValidation() {
                 applied: shouldApply,
                 source: fittedCorrection.source,
                 sampleCount: fittedCorrection.sampleCount,
-                matrixX: fittedCorrection.matrixX.map(v => Math.round(v * 1e6) / 1e6),
-                matrixY: fittedCorrection.matrixY.map(v => Math.round(v * 1e6) / 1e6),
+                kind: fittedCorrection.kind,
+                offsetX: Math.round(fittedCorrection.offsetX * 10) / 10,
+                offsetY: Math.round(fittedCorrection.offsetY * 10) / 10,
+                trajectory: fittedCorrection.trajectory,
                 rawMetrics,
                 filteredMetrics,
                 correctedInSampleMetrics: correctedMetrics,
@@ -883,10 +1107,11 @@ export function startGazeValidation() {
                     correctionId
                 });
             }
-            dbg('gaze', 'loocv:evaluateAffineCorrectionLOOCV', {
+            dbg('gaze', 'loocv:evaluateResidualBiasLOOCV', {
                 applied: shouldApply,
                 loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
                 rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
+                worsenedTargetCount: loocv?.worsenedTargetCount ?? null,
                 targetCount: loocv?.targetCount ?? null
             });
         }
@@ -935,30 +1160,63 @@ export function startGazeValidation() {
 
         const benchmarkPoints = state.runtime.validationBenchmarkPoints;
         const filteredBenchmark = filterValidationPointsForMetrics(benchmarkPoints, 0.8);
-        const correctedPoints = filteredBenchmark.points;
-        const baselinePoints = pointsForSignal(correctedPoints, 'rawX', 'rawY');
-        const displayPoints = pointsForSignal(correctedPoints, 'displayX', 'displayY');
-        const metrics = calculateValidationMetrics(correctedPoints, validationViewport);
+        const correctedCandidatePoints = filteredBenchmark.points;
+        const baselinePoints = pointsForSignal(correctedCandidatePoints, 'rawX', 'rawY');
+        const displayPoints = pointsForSignal(correctedCandidatePoints, 'displayX', 'displayY');
+        const correctedCandidateMetrics = calculateValidationMetrics(
+            correctedCandidatePoints,
+            validationViewport
+        );
         const rawMetrics = calculateValidationMetrics(baselinePoints, validationViewport);
         const displayMetrics = calculateValidationMetrics(displayPoints, validationViewport);
-        const qcValidationSamples = flattenValidationSamples(correctedPoints);
+        const independentDecision = postCalibrationCorrection.applied
+            ? evaluateIndependentCorrectionBenchmark(rawMetrics, correctedCandidateMetrics)
+            : { accepted: false, reason: 'correction_not_applied' };
+        const useCorrected = postCalibrationCorrection.applied && independentDecision.accepted;
+        const selectedPoints = useCorrected ? correctedCandidatePoints : baselinePoints;
+        const metrics = useCorrected ? correctedCandidateMetrics : rawMetrics;
+        const qcValidationSamples = flattenValidationSamples(selectedPoints);
+        if (postCalibrationCorrection.applied && !useCorrected) {
+            state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
+            postCalibrationCorrection = {
+                ...postCalibrationCorrection,
+                applied: false,
+                rolledBack: true,
+                rollbackReason: independentDecision.reason,
+                independentBenchmark: independentDecision
+            };
+            recordSessionEvent('validation_correction_rolled_back', {
+                correctionId: postCalibrationCorrection.correctionId,
+                reason: independentDecision.reason,
+                accuracyGainPx: independentDecision.accuracyGainPx ?? null,
+                precisionDeltaPx: independentDecision.precisionDeltaPx ?? null
+            });
+        } else {
+            postCalibrationCorrection = {
+                ...postCalibrationCorrection,
+                independentBenchmark: independentDecision
+            };
+        }
         const baselineVsNew = {
             independent: true,
             targetsUsedForFit: 0,
-            targetCount: correctedPoints.length,
+            targetCount: correctedCandidatePoints.length,
             sampleFilter: filteredBenchmark.stats,
             baselineRaw: rawMetrics,
-            newCorrected: metrics,
+            candidateCorrected: correctedCandidateMetrics,
+            selected: metrics,
+            selectedSignal: useCorrected ? 'corrected' : 'raw',
+            decision: independentDecision,
             displayOnly: displayMetrics,
             improvement: {
                 accuracyPx: Number.isFinite(rawMetrics.accuracyPx)
-                    ? rawMetrics.accuracyPx - metrics.accuracyPx
+                    ? rawMetrics.accuracyPx - correctedCandidateMetrics.accuracyPx
                     : null,
                 precisionPx: Number.isFinite(rawMetrics.precisionPx)
-                    ? rawMetrics.precisionPx - metrics.precisionPx
+                    ? rawMetrics.precisionPx - correctedCandidateMetrics.precisionPx
                     : null,
                 accuracyPct: Number.isFinite(rawMetrics.accuracyPct)
-                    ? rawMetrics.accuracyPct - metrics.accuracyPct
+                    ? rawMetrics.accuracyPct - correctedCandidateMetrics.accuracyPct
                     : null
             }
         };
@@ -969,12 +1227,18 @@ export function startGazeValidation() {
             targetBlindPrediction: true,
             correctionSet: correctionStageResult,
             benchmarkPoints,
-            points: benchmarkPoints,
+            points: selectedPoints,
             metrics,
             rawMetrics,
+            correctedCandidateMetrics,
             displayMetrics,
             baselineVsNew,
-            postCalibrationCorrection
+            postCalibrationCorrection,
+            passed:
+                Number.isFinite(metrics.accuracyPct)
+                && Number.isFinite(metrics.precisionPct)
+                && metrics.accuracyPct <= DEFAULT_THRESHOLDS.gaze_accuracy_pct_max
+                && metrics.precisionPct <= DEFAULT_THRESHOLDS.gaze_precision_pct_max
         };
         recordSessionEvent('validation_complete', {
             validationSampleCount: qcValidationSamples.length,
@@ -1000,11 +1264,11 @@ export function startGazeValidation() {
                     postCalibrationApplied: !!postCalibrationCorrection?.applied,
                     loocvPass: postCalibrationCorrection?.applied === true,
                     loocvRejectedReason: postCalibrationCorrection && !postCalibrationCorrection.applied
-                        ? 'held_out_or_insufficient_gain'
+                        ? (postCalibrationCorrection.rollbackReason || 'held_out_or_insufficient_gain')
                         : null,
                     accuracyPx: metrics?.accuracyPx ?? null,
                     validationRmsPx: metrics?.accuracyPx ?? null,
-                    affineStatus: postCalibrationCorrection?.correctionId ? 'fitted' : 'not_fitted',
+                    biasCorrectionStatus: postCalibrationCorrection?.correctionId ? 'fitted' : 'not_fitted',
                     calibrationStatus: state.runtime.gazeTracker?._isCalibrated ? 'calibrated' : 'unknown'
                 });
             }
@@ -1015,8 +1279,11 @@ export function startGazeValidation() {
             state.runtime.qcMetrics.setValidationData(qcValidationSamples);
         }
         
-        // Показываем результат на экране
-        instructionText.innerHTML = `${translations[state.currentLang].validation_complete}<br><small>${translations[state.currentLang].validation_accuracy}: ${metrics.accuracyPx.toFixed(0)}${translations[state.currentLang].pixels} (${metrics.accuracyPct}%) | ${translations[state.currentLang].validation_precision}: ${metrics.precisionPx.toFixed(0)}${translations[state.currentLang].pixels} (${metrics.precisionPct}%)</small>`;
+        const validationPassed = state.sessionData.gazeValidation.passed;
+        const validationStatus = validationPassed
+            ? translations[state.currentLang].qc_passed_full
+            : translations[state.currentLang].qc_failed_full;
+        instructionText.innerHTML = `${translations[state.currentLang].validation_complete}<br><small>${translations[state.currentLang].validation_accuracy}: ${metrics.accuracyPx.toFixed(0)}${translations[state.currentLang].pixels} (${metrics.accuracyPct}%) | ${translations[state.currentLang].validation_precision}: ${metrics.precisionPx.toFixed(0)}${translations[state.currentLang].pixels} (${metrics.precisionPct}%)</small><br><small>${validationStatus}</small>`;
         progressText.innerText = '';
         point.style.display = 'none';
         
@@ -1024,11 +1291,62 @@ export function startGazeValidation() {
         point.style.backgroundColor = '#DC2626';
         point.style.cursor = 'pointer';
         
-        // Переходим к протоколу / Test Hub после успешной калибровки
-        setTimeout(() => {
+        const proceedToProtocol = () => {
+            if (calibrationActions) calibrationActions.style.display = 'none';
+            if (recalibrateButton) recalibrateButton.onclick = null;
+            if (continueButton) continueButton.onclick = null;
             calibScreen.classList.remove('active');
+            showCalibrationHeadPoseGuide(false);
+            state.runtime.validationRepairAttempt = 0;
+            state.runtime.qcMetrics?.resetGazeAvailability?.();
             continueInvitationSessionAfterShell();
-        }, 2000);
+        };
+
+        const repairAttempt = Number(state.runtime.validationRepairAttempt) || 0;
+        const worstTargets = getWorstValidationTargets(selectedPoints, validationViewport, 4);
+        if (!validationPassed && repairAttempt < 2 && worstTargets.length) {
+            state.runtime.validationRepairAttempt = repairAttempt + 1;
+            recordSessionEvent('validation_targeted_recalibration_scheduled', {
+                repairAttempt: repairAttempt + 1,
+                targets: worstTargets
+            });
+            if (calibrationActions) calibrationActions.style.display = 'none';
+            setTimeout(() => {
+                startCalibration({
+                    targetedPositions: worstTargets,
+                    repairAttempt: repairAttempt + 1
+                });
+            }, 1200);
+            return;
+        }
+
+        if (recalibrateButton) {
+            recalibrateButton.textContent = participantMessage('runtime_recalibrate');
+            recalibrateButton.onclick = () => {
+                recordSessionEvent('validation_manual_recalibration', {
+                    accuracyPct: metrics.accuracyPct,
+                    precisionPct: metrics.precisionPct,
+                    passed: validationPassed
+                });
+                if (calibrationActions) calibrationActions.style.display = 'none';
+                state.runtime.validationRepairAttempt = 0;
+                startCalibration();
+            };
+        }
+        if (continueButton) {
+            continueButton.style.display = validationPassed ? '' : 'none';
+            continueButton.textContent = participantMessage('runtime_continue');
+            continueButton.onclick = () => {
+                recordSessionEvent('validation_continue_selected', {
+                    accuracyPct: metrics.accuracyPct,
+                    precisionPct: metrics.precisionPct,
+                    passed: validationPassed
+                });
+                proceedToProtocol();
+            };
+        }
+        if (recalibrateButton) recalibrateButton.style.display = '';
+        if (calibrationActions) calibrationActions.style.display = 'flex';
     }
     
     // Запускаем первую точку
@@ -1205,321 +1523,6 @@ function filterValidationPointsForMetrics(points, keepRatio = 0.8) {
     };
 }
 
-function solveLinear3x3(A, b) {
-    const M = [
-        [A[0][0], A[0][1], A[0][2], b[0]],
-        [A[1][0], A[1][1], A[1][2], b[1]],
-        [A[2][0], A[2][1], A[2][2], b[2]]
-    ];
-
-    for (let col = 0; col < 3; col++) {
-        let pivotRow = col;
-        let pivotAbs = Math.abs(M[col][col]);
-        for (let row = col + 1; row < 3; row++) {
-            const candidateAbs = Math.abs(M[row][col]);
-            if (candidateAbs > pivotAbs) {
-                pivotAbs = candidateAbs;
-                pivotRow = row;
-            }
-        }
-        if (pivotAbs < 1e-9) return null;
-
-        if (pivotRow !== col) {
-            const tmp = M[col];
-            M[col] = M[pivotRow];
-            M[pivotRow] = tmp;
-        }
-
-        const pivot = M[col][col];
-        for (let j = col; j < 4; j++) M[col][j] /= pivot;
-
-        for (let row = 0; row < 3; row++) {
-            if (row === col) continue;
-            const factor = M[row][col];
-            if (Math.abs(factor) < 1e-12) continue;
-            for (let j = col; j < 4; j++) {
-                M[row][j] -= factor * M[col][j];
-            }
-        }
-    }
-
-    return [M[0][3], M[1][3], M[2][3]];
-}
-
-function isAffineCorrectionSane(correction, screenW, screenH) {
-    const { matrixX, matrixY } = correction;
-    if (!Array.isArray(matrixX) || !Array.isArray(matrixY)) return false;
-    if (matrixX.length !== 3 || matrixY.length !== 3) return false;
-    if (!matrixX.every(Number.isFinite) || !matrixY.every(Number.isFinite)) return false;
-
-    const scaleX = Math.hypot(matrixX[0], matrixY[0]);
-    const scaleY = Math.hypot(matrixX[1], matrixY[1]);
-    const det = matrixX[0] * matrixY[1] - matrixX[1] * matrixY[0];
-    if (scaleX < 0.4 || scaleX > 1.9) return false;
-    if (scaleY < 0.4 || scaleY > 1.9) return false;
-    if (Math.abs(det) < 0.2 || Math.abs(det) > 3.5) return false;
-
-    const probes = [
-        [0, 0],
-        [screenW, 0],
-        [0, screenH],
-        [screenW, screenH],
-        [screenW * 0.5, screenH * 0.5]
-    ];
-    for (const [x, y] of probes) {
-        const tx = matrixX[0] * x + matrixX[1] * y + matrixX[2];
-        const ty = matrixY[0] * x + matrixY[1] * y + matrixY[2];
-        if (!Number.isFinite(tx) || !Number.isFinite(ty)) return false;
-        if (tx < -screenW * 0.4 || tx > screenW * 1.4) return false;
-        if (ty < -screenH * 0.4 || ty > screenH * 1.4) return false;
-    }
-    return true;
-}
-
-function fitValidationAffineCorrection(points, screenW, screenH) {
-    const samples = flattenValidationSamples(points);
-    if (samples.length < 24) return null;
-
-    let m00 = 0, m01 = 0, m02 = 0;
-    let m11 = 0, m12 = 0, m22 = 0;
-    let vx0 = 0, vx1 = 0, vx2 = 0;
-    let vy0 = 0, vy1 = 0, vy2 = 0;
-
-    for (const s of samples) {
-        const x = s.gazeX;
-        const y = s.gazeY;
-        const tx = s.targetX;
-        const ty = s.targetY;
-
-        m00 += x * x;
-        m01 += x * y;
-        m02 += x;
-        m11 += y * y;
-        m12 += y;
-        m22 += 1;
-
-        vx0 += x * tx;
-        vx1 += y * tx;
-        vx2 += tx;
-        vy0 += x * ty;
-        vy1 += y * ty;
-        vy2 += ty;
-    }
-
-    const ridge = 1e-3;
-    const A = [
-        [m00 + ridge, m01, m02],
-        [m01, m11 + ridge, m12],
-        [m02, m12, m22 + ridge]
-    ];
-
-    const matrixX = solveLinear3x3(A, [vx0, vx1, vx2]);
-    const matrixY = solveLinear3x3(A, [vy0, vy1, vy2]);
-    if (!matrixX || !matrixY) return null;
-
-    const correction = {
-        matrixX,
-        matrixY,
-        source: 'validation_affine',
-        sampleCount: samples.length
-    };
-
-    if (!isAffineCorrectionSane(correction, screenW, screenH)) return null;
-    return correction;
-}
-
-function applyValidationAffineCorrection(points, correction) {
-    const { matrixX, matrixY } = correction;
-    return (points || []).map(pointData => ({
-        ...pointData,
-        samples: (pointData?.samples || []).map(sample => {
-            if (!Number.isFinite(sample?.gazeX) || !Number.isFinite(sample?.gazeY)) return sample;
-            const correctedX = matrixX[0] * sample.gazeX + matrixX[1] * sample.gazeY + matrixX[2];
-            const correctedY = matrixY[0] * sample.gazeX + matrixY[1] * sample.gazeY + matrixY[2];
-            return {
-                ...sample,
-                gazeX: Math.round(correctedX),
-                gazeY: Math.round(correctedY)
-            };
-        })
-    }));
-}
-
-/**
- * Per-target медианы валидационных сэмплов.
- * Каждой validation-точке сопоставляется одна агрегированная (medianGazeX, medianGazeY)
- * + (targetX, targetY). Это устраняет within-target шум перед LOOCV-оценкой.
- *
- * @param {Array} points - validation points (каждый с .samples)
- * @returns {Array<{medianGazeX:number, medianGazeY:number, targetX:number, targetY:number, n:number}>}
- */
-function computePerTargetMedians(points) {
-    const out = [];
-    for (const pointData of points || []) {
-        const valid = (pointData?.samples || []).filter(s =>
-            Number.isFinite(s?.gazeX) && Number.isFinite(s?.gazeY) &&
-            Number.isFinite(s?.targetX) && Number.isFinite(s?.targetY)
-        );
-        if (valid.length === 0) continue;
-        const xs = valid.map(s => s.gazeX).sort((a, b) => a - b);
-        const ys = valid.map(s => s.gazeY).sort((a, b) => a - b);
-        const mid = Math.floor(xs.length / 2);
-        const medianGazeX = xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
-        const medianGazeY = ys.length % 2 ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
-        out.push({
-            medianGazeX,
-            medianGazeY,
-            targetX: valid[0].targetX,
-            targetY: valid[0].targetY,
-            n: valid.length
-        });
-    }
-    return out;
-}
-
-/**
- * Фит affine-коррекции по точкам {gazeX, gazeY} → {targetX, targetY}.
- * Использует те же нормальные уравнения с ridge'ом, что и fitValidationAffineCorrection.
- * Принимает массив объектов в формате computePerTargetMedians().
- */
-function fitAffineFromMedians(medians) {
-    if (!Array.isArray(medians) || medians.length < 4) return null;
-
-    let m00 = 0, m01 = 0, m02 = 0;
-    let m11 = 0, m12 = 0, m22 = 0;
-    let vx0 = 0, vx1 = 0, vx2 = 0;
-    let vy0 = 0, vy1 = 0, vy2 = 0;
-
-    for (const p of medians) {
-        const x = p.medianGazeX;
-        const y = p.medianGazeY;
-        const tx = p.targetX;
-        const ty = p.targetY;
-        m00 += x * x; m01 += x * y; m02 += x;
-        m11 += y * y; m12 += y;
-        m22 += 1;
-        vx0 += x * tx; vx1 += y * tx; vx2 += tx;
-        vy0 += x * ty; vy1 += y * ty; vy2 += ty;
-    }
-
-    const ridge = 1e-3;
-    const A = [
-        [m00 + ridge, m01, m02],
-        [m01, m11 + ridge, m12],
-        [m02, m12, m22 + ridge]
-    ];
-
-    const matrixX = solveLinear3x3(A, [vx0, vx1, vx2]);
-    const matrixY = solveLinear3x3(A, [vy0, vy1, vy2]);
-    if (!matrixX || !matrixY) return null;
-    return { matrixX, matrixY };
-}
-
-/**
- * Leave-one-target-out оценка affine-коррекции.
- *
- * Для каждой из N целевых точек:
- *  1. Фитим affine на медианах оставшихся N-1 целей.
- *  2. Применяем матрицу к удержанной (held-out) медиане.
- *  3. Считаем расстояние от прогноза до её targetX/targetY.
- *
- * Это честная оценка обобщающей ошибки коррекции (без переобучения на тех же
- * сэмплах, по которым она построена).
- *
- * Также возвращает rawTargetRmsPx — RMS расстояний (median_gaze - target) до коррекции.
- * Если loocvRmsHeldOutPx > rawTargetRmsPx + margin, коррекцию применять нельзя.
- *
- * @param {Array} filteredValidationPoints
- * @returns {{loocvRmsHeldOutPx, loocvMedianHeldOutPx, loocvP95HeldOutPx,
- *            rawTargetRmsPx, rawTargetMedianPx, targetCount} | null}
- */
-function evaluateAffineCorrectionLOOCV(filteredValidationPoints) {
-    const medians = computePerTargetMedians(filteredValidationPoints);
-    if (medians.length < 4) return null; // Минимум 4 цели для разумного LOOCV
-
-    const heldOutErrors = [];
-    for (let i = 0; i < medians.length; i++) {
-        const heldOut = medians[i];
-        const trainSet = medians.filter((_, j) => j !== i);
-        const fit = fitAffineFromMedians(trainSet);
-        if (!fit) continue;
-        const predX = fit.matrixX[0] * heldOut.medianGazeX + fit.matrixX[1] * heldOut.medianGazeY + fit.matrixX[2];
-        const predY = fit.matrixY[0] * heldOut.medianGazeX + fit.matrixY[1] * heldOut.medianGazeY + fit.matrixY[2];
-        const err = Math.hypot(predX - heldOut.targetX, predY - heldOut.targetY);
-        if (Number.isFinite(err)) heldOutErrors.push(err);
-    }
-    if (heldOutErrors.length === 0) return null;
-
-    const rawErrors = medians.map(m => Math.hypot(m.medianGazeX - m.targetX, m.medianGazeY - m.targetY));
-
-    const rms = arr => Math.sqrt(arr.reduce((s, v) => s + v * v, 0) / arr.length);
-    const sortedHO = [...heldOutErrors].sort((a, b) => a - b);
-    const sortedRaw = [...rawErrors].sort((a, b) => a - b);
-    const median = arr => arr[Math.floor(arr.length / 2)];
-    const p95 = arr => arr[Math.min(arr.length - 1, Math.ceil(arr.length * 0.95) - 1)];
-
-    return {
-        loocvRmsHeldOutPx: Math.round(rms(heldOutErrors) * 10) / 10,
-        loocvMedianHeldOutPx: Math.round(median(sortedHO) * 10) / 10,
-        loocvP95HeldOutPx: Math.round(p95(sortedHO) * 10) / 10,
-        rawTargetRmsPx: Math.round(rms(rawErrors) * 10) / 10,
-        rawTargetMedianPx: Math.round(median(sortedRaw) * 10) / 10,
-        targetCount: medians.length
-    };
-}
-
-/**
- * Решение, применять ли affine-коррекцию.
- *
- * In-sample improvement is only a preliminary gate. Correction is selected
- * only when LOOCV has at least five targets and its held-out RMS improves over
- * the raw target RMS by at least max(3 px, 2%). This prevents validation data
- * used for fitting from being reported as independent accuracy evidence.
- *
- * @param {Object} rawMetrics - метрики на отфильтрованных сэмплах ДО коррекции
- * @param {Object} correctedMetrics - метрики ПОСЛЕ применения коррекции (in-sample)
- * @param {Object|null} loocv - результат evaluateAffineCorrectionLOOCV (опционально)
- * @returns {boolean}
- */
-function shouldApplyValidationCorrection(rawMetrics, correctedMetrics, loocv = null) {
-    const rawAcc = rawMetrics?.accuracyPx;
-    const rawPrec = rawMetrics?.precisionPx;
-    const corrAcc = correctedMetrics?.accuracyPx;
-    const corrPrec = correctedMetrics?.precisionPx;
-    if (![rawAcc, rawPrec, corrAcc, corrPrec].every(Number.isFinite)) return false;
-
-    const improvedAccuracyPct = rawMetrics.accuracyPct - correctedMetrics.accuracyPct;
-    const improvedPrecisionPct = rawMetrics.precisionPct - correctedMetrics.precisionPct;
-
-    const significant = improvedAccuracyPct >= 0.6 ||
-        improvedPrecisionPct >= 0.6;
-
-    const noSeriousRegression = correctedMetrics.accuracyPct <= rawMetrics.accuracyPct + 0.2 &&
-        correctedMetrics.precisionPct <= rawMetrics.precisionPct + 0.2;
-
-    const crossesCommonGate = rawMetrics.precisionPct > 6 &&
-        correctedMetrics.precisionPct <= 6 &&
-        correctedMetrics.accuracyPct <= 12;
-
-    const baseDecision = (significant && noSeriousRegression) || crossesCommonGate;
-    if (!baseDecision) return false;
-
-    // Correction is never selected on in-sample metrics alone.
-    if (
-        !loocv
-        || loocv.targetCount < 5
-        || !Number.isFinite(loocv.loocvRmsHeldOutPx)
-        || !Number.isFinite(loocv.rawTargetRmsPx)
-    ) return false;
-    const requiredHeldOutGain = Math.max(3, loocv.rawTargetRmsPx * 0.02);
-    return loocv.loocvRmsHeldOutPx <= loocv.rawTargetRmsPx - requiredHeldOutGain;
-}
-
-/**
- * Простой ID коррекции: timestamp + случайные 4 символа.
- * Достаточно уникально внутри одной сессии; помогает связывать сэмплы с конкретной
- * матрицей в логах/payload.
- */
 function generateCorrectionId() {
     const t = Date.now().toString(36);
     const r = Math.random().toString(36).slice(2, 6);
@@ -1862,6 +1865,7 @@ function stopSessionMediaResources() {
 }
 
 export function finishSession() {
+    showCalibrationHeadPoseGuide(false);
     if (finishSessionPromise) return finishSessionPromise;
     const runtime = getSessionRuntime();
     if (runtime?.machine?.state === 'completed') {
@@ -1918,7 +1922,7 @@ async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
             updatedAt: Date.now()
         };
         state.sessionData.upload = result;
-        setUploadStatus('Не удалось подготовить payload для отправки.', 'error');
+        setUploadStatus(participantMessage('runtime_upload_prepare_failure'), 'error');
         await runtime?.persistCompletedCheckpoint();
         return result;
     }
@@ -1931,8 +1935,15 @@ async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
         ok: uploadResult.ok,
         attempt: uploadResult.attempt || null,
         error: uploadResult.error || null,
+        qcValidity: uploadResult.result?.qc_validity || null,
+        proxyReady: uploadResult.result?.proxy_ready === true,
         updatedAt: Date.now()
     };
+    if (uploadResult.ok && state.sessionData.upload.qcValidity) {
+        updateFinalStepWithQC(state.sessionData.qcSummary || null, {
+            serverValidity: state.sessionData.upload.qcValidity
+        });
+    }
     recordSessionEvent(uploadResult.ok ? 'session_final_upload_complete' : 'session_final_upload_failed', {
         category: uploadResult.ok ? 'upload' : 'technical',
         severity: uploadResult.ok ? 'info' : 'error',
@@ -1950,7 +1961,7 @@ async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
 
 async function retryFinalUpload(runtime) {
     nextStep(7);
-    setUploadStatus('Повторная отправка итоговых данных...', 'info');
+    setUploadStatus(participantMessage('runtime_upload_retrying'), 'info');
     const finishAttemptId = state.sessionData.lifecycle?.finishAttemptId;
     const completedAt = state.sessionData.lifecycle?.completedAt || new Date().toISOString();
     if (!finishAttemptId) {
@@ -1979,12 +1990,13 @@ async function finishSessionOnce() {
         throw new Error('Session finish rejected while a test block is active');
     }
     setSessionPhase('final', { source: 'finishSession' });
+    runtime?.ui?.hideIssue?.();
     recordSessionEvent('session_finish_start', {
         finishAttemptId: finish.finishAttemptId
     });
     state.flags.isRecording = false;
     try {
-        runtime?.stopContinuousModules('session_finish');
+        await runtime?.stopContinuousModules('session_finish');
     } finally {
         // Teardown does not depend on analytics or final-screen DOM succeeding.
         stopSessionMediaResources();
@@ -2124,7 +2136,7 @@ async function finishSessionOnce() {
     // Переходим на финальный шаг
     nextStep(7);
     recordSessionEvent('session_finish_complete');
-    setUploadStatus('Подготовка к отправке данных...', 'info');
+    setUploadStatus(participantMessage('runtime_upload_preparing'), 'info');
 
     await uploadFinalPayload(
         runtime,

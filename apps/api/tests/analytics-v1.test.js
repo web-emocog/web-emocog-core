@@ -11,6 +11,8 @@ const {
 const {
   exportCsv,
   protectSpreadsheetCell,
+  sessionQualityDetails,
+  sessionTechnicalDetails,
 } = require('../analytics/v1-router');
 
 function query(overrides = {}) {
@@ -157,6 +159,49 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(group.qcByChannel.find(item => item.channel === 'gaze').valid, 2);
     assert.equal(group.deviceCounts.length, 2);
     assert.ok(group.missingness.some(item => item.reasonCode === 'gaze_qc_invalid'));
+  });
+
+  await t.test('normalizes nested participant technical and QC data for researcher analytics', () => {
+    const source = row();
+    source.qc_score = 76.9;
+    source.qc_validity = 'borderline';
+    source.fail_reasons = ['low_pose_ok_pct', 'low_fps_time'];
+    source.qc_payload = {
+      analysisFps: 16,
+      durationMs: 519843,
+      passedChecks: 10,
+      totalChecks: 13,
+      faceVisiblePct: 98.9,
+      gazeValidPct: 82.7,
+      checks: { faceVisible: true, poseOk: false },
+    };
+    source.features_payload.meta = {
+      tech: {
+        screen: { width: 1512, height: 982, pixelRatio: 2 },
+        camera: { width: 640, height: 480, frameRate: 30 },
+        browser: { family: 'safari', language: 'ru', mobile: false, coresBucket: '5-8' },
+        measuredFPS: 34,
+        cameraFPS: 31,
+      },
+    };
+    assert.deepEqual(sessionTechnicalDetails(source), {
+      deviceClass: 'computer_webcam',
+      resolution: { width: 1512, height: 982 },
+      cameraResolution: { width: 640, height: 480 },
+      actualFps: 34,
+      cameraFps: 31,
+      analysisFps: 16,
+      browserFamily: 'safari',
+      browserLanguage: 'ru',
+      pixelRatio: 2,
+      processorClass: '5-8',
+    });
+    const quality = sessionQualityDetails(source);
+    assert.equal(quality.status, 'borderline');
+    assert.equal(quality.score, 76.9);
+    assert.deepEqual(quality.failReasons, ['low_pose_ok_pct', 'low_fps_time']);
+    assert.equal(quality.percentages.faceVisible, 98.9);
+    assert.equal(quality.percentages.gazeValid, 82.7);
   });
 
   await t.test('honors summary and long export content without changing the snapshot', () => {

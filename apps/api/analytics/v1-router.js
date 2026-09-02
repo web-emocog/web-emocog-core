@@ -78,6 +78,76 @@ function selectedSession(hydrated, sessionRef) {
   return row;
 }
 
+function finiteNumber(...values) {
+  for (const value of values) {
+    const number = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function sessionTechnicalDetails(row) {
+  const payload = row?.features_payload || {};
+  const tech = payload?.meta?.tech || payload?.tech || {};
+  const screen = tech.screen && typeof tech.screen === 'object' ? tech.screen : {};
+  const camera = tech.camera && typeof tech.camera === 'object' ? tech.camera : {};
+  const browser = tech.browser && typeof tech.browser === 'object' ? tech.browser : {};
+  const screenWidth = finiteNumber(tech.screenWidth, screen.width);
+  const screenHeight = finiteNumber(tech.screenHeight, screen.height);
+  const cameraWidth = finiteNumber(tech.cameraWidth, camera.width);
+  const cameraHeight = finiteNumber(tech.cameraHeight, camera.height);
+  const mobile = browser.mobile === true || tech.mobile === true;
+  const inferredDevice = mobile
+    ? 'mobile_browser'
+    : (cameraWidth && cameraHeight ? 'computer_webcam' : 'desktop_browser');
+  return {
+    deviceClass: String(tech.deviceClass || tech.device || inferredDevice).slice(0, 64),
+    resolution: screenWidth && screenHeight
+      ? { width: screenWidth, height: screenHeight }
+      : null,
+    cameraResolution: cameraWidth && cameraHeight
+      ? { width: cameraWidth, height: cameraHeight }
+      : null,
+    actualFps: finiteNumber(
+      tech.fpsMean,
+      tech.measuredFPS,
+      tech.renderFPS,
+      tech.cameraFPS,
+      row?.qc_payload?.analysisFps,
+      camera.frameRate
+    ),
+    cameraFps: finiteNumber(tech.cameraFPS, tech.cameraFPSDetails?.fps, camera.frameRate),
+    analysisFps: finiteNumber(row?.qc_payload?.analysisFps),
+    browserFamily: browser.family ? String(browser.family).slice(0, 64) : null,
+    browserLanguage: browser.language ? String(browser.language).slice(0, 16) : null,
+    pixelRatio: finiteNumber(tech.pixelRatio, screen.pixelRatio),
+    processorClass: browser.coresBucket ? String(browser.coresBucket).slice(0, 16) : null,
+  };
+}
+
+function sessionQualityDetails(row) {
+  const qc = row?.qc_payload && typeof row.qc_payload === 'object' ? row.qc_payload : {};
+  return {
+    status: String(row?.qc_validity || 'not_computed'),
+    score: finiteNumber(row?.qc_score),
+    passedChecks: finiteNumber(qc.passedChecks),
+    totalChecks: finiteNumber(qc.totalChecks),
+    durationMs: finiteNumber(qc.durationMs),
+    checks: qc.checks && typeof qc.checks === 'object' ? qc.checks : {},
+    percentages: {
+      faceVisible: finiteNumber(qc.faceVisiblePct),
+      faceOk: finiteNumber(qc.faceOkPct),
+      poseOk: finiteNumber(qc.poseOkPct),
+      illuminationOk: finiteNumber(qc.illuminationOkPct),
+      eyesOpen: finiteNumber(qc.eyesOpenPct),
+      gazeValid: finiteNumber(qc.gazeValidPct),
+      gazeOnScreen: finiteNumber(qc.gazeOnScreenPct),
+      lowFps: finiteNumber(qc.lowFpsPct),
+    },
+    failReasons: Array.isArray(row?.fail_reasons) ? row.fail_reasons.map(String) : [],
+  };
+}
+
 router.get('/filter-options', async (req, res) => {
   try {
     const projectId = parsePositiveInt(req.query.project_id);
@@ -123,7 +193,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
   try {
     const hydrated = await requireSnapshot(req);
     const row = selectedSession(hydrated, req.params.sessionRef);
-    const tech = row.features_payload?.meta?.tech || {};
+    const technical = sessionTechnicalDetails(row);
     const data = {
       session: {
         sessionId: Number(row.id),
@@ -133,12 +203,9 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
         completionStatus: row.stopped_at ? 'completed' : 'in_progress',
         protocolId: Number(row.protocol_id),
         protocolVersion: hydrated.snapshot.queryEcho.protocolVersion,
-        deviceClass: tech.deviceClass || tech.device || null,
-        resolution: tech.screenWidth && tech.screenHeight
-          ? { width: Number(tech.screenWidth), height: Number(tech.screenHeight) }
-          : null,
-        actualFps: Number.isFinite(tech.fpsMean) ? tech.fpsMean : null,
+        ...technical,
       },
+      quality: sessionQualityDetails(row),
       qcChannels: hydrated.snapshot.queryEcho.filters.qcChannels.map(channel => channelQc(row, channel)),
       metrics: buildSessionMetrics(row, hydrated.snapshot.queryEcho),
       exclusions: (Array.isArray(row.features_payload?.cognitiveResults)
@@ -356,3 +423,5 @@ module.exports = router;
 module.exports.escapeCsv = escapeCsv;
 module.exports.exportCsv = exportCsv;
 module.exports.protectSpreadsheetCell = protectSpreadsheetCell;
+module.exports.sessionQualityDetails = sessionQualityDetails;
+module.exports.sessionTechnicalDetails = sessionTechnicalDetails;

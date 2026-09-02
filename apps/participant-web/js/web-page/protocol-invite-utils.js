@@ -14,6 +14,7 @@ const POST_CALIBRATION_BLOCK_TYPES = new Set([
     'cognitive_task',
     'stimuli',
     'passive',
+    'survey',
     'rest',
     'finish'
 ]);
@@ -24,8 +25,8 @@ const TEST_HUB_METRIC_IDS = new Set(['rt', 'tracking', 'vpc', 'visuospatial']);
 const DEFAULT_PARTICIPANT_SHELL = {
     consent: true,
     questionnaire: true,
-    precheck: false,
-    calibration: false
+    precheck: true,
+    calibration: true
 };
 
 export function getProtocolBlockTypes(definition) {
@@ -34,34 +35,24 @@ export function getProtocolBlockTypes(definition) {
 }
 
 export function getParticipantShell(definition) {
-    const shell = definition?.participantShell;
-    let resolved;
-    if (shell && typeof shell === 'object') {
-        resolved = {
-            consent: shell.consent !== false,
-            questionnaire: shell.questionnaire !== false,
-            precheck: shell.precheck === true,
-            calibration: shell.calibration === true
-        };
-    } else {
-        // Legacy API definitions always include injected system_* blocks; do not infer shell from them.
-        resolved = { ...DEFAULT_PARTICIPANT_SHELL };
-    }
-    return resolved;
+    // These stages establish consent, session covariates and a participant-specific
+    // measurement baseline. They are mandatory even for legacy definitions that
+    // explicitly disabled pre-check/calibration before the contract was tightened.
+    return { ...DEFAULT_PARTICIPANT_SHELL };
 }
 
 export function describeParticipantShell(shell, lang = 'ru') {
+    const labels = lang === 'ru'
+        ? { consent: 'информированное согласие', questionnaire: 'анкета', precheck: 'проверка камеры', calibration: 'калибровка', join: ', затем ', empty: 'Без подготовительных этапов — сразу блоки эксперимента.' }
+        : (lang === 'es'
+            ? { consent: 'consentimiento informado', questionnaire: 'cuestionario', precheck: 'comprobación de la cámara', calibration: 'calibración', join: ', después ', empty: 'Sin preparación: los bloques del experimento comienzan inmediatamente.' }
+            : { consent: 'informed consent', questionnaire: 'questionnaire', precheck: 'camera check', calibration: 'calibration', join: ', then ', empty: 'No preparation steps — experiment blocks start immediately.' });
     const parts = [];
-    if (shell.consent) parts.push(lang === 'en' ? 'informed consent' : 'информированное согласие');
-    if (shell.questionnaire) parts.push(lang === 'en' ? 'questionnaire' : 'анкета');
-    if (shell.precheck) parts.push(lang === 'en' ? 'camera check' : 'проверка камеры');
-    if (shell.calibration) parts.push(lang === 'en' ? 'calibration' : 'калибровка');
-    if (!parts.length) {
-        return lang === 'en'
-            ? 'No preparation steps — experiment blocks start immediately.'
-            : 'Без подготовительных этапов — сразу блоки эксперимента.';
-    }
-    return parts.join(lang === 'en' ? ', then ' : ', затем ');
+    if (shell.consent) parts.push(labels.consent);
+    if (shell.questionnaire) parts.push(labels.questionnaire);
+    if (shell.precheck) parts.push(labels.precheck);
+    if (shell.calibration) parts.push(labels.calibration);
+    return parts.length ? parts.join(labels.join) : labels.empty;
 }
 
 export function getPostCalibrationProtocolBlocks(definition) {

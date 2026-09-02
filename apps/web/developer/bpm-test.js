@@ -1,3 +1,5 @@
+import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm-publication-gate.mjs';
+
 /**
  * BPM / rPPG test with robust face targeting.
  * - BPM calculates only when face is centered, right size and stable.
@@ -26,6 +28,7 @@
     var engine = null;
     var SessionReporterCtor = null;
     var reporter = null;
+    var publicationGate = new BpmPublicationGate();
     var frameCount = 0;
     var lastVideoTime = -1;
     var lastCenter = null;
@@ -33,6 +36,27 @@
     var stableFrames = 0;
     var lastHint = '';
     var hintTs = 0;
+    var measurementStartedAt = 0;
+    var lastStatusText = '';
+
+    var PUBLICATION_REASON_TEXT = {
+      no_bpm: 'накапливаем видеосигнал',
+      low_conf: 'сигнал пока недостаточно надёжен',
+      low_snr: 'слишком много шума в цветовом сигнале',
+      low_pqi: 'качество пульсовой волны ниже порога',
+      low_agreement: 'алгоритмы ещё не согласовали оценку',
+      high_agreement_delta: 'оценки алгоритмов расходятся',
+      streak: 'подтверждаем стабильность значения',
+      unstable: 'значение пока нестабильно',
+      subharmonic_guard: 'проверяем возможную кратную частоту',
+      low_resp_coupling: 'отделяем пульс от дыхания',
+      delta_limit: 'проверяем резкое изменение ЧСС',
+      physio_limit: 'изменение ЧСС требует подтверждения',
+      upshift_guard: 'подтверждаем повышение ЧСС',
+      downshift_guard: 'подтверждаем снижение ЧСС',
+      outside_physiological_range: 'оценка вне допустимого диапазона',
+      engine_rejected: 'накапливаем валидный сигнал'
+    };
 
     function appendLog(text, className) {
       if (!logEl) return;
@@ -44,6 +68,8 @@
     }
 
     function setStatus(text) {
+      if (text === lastStatusText) return;
+      lastStatusText = text;
       statusEl.textContent = text;
     }
 
@@ -59,7 +85,7 @@
 
     function logHintOncePerSecond(text) {
       var now = Date.now();
-      if (text !== lastHint || now - hintTs > 1200) {
+      if (text !== lastHint || now - hintTs > 5000) {
         lastHint = text;
         hintTs = now;
         appendLog(text, 'warn');
@@ -237,29 +263,6 @@
         }
         return true;
       }
-      function makeFallbackEngine() {
-        function FallbackEngine() {
-          this._lastTs = 0;
-          this._ema = 76;
-        }
-        FallbackEngine.prototype.update = function (frame) {
-          var ts = Number(frame && frame.timestampMs) || performance.now();
-          var dt = this._lastTs ? Math.max(16, ts - this._lastTs) : 33;
-          this._lastTs = ts;
-          var osc = Math.sin(ts / 850) * 4 + Math.sin(ts / 2300) * 2;
-          var instant = 76 + osc;
-          var alpha = Math.min(0.35, dt / 1000);
-          this._ema = this._ema * (1 - alpha) + instant * alpha;
-          return {
-            bpm: this._ema,
-            bpmSmoothed: this._ema,
-            bpmPublished: this._ema,
-            published: true,
-            confidence: 0.2
-          };
-        };
-        return FallbackEngine;
-      }
       var pathsToTry = buildRppgCandidateUrls();
       var lastErr = null;
       var errors = [];
@@ -278,7 +281,7 @@
           errors.push(url + ' -> ' + (e && (e.message || String(e))));
         }
       }
-      appendLog('RppgEngine не загружен, используется fallback-движок для дев-теста.', 'warn');
+      appendLog('RppgEngine не загружен. Тест остановлен без синтетических значений BPM.', 'err');
       if (lastErr) appendLog('Primary engine load error: ' + (lastErr.message || String(lastErr)), 'warn');
       appendLog('RppgEngine candidate URLs: ' + pathsToTry.join(' | '), 'warn');
       if (errors.length) appendLog('RppgEngine load attempts: ' + errors.join(' || '), 'warn');
@@ -287,18 +290,17 @@
           'Частая ошибка nginx: root только на apps/web — добавьте location для …/lib/ → файловая lib/.',
         'warn'
       );
-      return makeFallbackEngine();
+      throw lastErr || new Error('RppgEngine unavailable');
     }
 
     async function initMediaPipe() {
       if (faceLandmarker) return faceLandmarker;
-      var visionVersion = '0.10.14';
-      var vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@' + visionVersion + '/vision_bundle.mjs');
+      var vision = await import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs');
       var resolver = await vision.FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@' + visionVersion + '/wasm'
+        '../../participant-web/js/vendor/mediapipe/wasm'
       );
       var baseOpt = {
-        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+        modelAssetPath: '../../participant-web/js/vendor/mediapipe/models/face_landmarker.task'
       };
       var opts = {
         baseOptions: baseOpt,
@@ -338,6 +340,7 @@
       screenEl.classList.remove('running');
       setBpm(null);
       setStatus('Остановлено');
+      measurementStartedAt = 0;
       btnStart.disabled = false;
       btnStop.disabled = true;
       if (reporter) {
@@ -426,8 +429,14 @@
         drawRoiDiagnostics(out.roiDiagnostics);
       }
       if (out) {
-        if (reporter) reporter.push(out, timestampMs);
-        var bpm = out.bpmPublished ?? out.bpmSmoothed ?? out.bpm;
+        var publication = publicationGate.evaluate(out);
+        if (reporter) reporter.push({
+          ...out,
+          published: publication.accepted,
+          bpmPublished: publication.bpm,
+          publishReason: publication.reason
+        }, timestampMs);
+        var bpm = publication.bpm;
         var confidence = Number.isFinite(out.confidence) ? out.confidence : null;
         var feat = out.features || {};
         var rr = feat.respRate != null ? feat.respRate : feat.respRateRaw;
@@ -435,10 +444,20 @@
         if (Number.isFinite(bpm)) {
           setBpm(bpm);
           var confText = confidence != null ? (' · conf ' + confidence.toFixed(2)) : '';
-          setStatus((out.published ? ('BPM опубликован' + confText) : ('Сигнал стабилизируется' + confText)) + respPart);
+          var classification = publication.classification === 'elevated'
+            ? ' · повышенное значение подтверждено длительным стабильным сигналом'
+            : publication.classification === 'low'
+              ? ' · низкое значение подтверждено длительным стабильным сигналом'
+              : '';
+          setStatus((publication.held ? 'Последняя валидная ЧСС удерживается' : 'ЧСС опубликована') + confText + classification + respPart);
         } else {
           setBpm(null);
-          setStatus('Ожидание стабильного ppg-сигнала…');
+          var confirmation = publication.confirmationCount
+            ? (' (' + publication.confirmationCount + '/8)')
+            : '';
+          var elapsedSec = measurementStartedAt ? Math.floor((performance.now() - measurementStartedAt) / 1000) : 0;
+          var reasonText = PUBLICATION_REASON_TEXT[publication.reason] || 'проверяем качество сигнала';
+          setStatus('Измерение ' + elapsedSec + ' с · ' + reasonText + confirmation + respPart);
         }
       } else {
         setStatus('Сбор сигнала…');
@@ -460,6 +479,7 @@
         var RppgEngineCtor = await loadEngine();
         await initMediaPipe();
         engine = new RppgEngineCtor({ algorithm: 'pos', mode: 'safe' });
+        publicationGate.reset();
         reporter = SessionReporterCtor ? new SessionReporterCtor() : null;
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 720 } },
@@ -477,6 +497,7 @@
         });
 
         running = true;
+        measurementStartedAt = performance.now();
         frameCount = 0;
         lastVideoTime = -1;
         stableFrames = 0;
@@ -507,6 +528,11 @@
     var st = document.getElementById('status');
     var lg = document.getElementById('log');
     if (st) st.textContent = 'Ошибка инициализации: ' + (err.message || err);
-    if (lg) lg.innerHTML = '<div class="ev err">' + (err.message || err) + '</div>';
+    if (lg) {
+      var errorLine = document.createElement('div');
+      errorLine.className = 'ev err';
+      errorLine.textContent = String(err && err.message ? err.message : err);
+      lg.replaceChildren(errorLine);
+    }
   }
 })();

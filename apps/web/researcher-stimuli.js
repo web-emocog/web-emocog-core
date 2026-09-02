@@ -2,7 +2,7 @@ function absoluteStimulusApiUrl(pathValue) {
   const value = String(pathValue || '').trim();
   if (!value) return '';
   if (/^(https?:|blob:|data:)/i.test(value)) return value;
-  const base = String(window.API_BASE || localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+  const base = String(window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
   return base + (value.startsWith('/') ? value : '/' + value);
 }
 
@@ -86,6 +86,9 @@ async function convertDocumentToStimuli(file) {
 }
 
 function StimuliAOIView() {
+  // Standard stimuli are system-owned and must also exist when the library is
+  // opened directly, not only after visiting the protocol builder.
+  if (typeof ensureStandardStimuli === 'function') ensureStandardStimuli();
   document.getElementById('pageTitle').textContent = t('StimuliLibrary');
   setChips([t('Library'), t('Upload')]);
 
@@ -95,7 +98,7 @@ function StimuliAOIView() {
   root.style.cssText = 'display:flex; flex-direction:column; height:calc(100% + 40px); min-height:0; margin:-20px; padding:0;';
 
   const topBarWrap = document.createElement('div');
-  topBarWrap.style.cssText = 'display:flex; flex-direction:column; border-bottom:1px solid var(--stroke); background:rgba(255,255,255,.20); flex-shrink:0; width:100%;';
+  topBarWrap.style.cssText = 'display:flex; flex-direction:column; border-bottom:1px solid var(--stroke); background:var(--card-bg); flex-shrink:0; width:100%;';
 
   const tabsRow = document.createElement('div');
   tabsRow.style.cssText = 'display:flex; align-items:flex-end; padding:0; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; width:100%;';
@@ -323,9 +326,9 @@ function StimuliAOIView() {
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
             ${getIconForType(s.type)}
           </svg>
-          <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeStimulusHtml(s.name)}</div>
-          <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(s.info)}</div>
-          <button class="remove-from-folder-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;" title="Remove">
+          <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
+          <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
+          <button class="remove-from-folder-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;" title="${CURRENT_LANG === 'en' ? 'Remove' : 'Убрать'}">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
@@ -350,7 +353,7 @@ function StimuliAOIView() {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.65);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);z-index:9999;display:flex;align-items:center;justify-content:center;';
 
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:26px 24px 20px;width:650px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 28px 72px rgba(10,15,35,0.30),0 4px 16px rgba(92,102,189,0.12);';
+    modal.style.cssText = 'background:var(--card-bg);color:var(--text);border:1px solid var(--stroke);border-radius:20px;padding:26px 24px 20px;width:650px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:var(--shadow);';
 
     const available = stimuliList.filter(s => !(folder.stimuliIds || []).includes(String(s.id)));
 
@@ -368,7 +371,7 @@ function StimuliAOIView() {
           return `
             <div class="stimulus-card modal-pick" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;padding:8px;box-sizing:border-box;border:1px solid var(--stroke);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;height:100%;transition:all 0.2s;">
               ${thumb}
-              <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;">${escapeStimulusHtml(s.name)}</div>
+              <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
             </div>
           `;
         }).join('');
@@ -533,7 +536,7 @@ function showCreateFolderModal(onCreated) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;';
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:32px 28px 24px;width:380px;max-width:95vw;box-shadow:0 24px 64px rgba(10,15,35,0.28),0 4px 16px rgba(92,102,189,0.12);display:flex;flex-direction:column;gap:18px;';
+  modal.style.cssText = 'background:var(--card-bg);color:var(--text);border:1px solid var(--stroke);border-radius:20px;padding:32px 28px 24px;width:380px;max-width:95vw;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:18px;';
   modal.innerHTML = `
     <div style="font-size:16px;font-weight:700;color:var(--text);">${t('modalFolderTitle')}</div>
     <div>
@@ -610,8 +613,8 @@ function renderStimuliGallery(container) {
       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
         ${getIconForType(s.type)}
       </svg>
-      <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">${escapeStimulusHtml(s.name)}</div>
-      <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(s.info)}</div>
+      <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
+      <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
     </div>
   `).join('');
 
@@ -745,10 +748,14 @@ function openAoiEditor(stimulusId, options = {}) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,.65);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
   const modal = document.createElement('div');
-  modal.style.cssText = 'width:min(1180px,98vw);height:min(760px,94vh);background:rgba(255,255,255,.97);border:1px solid rgba(92,102,189,.22);border-radius:20px;box-shadow:0 28px 72px rgba(10,15,35,.30);display:flex;flex-direction:column;overflow:hidden;';
+  modal.style.cssText = 'width:min(1180px,98vw);height:min(760px,94vh);background:var(--card-bg);color:var(--text);border:1px solid var(--stroke);border-radius:20px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;';
+  const queueIndex = Number.isInteger(options.queueIndex) ? options.queueIndex : null;
+  const queueTotal = Number.isInteger(options.queueTotal) ? options.queueTotal : null;
+  const hasQueue = queueIndex !== null && queueTotal !== null && queueTotal > 0;
+  const isQueueLast = hasQueue && queueIndex >= queueTotal - 1;
   modal.innerHTML = `
     <div style="padding:14px 18px;border-bottom:1px solid var(--stroke);display:flex;align-items:center;justify-content:space-between;gap:12px;">
-      <div><div style="font-size:16px;font-weight:800;color:var(--text);">AOI · ${aoiEscape(stimulus.name)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">${aoiEscape(stimulus.id)} · ${CURRENT_LANG === 'en' ? 'schema' : 'схема'} ${AOI_SCHEMA_VERSION}</div></div>
+      <div><div style="font-size:16px;font-weight:800;color:var(--text);">AOI · ${aoiEscape(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : stimulus.name)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">${aoiEscape(stimulus.id)} · ${CURRENT_LANG === 'en' ? 'schema' : 'схема'} ${AOI_SCHEMA_VERSION}${hasQueue ? ` · ${CURRENT_LANG === 'en' ? 'queue' : 'очередь'} ${queueIndex + 1}/${queueTotal}` : ''}</div></div>
       <button id="aoiClose" class="quick-btn" aria-label="${CURRENT_LANG === 'en' ? 'Close' : 'Закрыть'}">✕</button>
     </div>
     <div style="padding:10px 14px;border-bottom:1px solid var(--stroke);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -759,7 +766,7 @@ function openAoiEditor(stimulusId, options = {}) {
       <span id="aoiHint" style="font-size:11px;color:var(--muted);margin-left:auto;">${CURRENT_LANG === 'en' ? 'Drag an AOI to move; use corner handles to resize' : 'Тяните AOI для перемещения, угловые маркеры — для масштаба'}</span>
     </div>
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 310px;flex:1;min-height:0;">
-      <div id="aoiViewport" style="padding:18px;display:flex;align-items:center;justify-content:center;background:rgba(241,245,249,.82);min-width:0;min-height:0;overflow:hidden;">
+      <div id="aoiViewport" style="padding:18px;display:flex;align-items:center;justify-content:center;background:var(--panel2);min-width:0;min-height:0;overflow:hidden;">
         <div id="aoiStage" style="position:relative;width:100%;aspect-ratio:16/9;background:#fff;border:1px solid #d8deea;border-radius:12px;box-shadow:0 8px 24px rgba(30,41,59,.10);overflow:hidden;user-select:none;touch-action:none;flex:none;">
           ${stimulus.type === 'image' && stimulus.url
             ? `<img id="aoiMedia" src="${aoiEscape(stimulus.url)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
@@ -776,7 +783,7 @@ function openAoiEditor(stimulusId, options = {}) {
         <div id="aoiForm" style="display:none;border-top:1px solid var(--stroke);padding-top:12px;flex-direction:column;gap:9px;">
           <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Name' : 'Название'}<input id="aoiName" type="text" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px;border:1px solid var(--stroke);border-radius:8px;"></label>
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);"><input id="aoiTarget" type="checkbox"> ${CURRENT_LANG === 'en' ? 'Target area' : 'Целевая зона'}</label>
-          <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Gaze sequence number' : 'Номер в последовательности взгляда'}<select id="aoiOrder" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;background:#fff;"></select></label>
+          <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Gaze sequence number' : 'Номер в последовательности взгляда'}<select id="aoiOrder" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;background:var(--card-bg);color:var(--text);"></select></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <label style="font-size:11px;color:var(--muted);">startMs<input id="aoiStart" type="number" min="0" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
             <label style="font-size:11px;color:var(--muted);">endMs<input id="aoiEnd" type="number" min="1" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
@@ -785,7 +792,8 @@ function openAoiEditor(stimulusId, options = {}) {
           <div style="display:flex;gap:7px;"><button id="aoiSave" class="quick-btn" style="flex:1;background:var(--accent);color:white;border-color:var(--accent);">${CURRENT_LANG === 'en' ? 'Save changes' : 'Сохранить изменения'}</button><button id="aoiDelete" class="quick-btn" style="color:var(--bad);">${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}</button></div>
         </div>
       </aside>
-    </div>`;
+    </div>
+    ${hasQueue ? `<div style="padding:12px 14px;border-top:1px solid var(--stroke);display:flex;align-items:center;justify-content:flex-end;gap:10px;background:var(--card-bg);"><button id="aoiSaveNext" class="quick-btn" style="background:var(--accent);border-color:var(--accent);color:white;font-weight:800;">${isQueueLast ? (CURRENT_LANG === 'en' ? 'Save and finish queue' : 'Сохранить и завершить очередь') : (CURRENT_LANG === 'en' ? 'Save material and continue' : 'Сохранить материал и далее')} →</button></div>` : ''}`;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
@@ -1184,12 +1192,24 @@ function openAoiEditor(stimulusId, options = {}) {
     selectedId = aois[0]?.id || null;
     saveAll(); renderAll();
   });
-  const close = () => {
+  const close = (notify = true) => {
     window.removeEventListener('resize', fitStage);
     if (document.body.contains(overlay)) document.body.removeChild(overlay);
-    if (typeof options.onClose === 'function') options.onClose(stimulus, aois);
+    if (notify && typeof options.onClose === 'function') options.onClose(stimulus, aois);
   };
-  modal.querySelector('#aoiClose').addEventListener('click', close);
+  modal.querySelector('#aoiSaveNext')?.addEventListener('click', () => {
+    captureSelectedFormDraft();
+    if (!aois.length) {
+      toast(CURRENT_LANG === 'en' ? 'Create at least one AOI' : 'Создайте хотя бы одну AOI');
+      return;
+    }
+    if (!saveAll()) return;
+    close(false);
+    if (typeof options.onSaveAndNext === 'function') {
+      options.onSaveAndNext({ stimulus, aois, queueIndex, queueTotal, isLast: isQueueLast });
+    }
+  });
+  modal.querySelector('#aoiClose').addEventListener('click', () => close());
   overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
   modal.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
   renderAll();

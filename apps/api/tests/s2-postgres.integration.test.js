@@ -410,6 +410,79 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     );
     assert.equal(memberships.rows[0].organization_member, true);
     assert.equal(memberships.rows[0].project_member, true);
+
+    const organizationAdminEmail = `s2-org-admin-${randomUUID()}@example.test`;
+    const organizationAdmin = await fetch(`${baseUrl}/auth/users`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: organizationAdminEmail,
+        password: 'temporary-password-123',
+        role: 'org_admin',
+        organization_ids: [organizationId],
+        project_ids: [],
+      }),
+    });
+    assert.equal(organizationAdmin.status, 201);
+    const organizationAdminUser = await organizationAdmin.json();
+    createdUserIds.push(organizationAdminUser.id);
+    const adminMembership = await pool.query(
+      `SELECT uo.role AS organization_role, up.role AS project_role
+       FROM user_organizations uo
+       INNER JOIN user_projects up ON up.user_id = uo.user_id AND up.project_id = $3
+       WHERE uo.user_id = $1 AND uo.organization_id = $2`,
+      [organizationAdminUser.id, organizationId, projectId]
+    );
+    assert.equal(adminMembership.rows[0].organization_role, 'admin');
+    assert.equal(adminMembership.rows[0].project_role, 'org_admin');
+
+    const atomicTarget = await pool.query(
+      `INSERT INTO users (email, password_hash, role)
+       VALUES ($1, $2, 'respondent')
+       RETURNING id, token_version`,
+      [
+        `s2-atomic-admin-${randomUUID()}@example.test`,
+        await bcrypt.hash('temporary-password-123', 4),
+      ]
+    );
+    createdUserIds.push(atomicTarget.rows[0].id);
+    const atomicUpdate = await fetch(
+      `${baseUrl}/auth/users/${atomicTarget.rows[0].id}/memberships`,
+      {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          role: 'org_admin',
+          organization_ids: [organizationId],
+          project_ids: [],
+        }),
+      }
+    );
+    assert.equal(atomicUpdate.status, 200);
+    const atomicPayload = await atomicUpdate.json();
+    assert.equal(atomicPayload.role, 'org_admin');
+    assert.deepEqual(atomicPayload.organization_ids, [Number(organizationId)]);
+    assert.equal(atomicPayload.project_ids.includes(Number(projectId)), true);
+    const atomicStored = await pool.query(
+      `SELECT u.role,
+              u.token_version,
+              uo.role AS organization_role,
+              up.role AS project_role
+       FROM users u
+       INNER JOIN user_organizations uo
+         ON uo.user_id = u.id AND uo.organization_id = $2
+       INNER JOIN user_projects up
+         ON up.user_id = u.id AND up.project_id = $3
+       WHERE u.id = $1`,
+      [atomicTarget.rows[0].id, organizationId, projectId]
+    );
+    assert.equal(atomicStored.rows[0].role, 'org_admin');
+    assert.equal(atomicStored.rows[0].organization_role, 'admin');
+    assert.equal(atomicStored.rows[0].project_role, 'org_admin');
+    assert.equal(
+      Number(atomicStored.rows[0].token_version),
+      Number(atomicTarget.rows[0].token_version) + 1
+    );
   });
 
   it('prevents PI account takeover across mixed tenant memberships', async () => {
@@ -493,7 +566,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     }
   });
 
-  it('does not grant the legacy developer role without tenant membership', async () => {
+  it('grants developer as technical-only and strips tenant memberships', async () => {
     const adminEmail = `s2-developer-admin-${randomUUID()}@example.test`;
     const admin = await pool.query(
       `INSERT INTO users (email, password_hash, role)
@@ -517,16 +590,6 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     );
     const authorization = `Bearer ${issueStaffToken(admin.rows[0])}`;
     try {
-      const unscoped = await fetch(`${baseUrl}/auth/grant-developer-access`, {
-        method: 'POST',
-        headers: { authorization, 'content-type': 'application/json' },
-        body: JSON.stringify({ email: developerEmail }),
-      });
-      assert.equal(unscoped.status, 400);
-      assert.equal((await unscoped.json()).code, 'staff_membership_required');
-      const unchanged = await pool.query('SELECT role FROM users WHERE id = $1', [target.rows[0].id]);
-      assert.equal(unchanged.rows[0].role, 'respondent');
-
       await pool.query(
         `INSERT INTO user_organizations (user_id, organization_id, role)
          VALUES ($1, $2, 'member')`,
@@ -534,16 +597,23 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       );
       await pool.query(
         `INSERT INTO user_projects (user_id, project_id, role)
-         VALUES ($1, $2, 'developer')`,
+         VALUES ($1, $2, 'researcher')`,
         [target.rows[0].id, projectId]
       );
-      const scoped = await fetch(`${baseUrl}/auth/grant-developer-access`, {
+      const granted = await fetch(`${baseUrl}/auth/grant-developer-access`, {
         method: 'POST',
         headers: { authorization, 'content-type': 'application/json' },
         body: JSON.stringify({ email: developerEmail }),
       });
-      assert.equal(scoped.status, 200);
-      assert.equal((await scoped.json()).role, 'developer');
+      assert.equal(granted.status, 200);
+      assert.equal((await granted.json()).role, 'developer');
+      const isolated = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM user_organizations WHERE user_id = $1) AS organizations,
+           (SELECT COUNT(*)::int FROM user_projects WHERE user_id = $1) AS projects`,
+        [target.rows[0].id]
+      );
+      assert.deepEqual(isolated.rows[0], { organizations: 0, projects: 0 });
     } finally {
       await pool.query('DELETE FROM developer_access_emails WHERE email = $1', [developerEmail]);
     }
@@ -647,6 +717,213 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(usage.rows[0].used_runs, 5);
     assert.equal(usage.rows[0].max_runs, 5);
     assert.equal(usage.rows[0].session_count, 5);
+  });
+
+  it('completes login -> project -> protocol -> invitation -> ingest -> analytics export over HTTP', async () => {
+    const suffix = randomUUID().slice(0, 12);
+    const email = `s2-full-flow-${suffix}@example.test`;
+    const password = 'FullFlowTest2026!';
+    const inserted = await pool.query(
+      `INSERT INTO users (email, password_hash, role)
+       VALUES ($1, $2, 'admin')
+       RETURNING id`,
+      [email, await bcrypt.hash(password, 4)]
+    );
+    createdUserIds.push(inserted.rows[0].id);
+
+    const login = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    assert.equal(login.status, 200);
+    const authorization = `Bearer ${(await login.json()).token}`;
+
+    let createdOrganizationId = null;
+    try {
+      const organizationResponse = await fetch(`${baseUrl}/organizations`, {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: `Full flow ${suffix}`,
+          slug: `full-flow-${suffix}`,
+        }),
+      });
+      assert.equal(organizationResponse.status, 201);
+      const organization = await organizationResponse.json();
+      createdOrganizationId = organization.id;
+
+      const projectResponse = await fetch(`${baseUrl}/projects`, {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          organization_id: organization.id,
+          name: `Full flow project ${suffix}`,
+          slug: `full-flow-project-${suffix}`,
+        }),
+      });
+      assert.equal(projectResponse.status, 201);
+      const project = await projectResponse.json();
+
+      const protocolResponse = await fetch(`${baseUrl}/protocols`, {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          project_id: project.id,
+          name: `Full flow protocol ${suffix}`,
+          definition: {
+            version: '1.0.0',
+            blocks: [{
+              id: 'main',
+              title: 'Main',
+              trials: [{ id: 'trial-1', stimulusId: 'cat' }],
+              blockConfig: {
+                aoiSchemaVersion: '1.2',
+                aoiDefinitions: {
+                  cat: [{
+                    id: 'face',
+                    name: 'Face',
+                    shape: 'rectangle',
+                    points: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }],
+                    order: 1,
+                    isTarget: true,
+                    validityInterval: { startMs: 0, endMs: 1000 },
+                  }],
+                },
+              },
+            }],
+          },
+        }),
+      });
+      assert.equal(protocolResponse.status, 201);
+      const protocol = await protocolResponse.json();
+
+      const invitationResponse = await fetch(`${baseUrl}/invitations`, {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ protocol_id: protocol.id, max_runs: 1 }),
+      });
+      assert.equal(invitationResponse.status, 201);
+      const invitation = await invitationResponse.json();
+      assert.match(invitation.code, /^[A-Za-z0-9_-]{20,64}$/);
+
+      const protocolListResponse = await fetch(
+        `${baseUrl}/protocols?project_id=${encodeURIComponent(project.id)}`,
+        { headers: { authorization } }
+      );
+      assert.equal(protocolListResponse.status, 200);
+      const protocolList = await protocolListResponse.json();
+      const publishedProtocol = protocolList.find(item => Number(item.id) === Number(protocol.id));
+      assert.equal(publishedProtocol.invitation_code, invitation.code);
+      assert.equal(publishedProtocol.invitation_expires_at, null);
+      assert.equal(publishedProtocol.invitation_max_runs, 1);
+
+      const publicLookup = await fetch(
+        `${baseUrl}/invitations/by-code/${encodeURIComponent(invitation.code)}`
+      );
+      assert.equal(publicLookup.status, 200);
+      const publicProtocol = await publicLookup.json();
+      assert.equal(publicProtocol.project_id, project.id);
+      assert.equal(publicProtocol.protocol_id, protocol.id);
+
+      const sessionId = `S-FULL-${suffix}`;
+      const tokenResponse = await fetch(
+        `${baseUrl}/invitations/by-code/${encodeURIComponent(invitation.code)}/ingest-token`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        }
+      );
+      assert.equal(tokenResponse.status, 200);
+      const ingestToken = (await tokenResponse.json()).token;
+
+      const completed = await ingest(
+        invitation,
+        sessionId,
+        `P-FULL-${suffix}`,
+        ingestToken,
+        true,
+        {
+          qcSummary: { qcScore: 95, validity: 'valid', failReasons: [] },
+          cognitiveResults: [{
+            blockId: 'main', trialId: 'trial-1', stimulusId: 'cat',
+            response: 'Space', correct: true, rt: 410, qualityValid: true,
+          }],
+          gaze_analytics: {
+            schemaVersion: 'gaze_analytics.v1',
+            coordinateSpace: 'stimulus_normalized_0_1',
+            summary: {
+              sampleCountTotal: 10, sampleCountValid: 9, validFraction: 0.9,
+              lowConfidenceCount: 1, offScreenCount: 0, outsideStimulusCount: 0,
+              observationDurationMs: 1000, meanConfidence: 0.9,
+            },
+            presentations: [{
+              blockId: 'main', trialId: 'trial-1', presentationId: 'presentation-1',
+              stimulusId: 'cat', stimulusName: 'Cat', stimulusType: 'image',
+              stimulusVersion: '1', intrinsicWidth: 800, intrinsicHeight: 600,
+              grid: { width: 2, height: 2, values: [1, 0, 0, 0] },
+              fixationPoints: [{
+                x: 0.25, y: 0.25, startMs: 120, durationMs: 240,
+                signalConfidence: 0.9,
+              }],
+              validObservationDurationMs: 1000,
+              meanConfidence: 0.9,
+            }],
+          },
+        }
+      );
+      assert.equal(completed.status, 200);
+
+      const exhaustedLookup = await fetch(
+        `${baseUrl}/invitations/by-code/${encodeURIComponent(invitation.code)}`
+      );
+      assert.equal(exhaustedLookup.status, 410);
+      const exhaustedProtocolList = await fetch(
+        `${baseUrl}/protocols?project_id=${encodeURIComponent(project.id)}`,
+        { headers: { authorization } }
+      );
+      assert.equal(exhaustedProtocolList.status, 200);
+      const exhaustedProtocol = (await exhaustedProtocolList.json())
+        .find(item => Number(item.id) === Number(protocol.id));
+      assert.equal(exhaustedProtocol.invitation_code, null);
+
+      const snapshotResponse = await fetch(`${baseUrl}/analytics/v1/snapshots`, {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schemaVersion: '1.0', mode: 'group', analysisLevel: 'level_1',
+          projectId: project.id, protocolId: protocol.id, protocolVersion: '1.0.0',
+          metricIds: ['aoi.dwell_time_ms', 'task.accuracy_pct', 'viz.heatmap'],
+          filters: {
+            blockIds: ['main'], stimulusIds: ['cat'], qcMode: 'all',
+            qcChannels: ['task', 'gaze'], includeIncompleteSessions: false,
+          },
+        }),
+      });
+      assert.equal(snapshotResponse.status, 201);
+      const snapshot = await snapshotResponse.json();
+      assert.equal(snapshot.includedSessionIds.length, 1);
+      assert.equal(Number.isInteger(snapshot.includedSessionIds[0]), true);
+
+      const exportResponse = await fetch(
+        `${baseUrl}/analytics/v1/exports?snapshot_id=${snapshot.id}&format=json&content=both`,
+        { headers: { authorization } }
+      );
+      assert.equal(exportResponse.status, 200);
+      assert.equal(exportResponse.headers.get('x-analysis-snapshot-id'), snapshot.id);
+      const exported = await exportResponse.json();
+      assert.equal(exported.snapshot.id, snapshot.id);
+      assert.equal(exported.snapshot.datasetHash, snapshot.datasetHash);
+      assert.equal(exported.counts.sessions, 1);
+      assert.ok(exported.summary.group.metrics.some(metric => (
+        metric.metricId === 'aoi.dwell_time_ms' && metric.median === 240
+      )));
+    } finally {
+      if (createdOrganizationId) {
+        await pool.query('DELETE FROM organizations WHERE id = $1', [createdOrganizationId]);
+      }
+    }
   });
 
   it('uses an HttpOnly staff cookie with CSRF restored by /auth/me', async () => {

@@ -6,6 +6,7 @@ const { query, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const { requireAuth, requireRole, requireOperation, OPERATIONS, isPlatformAdmin } = require('../middleware/auth');
 const { rowToProxyMetricsResponse } = require('../proxy_metrics/contract');
+const { normalizeSurveyResponses } = require('../export/survey-responses');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -140,6 +141,7 @@ router.get(
       const normalizedRows = rows.map(row => {
         const payload = row.features_payload && typeof row.features_payload === 'object' ? row.features_payload : {};
         const blocks = normalizeBlocks(payload);
+        const surveyResponses = normalizeSurveyResponses(payload);
         const qcSummary = normalizeQcSummary(row);
         const proxyRow = row.pm_session_id != null ? {
           session_id: row.pm_session_id,
@@ -173,12 +175,19 @@ router.get(
           payload,
           { qc_score: row.qc_score, validity: row.qc_validity, fail_reasons: row.fail_reasons, payload: row.qc_summary_payload }
         );
-        return { ...row, _blocks: blocks, _blocks_count: blocks.length, _qc_summary: qcSummary, _proxy_metrics: proxyContract };
+        return {
+          ...row,
+          _blocks: blocks,
+          _blocks_count: blocks.length,
+          _qc_summary: qcSummary,
+          _proxy_metrics: proxyContract,
+          _survey_responses: surveyResponses,
+        };
       });
 
       if (format === 'csv') {
         const maxBlocks = normalizedRows.reduce((acc, row) => Math.max(acc, row._blocks_count), 0);
-        const headers = ['id', 'session_id', 'participant_id', 'project_id', 'protocol_id', 'started_at', 'stopped_at', 'qc_score', 'qc_validity', 'fail_reasons', 'qc_summary', 'proxy_metrics_status', 'blocks_count'];
+        const headers = ['id', 'session_id', 'participant_id', 'project_id', 'protocol_id', 'started_at', 'stopped_at', 'qc_score', 'qc_validity', 'fail_reasons', 'qc_summary', 'proxy_metrics_status', 'survey_responses', 'blocks_count'];
         for (let i = 0; i < maxBlocks; i++) {
           headers.push(
             `block_${i}_name`,
@@ -195,12 +204,14 @@ router.get(
           const toStr = (h, v) => {
             if (h === 'fail_reasons' && v != null) return Array.isArray(v) ? v.join(';') : JSON.stringify(v);
             if (h === 'qc_summary' && v != null) return JSON.stringify(v);
+            if (h === 'survey_responses' && v != null) return JSON.stringify(v);
             return v;
           };
           const flat = {
             ...row,
             qc_summary: row._qc_summary,
             proxy_metrics_status: row._proxy_metrics ? row._proxy_metrics.status : 'not_computed',
+            survey_responses: row._survey_responses,
             blocks_count: row._blocks_count,
           };
           row._blocks.forEach((b, idx) => {
@@ -244,6 +255,7 @@ router.get(
           qc_summary: row._qc_summary,
           blocks_count: row._blocks_count,
           blocks: row._blocks,
+          survey_responses: row._survey_responses,
           features_payload: row.features_payload,
           proxy_metrics: row._proxy_metrics,
         })),

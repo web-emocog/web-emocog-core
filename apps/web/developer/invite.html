@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ссылки-приглашения — EmoCog</title>
+  <title>wecog — приглашения</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     :root {
       --bg: #0f0f1a;
@@ -76,9 +79,12 @@
     th, td { text-align: left; border-bottom: 1px solid var(--border); padding: 8px 6px; vertical-align: middle; }
     th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
-  <script src="../auth-guard.js"></script>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -87,7 +93,7 @@
       }
       window.EmocogAuthGuard.ensureProtectedPage({
         loginPath: 'login.html',
-        allowedRoles: ['admin', 'developer'],
+        allowedRoles: ['admin'],
         preserveAuthOnRoleDenied: true,
         roleDeniedRedirect: '../researcher.html'
       });
@@ -99,7 +105,7 @@
   </div>
   <div class="card">
     <h2>Создать ссылку для участника</h2>
-    <p>Ссылка создаётся через <code>POST /invitations</code> и ведёт на <code>/invite/КОД</code>. В поле ниже можно указать <strong>числовой id протокола в БД</strong> (например <code>1</code>) или <strong>код приглашения / Protocol ID из конструктора</strong> (например <code>val-03</code>) — протокол должен быть уже опубликован в API.</p>
+    <p>Ссылка создаётся через <code>POST /invitations</code> и открывает страницу участника с параметром <code>?code=КОД</code>. В поле ниже можно указать <strong>числовой id протокола в БД</strong> (например <code>1</code>) или <strong>код приглашения / Protocol ID из конструктора</strong> (например <code>val-03</code>) — протокол должен быть уже опубликован в API.</p>
     <label>API Base</label>
     <input type="text" id="apiBaseInput" placeholder="https://wecog.ru/main/api или https://wecog.ru/api" autocomplete="off">
     <label>Protocol ID (БД) или код приглашения</label>
@@ -162,14 +168,10 @@
 
       function getApiBase() {
         var fromField = (apiBaseInput && apiBaseInput.value || '').trim();
-        if (fromField) return fromField.replace(/\/$/, '');
-        var fromStorage = (localStorage.getItem('emocog_api_base') || '').trim();
-        if (fromStorage) return fromStorage.replace(/\/$/, '');
-        var path = window.location.pathname || '';
-        if (path.indexOf('/main/') === 0) {
-          return (window.location.origin + '/main/api').replace(/\/$/, '');
+        if (window.EmocogApiBase) {
+          return window.EmocogApiBase.resolve({ configuredBase: fromField || undefined });
         }
-        return (window.location.origin + '/api').replace(/\/$/, '');
+        return (window.API_BASE || window.location.origin + '/api').replace(/\/$/, '');
       }
 
       function getParticipantRunBasePath() {
@@ -182,7 +184,7 @@
       }
 
       function buildLink(code) {
-        return (window.location.origin || '') + '/invite/' + encodeURIComponent(code);
+        return getParticipantRunBasePath() + 'run_new.html?code=' + encodeURIComponent(code);
       }
 
       function isInviteSlug(value) {

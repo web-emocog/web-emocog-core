@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Учет экспериментов — EmoCog</title>
+  <title>wecog — сессии</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --border:rgba(92,102,189,.25); --ok:#10B981; --danger:#ef4444; }
     * { box-sizing:border-box; margin:0; padding:0; }
@@ -26,9 +29,12 @@
     .status.err { color:var(--danger); }
     .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
-  <script src="../auth-guard.js"></script>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -37,7 +43,7 @@
       }
       window.EmocogAuthGuard.ensureProtectedPage({
         loginPath: 'login.html',
-        allowedRoles: ['admin', 'developer'],
+        allowedRoles: ['admin'],
         preserveAuthOnRoleDenied: true,
         roleDeniedRedirect: '../researcher.html'
       });
@@ -112,8 +118,7 @@
 
   <script>
     (function () {
-      var token = localStorage.getItem('emocog_api_token') || '';
-      var base = (localStorage.getItem('emocog_api_base') || (window.location.origin + '/api')).replace(/\/$/, '');
+      var base = (window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
       var overviewBody = document.getElementById('overviewBody');
       var recentBody = document.getElementById('recentBody');
       var overviewStatus = document.getElementById('overviewStatus');
@@ -124,7 +129,7 @@
         el.className = 'status' + (text ? (isErr ? ' err' : '') : '');
       }
       function headers() {
-        return token ? { Authorization: 'Bearer ' + token } : {};
+        return {};
       }
 
       function escapeHtml(value) {

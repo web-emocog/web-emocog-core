@@ -28,6 +28,7 @@ const { INLINE_MEDIA_TYPES } = require('../security/stimulus-files');
 const config = require('../config');
 const crypto = require('crypto');
 const path = require('path');
+const { normalizeMandatoryParticipantShell } = require('../protocol/participant-shell');
 
 const router = express.Router();
 const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
@@ -147,7 +148,7 @@ router.get(
         max_runs: inv.max_runs,
         used_runs: inv.used_runs,
         expires_at: inv.expires_at,
-        definition: inv.protocol_definition,
+        definition: normalizeMandatoryParticipantShell(inv.protocol_definition),
         source: {
           type: 'invitation_code',
           value: inv.code,

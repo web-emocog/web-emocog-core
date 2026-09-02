@@ -8,17 +8,63 @@ function midpoint(a, b) {
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
+function meanPoint(landmarks, indices) {
+    const points = indices.map(index => landmarks[index]);
+    if (!points.every(hasFiniteCoordinates)) return null;
+    return {
+        x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+        y: points.reduce((sum, point) => sum + point.y, 0) / points.length
+    };
+}
+
 function hasFiniteCoordinates(point) {
     return point
         && Number.isFinite(point.x)
         && Number.isFinite(point.y);
 }
 
+function eyeLocalCoordinates(iris, inner, outer, top, bottom) {
+    const width = dist2d(inner, outer);
+    const height = dist2d(top, bottom);
+    if (Math.min(width, height) < 1e-6) return null;
+
+    const horizontalCenter = midpoint(inner, outer);
+    const verticalCenter = midpoint(top, bottom);
+    let horizontalX = (outer.x - inner.x) / width;
+    let horizontalY = (outer.y - inner.y) / width;
+    if (horizontalX < 0) {
+        horizontalX *= -1;
+        horizontalY *= -1;
+    }
+    let verticalX = -horizontalY;
+    let verticalY = horizontalX;
+    if (verticalY < 0) {
+        verticalX *= -1;
+        verticalY *= -1;
+    }
+
+    return {
+        x: (
+            (iris.x - horizontalCenter.x) * horizontalX
+            + (iris.y - horizontalCenter.y) * horizontalY
+        ) / (width / 2),
+        y: (
+            (iris.x - verticalCenter.x) * verticalX
+            + (iris.y - verticalCenter.y) * verticalY
+        ) / (height / 2),
+        width,
+        height,
+        center: horizontalCenter
+    };
+}
+
 export function extractFeatureGroups(landmarks) {
     if (!Array.isArray(landmarks) || landmarks.length < MIN_LANDMARKS) return null;
     try {
-        const leftIris = landmarks[LANDMARKS.LEFT_IRIS_CENTER];
-        const rightIris = landmarks[LANDMARKS.RIGHT_IRIS_CENTER];
+        // Averaging all five MediaPipe iris landmarks is less sensitive to
+        // one-landmark jitter than using only landmark 468/473.
+        const leftIris = meanPoint(landmarks, LANDMARKS.LEFT_IRIS);
+        const rightIris = meanPoint(landmarks, LANDMARKS.RIGHT_IRIS);
         const leftInner = landmarks[LANDMARKS.LEFT_EYE_INNER];
         const leftOuter = landmarks[LANDMARKS.LEFT_EYE_OUTER];
         const leftTop = landmarks[LANDMARKS.LEFT_EYE_TOP];
@@ -36,18 +82,20 @@ export function extractFeatureGroups(landmarks) {
             rightInner, rightOuter, rightTop, rightBottom, nose, leftEar,
             rightEar, forehead, chin].every(hasFiniteCoordinates)) return null;
 
-        const leftWidth = dist2d(leftInner, leftOuter);
-        const rightWidth = dist2d(rightInner, rightOuter);
-        const leftHeight = dist2d(leftTop, leftBottom);
-        const rightHeight = dist2d(rightTop, rightBottom);
-        if (Math.min(leftWidth, rightWidth, leftHeight, rightHeight) < 1e-6) return null;
+        const leftEye = eyeLocalCoordinates(leftIris, leftInner, leftOuter, leftTop, leftBottom);
+        const rightEye = eyeLocalCoordinates(rightIris, rightInner, rightOuter, rightTop, rightBottom);
+        if (!leftEye || !rightEye) return null;
 
-        const leftCenter = midpoint(leftInner, leftOuter);
-        const rightCenter = midpoint(rightInner, rightOuter);
-        const leftNormX = (leftIris.x - leftCenter.x) / (leftWidth / 2);
-        const leftNormY = (leftIris.y - midpoint(leftTop, leftBottom).y) / (leftHeight / 2);
-        const rightNormX = (rightIris.x - rightCenter.x) / (rightWidth / 2);
-        const rightNormY = (rightIris.y - midpoint(rightTop, rightBottom).y) / (rightHeight / 2);
+        const leftWidth = leftEye.width;
+        const rightWidth = rightEye.width;
+        const leftHeight = leftEye.height;
+        const rightHeight = rightEye.height;
+        const leftCenter = leftEye.center;
+        const rightCenter = rightEye.center;
+        const leftNormX = leftEye.x;
+        const leftNormY = leftEye.y;
+        const rightNormX = rightEye.x;
+        const rightNormY = rightEye.y;
         const avgIrisX = (leftNormX + rightNormX) / 2;
         const avgIrisY = (leftNormY + rightNormY) / 2;
 
@@ -71,6 +119,9 @@ export function extractFeatureGroups(landmarks) {
             avgIrisY,
             leftNormX - rightNormX,
             leftNormY - rightNormY,
+            avgIrisX * avgIrisX,
+            avgIrisY * avgIrisY,
+            avgIrisX * avgIrisY,
             1
         ];
         const head = [

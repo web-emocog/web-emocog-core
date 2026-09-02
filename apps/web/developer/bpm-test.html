@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BPM / rPPG тест — EmoCog</title>
+  <title>wecog — BPM / rPPG</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e8e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
@@ -36,8 +39,26 @@
     #log .warn { color: #F59E0B; }
     #log .err { color: #EF4444; }
   </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
 </head>
 <body>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
   <div id="file-protocol-warn" style="display:none; margin-bottom:16px; padding:14px 18px; background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); border-radius:12px; color:#e8e8f0; font-size:14px;">
     <strong>Страница открыта как файл (file://).</strong> Модули и камера не работают. Запустите локальный сервер из корня проекта и откройте страницу по адресу <code style="background:rgba(0,0,0,.2); padding:2px 6px;">http://localhost:8000/main/apps/web/developer/bpm-test.html</code> (или другой порт).
   </div>
@@ -86,6 +107,6 @@
       });
     })();
   </script>
-  <script type="module" src="bpm-test.js?v=20260328"></script>
+  <script type="module" src="bpm-test.js?v=20260827-1"></script>
 </body>
 </html>
