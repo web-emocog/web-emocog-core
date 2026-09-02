@@ -170,16 +170,27 @@ The release status command must work without a password. Generic sudo must still
 
 ## First automated release
 
-After bootstrap, commit and push the CI/CD files to the release-candidate branch, open a pull request into `main`, wait for `CI` to pass, and merge it. The merge triggers `Deploy production` automatically.
+After bootstrap, commit and push the CI/CD files to the release branch, merge
+them into `develop`, and wait for every required check on the `develop` to
+`main` pull request. Merging that pull request triggers `Deploy production`
+automatically.
+
+The staged VM configuration must come from the same revision as the release.
+If `compose.production.yaml` or `deploy/production/` changed after the initial
+bootstrap, copy the updated files to the VM and run `bootstrap.sh` again before
+merging. Re-running bootstrap updates only the staged configuration and keeps
+the active Nginx configuration and application traffic unchanged.
 
 The workflow must complete these visible stages in order:
 
 1. tests;
 2. image build and push;
-3. Lockbox read and PostgreSQL backup upload;
-4. disk snapshot creation;
-5. migrations and container deployment;
-6. public HTTPS checks.
+3. smoke test of the exact production web image, including participant media
+   modules, MIME types, security headers, and private-path denials;
+4. Lockbox read and PostgreSQL backup upload;
+5. disk snapshot creation;
+6. migrations and container deployment;
+7. public HTTPS checks.
 
 Do not switch host Nginx to the web container before that first workflow is green.
 
@@ -288,12 +299,31 @@ Verify the public boundary:
 ```bash
 curl -fsS https://wecog.ru/ >/dev/null && echo 'WEB OK'
 curl -fsS https://wecog.ru/api/ready && echo
-for path in /.git/config /apps/api/.env /apps/api/package.json /DEPLOY_VERSION.txt; do
+for path in \
+  /Audio_detection/browser/open-vocal-biomarkers.mjs \
+  /packages/shared/multimodal/index.mjs; do
+  curl -fsSI "https://wecog.ru$path" \
+    | tr -d '\r' \
+    | grep -Eqi '^Content-Type: (application|text)/javascript(;|$)' \
+    && echo "$path -> JavaScript MIME OK"
+done
+curl -fsSI https://wecog.ru/apps/participant-web/run_new.html \
+  | tr -d '\r' \
+  | grep -Fi 'Permissions-Policy: camera=(self), microphone=(self), geolocation=()'
+for path in \
+  /.git/config \
+  /apps/api/.env \
+  /apps/api/package.json \
+  /Audio_detection/README.md \
+  /packages/shared/multimodal/README.md \
+  /packages/shared/contracts/session-feature.v1.schema.json \
+  /DEPLOY_VERSION.txt; do
   curl -sS -o /dev/null -w "$path -> HTTP %{http_code}\n" "https://wecog.ru$path"
 done
 ```
 
-The web and API checks must succeed. Every private path must return `404`.
+The web, API, participant media module, MIME, and permission-policy checks must
+succeed. Every private path must return `404`.
 
 ## Normal operation
 

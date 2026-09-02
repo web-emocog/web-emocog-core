@@ -116,6 +116,11 @@ jobs:
           cache-to: type=gha,mode=max,scope=wecog-web
           provenance: false
 
+      - name: Smoke-test the exact production web image
+        run: |
+          bash deploy/production/smoke-test-web-image.sh \
+            "cr.yandex/${YC_REGISTRY_ID}/wecog-web:${GITHUB_SHA}"
+
       - name: Export short-lived OS Login certificate
         run: |
           ssh_directory="${RUNNER_TEMP}/yc-ssh"
