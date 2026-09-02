@@ -106,7 +106,7 @@ jobs:
       - name: Start canonical API
         working-directory: apps/api
         run: |
-          npm start > /tmp/wecog-api.log 2>&1 &
+          node server.js > /tmp/wecog-api.log 2>&1 &
           echo $! > /tmp/wecog-api.pid
           for attempt in $(seq 1 30); do
             curl --fail --silent http://127.0.0.1:3000/ready && exit 0
