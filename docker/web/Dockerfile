@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM nginx:1.28-alpine
+FROM nginx:1.31-alpine
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Wecog Web" \
