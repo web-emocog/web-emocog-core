@@ -53,8 +53,20 @@ describe('S3-01 release hardening', () => {
     assert.doesNotMatch(`${backup}\n${restore}\n${drill}`, /PGDATABASE=/);
   });
 
-  it('grants CodeQL read-only access to workflow run metadata', () => {
+  it('runs CodeQL only where GitHub Code Security is available', () => {
     const workflow = fs.readFileSync(path.resolve(apiRoot, '../../.github/workflows/codeql.yml'), 'utf8');
     assert.match(workflow, /permissions:\s+actions: read\s+contents: read\s+security-events: write/);
+    assert.match(workflow, /CODEQL_ENABLED:.*github\.event\.repository\.private == false.*vars\.CODEQL_ENABLED == 'true'/);
+    assert.equal((workflow.match(/if: env\.CODEQL_ENABLED == 'true'/g) || []).length, 3);
+    assert.match(workflow, /if: env\.CODEQL_ENABLED != 'true'\s+run:/);
+    assert.match(workflow, /Enable GitHub Code Security.*CODEQL_ENABLED=true/);
+  });
+
+  it('tracks the canonical API process for graceful release shutdown', () => {
+    const workflow = fs.readFileSync(path.resolve(apiRoot, '../../.github/workflows/release-gates.yml'), 'utf8');
+    assert.match(workflow, /node server\.js > \/tmp\/wecog-api\.log 2>&1 &\s+echo \$! > \/tmp\/wecog-api\.pid/);
+    assert.doesNotMatch(workflow, /npm start > \/tmp\/wecog-api\.log 2>&1 &/);
+    assert.match(workflow, /kill -TERM "\$\(cat \/tmp\/wecog-api\.pid\)"/);
+    assert.match(workflow, /grep -q 'api_shutdown_completed' \/tmp\/wecog-api\.log/);
   });
 });
