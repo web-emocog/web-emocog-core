@@ -104,6 +104,11 @@ jobs:
           cache-to: type=gha,mode=max,scope=wecog-api
           provenance: false
 
+      - name: Smoke-test the exact production API image
+        run: |
+          bash deploy/production/smoke-test-api-image.sh \
+            "cr.yandex/${YC_REGISTRY_ID}/wecog-api:${GITHUB_SHA}"
+
       - name: Build and push the immutable web image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
