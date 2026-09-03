@@ -38,7 +38,42 @@ jobs:
         run: npm ci
       - name: Audit production dependencies
         working-directory: apps/api
-        run: npm audit --omit=dev --audit-level=high
+        shell: bash
+        run: |
+          set -o pipefail
+
+          audit_log="$(mktemp)"
+          trap 'rm -f "$audit_log"' EXIT
+
+          for attempt in 1 2 3; do
+            : > "$audit_log"
+            if npm audit \
+              --omit=dev \
+              --audit-level=high \
+              --fetch-retries=0 \
+              --fetch-timeout=60000 \
+              2>&1 | tee "$audit_log"
+            then
+              exit 0
+            fi
+
+            if ! grep -Eqi \
+              'audit endpoint returned an error|service unavailable|bad gateway|gateway timeout|too many requests|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|ETIMEDOUT|socket hang up' \
+              "$audit_log"
+            then
+              echo 'npm audit reported a non-transient failure; refusing to retry.' >&2
+              exit 1
+            fi
+
+            if (( attempt == 3 )); then
+              echo 'npm audit failed after 3 attempts because the registry remained unavailable.' >&2
+              exit 1
+            fi
+
+            delay=$((attempt * 15))
+            echo "Transient npm registry failure; retrying in ${delay}s." >&2
+            sleep "$delay"
+          done
       - name: Static release audit
         working-directory: apps/api
         run: node scripts/release-audit.js

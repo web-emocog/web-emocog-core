@@ -1,0 +1,20 @@
+[Unit]
+Description=Wecog production metrics exporters and Monium collector
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/wecog-monitoring start
+ExecReload=/usr/local/sbin/wecog-monitoring restart
+ExecStop=/usr/local/sbin/wecog-monitoring stop
+TimeoutStartSec=5min
+TimeoutStopSec=2min
+
+[Install]
+WantedBy=multi-user.target
