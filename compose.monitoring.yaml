@@ -1,0 +1,79 @@
+name: wecog-monitoring
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.11.1@sha256:0f422f62c15f154af8d8572b23d623aebfb10cec73a5c654d18f911f3f9df241
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.disable-defaults
+      - --collector.meminfo
+      - --collector.filesystem
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)
+    ports:
+      - 127.0.0.1:9100:9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    logging: *default-logging
+
+  blackbox-exporter:
+    image: quay.io/prometheus/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox_exporter/blackbox.yml
+      - --web.listen-address=:9115
+    ports:
+      - 127.0.0.1:9115:9115
+    volumes:
+      - ${WECOG_BLACKBOX_CONFIG:-/etc/wecog/monitoring/blackbox.yml}:/etc/blackbox_exporter/blackbox.yml:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    logging: *default-logging
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.156.0@sha256:125bdbeb7590cc1952c5b3430ecf14063568980c2c93d5b38676cc0446ed8108
+    restart: unless-stopped
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    env_file:
+      - path: ${WECOG_MONITORING_ENV_FILE:-/etc/wecog/monitoring.env}
+        required: true
+        format: raw
+    volumes:
+      - ${WECOG_OTELCOL_CONFIG:-/etc/wecog/monitoring/otelcol.yaml}:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      - blackbox-exporter
+      - node-exporter
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *default-logging
