@@ -1,0 +1,8 @@
+# Non-secret Monium and Lockbox identifiers. The API key is fetched at runtime.
+WECOG_MONITORING_LOCKBOX_SECRET_ID=e6qv3j5psv0u96jruihr
+WECOG_MONIUM_PROJECT=folder__b1gakvq29fuiic89917k
+WECOG_MONIUM_CLUSTER=production
+WECOG_MONIUM_SERVICE=wecog
+
+WECOG_MONITORING_COMPOSE_FILE=/opt/wecog/compose.monitoring.yaml
+WECOG_MONITORING_ENV_FILE=/etc/wecog/monitoring.env

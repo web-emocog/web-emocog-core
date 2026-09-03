@@ -17,25 +17,46 @@ for command in curl docker find flock nginx python3 sha256sum systemctl visudo; 
 done
 docker compose version >/dev/null
 
-install -d -o root -g root -m 0755 /opt/wecog /etc/wecog /etc/nginx/snippets
+install -d -o root -g root -m 0755 \
+  /opt/wecog \
+  /etc/wecog \
+  /etc/wecog/monitoring \
+  /etc/nginx/snippets
 install -d -o root -g root -m 0700 /var/lib/wecog/state
 install -d -o 10001 -g 10001 -m 0750 /var/lib/wecog/uploads /var/lib/wecog/backups
 
 install -o root -g root -m 0644 \
   "${REPOSITORY_ROOT}/compose.production.yaml" \
   /opt/wecog/compose.yaml
+install -o root -g root -m 0644 \
+  "${REPOSITORY_ROOT}/compose.monitoring.yaml" \
+  /opt/wecog/compose.monitoring.yaml
 install -o root -g root -m 0755 \
   "${SCRIPT_DIR}/wecog-release" \
   /usr/local/sbin/wecog-release
+install -o root -g root -m 0755 \
+  "${SCRIPT_DIR}/wecog-monitoring" \
+  /usr/local/sbin/wecog-monitoring
 install -o root -g root -m 0644 \
   "${SCRIPT_DIR}/wecog-backup.service" \
   "${SCRIPT_DIR}/wecog-backup.timer" \
+  "${SCRIPT_DIR}/wecog-monitoring.service" \
   /etc/systemd/system/
+install -o root -g root -m 0644 \
+  "${SCRIPT_DIR}/monitoring/blackbox.yml" \
+  "${SCRIPT_DIR}/monitoring/otelcol.yaml" \
+  /etc/wecog/monitoring/
 
 if [[ ! -e /etc/wecog/release.conf ]]; then
   install -o root -g root -m 0600 \
     "${SCRIPT_DIR}/release.conf.example" \
     /etc/wecog/release.conf
+fi
+
+if [[ ! -e /etc/wecog/monitoring.conf ]]; then
+  install -o root -g root -m 0600 \
+    "${SCRIPT_DIR}/monitoring.conf.example" \
+    /etc/wecog/monitoring.conf
 fi
 
 install -o root -g root -m 0440 \
@@ -54,5 +75,5 @@ systemctl daemon-reload
 systemctl enable --now wecog-backup.timer
 
 echo "Bootstrap files installed and the daily backup timer was enabled."
+echo "Monitoring files were staged but the monitoring service was not enabled or started."
 echo "Active Nginx configuration, application containers, and PostgreSQL were not changed."
-echo "Next: run the GitHub production workflow, verify both containers, then switch Nginx."
