@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CONFIG_FILE=/etc/wecog/monitoring.conf
+readonly METADATA_TOKEN_URL=http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token
+readonly LOCKBOX_PAYLOAD_URL=https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "This command must run as root." >&2
+  exit 77
+fi
+
+if [[ ! -r ${CONFIG_FILE} ]]; then
+  echo "Missing ${CONFIG_FILE}." >&2
+  exit 78
+fi
+
+# shellcheck source=/dev/null
+source "${CONFIG_FILE}"
+
+: "${WECOG_MONITORING_LOCKBOX_SECRET_ID:?Missing WECOG_MONITORING_LOCKBOX_SECRET_ID}"
+: "${WECOG_MONIUM_PROJECT:?Missing WECOG_MONIUM_PROJECT}"
+: "${WECOG_MONIUM_CLUSTER:?Missing WECOG_MONIUM_CLUSTER}"
+: "${WECOG_MONIUM_SERVICE:?Missing WECOG_MONIUM_SERVICE}"
+: "${WECOG_MONITORING_COMPOSE_FILE:?Missing WECOG_MONITORING_COMPOSE_FILE}"
+: "${WECOG_MONITORING_ENV_FILE:?Missing WECOG_MONITORING_ENV_FILE}"
+
+for value in \
+  "${WECOG_MONIUM_PROJECT}" \
+  "${WECOG_MONIUM_CLUSTER}" \
+  "${WECOG_MONIUM_SERVICE}"; do
+  if [[ ! ${value} =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "Invalid Monium label value in ${CONFIG_FILE}." >&2
+    exit 78
+  fi
+done
+
+for command in chmod chown curl date docker grep mktemp mv python3 rm seq sleep; do
+  command -v "${command}" >/dev/null || {
+    echo "Required command is missing: ${command}" >&2
+    exit 69
+  }
+done
+docker compose version >/dev/null
+
+log() {
+  printf '%s %s\n' "$(date --utc +'%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+metadata_iam_token() {
+  curl --fail --silent --show-error \
+    --header 'Metadata-Flavor: Google' \
+    "${METADATA_TOKEN_URL}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+}
+
+render_monitoring_env() {
+  local token temporary
+  token=$(metadata_iam_token)
+  temporary=$(mktemp "${WECOG_MONITORING_ENV_FILE}.tmp.XXXXXX")
+  chmod 0600 "${temporary}"
+
+  if ! curl --fail --silent --show-error \
+      --header "Authorization: Bearer ${token}" \
+      "${LOCKBOX_PAYLOAD_URL}/${WECOG_MONITORING_LOCKBOX_SECRET_ID}/payload" \
+      | python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+entries = {
+    entry.get("key"): entry.get("textValue")
+    for entry in payload.get("entries", [])
+}
+if set(entries) != {"MONIUM_API_KEY"}:
+    raise SystemExit("Monitoring Lockbox secret must contain only MONIUM_API_KEY")
+api_key = entries["MONIUM_API_KEY"]
+if not api_key or any(character in api_key for character in "\r\n\0"):
+    raise SystemExit("MONIUM_API_KEY must be a non-empty single text line")
+print(f"MONIUM_API_KEY={api_key}")
+' >"${temporary}"; then
+    rm -f "${temporary}"
+    echo "Unable to render the monitoring Lockbox payload." >&2
+    exit 70
+  fi
+
+  printf 'MONIUM_PROJECT=%s\n' "${WECOG_MONIUM_PROJECT}" >>"${temporary}"
+  printf 'MONIUM_CLUSTER=%s\n' "${WECOG_MONIUM_CLUSTER}" >>"${temporary}"
+  printf 'MONIUM_SERVICE=%s\n' "${WECOG_MONIUM_SERVICE}" >>"${temporary}"
+  chown root:root "${temporary}"
+  mv --force "${temporary}" "${WECOG_MONITORING_ENV_FILE}"
+  log "Monitoring credentials rendered from Lockbox."
+}
+
+compose() {
+  WECOG_MONITORING_ENV_FILE="${WECOG_MONITORING_ENV_FILE}" \
+    docker compose \
+      --project-name wecog-monitoring \
+      --file "${WECOG_MONITORING_COMPOSE_FILE}" \
+      "$@"
+}
+
+verify_local_exporters() {
+  local target probe_output node_output
+  for target in https://wecog.ru/ https://wecog.ru/api/ready; do
+    probe_output=$(curl \
+      --fail \
+      --silent \
+      --show-error \
+      --get \
+      --max-time 15 \
+      --data-urlencode "target=${target}" \
+      --data-urlencode 'module=https_2xx' \
+      http://127.0.0.1:9115/probe)
+    if ! grep --extended-regexp --quiet '^probe_success 1$' <<<"${probe_output}"; then
+      echo "HTTPS probe failed for ${target}." >&2
+      return 1
+    fi
+  done
+
+  node_output=$(curl --fail --silent --show-error --max-time 5 \
+    http://127.0.0.1:9100/metrics)
+  if ! grep --fixed-strings --quiet \
+      'node_memory_MemAvailable_bytes' \
+      <<<"${node_output}"; then
+    echo "Host memory metrics are missing." >&2
+    return 1
+  fi
+  if ! grep --extended-regexp --quiet \
+      '^node_filesystem_avail_bytes\{[^}]*mountpoint="/(rootfs)?"' \
+      <<<"${node_output}"; then
+    echo "Host root-filesystem metrics are missing." >&2
+    return 1
+  fi
+}
+
+verify_containers() {
+  local service running_services
+  running_services=$(compose ps --status running --services)
+  for service in blackbox-exporter node-exporter otel-collector; do
+    if ! grep --fixed-strings --line-regexp --quiet \
+        "${service}" <<<"${running_services}"; then
+      echo "Monitoring container is not running: ${service}." >&2
+      return 1
+    fi
+  done
+}
+
+wait_until_ready() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if verify_containers 2>/dev/null \
+        && verify_local_exporters 2>/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+start_monitoring() {
+  render_monitoring_env
+  log "Pulling pinned monitoring images."
+  compose pull
+  compose up --detach --remove-orphans --force-recreate
+  if ! wait_until_ready; then
+    compose ps --all >&2 || true
+    compose logs --no-color --tail 100 >&2 || true
+    echo "Monitoring exporters did not become ready." >&2
+    exit 1
+  fi
+  log "Local monitoring probes are healthy."
+}
+
+stop_monitoring() {
+  compose down --remove-orphans
+}
+
+show_status() {
+  compose ps --all
+  verify_containers
+  verify_local_exporters
+  echo "Local HTTPS and host-metric probes are healthy."
+}
+
+case ${1:-} in
+  start)
+    start_monitoring
+    ;;
+  restart)
+    start_monitoring
+    ;;
+  stop)
+    stop_monitoring
+    ;;
+  status)
+    show_status
+    ;;
+  *)
+    echo "Usage: $0 {start|restart|stop|status}" >&2
+    exit 64
+    ;;
+esac
