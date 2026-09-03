@@ -10,18 +10,20 @@ readonly SSH_DIRECTORY=$1
 readonly OSLOGIN_LOGIN=$2
 readonly ORGANIZATION_ID=$3
 
-for command in chmod find install yc; do
+for command in chmod find mkdir yc; do
   command -v "${command}" >/dev/null || {
     echo "Required command is missing: ${command}" >&2
     exit 69
   }
 done
 
-install --directory --mode 0700 "${SSH_DIRECTORY}"
+mkdir -p "${SSH_DIRECTORY}"
+chmod 0700 "${SSH_DIRECTORY}"
 
-mapfile -d '' -t existing_entries < <(
-  find "${SSH_DIRECTORY}" -mindepth 1 -maxdepth 1 -print0
-)
+existing_entries=()
+while IFS= read -r -d '' entry; do
+  existing_entries+=("${entry}")
+done < <(find "${SSH_DIRECTORY}" -mindepth 1 -maxdepth 1 -print0)
 if (( ${#existing_entries[@]} != 0 )); then
   echo "OS Login export directory must be empty: ${SSH_DIRECTORY}" >&2
   exit 73
@@ -35,13 +37,16 @@ yc compute ssh certificate export \
   --directory "${SSH_DIRECTORY}" \
   >/dev/null
 
-mapfile -d '' -t certificates < <(
+certificates=()
+while IFS= read -r -d '' certificate; do
+  certificates+=("${certificate}")
+done < <(
   find "${SSH_DIRECTORY}" \
-    -mindepth 1 \
-    -maxdepth 1 \
-    -type f \
-    -name '*-cert.pub' \
-    -print0
+      -mindepth 1 \
+      -maxdepth 1 \
+      -type f \
+      -name '*-cert.pub' \
+      -print0
 )
 if (( ${#certificates[@]} != 1 )); then
   echo "Expected exactly one exported OS Login certificate, found ${#certificates[@]}." >&2
