@@ -130,4 +130,65 @@ test -n "\${directory}"
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  it('packages every server-side repository dependency in the production API image', () => {
+    const repositoryRoot = path.resolve(apiRoot, '../..');
+    const dockerfile = fs.readFileSync(path.join(repositoryRoot, 'docker/api/Dockerfile'), 'utf8');
+
+    for (const dependency of [
+      'apps/web/aoi-geometry.js',
+      'apps/web/aoi-protocol.js',
+      'apps/web/docs/analytics-contract/metric-catalog-v1.json',
+      'packages/shared/contracts',
+    ]) {
+      assert.match(dockerfile, new RegExp(dependency.replaceAll('/', '\\/')));
+    }
+    assert.doesNotMatch(dockerfile, /COPY[^\n]*apps\/web\s+\/app\/apps\/web/);
+  });
+
+  it('starts the built API image before deployment side effects', () => {
+    const repositoryRoot = path.resolve(apiRoot, '../..');
+    const smokeCommand = /deploy\/production\/smoke-test-api-image\.sh/;
+    const smokeScript = fs.readFileSync(
+      path.join(repositoryRoot, 'deploy/production/smoke-test-api-image.sh'),
+      'utf8',
+    );
+
+    assert.match(smokeScript, /--read-only/);
+    assert.match(
+      smokeScript,
+      /--tmpfs \/var\/lib\/wecog\/uploads:[^\n]*uid=10001,gid=10001/,
+    );
+    assert.match(smokeScript, /--env UPLOADS_ROOT=\/var\/lib\/wecog\/uploads/);
+
+    for (const workflowName of ['ci.yml', 'deploy-production.yml']) {
+      const workflow = fs.readFileSync(
+        path.join(repositoryRoot, '.github/workflows', workflowName),
+        'utf8',
+      );
+      assert.match(workflow, smokeCommand);
+    }
+
+    const deployWorkflow = fs.readFileSync(
+      path.join(repositoryRoot, '.github/workflows/deploy-production.yml'),
+      'utf8',
+    );
+    assert.ok(
+      deployWorkflow.indexOf('smoke-test-api-image.sh')
+        < deployWorkflow.indexOf('Prepare release and upload the database backup'),
+    );
+  });
+
+  it('preserves bounded container diagnostics before failed-release cleanup', () => {
+    const repositoryRoot = path.resolve(apiRoot, '../..');
+    const controller = fs.readFileSync(
+      path.join(repositoryRoot, 'deploy/production/wecog-release'),
+      'utf8',
+    );
+    assert.match(controller, /logs \\\n\s+--no-color \\\n\s+--timestamps \\\n\s+--tail 200/);
+    assert.ok(
+      controller.indexOf('dump_release_diagnostics "${tag}"')
+        < controller.indexOf('compose_for "${tag}" down'),
+    );
+  });
 });
