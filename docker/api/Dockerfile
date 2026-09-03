@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22-bookworm-slim AS dependencies
+FROM node:26-bookworm-slim AS dependencies
 
 WORKDIR /app/apps/api
 COPY apps/api/package.json apps/api/package-lock.json ./
@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --ignore-scripts && \
     npm cache clean --force
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Wecog API" \
