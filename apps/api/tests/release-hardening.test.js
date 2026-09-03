@@ -148,6 +148,17 @@ test -n "\${directory}"
   it('starts the built API image before deployment side effects', () => {
     const repositoryRoot = path.resolve(apiRoot, '../..');
     const smokeCommand = /deploy\/production\/smoke-test-api-image\.sh/;
+    const smokeScript = fs.readFileSync(
+      path.join(repositoryRoot, 'deploy/production/smoke-test-api-image.sh'),
+      'utf8',
+    );
+
+    assert.match(smokeScript, /--read-only/);
+    assert.match(
+      smokeScript,
+      /--tmpfs \/var\/lib\/wecog\/uploads:[^\n]*uid=10001,gid=10001/,
+    );
+    assert.match(smokeScript, /--env UPLOADS_ROOT=\/var\/lib\/wecog\/uploads/);
 
     for (const workflowName of ['ci.yml', 'deploy-production.yml']) {
       const workflow = fs.readFileSync(

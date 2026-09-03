@@ -35,6 +35,7 @@ docker run \
   --name "${CONTAINER_NAME}" \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --tmpfs /var/lib/wecog/uploads:rw,noexec,nosuid,nodev,size=16m,mode=0750,uid=10001,gid=10001 \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --no-healthcheck \
@@ -43,6 +44,7 @@ docker run \
   --env HOST=0.0.0.0 \
   --env PORT=3000 \
   --env TRUST_PROXY_HOPS=1 \
+  --env UPLOADS_ROOT=/var/lib/wecog/uploads \
   --env DATABASE_URL=postgres://wecog:unused@127.0.0.1:1/wecog \
   --env DB_CONNECTION_TIMEOUT_MS=500 \
   --env JWT_SECRET=ci-only-secret-that-is-longer-than-thirty-two-characters \
