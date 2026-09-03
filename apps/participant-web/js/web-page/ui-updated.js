@@ -348,6 +348,12 @@ export async function generateIdsAndProceed() {
             sessionId,
             invitationCode
         });
+        if (invitationCode) {
+            const checkpointSaved = await state.runtime?.sessionRuntime?.saveCheckpoint?.();
+            if (checkpointSaved !== true) {
+                throw new Error('checkpoint_persistence_failed');
+            }
+        }
         const currentUrl = new URL(window.location.href);
         if (currentUrl.searchParams.has('code')) {
             currentUrl.searchParams.delete('code');

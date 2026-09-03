@@ -360,6 +360,114 @@ An application rollback changes container images only. It deliberately does not 
 
 If data itself must be restored, stop and perform a manual recovery from the validated Object Storage dump. Restoring a database is destructive and must never be an automatic reaction to an HTTP health failure.
 
+## Production observability
+
+The low-cost baseline runs three resource-limited containers on the production
+VM under the separate `wecog-monitoring` Compose project:
+
+- `blackbox-exporter` checks `https://wecog.ru/` and
+  `https://wecog.ru/api/ready` through public HTTPS, including DNS, TLS, Nginx,
+  the application containers, and PostgreSQL readiness;
+- `node-exporter` reads host memory and root-filesystem capacity;
+- `otel-collector` sends the selected metrics to Monium.
+
+The exporters listen only on VM loopback ports `9100` and `9115`. The Collector
+configuration keeps only availability, latency, HTTP status, earliest TLS
+certificate expiry, memory, and root-filesystem metrics. A 60-second scrape
+interval and metric filtering prevent unbounded metric cardinality and cost.
+Container logs use rotation and the three monitoring containers together are
+limited to one CPU and 512 MiB of memory.
+
+The Monium API key belongs to the dedicated `wecog-monitoring-writer` service
+account and is stored in the separate Lockbox secret
+`e6qv3j5psv0u96jruihr`. It must never be stored in Git, GitHub Actions, the API
+Lockbox secret, or the application container environment. The production VM's
+runtime service account receives `lockbox.payloadViewer` on this monitoring
+secret only so that the root-owned controller can render
+`/etc/wecog/monitoring.env` with mode `0600`.
+
+The first rollout is deliberately staged. Running the main bootstrap installs
+the monitoring files and systemd unit but does not enable or start monitoring.
+Before starting it, confirm that its loopback ports are free:
+
+```bash
+sudo ss -lntp | grep -E ':(9100|9115)\b' \
+  || echo 'MONITORING PORTS ARE FREE'
+```
+
+This is a read-only socket check. Any existing listener must be identified
+before continuing; do not terminate an unknown process merely to free a port.
+
+After copying the reviewed repository bundle to the VM, install its protected
+files:
+
+```bash
+sudo /home/eabulanov/REVIEWED_BUNDLE/deploy/production/bootstrap.sh
+```
+
+Replace `REVIEWED_BUNDLE` with the directory containing the exact reviewed
+commit. The command updates root-owned templates, keeps the existing
+`/etc/wecog/monitoring.conf` if it already exists, and does not start the
+monitoring containers or change application traffic.
+
+Verify installed identifiers and file permissions without printing the API
+key:
+
+```bash
+sudo grep -E \
+  '^(WECOG_MONITORING_LOCKBOX_SECRET_ID|WECOG_MONIUM_PROJECT|WECOG_MONIUM_CLUSTER|WECOG_MONIUM_SERVICE)=' \
+  /etc/wecog/monitoring.conf
+sudo stat -c '%U:%G %a %n' \
+  /etc/wecog/monitoring.conf \
+  /usr/local/sbin/wecog-monitoring \
+  /opt/wecog/compose.monitoring.yaml \
+  /etc/systemd/system/wecog-monitoring.service
+```
+
+The first command prints only non-secret identifiers. The second must show
+`root:root`, mode `600` for `monitoring.conf`, mode `755` for the controller,
+and mode `644` for Compose and systemd files.
+
+Enable and start the monitoring stack:
+
+```bash
+sudo systemctl enable --now wecog-monitoring.service
+```
+
+This fetches the API key from Lockbox into a root-only environment file, pulls
+the pinned monitoring images, starts the isolated Compose project, and fails if
+either local HTTPS probe or the host metrics endpoint is unhealthy. It does not
+restart Nginx, PostgreSQL, or the application containers.
+
+Inspect the result without exposing credentials:
+
+```bash
+sudo systemctl status wecog-monitoring.service --no-pager -l
+sudo /usr/local/sbin/wecog-monitoring status
+sudo docker logs --tail 100 wecog-monitoring-otel-collector-1 2>&1 \
+  | grep -Ei 'error|failed|unauthenticated|permission' \
+  || echo 'NO COLLECTOR ERRORS FOUND'
+```
+
+The first command checks systemd state. The second requires all three
+containers to be running and both public HTTPS targets to return a successful
+probe. The final command looks only for recent Collector errors and does not
+print its environment.
+
+Monium may need more than 60 seconds to display the first data. In
+`Overview -> Metrics`, filter by `service = "wecog"`; expected metric names
+include `probe_success`, `probe_duration_seconds`,
+`probe_ssl_earliest_cert_expiry`, `node_memory_MemAvailable_bytes`, and
+`node_filesystem_avail_bytes`.
+
+This baseline is not an independent external observer because it runs on the
+production VM. A total VM or network failure is detected by the existing native
+Compute Cloud alert through its strict `No data` policy. When contractual SLOs
+or multiple application instances are introduced, move `blackbox-exporter` and
+`otel-collector` to a separate monitoring VM or external probe. Keep the same
+target names and metric labels so existing dashboards and alerts continue to
+work.
+
 ## Growth path
 
 The next infrastructure steps should be triggered by load and recovery objectives, in this order:
