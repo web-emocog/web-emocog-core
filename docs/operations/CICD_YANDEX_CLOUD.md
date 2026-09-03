@@ -185,8 +185,10 @@ The workflow must complete these visible stages in order:
 
 1. tests;
 2. image build and push;
-3. smoke test of the exact production web image, including participant media
-   modules, MIME types, security headers, and private-path denials;
+3. startup smoke test of the exact production API image without production
+   secrets or database access, followed by the exact web-image smoke test for
+   participant media modules, MIME types, security headers, and private-path
+   denials;
 4. Lockbox read and PostgreSQL backup upload;
 5. disk snapshot creation;
 6. migrations and container deployment;
@@ -196,6 +198,10 @@ The OS Login export step locates the generated private key and certificate in
 a newly created protected directory. It does not parse the CLI's
 human-readable output, which may be written to a different stream or change
 between CLI versions.
+
+If container startup or its health check fails, the release controller writes
+container status and the last 200 log lines to the GitHub job before cleanup or
+application rollback. It does not print the runtime environment file.
 
 Do not switch host Nginx to the web container before that first workflow is green.
 
