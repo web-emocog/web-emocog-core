@@ -251,6 +251,17 @@ start_release() {
   wait_for_health
 }
 
+dump_release_diagnostics() {
+  local tag=$1
+  log "Container status and bounded logs for failed release ${tag}:"
+  compose_for "${tag}" ps --all >&2 || true
+  compose_for "${tag}" logs \
+    --no-color \
+    --timestamps \
+    --tail 200 \
+    api web >&2 || true
+}
+
 prepare_release() {
   local tag=$1
   require_tag "${tag}"
@@ -300,6 +311,7 @@ deploy_release() {
   log "Starting release ${tag}."
   if ! start_release "${tag}"; then
     log "Health check failed for ${tag}."
+    dump_release_diagnostics "${tag}"
     if [[ -n ${old_tag} ]]; then
       log "Restoring application containers for ${old_tag}; database migrations are not reversed."
       start_release "${old_tag}" || true

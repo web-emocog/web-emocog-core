@@ -39,6 +39,13 @@ WORKDIR /app/apps/api
 COPY --from=dependencies --chown=10001:10001 /app/apps/api/node_modules ./node_modules
 COPY --chown=10001:10001 apps/api ./
 COPY --chown=10001:10001 apps/shared /app/apps/shared
+COPY --chown=10001:10001 \
+    apps/web/aoi-geometry.js \
+    apps/web/aoi-protocol.js \
+    /app/apps/web/
+COPY --chown=10001:10001 \
+    apps/web/docs/analytics-contract/metric-catalog-v1.json \
+    /app/apps/web/docs/analytics-contract/
 COPY --chown=10001:10001 rt_component- /app/rt_component-
 
 USER 10001:10001
