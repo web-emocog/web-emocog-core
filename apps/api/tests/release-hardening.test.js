@@ -131,7 +131,7 @@ test -n "\${directory}"
     }
   });
 
-  it('packages every server-side web dependency in the production API image', () => {
+  it('packages every server-side repository dependency in the production API image', () => {
     const repositoryRoot = path.resolve(apiRoot, '../..');
     const dockerfile = fs.readFileSync(path.join(repositoryRoot, 'docker/api/Dockerfile'), 'utf8');
 
@@ -139,6 +139,7 @@ test -n "\${directory}"
       'apps/web/aoi-geometry.js',
       'apps/web/aoi-protocol.js',
       'apps/web/docs/analytics-contract/metric-catalog-v1.json',
+      'packages/shared/contracts',
     ]) {
       assert.match(dockerfile, new RegExp(dependency.replaceAll('/', '\\/')));
     }

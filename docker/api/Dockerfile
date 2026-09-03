@@ -46,6 +46,9 @@ COPY --chown=10001:10001 \
 COPY --chown=10001:10001 \
     apps/web/docs/analytics-contract/metric-catalog-v1.json \
     /app/apps/web/docs/analytics-contract/
+COPY --chown=10001:10001 \
+    packages/shared/contracts \
+    /app/packages/shared/contracts
 COPY --chown=10001:10001 rt_component- /app/rt_component-
 
 USER 10001:10001
