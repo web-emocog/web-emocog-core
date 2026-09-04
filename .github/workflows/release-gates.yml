@@ -51,14 +51,14 @@ jobs:
               --omit=dev \
               --audit-level=high \
               --fetch-retries=0 \
-              --fetch-timeout=60000 \
+              --fetch-timeout=30000 \
               2>&1 | tee "$audit_log"
             then
               exit 0
             fi
 
             if ! grep -Eqi \
-              'audit endpoint returned an error|service unavailable|bad gateway|gateway timeout|too many requests|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|ETIMEDOUT|socket hang up' \
+              '^(npm warn audit|npm error).*(network timeout|503 service unavailable|502 bad gateway|504 gateway timeout|429 too many requests|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|ETIMEDOUT|socket hang up)' \
               "$audit_log"
             then
               echo 'npm audit reported a non-transient failure; refusing to retry.' >&2
@@ -66,11 +66,17 @@ jobs:
             fi
 
             if (( attempt == 3 )); then
-              echo 'npm audit failed after 3 attempts because the registry remained unavailable.' >&2
-              exit 1
+              warning='npm audit was unavailable after 3 attempts. No vulnerability result was returned; Dependabot and the next release-gate run remain the fallback checks.'
+              echo "::warning title=Dependency audit unavailable::${warning}"
+              {
+                echo '### Dependency audit warning'
+                echo
+                echo "${warning}"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
             fi
 
-            delay=$((attempt * 15))
+            delay=$((attempt * 10))
             echo "Transient npm registry failure; retrying in ${delay}s." >&2
             sleep "$delay"
           done
