@@ -351,6 +351,44 @@ The first command is read-only and shows the next run. The second shows the last
 
 Application rollback is available under GitHub Actions as `Roll back production application`. Leaving `image_tag` empty selects the recorded previous release. Supplying a value requires the full 40-character commit SHA.
 
+The rollback controller changes the recorded `current` and `previous` tags only after the target release passes its local API and web health checks. If the target fails, it emits bounded container diagnostics and attempts to restore the release that was active before the rollback. The GitHub workflow then remains failed so the incident is visible even when service restoration succeeds.
+
+### Controlled application rollback drill
+
+Run this drill in a quiet operational window after installing the reviewed
+`deploy/production/wecog-release` on the VM. Record the initial `current` and
+`previous` values first:
+
+```bash
+sudo /usr/local/sbin/wecog-release status
+```
+
+In GitHub, open **Actions → Roll back production application → Run workflow**,
+select `main`, leave `image_tag` empty, and start the workflow. An empty value
+selects the recorded previous release. Wait for both the rollback and public
+HTTPS verification steps to succeed.
+
+Verify on the VM that the two release tags swapped and both containers are
+healthy:
+
+```bash
+sudo /usr/local/sbin/wecog-release status
+sudo docker inspect \
+  --format '{{.Name}} health={{.State.Health.Status}} restarts={{.RestartCount}}' \
+  wecog-api-1 wecog-web-1
+curl --fail --silent --show-error https://wecog.ru/ >/dev/null \
+  && echo 'PUBLIC WEB OK'
+curl --fail --silent --show-error https://wecog.ru/api/ready \
+  && echo
+```
+
+Run the same workflow once more with an empty `image_tag`. Because a successful
+rollback swaps `current` and `previous`, the second run restores the release
+that was current before the drill. Repeat the VM checks and confirm the final
+`current` value exactly matches the value recorded at the start. Do not run the
+second workflow if the first one failed; inspect the failed workflow and the VM
+status before taking any further action.
+
 An application rollback changes container images only. It deliberately does not run `node-pg-migrate down`. All production migrations must follow the expand/contract rule:
 
 1. add new nullable columns/tables/indexes without breaking the old application;
