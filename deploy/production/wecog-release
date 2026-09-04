@@ -353,7 +353,15 @@ rollback_release() {
   registry_login
   compose_for "${target}" pull
   log "Rolling application containers back to ${target}. Database migrations are not reversed."
-  start_release "${target}"
+  if ! start_release "${target}"; then
+    log "Health check failed for rollback target ${target}."
+    dump_release_diagnostics "${target}"
+    if [[ -n ${current} && ${current} != "${target}" ]]; then
+      log "Restoring application containers for ${current}; database migrations are not reversed."
+      start_release "${current}" || true
+    fi
+    exit 1
+  fi
   if [[ -n ${current} && ${current} != "${target}" ]]; then
     printf '%s\n' "${current}" >"${PREVIOUS_TAG_FILE}"
   fi

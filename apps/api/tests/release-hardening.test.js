@@ -191,4 +191,24 @@ test -n "\${directory}"
         < controller.indexOf('compose_for "${tag}" down'),
     );
   });
+
+  it('restores the active release when a rollback target fails its health check', () => {
+    const repositoryRoot = path.resolve(apiRoot, '../..');
+    const controller = fs.readFileSync(
+      path.join(repositoryRoot, 'deploy/production/wecog-release'),
+      'utf8',
+    );
+    const rollbackStart = controller.indexOf('rollback_release() {');
+    const rollbackEnd = controller.indexOf('\nshow_status() {', rollbackStart);
+    const rollback = controller.slice(rollbackStart, rollbackEnd);
+
+    assert.ok(rollbackStart >= 0 && rollbackEnd > rollbackStart);
+    assert.match(rollback, /if ! start_release "\$\{target\}"; then/);
+    assert.match(rollback, /dump_release_diagnostics "\$\{target\}"/);
+    assert.match(rollback, /start_release "\$\{current\}" \|\| true/);
+    assert.ok(
+      rollback.indexOf('start_release "${current}" || true')
+        < rollback.indexOf('printf \'%s\\n\' "${target}" >"${CURRENT_TAG_FILE}"'),
+    );
+  });
 });
