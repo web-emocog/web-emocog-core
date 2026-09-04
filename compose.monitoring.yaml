@@ -17,6 +17,9 @@ services:
       - --collector.disable-defaults
       - --collector.meminfo
       - --collector.filesystem
+      - --collector.textfile
+      - --collector.textfile.directory=/textfile
+      - --collector.time
       - --collector.filesystem.mount-points-exclude=^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)
     ports:
       - 127.0.0.1:9100:9100
@@ -24,6 +27,7 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
+      - /var/lib/wecog/metrics:/textfile:ro
     read_only: true
     cap_drop:
       - ALL
