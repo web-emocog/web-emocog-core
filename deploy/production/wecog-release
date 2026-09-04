@@ -7,6 +7,8 @@ readonly LOCKBOX_PAYLOAD_URL=https://payload.lockbox.api.cloud.yandex.net/lockbo
 readonly STORAGE_ENDPOINT=https://storage.yandexcloud.net
 readonly RELEASE_TAG_PATTERN='^[0-9a-f]{40}$'
 readonly LOCAL_BACKUP_RETENTION_MINUTES=2880
+readonly BACKUP_HELPER=/opt/wecog/backup-support.py
+readonly BACKUP_METRICS_DIR=/var/lib/wecog/metrics
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "This command must run as root." >&2
@@ -43,6 +45,23 @@ flock --exclusive 9
 
 log() {
   printf '%s %s\n' "$(date --utc +'%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+backup_metrics_on_exit() {
+  local status=$?
+  trap - EXIT
+  if (( status != 0 )); then
+    python3 "${BACKUP_HELPER}" metrics "${BACKUP_METRICS_DIR}" "${BACKUP_REASON}" failure \
+      || log "Unable to publish backup failure metrics; freshness and No data alerts must remain enabled."
+  fi
+  exit "${status}"
+}
+
+begin_backup_metrics() {
+  BACKUP_REASON=$1
+  trap backup_metrics_on_exit EXIT
+  # Catch failures while reading Lockbox or pulling images, not only pg_dump failures.
+  python3 "${BACKUP_HELPER}" metrics "${BACKUP_METRICS_DIR}" "${BACKUP_REASON}" start
 }
 
 require_tag() {
@@ -184,13 +203,16 @@ prune_local_backups() {
   find "${WECOG_BACKUP_DIR}" \
     -maxdepth 1 \
     -type f \
-    \( -name 'wecog-*.dump' -o -name 'wecog-*.dump.sha256' \) \
+    \( -name 'wecog-*.dump' -o -name 'wecog-*.dump.sha256' \
+       -o -name 'wecog-*.uploads.tar.gz' -o -name 'wecog-*.uploads.tar.gz.sha256' \
+       -o -name 'wecog-*.manifest.json' \) \
     -mmin "+${LOCAL_BACKUP_RETENTION_MINUTES}" \
     -delete
 }
 
 backup_database() {
   local tag=$1 reason=$2 timestamp short_tag filename checksum object_prefix
+  local uploads_filename uploads_checksum uploads_count manifest_filename
   case ${reason} in
     pre-deploy|daily) ;;
     *)
@@ -200,10 +222,13 @@ backup_database() {
   esac
 
   prune_local_backups
-  timestamp=$(date --utc +'%Y%m%dT%H%M%SZ')
+  timestamp=$(date --utc +'%Y%m%dT%H%M%S%NZ')
   short_tag=${tag:0:12}
   filename="wecog-${timestamp}-${short_tag}.dump"
   checksum="${filename}.sha256"
+  uploads_filename="wecog-${timestamp}-${short_tag}.uploads.tar.gz"
+  uploads_checksum="${uploads_filename}.sha256"
+  manifest_filename="wecog-${timestamp}-${short_tag}.manifest.json"
   object_prefix="postgresql/${reason}/${timestamp}-${short_tag}"
 
   log "Creating a PostgreSQL custom-format dump."
@@ -222,11 +247,37 @@ backup_database() {
   )
   chmod 0600 "${WECOG_BACKUP_DIR}/${filename}" "${WECOG_BACKUP_DIR}/${checksum}"
 
-  log "Uploading the PostgreSQL dump and checksum to Object Storage."
+  log "Creating and verifying the uploads archive (empty directories need no archive)."
+  uploads_count=$(python3 "${BACKUP_HELPER}" create-uploads \
+    "${WECOG_UPLOADS_DIR}" "${WECOG_BACKUP_DIR}/${uploads_filename}")
+  [[ ${uploads_count} =~ ^[0-9]+$ ]] || return 1
+  if (( uploads_count > 0 )); then
+    python3 "${BACKUP_HELPER}" verify-uploads "${WECOG_BACKUP_DIR}/${uploads_filename}" >/dev/null
+    (
+      cd -- "${WECOG_BACKUP_DIR}"
+      sha256sum "${uploads_filename}" >"${uploads_checksum}"
+    )
+    chmod 0600 "${WECOG_BACKUP_DIR}/${uploads_checksum}"
+  fi
+  python3 "${BACKUP_HELPER}" manifest "${WECOG_BACKUP_DIR}" \
+    "${timestamp}" "${tag}" "${reason}" "${uploads_count}"
+
+  log "Uploading the PostgreSQL and uploads backup set to Object Storage."
   upload_object "${WECOG_BACKUP_DIR}/${filename}" "${object_prefix}/${filename}"
   upload_object "${WECOG_BACKUP_DIR}/${checksum}" "${object_prefix}/${checksum}"
+  if (( uploads_count > 0 )); then
+    upload_object "${WECOG_BACKUP_DIR}/${uploads_filename}" "${object_prefix}/${uploads_filename}"
+    upload_object "${WECOG_BACKUP_DIR}/${uploads_checksum}" "${object_prefix}/${uploads_checksum}"
+  fi
+  # This completion marker is published LAST. A prefix without it is incomplete.
+  upload_object "${WECOG_BACKUP_DIR}/${manifest_filename}" "${object_prefix}/${manifest_filename}"
+  python3 "${BACKUP_HELPER}" metrics "${BACKUP_METRICS_DIR}" "${reason}" success "${uploads_count}"
+  trap - EXIT
   rm -f -- "${WECOG_BACKUP_DIR}/${filename}" "${WECOG_BACKUP_DIR}/${checksum}"
+  rm -f -- "${WECOG_BACKUP_DIR}/${uploads_filename}" \
+    "${WECOG_BACKUP_DIR}/${uploads_checksum}" "${WECOG_BACKUP_DIR}/${manifest_filename}"
   log "Database backup uploaded: ${object_prefix}/${filename}"
+  log "Backup set completed; uploads files: ${uploads_count}."
 }
 
 wait_for_health() {
@@ -265,6 +316,7 @@ dump_release_diagnostics() {
 prepare_release() {
   local tag=$1
   require_tag "${tag}"
+  begin_backup_metrics pre-deploy
   render_secret_env
   registry_login
   log "Pulling immutable images for ${tag}."
@@ -277,7 +329,10 @@ prepare_release() {
 
 scheduled_backup() {
   local tag
+  begin_backup_metrics daily
   if [[ ! -r ${CURRENT_TAG_FILE} ]]; then
+    python3 "${BACKUP_HELPER}" metrics "${BACKUP_METRICS_DIR}" daily failure
+    trap - EXIT
     log "No active release is recorded; scheduled database backup skipped."
     return 0
   fi

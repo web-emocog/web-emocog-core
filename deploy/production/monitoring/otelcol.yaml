@@ -55,6 +55,16 @@ receivers:
               regex: ^/(rootfs)?$
               action: keep
 
+        - job_name: wecog_backups
+          static_configs:
+            - targets: [node-exporter:9100]
+              labels:
+                target_name: production_vm
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: wecog_backup_(last_success_timestamp_seconds|last_attempt_timestamp_seconds|last_run_success|in_progress|uploads_files)|node_time_seconds|node_textfile_scrape_error
+              action: keep
+
 processors:
   memory_limiter:
     check_interval: 5s
