@@ -56,9 +56,6 @@ function computeQcValidity(qcSummary, payload) {
     checks?.faceOk ?? checks?.face_ok,
     checks?.illuminationOk ?? checks?.illumination_ok,
     checks?.occlusion,
-    checks?.gazeValid ?? checks?.gaze_valid,
-    checks?.gazeOnScreen ?? checks?.gaze_on_screen,
-    checks?.gazeAccuracy ?? checks?.gaze_accuracy,
   ].filter(value => typeof value === 'boolean');
   const hasCriticalFailure = criticalChecks.some(value => value === false);
   const hasAdvisoryFailure = checkEntries.some(([, value]) => value === false) && !hasCriticalFailure;

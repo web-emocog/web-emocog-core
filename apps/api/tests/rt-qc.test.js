@@ -28,19 +28,37 @@ describe('session QC classification', () => {
     assert.ok(out.fail_reasons.includes('consecutive_low_fps'));
   });
 
-  it('keeps a critical gaze failure invalid even when most other checks pass', () => {
+  it('keeps a gaze-only failure borderline when foundational recording checks pass', () => {
+    const out = computeQcValidity({
+      qcScore: 0.384,
+      checks: {
+        duration: true,
+        faceVisible: true,
+        faceOk: true,
+        illuminationOk: true,
+        occlusion: true,
+        gazeValid: false,
+        gazeOnScreen: true,
+        lowFps: false,
+        gazeAccuracy: true,
+      },
+    });
+    assert.equal(out.validity, 'borderline');
+    assert.equal(out.qc_score, 77.8);
+    assert.ok(out.fail_reasons.includes('low_gaze_valid_pct'));
+  });
+
+  it('still rejects sessions with a foundational recording failure', () => {
     const out = computeQcValidity({
       qcScore: 0.9,
       checks: {
         duration: true,
-        faceVisible: true,
-        gazeValid: false,
-        gazeOnScreen: true,
-        lowFps: true,
+        faceVisible: false,
+        gazeValid: true,
       },
     });
     assert.equal(out.validity, 'invalid');
-    assert.ok(out.fail_reasons.includes('low_gaze_valid_pct'));
+    assert.ok(out.fail_reasons.includes('low_face_visible'));
   });
 });
 

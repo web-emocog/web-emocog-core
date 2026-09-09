@@ -22,6 +22,7 @@ install -d -o root -g root -m 0755 \
   /etc/wecog \
   /etc/wecog/monitoring \
   /etc/nginx/snippets
+install -d -o root -g root -m 0755 /var/lib/wecog/metrics
 install -d -o root -g root -m 0700 /var/lib/wecog/state
 install -d -o 10001 -g 10001 -m 0750 /var/lib/wecog/uploads /var/lib/wecog/backups
 
@@ -31,6 +32,13 @@ install -o root -g root -m 0644 \
 install -o root -g root -m 0644 \
   "${REPOSITORY_ROOT}/compose.monitoring.yaml" \
   /opt/wecog/compose.monitoring.yaml
+install -o root -g root -m 0644 \
+  "${SCRIPT_DIR}/backup-support.py" /opt/wecog/backup-support.py
+# Serialize with the backup/deploy controller; init preserves previous successes.
+flock --exclusive /var/lib/wecog/state/release.lock \
+  python3 /opt/wecog/backup-support.py metrics /var/lib/wecog/metrics daily init
+flock --exclusive /var/lib/wecog/state/release.lock \
+  python3 /opt/wecog/backup-support.py metrics /var/lib/wecog/metrics pre-deploy init
 install -o root -g root -m 0755 \
   "${SCRIPT_DIR}/wecog-release" \
   /usr/local/sbin/wecog-release
