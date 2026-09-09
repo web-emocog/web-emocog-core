@@ -7,6 +7,7 @@ const {
   buildGroupSummary,
   buildHeatmapData,
   buildSessionMetrics,
+  channelQc,
 } = require('../analytics/metrics');
 const {
   exportCsv,
@@ -114,6 +115,19 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(noData.status, 'no_data');
   });
 
+  await t.test('keeps task QC independent from gaze-only session failures', () => {
+    const source = row();
+    source.qc_validity = 'invalid';
+    source.features_payload.cognitiveResults = Array.from({ length: 100 }, (_, index) => ({
+      qualityValid: index < 99,
+      correct: index < 95,
+    }));
+    source.features_payload.gaze_analytics.summary.validFraction = 0.65;
+    assert.equal(channelQc(source, 'task').status, 'valid');
+    assert.equal(channelQc(source, 'task').validFraction, 0.99);
+    assert.equal(channelQc(source, 'gaze').status, 'borderline');
+  });
+
   await t.test('aggregates repeated presentations with presentation-relative AOI timing', () => {
     const rows = buildAoiRows(row(), protocol, query());
     assert.equal(rows.length, 1);
@@ -184,6 +198,15 @@ test('analytics v1 contract and computations', async t => {
         cameraFPS: 31,
       },
     };
+    source.features_payload.experimentMeta = {
+      protocolTimers: [{
+        id: 'session_total',
+        name: 'Total session time',
+        startedAt: 1000,
+        finishedAt: 61000,
+        durationMs: 60000,
+      }],
+    };
     assert.deepEqual(sessionTechnicalDetails(source), {
       deviceClass: 'computer_webcam',
       resolution: { width: 1512, height: 982 },
@@ -195,6 +218,13 @@ test('analytics v1 contract and computations', async t => {
       browserLanguage: 'ru',
       pixelRatio: 2,
       processorClass: '5-8',
+      protocolTimers: [{
+        id: 'session_total',
+        name: 'Total session time',
+        startedAt: 1000,
+        finishedAt: 61000,
+        durationMs: 60000,
+      }],
     });
     const quality = sessionQualityDetails(source);
     assert.equal(quality.status, 'borderline');

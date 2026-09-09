@@ -7,7 +7,7 @@
     <title>wecog — исследование</title>
     <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
 
-    <link rel="stylesheet" href="style.css?v=20260820-3">
+    <link rel="stylesheet" href="style.css?v=20260909-2">
     <link rel="stylesheet" href="participant-redesign.css?v=20260820-3">
     <script>
       (function () {
@@ -62,14 +62,30 @@
                 <button type="button" id="calibrationIntroStartBtn" class="btn">Начать калибровку</button>
             </div>
         </div>
-        <div class="calib-instruction">
-            <span id="calibInstructionText">👆 Кликайте на красную точку, смотря на неё</span>
-            <div class="calib-progress">
-                <span id="calibProgressText">Точка 1 из 25</span>
+        <div id="validationIntro" class="calibration-intro" hidden>
+            <div class="calibration-intro-card" role="dialog" aria-modal="true" aria-labelledby="validationIntroTitle">
+                <div class="calibration-intro-kicker" id="validationIntroKicker">Проверка точности</div>
+                <h2 id="validationIntroTitle">Теперь проверим взгляд</h2>
+                <p id="validationIntroText">Смотрите на каждый зелёный круг до его перемещения. Нажимать на круги или клавиши не нужно.</p>
+                <button type="button" id="validationIntroStartBtn" class="btn">Начать проверку</button>
             </div>
-            <div id="calibrationActions" class="calibration-actions" style="display:none;">
-                <button type="button" id="recalibrateGazeBtn" class="btn btn-secondary">Повторить калибровку</button>
-                <button type="button" id="continueAfterValidationBtn" class="btn">Продолжить</button>
+        </div>
+        <div id="validationResult" class="calibration-intro" hidden>
+            <div class="calibration-intro-card" role="dialog" aria-modal="true" aria-labelledby="validationResultTitle">
+                <div class="calibration-intro-kicker">Проверка точности</div>
+                <h2 id="validationResultTitle">Проверка завершена</h2>
+                <p id="validationResultMetrics" class="calibration-result-metrics"></p>
+                <p id="validationResultAdvice" class="calibration-result-advice"></p>
+                <div id="calibrationActions" class="calibration-actions" style="display:none;">
+                    <button type="button" id="recalibrateGazeBtn" class="btn btn-secondary">Повторить калибровку</button>
+                    <button type="button" id="continueAfterValidationBtn" class="btn">Продолжить</button>
+                </div>
+            </div>
+        </div>
+        <div class="calib-instruction">
+            <span id="calibInstructionText" class="calibration-live-copy">Кликайте на красную точку, смотря на неё</span>
+            <div class="calib-progress">
+                <span id="calibProgressText" class="calibration-live-copy">Точка 1 из 25</span>
             </div>
         </div>
         <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
@@ -518,10 +534,10 @@
         };
       }
     </script>
-    <script src="../shared/standard-stimuli.js?v=20260828-2"></script>
-    <script src="../web/cognitive-task-protocols.js?v=20260828-2"></script>
+    <script src="../shared/standard-stimuli.js?v=20260909-1"></script>
+    <script src="../web/cognitive-task-protocols.js?v=20260909-1"></script>
     <script src="../shared/survey-contract.js?v=20260828-2"></script>
-    <script type="module" src="js/web-page/app-updated.js?v=20260828-2"></script>
+    <script type="module" src="js/web-page/app-updated.js?v=20260909-2"></script>
     <script>
       (function () {
         const ru = document.getElementById('langRu');

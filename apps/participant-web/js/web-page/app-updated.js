@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260828-2';
+} from './ui-updated.js?v=20260909-1';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20260828-2';
+} from './precheck-updated.js?v=20260909-1';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260828-2';
+} from './tests-updated.js?v=20260909-2';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,7 +34,7 @@ import {
 } from './protocol-invite-utils.js';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260909-1';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -87,35 +87,18 @@ let _eyeTrackingShapeLogged = false;
 
 function currentStimulusContentRect() {
     if (state.runtime.currentPhase !== 'cognitive_stimulus') return null;
-    const image = document.getElementById('cogImage');
-    const shape = document.getElementById('cogShape');
-    const element = image && getComputedStyle(image).display !== 'none' ? image : shape;
-    if (!element || getComputedStyle(element).display === 'none') return null;
-    const rect = element.getBoundingClientRect();
+    const stage = document.getElementById('cognitiveStimulusArea');
+    if (!stage || getComputedStyle(stage).display === 'none') return null;
+    const rect = stage.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) return null;
     const viewport = getContentViewport();
-    let left = rect.left - viewport.offsetLeft;
-    let top = rect.top - viewport.offsetTop;
-    let width = rect.width;
-    let height = rect.height;
-    const intrinsicWidth = element === image && image.naturalWidth > 0 ? image.naturalWidth : null;
-    const intrinsicHeight = element === image && image.naturalHeight > 0 ? image.naturalHeight : null;
-    if (intrinsicWidth && intrinsicHeight && getComputedStyle(image).objectFit === 'contain') {
-        const scale = Math.min(width / intrinsicWidth, height / intrinsicHeight);
-        const contentWidth = intrinsicWidth * scale;
-        const contentHeight = intrinsicHeight * scale;
-        left += (width - contentWidth) / 2;
-        top += (height - contentHeight) / 2;
-        width = contentWidth;
-        height = contentHeight;
-    }
     return {
-        left,
-        top,
-        width,
-        height,
-        intrinsicWidth,
-        intrinsicHeight
+        left: rect.left - viewport.offsetLeft,
+        top: rect.top - viewport.offsetTop,
+        width: rect.width,
+        height: rect.height,
+        intrinsicWidth: null,
+        intrinsicHeight: null
     };
 }
 
@@ -238,21 +221,9 @@ export function handleGazeUpdate(gazeData) {
     const clipped = typeof gazeData.clipped === 'boolean' ? gazeData.clipped : !onScreen;
     const confidence = Number.isFinite(gazeData.confidence) ? gazeData.confidence : null;
     const stimulusRect = currentStimulusContentRect();
-    const hubLike =
-        phase === 'test_hub' ||
-        phase === 'bpm_test' ||
-        (typeof phase === 'string' && phase.indexOf('vpc_') === 0) ||
-        phase === 'visuospatial_instruction' ||
-        phase === 'visuospatial_drawing';
-    const showGazeDot =
-        (state.flags.isValidating || (state.flags.isRecording && !hubLike)) &&
-        (phase === 'calibration' ||
-            phase === 'validation' ||
-            phase === 'tracking_test' ||
-            phase === 'cognitive_instruction' ||
-            phase === 'cognitive_stimulus' ||
-            phase === 'paused' ||
-            state.flags.isValidating);
+    // Participant-facing sessions never expose the predicted gaze position.
+    // The signal is still collected and remains available in developer tools.
+    const showGazeDot = false;
 
     if (customDot && showGazeDot) {
         const layoutPoint = contentToLayoutViewport({ x, y });
@@ -404,12 +375,23 @@ async function loadInvitationProtocolByCode(code) {
     if (payload && payload.definition && typeof payload.definition === 'object') {
         const protocolBlocks = Array.isArray(payload.definition?.blocks) ? payload.definition.blocks : [];
         const stimulusIds = [];
+        const addStimulusId = (value) => {
+            const key = String(value ?? '').replace(/^api:/, '').trim();
+            if (key && !stimulusIds.includes(key)) stimulusIds.push(key);
+        };
+        const addTrialStimuli = (trials) => {
+            if (!Array.isArray(trials)) return;
+            trials.forEach((trial) => addStimulusId(
+                trial?.stimulusId ?? trial?.stimulus_id ?? trial?.stimulus?.stimulusId ?? trial?.stimulus?.id
+            ));
+        };
         protocolBlocks.forEach((block) => {
             const ids = Array.isArray(block?.params?.stimuli_ids) ? block.params.stimuli_ids : [];
-            ids.forEach((id) => {
-                const key = String(id);
-                if (key && !stimulusIds.includes(key)) stimulusIds.push(key);
-            });
+            ids.forEach(addStimulusId);
+            addStimulusId(block?.params?.stimulus_id);
+            addTrialStimuli(block?.params?.trials);
+            addTrialStimuli(block?.trials);
+            addTrialStimuli(block?.content?.trials);
         });
 
         let stimuliMap = {};
@@ -538,12 +520,15 @@ function extractInvitationCodeFromInput(rawValue) {
 async function fetchParticipantInviteBypass() {
     try {
         const token = localStorage.getItem('emocog_api_token');
-        if (!token) return false;
         const base = resolveParticipantApiBase();
-        const r = await fetch(`${base}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const r = await fetch(`${base}/auth/me`, {
+            headers,
+            credentials: 'include'
+        });
         if (!r.ok) return false;
         const me = await r.json();
-        const role = me.role;
+        const role = me?.user?.role || me?.role;
         return role === 'developer' || role === 'admin';
     } catch (_) {
         return false;

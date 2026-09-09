@@ -26,9 +26,19 @@ describe('researcher protocol builder contract', () => {
     assert.match(source, /testHubMetrics:\s*\[\]/);
     assert.doesNotMatch(source, /useBPM:\s*!!/);
     assert.doesNotMatch(source, /useEmotionTracking:\s*!!/);
-    assert.match(source, /Фоновые сигналы сессии/);
+    assert.doesNotMatch(source, /Фоновые сигналы сессии/);
     assert.match(source, /featureFlags:\s*sessionFeatureFlags/);
     assert.match(source, /class="session-feature"/);
+  });
+
+  it('keeps converted document pages in the Slides category with image previews', () => {
+    const core = read('web/researcher-core.js');
+    const stimuli = read('web/researcher-stimuli.js');
+    const builder = read('web/researcher-builder.js');
+    assert.match(core, /sourceDocumentName[\s\S]+type: 'slides'/);
+    assert.match(stimuli, /function convertedStimulusFromApi[\s\S]+type: 'slides'/);
+    assert.match(stimuli, /stimulus\?\.type === 'image' \|\| stimulus\?\.type === 'slides'/);
+    assert.match(builder, /stimulus\.type === 'image' \|\| stimulus\.type === 'slides'/);
   });
 });
 
@@ -103,6 +113,45 @@ describe('participant test hub contract', () => {
     assert.match(ui, /searchParams\.delete\('code'\)/);
     assert.match(ui, /history\.replaceState/);
     assert.match(app, /invitationCodeFromUrl \|\| state\.sessionData\.ids\.invitationCode/);
+  });
+
+  it('allows authenticated developers to run modules without an invitation', () => {
+    const app = read('participant-web/js/web-page/app-updated.js');
+    const bypassStart = app.indexOf('async function fetchParticipantInviteBypass()');
+    const bypassEnd = app.indexOf('function ensureDeveloperSessionIds()', bypassStart);
+    const bypass = app.slice(bypassStart, bypassEnd);
+    assert.match(bypass, /credentials:\s*'include'/);
+    assert.match(bypass, /me\?\.user\?\.role \|\| me\?\.role/);
+    assert.doesNotMatch(bypass, /if \(!token\) return false/);
+  });
+
+  it('uses the full stimulus stage for AOI coordinates and explains gaze validation', async () => {
+    const app = read('participant-web/js/web-page/app-updated.js');
+    const task = read('participant-web/js/web-page/experimental_task-updated.js');
+    const tests = read('participant-web/js/web-page/tests-updated.js');
+    const html = read('participant-web/mvp_with_precheck_1-updated.html');
+    const css = read('participant-web/style.css');
+    const rectStart = app.indexOf('function currentStimulusContentRect()');
+    const rectEnd = app.indexOf('window.setLanguage', rectStart);
+    const rectSource = app.slice(rectStart, rectEnd);
+    assert.match(rectSource, /getElementById\('cognitiveStimulusArea'\)/);
+    assert.doesNotMatch(rectSource, /getElementById\('cogImage'\)/);
+    assert.match(task, /classList\.add\('cognitive-stimulus-presenting'\)/);
+    assert.match(css, /body\.cognitive-stimulus-presenting[\s\S]+#cognitiveStimulusArea/);
+    assert.match(html, /id="validationIntro"/);
+    assert.match(html, /id="validationResult"/);
+    assert.match(tests, /validation_instruction_acknowledged/);
+    assert.doesNotMatch(tests, /validation_targeted_recalibration_scheduled/);
+
+    const translationsPath = path.join(root, 'participant-web/translations.js');
+    const { translations, participantLocales } = await import(
+      pathToFileURL(translationsPath).href + `?validation=${Date.now()}`
+    );
+    participantLocales.forEach(locale => {
+      assert.ok(translations[locale].validation_intro_body);
+      assert.ok(translations[locale].validation_result_passed_advice);
+      assert.ok(translations[locale].validation_result_failed_advice);
+    });
   });
 
   it('maps yaw and pitch to matching head-pose guidance in both locales', async () => {
@@ -306,7 +355,7 @@ describe('researcher navigation contract', () => {
     assert.match(ui, /wecog:languagechange/);
     assert.match(runner, /refreshLocalizedInstructionScreen/);
     assert.match(runner, /captureSurveyDraft/);
-    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260828-2/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260909-1/);
   });
 
   it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
@@ -350,12 +399,96 @@ describe('researcher navigation contract', () => {
     assert.match(router, /quality: sessionQualityDetails\(row\)/);
   });
 
-  it('recovers an existing published protocol only by stable protocol identity', () => {
+  it('rejects duplicate protocol identities instead of overwriting an existing protocol', () => {
     const source = read('web/researcher-core.js');
-    assert.match(source, /protocol\.definition\.protocolId/);
-    assert.match(source, /apiPatch\('\/protocols\/' \+ matching\.id/);
-    assert.doesNotMatch(source, /protocol\.name\s*===\s*payload\.name/);
+    const routes = read('api/routes/protocols_new.js');
+    const migration = read('api/migrations/1699000000016_unique_protocol_identity.js');
+    assert.doesNotMatch(source, /apiPatch\('\/protocols\/' \+ matching\.id/);
+    assert.doesNotMatch(source, /apiGet\('\/protocols\?project_id=' \+ encodeURIComponent/);
+    assert.match(source, /removeItem\(builderApiStateKey\('draft'\)\)/);
     assert.match(source, /\/invitations\?protocol_id=/);
+    assert.match(routes, /protocol_id_conflict/);
+    assert.match(migration, /protocols_project_protocol_id_unique/);
+    assert.match(migration, /lower\(btrim\(definition->>'protocolId'\)\)/);
+    assert.match(migration, /row_number\(\) OVER/);
+    assert.match(migration, /'-legacy-'/);
+  });
+
+  it('exports and executes hidden timers, random intervals and optional fullscreen stimuli', () => {
+    const builder = read('web/researcher-builder.js');
+    const participant = read('participant-web/js/web-page/experimental_task-updated.js');
+    assert.match(builder, /type:\s*'timer'/);
+    assert.match(builder, /randomInterStimulus:/);
+    assert.match(builder, /fullscreenStimulus:/);
+    assert.match(builder, /analyticsPlan/);
+    assert.match(participant, /protocolTimers/);
+    assert.match(participant, /protocol_timer_started/);
+    assert.match(participant, /randomPreStimulusMs/);
+    assert.match(participant, /trial\?\.randomItiMin/);
+    assert.match(participant, /trial\?\.fixationMin/);
+    assert.match(participant, /trial\?\.iti/);
+    assert.match(participant, /requestCognitiveFullscreen/);
+  });
+
+  it('loads each stateful participant module through one cache version', () => {
+    const app = read('participant-web/js/web-page/app-updated.js');
+    const tests = read('participant-web/js/web-page/tests-updated.js');
+    const task = read('participant-web/js/web-page/experimental_task-updated.js');
+    const runtime = read('participant-web/js/session-runtime/index.js');
+    for (const source of [app, tests, task, runtime]) {
+      assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
+    }
+    assert.match(tests, /ui-updated\.js\?v=20260909-1/);
+  });
+
+  it('shows real stimulus previews and supports drag and drop with conversion progress', () => {
+    const stimuli = read('web/researcher-stimuli.js');
+    const builder = read('web/researcher-builder.js');
+    const participant = read('participant-web/js/web-page/app-updated.js');
+    const researcher = read('web/researcher.html');
+    assert.match(stimuli, /function stimulusPreviewHtml/);
+    assert.match(stimuli, /resolveStandardStimulus/);
+    assert.match(stimuli, /wireStimulusDropzone/);
+    assert.match(stimuli, /Preparing page/);
+    assert.match(stimuli, /\/stimuli\/upload/);
+    assert.match(stimuli, /delete copy\._previewObjectUrl/);
+    assert.match(stimuli, /renameStimulusInLibrary/);
+    assert.match(stimuli, /apiPatch\('\/stimuli\/'/);
+    assert.match(builder, /handleFileUpload\(mediaFiles/);
+    assert.match(builder, /convertDocumentToStimuli\(file/);
+    assert.match(participant, /addTrialStimuli\(block\?\.trials\)/);
+    assert.match(participant, /replace\(\/\^api:\//);
+    assert.match(researcher, /shared\/standard-stimuli\.js/);
+  });
+
+  it('keeps new protocols, developer diagnostics, calibration, and navigation isolated', () => {
+    const core = read('web/researcher-core.js');
+    const developer = read('web/developer.html');
+    const participant = read('participant-web/mvp_with_precheck_1-updated.html');
+    const participantCss = read('participant-web/style.css');
+    const researcher = read('web/researcher.html');
+    const consent = read('participant-web/documents/informed-consent-v1.0.html');
+    const privacy = read('participant-web/documents/privacy-policy-v1.0.html');
+    assert.match(core, /isNewProtocol \? \{ forceCreate: true \}/);
+    assert.match(core, /href==='#\/experiments\/builder'[\s\S]+startNewExperimentBuilder\(\)/);
+    assert.doesNotMatch(developer, /run_new\.html\?code=test/);
+    assert.match(developer, /developer_module=tracking/);
+    assert.match(participant, /class="calibration-live-copy"/);
+    assert.match(participantCss, /\.cognitive-session-active \.container/);
+    assert.match(participantCss, /height: clamp\(520px, 72vh, 860px\)/);
+    assert.match(researcher, /name="wecog-navigation-filter"/);
+    assert.match(researcher, /data-1p-ignore="true"/);
+    assert.doesNotMatch(consent, /АВТОЗАПОЛНЕНИЕ|<li>✅/);
+    assert.doesNotMatch(privacy, /АВТОЗАПОЛНЕНИЕ|<li>[📄✏️🗑️⛔📤]/u);
+  });
+
+  it('keeps participant gaze prediction hidden and shows head guidance only on deviation', () => {
+    const app = read('participant-web/js/web-page/app-updated.js');
+    const visuospatial = read('participant-web/js/gaze-tracker/gaze-tests/visuospatial/runner.js');
+    const headGuide = read('participant-web/js/gaze-tracker/head-pose-guide.js');
+    assert.match(app, /const showGazeDot = false/);
+    assert.doesNotMatch(visuospatial, /gazeDot\.style\.display = 'block'/);
+    assert.match(headGuide, /currentDeviation\.status !== 'aligned'/);
   });
 
   it('does not route public respondents into staff UI or render API labels as HTML', () => {

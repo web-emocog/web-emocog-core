@@ -6,7 +6,7 @@
  */
 import { state, recordSessionEvent } from './state.js';
 import { translations } from '../../translations.js?v=20260828-2';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20260828-2';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20260909-1';
 import { measureRenderFPS } from './camera.js';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
@@ -72,7 +72,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20260828-2');
+        const mod = await import('./tests-updated.js?v=20260909-2');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;
@@ -218,6 +218,7 @@ export function nextStep(stepNumber) {
     }
 
     ensureParticipantChromeVisible();
+    document.body.classList.toggle('cognitive-session-active', targetStep === MVP_STEP.SESSION);
 
     document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
     const nextEl = document.getElementById('step' + targetStep);
