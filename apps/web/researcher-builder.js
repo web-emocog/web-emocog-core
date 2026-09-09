@@ -429,6 +429,16 @@ function ExperimentBuilderView(options = {}) {
           <input class="proto-field" data-field="duration" type="number" value="${c.duration || 30}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
         </div>`;
     }
+    if (block.type === 'timer') {
+      return `
+        <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Название измерения', 'Measurement name')}</label>
+          <input class="proto-field" data-field="name" value="${previewEscape(c.name || trb('Общее время сессии', 'Total session time'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
+          <div style="font-size:11px;line-height:1.5;color:var(--muted);padding:9px 10px;border-radius:8px;background:rgba(8,145,178,.08);border:1px solid rgba(8,145,178,.2);">
+            ${trb('Блок не показывается участнику. Он фиксирует общее время от старта сессии до её завершения и передаёт его исследователю.', 'This block is hidden from the participant. It records total time from session start to completion and sends it to the researcher.')}
+          </div>
+        </div>`;
+    }
     if (block.type === 'finish') {
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
@@ -669,6 +679,7 @@ function ExperimentBuilderView(options = {}) {
       rest: pack.blockBreak,
       finish: pack.blockFinish,
       instruction: trb('Инструкция', 'Instruction'),
+      timer: trb('Таймер', 'Timer'),
     };
     return map[type] || type;
   }
@@ -711,6 +722,7 @@ function ExperimentBuilderView(options = {}) {
     { type:'cognitive_task', color:'#ef4444', icon:'M13 10V3L4 14h7v7l9-11h-7z' },
     { type:'passive',        color:'#ec4899', icon:'M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z' },
     { type:'rest',           color:'#64748b', icon:'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { type:'timer',          color:'#0891b2', icon:'M12 8v4l3 2m3-9l2 2M6 5L4 7m8 14a8 8 0 100-16 8 8 0 000 16z' },
     { type:'finish',         color:'#5C66BD', icon:'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z' },
   ];
 
@@ -739,6 +751,7 @@ function ExperimentBuilderView(options = {}) {
       case 'questionnaire':  return { questions:[] };
       case 'passive':        return { slideDuration:5000, slides:[], stimuliSource:'library', stimuliFolder:'' };
       case 'rest':           return { text:trb('Сделайте небольшой перерыв','Take a short break'), duration:30 };
+      case 'timer':          return { name:trb('Общее время сессии','Total session time'), hidden:true, startsAt:'session_start' };
       case 'finish':         return { title:trb('Эксперимент завершён','Experiment completed'), text:trb('Спасибо за участие!','Thank you for participating!') };
       default:               return {};
     }
@@ -806,7 +819,7 @@ function ExperimentBuilderView(options = {}) {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.65);backdrop-filter:blur(5px);z-index:9999;display:flex;align-items:center;justify-content:center;';
 
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:26px 24px 20px;width:1120px;max-width:98vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
+    modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:20px 24px 18px;width:1180px;max-width:98vw;height:min(92vh,900px);display:flex;flex-direction:column;gap:12px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
 
     const stimuliOptions = stimuliList.map(s => `<option value="${previewEscape(s.id)}">${previewEscape(s.name)}</option>`).join('');
     const standardFolderId = typeof getStandardFolderId === 'function' ? getStandardFolderId() : 'folder_standard';
@@ -858,13 +871,6 @@ function ExperimentBuilderView(options = {}) {
             </select>
             <span id="responseModeHint" style="font-size:10px;line-height:1.4;color:var(--muted2);"></span>
           </label>
-          <div style="padding:9px 10px;border-radius:9px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);font-size:11px;line-height:1.45;color:var(--muted);">
-            <strong style="display:block;color:var(--text);margin-bottom:2px;">${trb('Фоновые сигналы сессии', 'Background session signals')}</strong>
-            ${trb(
-              'Взгляд, моргания, PERCLOS, эмоции, пульс и поза записываются автоматически на протяжении всей измерительной сессии.',
-              'Gaze, blinks, PERCLOS, emotion, pulse and posture are recorded automatically throughout the measurement session.'
-            )}
-          </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
             <input type="checkbox" id="trialAoiCb" ${block.content.useAOI ? 'checked' : ''} style="accent-color:var(--accent);">
             <span style="font-weight:600;">AOI (${trb('области интереса', 'areas of interest')})</span>
@@ -886,6 +892,22 @@ function ExperimentBuilderView(options = {}) {
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
             <input type="checkbox" id="trialRandomizeCb" ${block.content.randomize ? 'checked' : ''} style="accent-color:var(--warn);">
             <span style="font-weight:600;color:var(--warn);">${trb('Перемешивать пробы', 'Randomize trials')}</span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="randomIsiCb" ${block.content.randomInterStimulus ? 'checked' : ''} style="margin-top:2px;accent-color:var(--warn);">
+            <span style="flex:1;">
+              <span style="font-weight:600;display:block;">${trb('Случайная пауза перед стимулом', 'Random pre-stimulus interval')}</span>
+              <span style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                <input type="number" id="randomIsiMin" min="0" value="${block.content.interStimulusMinMs ?? 300}" style="width:68px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.randomInterStimulus ? '' : 'disabled'}>
+                <span style="font-size:11px;color:var(--muted);">—</span>
+                <input type="number" id="randomIsiMax" min="0" value="${block.content.interStimulusMaxMs ?? 900}" style="width:68px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.randomInterStimulus ? '' : 'disabled'}>
+                <span style="font-size:11px;color:var(--muted);">${trb('мс', 'ms')}</span>
+              </span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text);cursor:pointer;">
+            <input type="checkbox" id="fullscreenStimulusCb" ${block.content.fullscreenStimulus ? 'checked' : ''} style="margin-top:2px;accent-color:var(--accent);">
+            <span><strong style="display:block;">${trb('Показывать на весь экран', 'Show in fullscreen')}</strong><small style="display:block;color:var(--muted);line-height:1.4;margin-top:3px;">${trb('Браузер запросит разрешение после нажатия «Начать».', 'The browser will request permission after the participant presses Start.')}</small></span>
           </label>
         </div>
 
@@ -938,7 +960,7 @@ function ExperimentBuilderView(options = {}) {
         <button id="autoGenBtn" class="quick-btn" style="background:rgba(92,102,189,.1);color:var(--accent);border-color:rgba(92,102,189,.2);font-size:12px;">${trb('Сгенерировать', 'Generate')}</button>
       </div>
 
-      <div id="trialsContainer" style="flex:1;min-height:220px;max-height:42vh;overflow:auto;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.45);">
+      <div id="trialsContainer" style="flex:1;min-height:300px;overflow:auto;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.45);">
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
           <thead>
             <tr style="background:rgba(92,102,189,.08);border-bottom:1px solid var(--stroke);">
@@ -979,6 +1001,13 @@ function ExperimentBuilderView(options = {}) {
     const fixCb = modal.querySelector('#useFixationCb');
     const fixInput = modal.querySelector('#fixationDuration');
     fixCb.addEventListener('change', () => { fixInput.disabled = !fixCb.checked; });
+    const randomIsiCb = modal.querySelector('#randomIsiCb');
+    const randomIsiMin = modal.querySelector('#randomIsiMin');
+    const randomIsiMax = modal.querySelector('#randomIsiMax');
+    randomIsiCb?.addEventListener('change', () => {
+      randomIsiMin.disabled = !randomIsiCb.checked;
+      randomIsiMax.disabled = !randomIsiCb.checked;
+    });
     const useRtCalcCb = modal.querySelector('#useRtCalcCb');
     const rtMinInput = modal.querySelector('#rtMinInput');
     const rtWindowInput = modal.querySelector('#rtWindowInput');
@@ -1228,6 +1257,17 @@ function ExperimentBuilderView(options = {}) {
       }
       block.content.useFixation = fixCb.checked;
       block.content.fixationDuration = parseInt(fixInput.value) || 500;
+      const randomIntervalEnabled = !!randomIsiCb?.checked;
+      const randomIntervalMin = Math.max(0, parseInt(randomIsiMin?.value, 10) || 0);
+      const randomIntervalMax = Math.max(0, parseInt(randomIsiMax?.value, 10) || 0);
+      if (randomIntervalEnabled && randomIntervalMin > randomIntervalMax) {
+        toast(trb('Минимальная пауза должна быть меньше или равна максимальной', 'Minimum interval must be less than or equal to maximum interval'));
+        return;
+      }
+      block.content.randomInterStimulus = randomIntervalEnabled;
+      block.content.interStimulusMinMs = randomIntervalMin;
+      block.content.interStimulusMaxMs = randomIntervalMax;
+      block.content.fullscreenStimulus = !!modal.querySelector('#fullscreenStimulusCb')?.checked;
 
       if (block.type === 'cognitive_task') {
         block.content.showFeedback = modal.querySelector('#fbCb').checked;
@@ -1276,6 +1316,16 @@ function ExperimentBuilderView(options = {}) {
     if (!meta.protocolId) missing.push(trb('id протокола','protocol id'));
     if (!meta.estimatedDuration) missing.push(trb('приблизительную длительность','estimated duration'));
     return missing;
+  }
+
+  function hasLocalProtocolIdConflict(protocolId, currentExperimentId) {
+    const normalized = String(protocolId || '').trim().toLowerCase();
+    if (!normalized) return false;
+    const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+    return experiments.some(experiment => (
+      String(experiment?.id || '') !== String(currentExperimentId || '')
+      && String(experiment?.protocolId || experiment?.metadata?.protocolId || '').trim().toLowerCase() === normalized
+    ));
   }
 
   function renderMetadataStep() {
@@ -2012,7 +2062,7 @@ function ExperimentBuilderView(options = {}) {
       const sel = b.id === selectedBlockId;
       const blockLabel = localizedBlockLabel(b, meta.label);
       const inlineEditor = sel ? buildBlockInlineEditor(b) : '';
-      const canEdit = ['instruction', 'survey', 'rest', 'finish', 'cognitive_task', 'passive'].includes(b.type);
+      const canEdit = ['instruction', 'survey', 'rest', 'timer', 'finish', 'cognitive_task', 'passive'].includes(b.type);
 
       parts.push(`
         <div class="proto-card ${sel ? 'proto-card-sel' : ''}" data-id="${previewEscape(b.id)}" data-idx="${i}"
@@ -2266,7 +2316,7 @@ function ExperimentBuilderView(options = {}) {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button class="quick-btn" id="builderStimuliFileBtn" style="font-size:12px;background:var(--card-bg);border-color:var(--stroke);">Выбрать файлы</button>
         <button class="quick-btn" id="builderStimuliFolderBtn" style="font-size:12px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:700;">Открыть папку</button>
-        <input id="builderStimuliFileInput" type="file" multiple accept="image/*,video/*,audio/*,.txt,.csv,.json" style="display:none;">
+        <input id="builderStimuliFileInput" type="file" multiple accept="image/*,video/*,audio/*,.txt,.csv,.json,.pdf,.ppt,.pptx" style="display:none;">
         <input id="builderStimuliFolderInput" type="file" multiple webkitdirectory directory style="display:none;">
       </div>
     `;
@@ -2274,8 +2324,9 @@ function ExperimentBuilderView(options = {}) {
 
     if (stimuliBlocks.length === 0) {
       const emptyState = document.createElement('div');
-      emptyState.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;font-size:13px;margin-top:24px;padding:28px;border:1px dashed var(--stroke);border-radius:12px;';
-      emptyState.textContent = trb('В протоколе нет блоков, требующих настройки стимулов.','No blocks requiring stimulus setup in the protocol.');
+      emptyState.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);text-align:center;font-size:13px;margin-top:24px;padding:34px;border:1px dashed var(--stroke);border-radius:14px;background:var(--card-bg);';
+      emptyState.innerHTML = `<div style="font-size:16px;font-weight:800;color:var(--text);margin-bottom:8px;">${trb('Настройка стимулов не требуется','No stimulus setup required')}</div>
+        <div style="max-width:560px;line-height:1.6;">${trb('В выбранном протоколе нет когнитивных или пассивных блоков. Это корректно: добавьте такой блок на шаге «Протокол», если участнику нужно показывать стимулы.','The selected protocol has no cognitive or passive blocks. This is valid; add one on the Protocol step when participants need to see stimuli.')}</div>`;
       body.appendChild(emptyState);
     } else {
       stimuliBlocks.forEach(block => {
@@ -2341,14 +2392,6 @@ function ExperimentBuilderView(options = {}) {
     const statusEl = wrapper.querySelector('#builderUploadStatus');
     const progressWrap = wrapper.querySelector('#builderUploadProgressWrap');
     const progressBar = wrapper.querySelector('#builderUploadProgressBar');
-    const fileTypeFromUpload = (file) => {
-      if (file.type.startsWith('image/')) return 'image';
-      if (file.type.startsWith('video/')) return 'video';
-      if (file.type.startsWith('audio/')) return 'audio';
-      if (file.type.startsWith('text/') || /\.(txt|csv|json)$/i.test(file.name)) return 'text';
-      if (/\.(pptx?|key)$/i.test(file.name) || file.type.includes('presentation')) return 'slides';
-      return 'other';
-    };
     const uploadBuilderStimuli = async (fileList) => {
       const files = Array.from(fileList || []).filter(Boolean);
       if (!files.length) return;
@@ -2365,47 +2408,56 @@ function ExperimentBuilderView(options = {}) {
         if (progressBar) progressBar.style.width = pct + '%';
       };
       setUploadProgress(0, files.length);
-      let completed = 0;
       if (fileInput) fileInput.disabled = true;
       if (folderInput) folderInput.disabled = true;
       wrapper.querySelector('#builderStimuliFileBtn').disabled = true;
       wrapper.querySelector('#builderStimuliFolderBtn').disabled = true;
       uploadPanel.style.pointerEvents = 'none';
-      const uploaded = await Promise.all(files.map(file => new Promise(resolve => {
-        const reader = new FileReader();
-        const finish = (item) => {
-          completed += 1;
-          setUploadProgress(completed, files.length);
-          resolve(item);
-        };
-        reader.onload = ev => finish({
-          id: 'stim_' + Date.now() + '_' + Math.floor(Math.random() * 100000),
-          name: file.webkitRelativePath || file.name,
-          type: fileTypeFromUpload(file),
-          url: ev.target.result,
-          info: (file.size / 1024).toFixed(1) + ' KB',
-          createdAt: new Date().toISOString()
-        });
-        reader.onerror = () => finish(null);
-        reader.readAsDataURL(file);
-      })));
-      uploadPanel.style.pointerEvents = '';
-      wrapper.querySelector('#builderStimuliFileBtn').disabled = false;
-      wrapper.querySelector('#builderStimuliFolderBtn').disabled = false;
-      if (fileInput) fileInput.disabled = false;
-      if (folderInput) folderInput.disabled = false;
-      const newItems = uploaded.filter(Boolean);
-      if (!newItems.length) {
+      let importedCount = 0;
+      try {
+        const documents = files.filter(file => typeof isConvertibleStimulusDocument === 'function' && isConvertibleStimulusDocument(file));
+        const mediaFiles = files.filter(file => !documents.includes(file));
+        if (mediaFiles.length) {
+          if (typeof handleFileUpload !== 'function') throw new Error(trb('Загрузчик медиа недоступен','Media uploader is unavailable'));
+          const ids = await handleFileUpload(mediaFiles, (current, total) => setUploadProgress(current, total));
+          importedCount += ids.length;
+        }
+        for (const file of documents) {
+          if (typeof convertDocumentToStimuli !== 'function') throw new Error(trb('Конвертация документов недоступна','Document conversion is unavailable'));
+          const progress = typeof showStimulusImportProgress === 'function' ? showStimulusImportProgress(file.name) : null;
+          let converted;
+          try {
+            converted = await convertDocumentToStimuli(file, (current, total, phase) => {
+              progress?.update(current, total, phase);
+              setUploadProgress(current, total);
+              if (statusEl && !phase) {
+                statusEl.textContent = `${trb('Конвертация страницы','Converting page')} ${current} ${trb('из','of')} ${total}`;
+              }
+            });
+          } finally {
+            progress?.close();
+          }
+          stimuliList.unshift(...converted);
+          importedCount += converted.length;
+          if (typeof persistStimuliList === 'function') persistStimuliList();
+          else localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+        }
+      } catch (error) {
         if (statusEl) {
           statusEl.style.color = 'var(--bad)';
-          statusEl.textContent = `${trb('Не удалось загрузить файлы','Could not upload files')}`;
+          statusEl.textContent = `${trb('Не удалось загрузить файлы','Could not upload files')}: ${error?.message || ''}`;
         }
         return;
+      } finally {
+        uploadPanel.style.pointerEvents = '';
+        wrapper.querySelector('#builderStimuliFileBtn').disabled = false;
+        wrapper.querySelector('#builderStimuliFolderBtn').disabled = false;
+        if (fileInput) fileInput.disabled = false;
+        if (folderInput) folderInput.disabled = false;
       }
-      setUploadProgress(newItems.length, files.length, true);
-      stimuliList = [...newItems, ...stimuliList];
-      localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
-      toast(`${trb('Добавлено стимулов:','Stimuli added:')} ${newItems.length}`);
+      if (!importedCount) return;
+      setUploadProgress(importedCount, importedCount, true);
+      toast(`${trb('Добавлено стимулов:','Stimuli added:')} ${importedCount}`);
       setTimeout(() => renderStep2Stimuli(), 900);
     };
 
@@ -2434,6 +2486,15 @@ function ExperimentBuilderView(options = {}) {
       uploadPanel.style.background = 'rgba(92,102,189,.04)';
       uploadBuilderStimuli(e.dataTransfer.files);
     });
+    stimuliList
+      .filter(stimulus => stimulus?.apiContentUrl && !stimulus?._previewObjectUrl && !stimulus?._previewHydrating)
+      .forEach(stimulus => {
+        if (typeof hydrateApiStimulusPreview !== 'function') return;
+        stimulus._previewHydrating = true;
+        hydrateApiStimulusPreview(stimulus)
+          .catch(() => {})
+          .finally(() => { stimulus._previewHydrating = false; });
+      });
     setTimeout(() => applyAutoI18n(wrapper), 0);
   }
 
@@ -2475,7 +2536,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function renderAoiStimulusThumbnail(stimulus, stimulusId) {
-    if (stimulus?.type === 'image' && stimulus.url) {
+    if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && stimulus.url) {
       return `<img src="${previewEscape(stimulus.url)}" alt="${previewEscape(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : (stimulus.name || stimulusId))}" style="width:100%;height:100%;object-fit:contain;">`;
     }
     if (stimulus?.type === 'video' && stimulus.url) {
@@ -2515,6 +2576,14 @@ function ExperimentBuilderView(options = {}) {
           </div>`)}
         <div style="font-size:12px;color:var(--muted);padding:10px 12px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);">
           ${trb('Здесь показаны все визуальные материалы из блоков, для которых на предыдущем шаге включена отметка AOI. Разметьте каждый материал: AOI сохраняются отдельно для каждого блока, даже если блоки используют один stimulusId.','All visual materials from blocks marked AOI on the previous step are shown here. Mark up every material: AOIs are stored separately for each block, even when blocks share one stimulusId.')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:8px;">
+          ${[
+            trb('Включите AOI у нужных блоков на предыдущем шаге.','Enable AOI for the required blocks on the previous step.'),
+            trb('Откройте «Очередь разметки» или отдельный материал.','Open the Markup queue or one material.'),
+            trb('Нарисуйте область, задайте имя и отметьте целевую AOI.','Draw an area, name it, and mark the target AOI.'),
+            trb('Сохраните материал и перейдите к следующему.','Save the material and continue to the next one.')
+          ].map((text, index) => `<div style="display:flex;gap:9px;align-items:flex-start;padding:10px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);"><span style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-size:11px;font-weight:800;flex-shrink:0;">${index + 1}</span><span style="font-size:11px;line-height:1.45;color:var(--text);">${text}</span></div>`).join('')}
         </div>
         <div id="builderAoiBlocks" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:2px 2px 8px;">
           ${blockRows.length ? blockRows.map(row => {
@@ -2773,7 +2842,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function previewableExperimentBlocks() {
-    return experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
+    return experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type) && b.type !== 'timer');
   }
 
   function stimulusNameById(stimulusId) {
@@ -2821,9 +2890,9 @@ function ExperimentBuilderView(options = {}) {
 
     const id = String(stimulus.id || '');
     const name = previewEscape(stimulus.name || stimulus.text || id);
-    const url = stimulus.url || stimulus.src;
+    const url = stimulus._previewObjectUrl || stimulus.url || stimulus.src;
 
-    if (stimulus.type === 'image' && url) {
+    if ((stimulus.type === 'image' || stimulus.type === 'slides') && url) {
       return `<img src="${previewEscape(url)}" alt="${name}" style="max-width:min(72vw,620px);max-height:48vh;object-fit:contain;border-radius:14px;box-shadow:0 12px 36px rgba(15,23,42,.16);">`;
     }
     if (stimulus.type === 'video' && url) {
@@ -2834,6 +2903,19 @@ function ExperimentBuilderView(options = {}) {
         <div style="width:88px;height:88px;border-radius:24px;background:rgba(92,102,189,.12);display:flex;align-items:center;justify-content:center;font-size:36px;color:var(--accent);">♪</div>
         <audio src="${previewEscape(url)}" controls autoplay></audio>
       </div>`;
+    }
+
+    const standard = window.StandardStimuli?.resolveStandardStimulus?.(id, stimulus, { lang: CURRENT_LANG });
+    if (standard?.type === 'image' && standard.src) {
+      return `<img src="${previewEscape(standard.src)}" alt="${name}" style="max-width:min(72vw,620px);max-height:48vh;object-fit:contain;border-radius:14px;">`;
+    }
+    if (standard?.type === 'text') {
+      const style = standard.style || {};
+      return `<div style="font-size:${previewEscape(style.fontSize || 'clamp(42px,8vw,86px)')};font-weight:${previewEscape(style.fontWeight || '900')};letter-spacing:${previewEscape(style.letterSpacing || 'normal')};color:${previewEscape(style.color || '#0f172a')};text-align:center;line-height:1.12;white-space:nowrap;">${previewEscape(standard.text)}</div>`;
+    }
+    if (standard?.type === 'shape') {
+      const shapeCss = Object.entries(standard.style || {}).map(([key, value]) => `${key.replace(/[A-Z]/g, char => '-' + char.toLowerCase())}:${value}`).join(';');
+      return `<div style="${previewEscape(shapeCss)}"></div>`;
     }
 
     if (id === 'std_simple_black_square') {
@@ -3401,47 +3483,38 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function renderAnalyticsStep() {
-    const analyticsKey = 'emocog_analytics_config_' + (experimentId || 'draft');
-    const cfg = typeof getExperimentAnalyticsConfig === 'function'
-      ? getExperimentAnalyticsConfig(experimentId || 'draft')
-      : { tabs: { 'session-card': true, 'group-comparison': true, 'data-quality': true, 'connectedness': true } };
-    const tabDefs = [
-      { key: 'session-card', icon: '📋', color: '#5c66bd', title: trb('Карточка сессии', 'Session Card'), desc: trb('QC, метрики и таймлайн одной сессии.', 'QC, metrics, and timeline for a single session.') },
-      { key: 'group-comparison', icon: '👥', color: '#0ea5e9', title: trb('Групповое сравнение', 'Group Comparison'), desc: trb('Сравнение групп по протоколам и метрикам.', 'Compare groups across protocols and metrics.') },
-      { key: 'data-quality', icon: '✓', color: '#22c55e', title: trb('Качество данных', 'Data Quality'), desc: trb('Валидность записи и QC-показатели.', 'Recording validity and QC indicators.') },
-      { key: 'connectedness', icon: '🔗', color: '#f59e0b', title: trb('Связанность метрик', 'Connectedness'), desc: trb('Корреляции между метриками эксперимента.', 'Correlations between experiment metrics.') }
-    ];
-    const selectedCount = tabDefs.filter(t => cfg.tabs[t.key] !== false).length;
+    const analyticsApi = typeof window !== 'undefined' ? window.EmocogAnalyticsPlan : null;
+    if (!analyticsApi) {
+      canvasCol.innerHTML = `<div style="padding:${BUILDER_CANVAS_PAD};"><div class="card" style="padding:18px;color:var(--bad);">${trb('Конфигурация аналитики недоступна.','Analytics configuration is unavailable.')}</div></div>`;
+      return;
+    }
+    const builderKey = experimentId || 'draft';
+    let plan = getBuilderAnalyticsPlan();
+    let metricsOpen = false;
+    let overridesOpen = false;
+    const analyzableBlocks = experimentBlocks.filter(block => block && (block.type === 'cognitive_task' || block.type === 'passive'));
+    const lang = CURRENT_LANG === 'en' ? 'en' : 'ru';
+    const esc = value => String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const labelFor = def => def?.label?.[lang] || def?.label?.ru || def?.id || '';
+    const descriptionFor = def => def?.description?.[lang] || def?.description?.ru || '';
+
+    function persistPlan() {
+      plan = analyticsApi.save(builderKey, plan, experimentBlocks);
+      return plan;
+    }
+
+    function selectedPackageCount() {
+      return plan.defaultPackages.filter(id => id !== 'data_quality').length + 1;
+    }
+
     const analyticsHeaderExtra = `
-      <div id="analyticsSelectedSummary" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid rgba(92,102,189,.16);font-size:12px;font-weight:600;color:var(--accent);">
-        ${selectedCount} ${trb('из', 'of')} ${tabDefs.length} ${trb('инструментов выбрано', 'tools selected')}
-      </div>`;
+      <div id="analyticsSelectedSummary" style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.62);border:1px solid rgba(92,102,189,.16);font-size:12px;font-weight:600;color:var(--accent);"></div>`;
     canvasCol.innerHTML = `
       <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:16px;overflow-y:auto;">
         ${builderStepHeader(7, analyticsHeaderExtra)}
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;">
-          ${tabDefs.map(tab => {
-            const on = cfg.tabs[tab.key] !== false;
-            return `
-            <label class="an-tab-card" data-tab="${tab.key}" style="display:flex;flex-direction:column;gap:10px;padding:16px;border:2px solid ${on ? tab.color : 'var(--stroke)'};border-radius:14px;background:${on ? `linear-gradient(180deg,${tab.color}12,transparent)` : 'var(--card-bg)'};cursor:pointer;transition:border-color .15s, box-shadow .15s, background .15s;box-shadow:${on ? `0 8px 24px ${tab.color}22` : 'none'};">
-              <div style="display:flex;align-items:flex-start;gap:12px;">
-                <div style="width:40px;height:40px;border-radius:12px;background:${tab.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">${tab.icon}</div>
-                <div style="flex:1;min-width:0;">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                    <div style="font-size:14px;font-weight:700;color:var(--text);">${tab.title}</div>
-                    <input type="checkbox" class="an-tab-cb" data-tab="${tab.key}" ${on ? 'checked' : ''} style="accent-color:${tab.color};width:16px;height:16px;flex-shrink:0;">
-                  </div>
-                  <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px;">${tab.desc}</div>
-                </div>
-              </div>
-            </label>`;
-          }).join('')}
-        </div>
-
-        <div style="font-size:12px;color:var(--muted);padding:12px 14px;border-radius:12px;background:rgba(92,102,189,.05);border:1px dashed rgba(92,102,189,.18);line-height:1.5;">
-          ${trb('Выбранные инструменты появятся во вкладках раздела «Инструменты аналитики» после сохранения протокола.', 'Selected tools will appear as tabs in Analytics Tools after you save the protocol.')}
-        </div>
+        <div id="analyticsPlanContent"></div>
 
         <div style="display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid var(--stroke);margin-top:auto;">
           <button class="quick-btn" id="analyticsBackBtn" style="font-size:12px;">← ${trb('Назад', 'Back')}</button>
@@ -3450,37 +3523,273 @@ function ExperimentBuilderView(options = {}) {
       </div>
     `;
 
-    function refreshAnalyticsCards() {
-      const tabs = {};
-      canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
-      const count = Object.values(tabs).filter(Boolean).length;
+    function packageCardsHtml(packageIds, capabilities, scope, blockId) {
+      return analyticsApi.packages.map(pkg => {
+        const available = analyticsApi.isPackageAvailable(pkg.id, capabilities);
+        const enabled = packageIds.includes(pkg.id);
+        const locked = pkg.mandatory === true;
+        const unavailableReason = pkg.availability === 'aoi'
+          ? trb('Сначала добавьте AOI в этот протокол/блок.', 'Add an AOI to this protocol/block first.')
+          : pkg.availability === 'task'
+            ? trb('Доступно для блоков с оцениваемой задачей.', 'Available for blocks with a scorable task.')
+            : '';
+        return `
+          <label style="display:flex;gap:12px;padding:14px;border:1.5px solid ${enabled ? pkg.color : 'var(--stroke)'};border-radius:14px;background:${enabled ? pkg.color + '0D' : 'var(--card-bg)'};opacity:${available ? '1' : '.56'};cursor:${locked || !available ? 'default' : 'pointer'};transition:.15s;">
+            <div style="width:36px;height:36px;border-radius:11px;background:${pkg.color}18;color:${pkg.color};display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;">${pkg.icon}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+                <div>
+                  <div style="font-size:13px;font-weight:750;color:var(--text);">${esc(labelFor(pkg))}</div>
+                  ${locked ? `<span style="display:inline-block;margin-top:4px;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${pkg.color};">${trb('Обязательно','Required')}</span>` : ''}
+                </div>
+                <input type="checkbox" class="${scope === 'global' ? 'an-package-cb' : 'an-block-package-cb'}" data-package-id="${esc(pkg.id)}" ${blockId ? `data-block-id="${esc(blockId)}"` : ''} ${enabled ? 'checked' : ''} ${locked || !available ? 'disabled' : ''} style="width:17px;height:17px;accent-color:${pkg.color};flex-shrink:0;">
+              </div>
+              <div style="font-size:11px;color:var(--muted);line-height:1.45;margin-top:6px;">${esc(descriptionFor(pkg))}</div>
+              ${!available ? `<div style="font-size:10px;color:var(--warn);margin-top:6px;">${esc(unavailableReason)}</div>` : ''}
+            </div>
+          </label>`;
+      }).join('');
+    }
+
+    function metricGroupsHtml() {
+      return analyticsApi.packages.map(pkg => {
+        if (!plan.defaultPackages.includes(pkg.id)) return '';
+        const packageMetrics = analyticsApi.metrics.filter(metric => metric.packageId === pkg.id);
+        if (!packageMetrics.length) {
+          return `<div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);">
+            <div style="font-size:12px;font-weight:700;color:var(--text);">${esc(labelFor(pkg))}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:5px;">${trb('Использует выбранные показатели и добавляет групповые распределения, N и описательные сводки.','Uses selected outcomes and adds group distributions, N, and descriptive summaries.')}</div>
+          </div>`;
+        }
+        return `<div style="border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);overflow:hidden;">
+          <div style="padding:10px 14px;background:${pkg.color}0B;border-bottom:1px solid var(--stroke);font-size:12px;font-weight:700;color:var(--text);">${esc(labelFor(pkg))}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));">
+            ${packageMetrics.map(metric => {
+              const checked = plan.selectedMetricIds.includes(metric.id);
+              const locked = metric.mandatory === true;
+              return `<label style="display:flex;align-items:flex-start;gap:9px;padding:10px 14px;border-bottom:1px solid rgba(100,116,139,.09);cursor:${locked ? 'default' : 'pointer'};">
+                <input type="checkbox" class="an-metric-cb" data-metric-id="${esc(metric.id)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} style="margin-top:2px;width:15px;height:15px;accent-color:${pkg.color};">
+                <span style="min-width:0;">
+                  <span style="display:block;font-size:11px;font-weight:650;color:var(--text);">${esc(labelFor(metric))}${locked ? ` · ${trb('обязательно','required')}` : ''}</span>
+                  <span style="display:block;font-size:10px;line-height:1.4;color:var(--muted);margin-top:3px;">${esc(descriptionFor(metric))}</span>
+                </span>
+              </label>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function blockMetricsHtml(override, blockId) {
+      const enabledPackages = new Set(override.packages);
+      const availableMetrics = analyticsApi.metrics.filter(metric => enabledPackages.has(metric.packageId));
+      if (!availableMetrics.length) return '';
+      return `<details style="margin-top:10px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;background:rgba(255,255,255,.3);">
+        <summary style="cursor:pointer;list-style:none;padding:9px 11px;display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:700;color:var(--text);">
+          <span>${trb('Настроить метрики этой задачи','Configure metrics for this task')}</span>
+          <span style="color:var(--muted);font-weight:550;">${override.selectedMetricIds.length} ${trb('выбрано','selected')} ▾</span>
+        </summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));border-top:1px solid var(--stroke);">
+          ${availableMetrics.map(metric => {
+            const pkg = analyticsApi.packages.find(item => item.id === metric.packageId);
+            const locked = metric.mandatory === true;
+            return `<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border-bottom:1px solid rgba(100,116,139,.09);cursor:${locked ? 'default' : 'pointer'};">
+              <input type="checkbox" class="an-block-metric-cb" data-block-id="${esc(blockId)}" data-metric-id="${esc(metric.id)}" ${override.selectedMetricIds.includes(metric.id) ? 'checked' : ''} ${locked ? 'disabled' : ''} style="margin-top:1px;width:14px;height:14px;accent-color:${pkg?.color || 'var(--accent)'};">
+              <span style="font-size:10px;line-height:1.4;color:var(--text);">${esc(labelFor(metric))}${locked ? ` · ${trb('обязательно','required')}` : ''}</span>
+            </label>`;
+          }).join('')}
+        </div>
+      </details>`;
+    }
+
+    function blockOverridesHtml() {
+      if (!analyzableBlocks.length) {
+        return `<div style="font-size:11px;color:var(--muted);padding:12px;">${trb('В протоколе пока нет блоков, для которых можно настроить аналитику.','The protocol has no blocks that can be configured for analytics yet.')}</div>`;
+      }
+      return analyzableBlocks.map(block => {
+        const blockId = String(block.id);
+        const override = plan.blockOverrides[blockId] || null;
+        const capabilities = analyticsApi.blockCapabilities(block);
+        const blockName = localizedBlockLabel(block, block.label || block.type || blockId);
+        const inheritedLabels = plan.defaultPackages.map(id => labelFor(analyticsApi.packages.find(pkg => pkg.id === id))).join(' · ');
+        const ownLabels = override ? override.packages.map(id => labelFor(analyticsApi.packages.find(pkg => pkg.id === id))).join(' · ') : '';
+        return `<div style="padding:13px 14px;border:1px solid var(--stroke);border-radius:13px;background:var(--card-bg);">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+            <div style="min-width:0;">
+              <div style="font-size:12px;font-weight:750;color:var(--text);">${esc(blockName)}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:3px;">${esc(blockId)} · ${block.type === 'cognitive_task' ? trb('задача','task') : trb('пассивный просмотр','passive viewing')}</div>
+            </div>
+            <label style="display:flex;align-items:center;gap:7px;font-size:10px;font-weight:650;color:var(--muted);cursor:pointer;white-space:nowrap;">
+              <input type="checkbox" class="an-block-override-cb" data-block-id="${esc(blockId)}" ${override ? 'checked' : ''} style="width:15px;height:15px;accent-color:var(--accent);">
+              ${trb('Свой набор','Custom set')}
+            </label>
+          </div>
+          ${override ? `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:8px;margin-top:12px;">
+              ${packageCardsHtml(override.packages, capabilities, 'block', blockId)}
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:9px;">${trb('Для блока: ','For this block: ')}${esc(ownLabels)}</div>
+            ${blockMetricsHtml(override, blockId)}
+          ` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${trb('Наследует: ','Inherits: ')}${esc(inheritedLabels)}</div>`}
+        </div>`;
+      }).join('');
+    }
+
+    function renderPlanContent() {
+      plan = analyticsApi.normalizePlan(plan, experimentBlocks);
+      const capabilities = analyticsApi.experimentCapabilities(experimentBlocks);
+      const content = canvasCol.querySelector('#analyticsPlanContent');
       const summary = canvasCol.querySelector('#analyticsSelectedSummary');
-      if (summary) summary.textContent = `${count} ${trb('из', 'of')} ${tabDefs.length} ${trb('инструментов выбрано', 'tools selected')}`;
-      tabDefs.forEach(tab => {
-        const card = canvasCol.querySelector(`.an-tab-card[data-tab="${tab.key}"]`);
-        const cb = card?.querySelector('.an-tab-cb');
-        if (!card || !cb) return;
-        const on = cb.checked;
-        card.style.borderColor = on ? tab.color : 'var(--stroke)';
-        card.style.background = on ? `linear-gradient(180deg,${tab.color}12,transparent)` : 'var(--card-bg)';
-        card.style.boxShadow = on ? `0 8px 24px ${tab.color}22` : 'none';
+      if (summary) {
+        summary.textContent = `${selectedPackageCount()} ${trb('пакета','packages')} · ${plan.selectedMetricIds.length} ${trb('показателей','metrics')} · ${Object.keys(plan.blockOverrides).length} ${trb('исключений по блокам','block overrides')}`;
+      }
+      if (!content) return;
+      content.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <div style="font-size:14px;font-weight:750;color:var(--text);">${trb('Что вы хотите анализировать?','What do you want to analyze?')}</div>
+            <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px;">${trb('Выберите компактные пакеты. Подробный список показателей доступен ниже.','Choose compact packages. The detailed metric list is available below.')}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:10px;">
+            ${packageCardsHtml(plan.defaultPackages, capabilities, 'global')}
+          </div>
+
+          <details id="analyticsMetricsDetails" ${metricsOpen ? 'open' : ''} style="border:1px solid var(--stroke);border-radius:14px;background:rgba(255,255,255,.38);overflow:hidden;">
+            <summary style="cursor:pointer;list-style:none;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:700;color:var(--text);">
+              <span>${trb('Настроить отдельные показатели','Configure individual metrics')}</span>
+              <span style="font-size:10px;color:var(--muted);font-weight:550;">${plan.selectedMetricIds.length} ${trb('выбрано','selected')} ▾</span>
+            </summary>
+            <div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:9px;">${metricGroupsHtml()}</div>
+          </details>
+
+          <details id="analyticsOverridesDetails" ${overridesOpen ? 'open' : ''} style="border:1px solid var(--stroke);border-radius:14px;background:rgba(255,255,255,.38);overflow:hidden;">
+            <summary style="cursor:pointer;list-style:none;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:700;color:var(--text);">
+              <span>${trb('Разные настройки для отдельных задач','Different settings for individual tasks')}</span>
+              <span style="font-size:10px;color:var(--muted);font-weight:550;">${Object.keys(plan.blockOverrides).length} ${trb('исключений','overrides')} ▾</span>
+            </summary>
+            <div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:9px;">${blockOverridesHtml()}</div>
+          </details>
+
+          <div style="font-size:11px;color:var(--muted);padding:12px 14px;border-radius:12px;background:rgba(92,102,189,.05);border:1px dashed rgba(92,102,189,.2);line-height:1.55;">
+            <strong style="color:var(--text);">${trb('Важно:','Important:')}</strong>
+            ${trb(' выбор здесь определяет состав отчёта по умолчанию, но не отключает сбор исходных обезличенных gaze/QC данных. Качество данных всегда остаётся включённым.',' this selection controls the default report, but does not disable collection of source anonymized gaze/QC data. Data quality always remains enabled.')}
+          </div>
+        </div>`;
+
+      content.querySelector('#analyticsMetricsDetails')?.addEventListener('toggle', event => { metricsOpen = event.currentTarget.open; });
+      content.querySelector('#analyticsOverridesDetails')?.addEventListener('toggle', event => { overridesOpen = event.currentTarget.open; });
+
+      content.querySelectorAll('.an-package-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const packageId = input.dataset.packageId;
+          if (input.checked) {
+            if (!plan.defaultPackages.includes(packageId)) plan.defaultPackages.push(packageId);
+            analyticsApi.metrics.filter(metric => metric.packageId === packageId && metric.defaultSelected).forEach(metric => {
+              if (!plan.selectedMetricIds.includes(metric.id)) plan.selectedMetricIds.push(metric.id);
+            });
+          } else {
+            plan.defaultPackages = plan.defaultPackages.filter(id => id !== packageId);
+            plan.selectedMetricIds = plan.selectedMetricIds.filter(id => {
+              const metric = analyticsApi.metrics.find(item => item.id === id);
+              return !metric || metric.mandatory || metric.packageId !== packageId;
+            });
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-metric-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const metricId = input.dataset.metricId;
+          if (input.checked) {
+            if (!plan.selectedMetricIds.includes(metricId)) plan.selectedMetricIds.push(metricId);
+          } else {
+            plan.selectedMetricIds = plan.selectedMetricIds.filter(id => id !== metricId);
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-block-override-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const blockId = input.dataset.blockId;
+          const block = analyzableBlocks.find(item => String(item.id) === String(blockId));
+          if (!block) return;
+          if (input.checked) {
+            const caps = analyticsApi.blockCapabilities(block);
+            const packagesForBlock = plan.defaultPackages.filter(id => analyticsApi.isPackageAvailable(id, caps));
+            if (!packagesForBlock.includes('data_quality')) packagesForBlock.push('data_quality');
+            plan.blockOverrides[blockId] = {
+              packages: packagesForBlock,
+              selectedMetricIds: plan.selectedMetricIds.slice()
+            };
+          } else {
+            delete plan.blockOverrides[blockId];
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-block-package-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const blockId = input.dataset.blockId;
+          const packageId = input.dataset.packageId;
+          const override = plan.blockOverrides[blockId];
+          if (!override) return;
+          if (input.checked) {
+            if (!override.packages.includes(packageId)) override.packages.push(packageId);
+            analyticsApi.metrics.filter(metric => metric.packageId === packageId && metric.defaultSelected).forEach(metric => {
+              if (!override.selectedMetricIds.includes(metric.id)) override.selectedMetricIds.push(metric.id);
+            });
+          } else {
+            override.packages = override.packages.filter(id => id !== packageId);
+            override.selectedMetricIds = override.selectedMetricIds.filter(id => {
+              const metric = analyticsApi.metrics.find(item => item.id === id);
+              return !metric || metric.mandatory || metric.packageId !== packageId;
+            });
+          }
+          persistPlan();
+          renderPlanContent();
+        });
+      });
+
+      content.querySelectorAll('.an-block-metric-cb').forEach(input => {
+        input.addEventListener('change', () => {
+          const override = plan.blockOverrides[input.dataset.blockId];
+          const metricId = input.dataset.metricId;
+          if (!override) return;
+          if (input.checked) {
+            if (!override.selectedMetricIds.includes(metricId)) override.selectedMetricIds.push(metricId);
+          } else {
+            override.selectedMetricIds = override.selectedMetricIds.filter(id => id !== metricId);
+          }
+          persistPlan();
+          renderPlanContent();
+        });
       });
     }
 
-    function saveAnalyticsStep() {
-      const tabs = {};
-      canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
-      localStorage.setItem(analyticsKey, JSON.stringify({ tabs }));
-    }
-
-    canvasCol.querySelectorAll('.an-tab-cb').forEach(cb => {
-      cb.addEventListener('change', refreshAnalyticsCards);
-    });
-    canvasCol.querySelector('#analyticsBackBtn').addEventListener('click', () => { saveAnalyticsStep(); currentStep--; renderStepper(); renderCanvas(); });
-    canvasCol.querySelector('#analyticsNextBtn').addEventListener('click', () => { saveAnalyticsStep(); currentStep++; renderStepper(); renderCanvas(); });
+    renderPlanContent();
+    canvasCol.querySelector('#analyticsBackBtn').addEventListener('click', () => { persistPlan(); currentStep--; renderStepper(); renderCanvas(); });
+    canvasCol.querySelector('#analyticsNextBtn').addEventListener('click', () => { persistPlan(); currentStep++; renderStepper(); renderCanvas(); });
   }
 
   //сохранение черновика
+  function getBuilderAnalyticsPlan() {
+    const analyticsApi = typeof window !== 'undefined' ? window.EmocogAnalyticsPlan : null;
+    if (!analyticsApi) return null;
+    return analyticsApi.load(experimentId || 'draft', experimentBlocks, [
+      editingExp?.analyticsPlan,
+      editingExp?.definition?.analyticsPlan,
+      parsedExperimentData?.json?.analyticsPlan,
+      editingExp?.analyticsConfig,
+      editingExp?.definition?.analyticsConfig
+    ]);
+  }
+
   function saveDraft() {
     const metaFromForm = canvasCol.querySelector('#metaTitle') ? getProtocolMetaFromForm() : protocolMeta;
     protocolMeta = { ...protocolMeta, ...metaFromForm };
@@ -3488,7 +3797,12 @@ function ExperimentBuilderView(options = {}) {
 
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     const id = experimentId || 'exp_' + Date.now();
+    if (hasLocalProtocolIdConflict(protocolMeta.protocolId, id)) {
+      toast(trb('Этот ID протокола уже используется. Укажите уникальный ID.','This Protocol ID is already in use. Enter a unique ID.'));
+      return;
+    }
     const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
+    const analyticsPlan = getBuilderAnalyticsPlan();
     const sessionFeatureFlags = JSON.parse(
       localStorage.getItem('emocog_session_features_' + (experimentId || 'draft')) || 'null'
     ) || editingExp?.sessionFeatureFlags || {
@@ -3505,6 +3819,7 @@ function ExperimentBuilderView(options = {}) {
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
       sessionFeatureFlags,
+      analyticsPlan,
       blocks: userBlocks,
       version: editingExp?.status === 'active' ? protocolVersion : (editingExp?.version || '1.0'),
       history: editingExp?.history || [],
@@ -3555,6 +3870,10 @@ function ExperimentBuilderView(options = {}) {
     const errors = [];
     let hasBlockingErrors = false;
     validateProtocolMeta(protocolMeta).forEach(field => errors.push(trb('Заполните поле: ','Fill in field: ') + field));
+    if (hasLocalProtocolIdConflict(protocolMeta.protocolId, experimentId)) {
+      hasBlockingErrors = true;
+      errors.push(trb('ID протокола уже используется в другом протоколе.','The Protocol ID is already used by another protocol.'));
+    }
     const surveyValidation = surveyContract()?.validateProtocolSurveyBlocks?.({
       participantShell: getParticipantShellMeta(),
       blocks: experimentBlocks
@@ -3644,6 +3963,7 @@ function ExperimentBuilderView(options = {}) {
     const analyticsCfg = typeof getExperimentAnalyticsConfig === 'function'
       ? getExperimentAnalyticsConfig(builderKey)
       : null;
+    const analyticsPlan = getBuilderAnalyticsPlan();
     const sourceFeatureFlags = srcData.settings?.featureFlags || {};
     const sessionFeatureFlags = JSON.parse(
       localStorage.getItem('emocog_session_features_' + builderKey) || 'null'
@@ -3663,6 +3983,7 @@ function ExperimentBuilderView(options = {}) {
       participantShell: shell,
       testHubMetrics: [],
       analyticsConfig: analyticsCfg,
+      analyticsPlan,
       version: 'v2.0_universal',
       settings: {
         ...(srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' }),
@@ -3719,6 +4040,11 @@ function ExperimentBuilderView(options = {}) {
             stimuliSource: b.content?.stimuliSource || 'library',
             stimuliFolder: b.content?.stimuliFolder || '',
             randomize: !!b.content?.randomize,
+            randomInterStimulus: !!b.content?.randomInterStimulus,
+            interStimulusMinMs: Number(b.content?.interStimulusMinMs) || 0,
+            interStimulusMaxMs: Number(b.content?.interStimulusMaxMs) || 0,
+            fullscreenStimulus: !!b.content?.fullscreenStimulus,
+            useFixation: !!b.content?.useFixation,
             useAOI: !!b.content?.useAOI,
             protocolDurationMs: b.content?.protocolDurationMs || null,
             analytics: b.content?.analytics || null,
@@ -3766,6 +4092,9 @@ function ExperimentBuilderView(options = {}) {
 
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     const id = experimentId || 'exp_' + Date.now();
+    if (hasLocalProtocolIdConflict(protocolMeta.protocolId, id)) {
+      throw new Error(trb('ID протокола уже используется. Укажите уникальный ID.','Protocol ID is already in use. Enter a unique ID.'));
+    }
 
     let history = editingExp?.history || [];
     if (editingExp && editingExp.status === 'active') {
@@ -3783,6 +4112,7 @@ function ExperimentBuilderView(options = {}) {
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
       sessionFeatureFlags,
+      analyticsPlan,
       blocks: userBlocks,
       version: protocolVersion,
       history: history,

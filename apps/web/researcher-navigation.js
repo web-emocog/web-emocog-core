@@ -70,6 +70,7 @@
     var input = document.getElementById('researcherNavSearch');
     var host = input && input.closest('.search-box');
     if (!input || !host) return;
+    input.value = '';
     var results = document.createElement('div');
     results.className = 'wecog-search-results';
     results.id = 'researcherSearchResults';

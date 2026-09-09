@@ -174,7 +174,12 @@ function ensureCalibrationGuide() {
 
 function renderCurrentMode() {
     const root = ensureCalibrationGuide();
-    const fixedVisible = FIXED_GUIDE_MODES.has(guideMode) && Boolean(referencePose);
+    const currentDeviation = referencePose
+        ? deviation(lastPose, referencePose)
+        : { status: 'missing' };
+    const fixedVisible = FIXED_GUIDE_MODES.has(guideMode)
+        && Boolean(referencePose)
+        && currentDeviation.status !== 'aligned';
     root.classList.toggle('active', fixedVisible);
     if (fixedVisible) {
         drawFixedGuide(document.getElementById('calibrationHeadPoseCanvas'), lastPose);

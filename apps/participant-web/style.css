@@ -316,6 +316,18 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     pointer-events: none;
 }
 
+.calibration-live-copy {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
 .calibration-intro {
     position: fixed;
     inset: 0;
@@ -360,6 +372,24 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     color: #55635c;
     font-size: 19px;
     line-height: 1.55;
+}
+
+.calibration-intro-card .calibration-result-metrics {
+    margin-bottom: 14px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: #f3f6f4;
+    color: #10211b;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.65;
+    white-space: pre-line;
+}
+
+.calibration-intro-card .calibration-result-advice {
+    margin-bottom: 4px;
+    color: #425149;
+    font-size: 17px;
 }
 
 .calibration-intro-card .btn {
@@ -865,15 +895,15 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
 }
 
 .cog-image {
-    max-width: 80%;
-    max-height: 80%;
+    max-width: 96%;
+    max-height: 94%;
     object-fit: contain;
 }
 
 .cognitive-stimulus-area {
     position: relative;
     width: 100%;
-    height: 400px;
+    height: clamp(520px, 72vh, 860px);
     background: #e8e8e8;
     border-radius: 8px;
     display: flex;
@@ -910,12 +940,116 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
 
 #cogText {
     white-space: pre-wrap;
-    line-height: 1.6;
-    margin-bottom: 20px;
-    font-size: 16px;
-    max-width: 600px;
+    line-height: 1.7;
+    margin: 0 auto 24px;
+    width: min(100%, 940px);
+    font-size: clamp(17px, 1.35vw, 20px);
+    text-align: center;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    hyphens: auto;
+    max-height: min(58vh, 620px);
+    overflow-y: auto;
     margin-left: auto;
     margin-right: auto;
+}
+
+#cogTitle {
+    width: min(100%, 960px);
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.cognitive-session-active .container {
+    max-width: min(94vw, 1500px);
+    padding: clamp(18px, 2.4vw, 40px);
+}
+
+.cognitive-session-active #cognitiveInstruction {
+    width: min(100%, 1060px);
+    box-sizing: border-box;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+body.cognitive-stimulus-presenting {
+    padding: 0;
+    overflow: hidden;
+    background: #e8e8e8;
+}
+
+.cognitive-stimulus-presenting .top-bar {
+    display: none;
+}
+
+.cognitive-stimulus-presenting > .container {
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    width: 100vw;
+    max-width: none;
+    height: 100vh;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: #e8e8e8;
+    box-sizing: border-box;
+}
+
+.cognitive-stimulus-presenting #step6,
+.cognitive-stimulus-presenting #cognitiveContainer {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+.cognitive-stimulus-presenting #cognitiveStimulusArea {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border-radius: 0;
+    background: #e8e8e8;
+}
+
+.cognitive-stimulus-presenting .cog-image {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+@media (max-width: 720px) {
+    .cognitive-session-active .container {
+        max-width: 96vw;
+        padding: 14px;
+    }
+
+    .cognitive-stimulus-area {
+        height: min(70vh, 680px);
+    }
+}
+
+:fullscreen #cognitiveContainer,
+:-webkit-full-screen #cognitiveContainer {
+    width: 100vw;
+    min-height: 100vh;
+    padding: clamp(16px, 3vw, 48px);
+    background: var(--bg-main);
+}
+
+:fullscreen #cognitiveStimulusArea,
+:-webkit-full-screen #cognitiveStimulusArea {
+    width: 100%;
+    height: calc(100vh - clamp(32px, 6vw, 96px));
+    margin: 0;
+    border-radius: 0;
 }
 
 .test-hub-container {

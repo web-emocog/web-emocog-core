@@ -12,7 +12,7 @@ import {
 } from '../emotion-stub-new.js';
 import { ContinuousBodyPoseCollector } from './continuous-body-pose.js';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
-import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js';
+import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20260909-1';
 
 const TARGET_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;

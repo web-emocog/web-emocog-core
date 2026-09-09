@@ -5,11 +5,11 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { translations } from '../../translations.js?v=20260828-2';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260828-2';
-import { stopPreCheck } from './precheck-updated.js?v=20260828-2';
+import { translations } from '../../translations.js?v=20260909-2';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260909-1';
+import { stopPreCheck } from './precheck-updated.js?v=20260909-1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260828-2';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260909-2';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -20,7 +20,7 @@ import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20260828-2';
+} from '../gaze-tracker/gaze-tests/index.js?v=20260909-1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
@@ -44,12 +44,12 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js';
+} from '../session-runtime/index.js?v=20260909-1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
     showCalibrationHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js';
+} from '../gaze-tracker/head-pose-guide.js?v=20260909-1';
 
 function participantMessage(key, replacements = {}) {
     const pack = translations[state.currentLang] || translations.en;
@@ -531,7 +531,18 @@ export async function startCalibration(options = {}) {
     const calibrationActions = document.getElementById('calibrationActions');
     const recalibrateButton = document.getElementById('recalibrateGazeBtn');
     const continueButton = document.getElementById('continueAfterValidationBtn');
+    const validationIntro = document.getElementById('validationIntro');
+    const validationIntroKicker = document.getElementById('validationIntroKicker');
+    const validationIntroTitle = document.getElementById('validationIntroTitle');
+    const validationIntroText = document.getElementById('validationIntroText');
+    const validationIntroStartButton = document.getElementById('validationIntroStartBtn');
+    const validationResult = document.getElementById('validationResult');
+    const validationResultTitle = document.getElementById('validationResultTitle');
+    const validationResultMetrics = document.getElementById('validationResultMetrics');
+    const validationResultAdvice = document.getElementById('validationResultAdvice');
     if (calibrationActions) calibrationActions.style.display = 'none';
+    if (validationIntro) validationIntro.hidden = true;
+    if (validationResult) validationResult.hidden = true;
     if (recalibrateButton) recalibrateButton.onclick = null;
     if (continueButton) continueButton.onclick = null;
     
@@ -547,7 +558,7 @@ export async function startCalibration(options = {}) {
     if (instructionPanel) instructionPanel.style.display = 'none';
     await waitForCalibrationIntroduction({ targeted });
     if (instructionPanel) instructionPanel.style.display = '';
-    point.style.display = 'block';
+    point.style.display = 'none';
     
     instructionText.innerText = translations[state.currentLang].calib_click_instruction;
 
@@ -1280,12 +1291,23 @@ export function startGazeValidation() {
         }
         
         const validationPassed = state.sessionData.gazeValidation.passed;
-        const validationStatus = validationPassed
-            ? translations[state.currentLang].qc_passed_full
-            : translations[state.currentLang].qc_failed_full;
-        instructionText.innerHTML = `${translations[state.currentLang].validation_complete}<br><small>${translations[state.currentLang].validation_accuracy}: ${metrics.accuracyPx.toFixed(0)}${translations[state.currentLang].pixels} (${metrics.accuracyPct}%) | ${translations[state.currentLang].validation_precision}: ${metrics.precisionPx.toFixed(0)}${translations[state.currentLang].pixels} (${metrics.precisionPct}%)</small><br><small>${validationStatus}</small>`;
+        const formatMetric = value => Number.isFinite(value) ? value.toFixed(1) : '—';
+        instructionText.textContent = participantMessage('validation_complete');
+        if (validationResultTitle) validationResultTitle.textContent = participantMessage('validation_complete');
+        if (validationResultMetrics) {
+            validationResultMetrics.textContent = [
+                `${participantMessage('validation_accuracy')}: ${formatMetric(metrics.accuracyPx)}${participantMessage('pixels')} (${formatMetric(metrics.accuracyPct)}%)`,
+                `${participantMessage('validation_precision')}: ${formatMetric(metrics.precisionPx)}${participantMessage('pixels')} (${formatMetric(metrics.precisionPct)}%)`
+            ].join('\n');
+        }
+        if (validationResultAdvice) {
+            validationResultAdvice.textContent = participantMessage(
+                validationPassed ? 'validation_result_passed_advice' : 'validation_result_failed_advice'
+            );
+        }
         progressText.innerText = '';
         point.style.display = 'none';
+        if (validationResult) validationResult.hidden = false;
         
         // Восстанавливаем стиль точки для будущего использования
         point.style.backgroundColor = '#DC2626';
@@ -1293,6 +1315,7 @@ export function startGazeValidation() {
         
         const proceedToProtocol = () => {
             if (calibrationActions) calibrationActions.style.display = 'none';
+            if (validationResult) validationResult.hidden = true;
             if (recalibrateButton) recalibrateButton.onclick = null;
             if (continueButton) continueButton.onclick = null;
             calibScreen.classList.remove('active');
@@ -1302,24 +1325,7 @@ export function startGazeValidation() {
             continueInvitationSessionAfterShell();
         };
 
-        const repairAttempt = Number(state.runtime.validationRepairAttempt) || 0;
         const worstTargets = getWorstValidationTargets(selectedPoints, validationViewport, 4);
-        if (!validationPassed && repairAttempt < 2 && worstTargets.length) {
-            state.runtime.validationRepairAttempt = repairAttempt + 1;
-            recordSessionEvent('validation_targeted_recalibration_scheduled', {
-                repairAttempt: repairAttempt + 1,
-                targets: worstTargets
-            });
-            if (calibrationActions) calibrationActions.style.display = 'none';
-            setTimeout(() => {
-                startCalibration({
-                    targetedPositions: worstTargets,
-                    repairAttempt: repairAttempt + 1
-                });
-            }, 1200);
-            return;
-        }
-
         if (recalibrateButton) {
             recalibrateButton.textContent = participantMessage('runtime_recalibrate');
             recalibrateButton.onclick = () => {
@@ -1329,8 +1335,12 @@ export function startGazeValidation() {
                     passed: validationPassed
                 });
                 if (calibrationActions) calibrationActions.style.display = 'none';
-                state.runtime.validationRepairAttempt = 0;
-                startCalibration();
+                if (validationResult) validationResult.hidden = true;
+                const nextRepairAttempt = (Number(state.runtime.validationRepairAttempt) || 0) + 1;
+                state.runtime.validationRepairAttempt = nextRepairAttempt;
+                startCalibration(!validationPassed && worstTargets.length
+                    ? { targetedPositions: worstTargets, repairAttempt: nextRepairAttempt }
+                    : {});
             };
         }
         if (continueButton) {
@@ -1349,8 +1359,24 @@ export function startGazeValidation() {
         if (calibrationActions) calibrationActions.style.display = 'flex';
     }
     
-    // Запускаем первую точку
-    showNextPoint();
+    if (validationIntro && validationIntroStartButton) {
+        if (validationIntroKicker) validationIntroKicker.textContent = participantMessage('validation_intro_kicker');
+        if (validationIntroTitle) validationIntroTitle.textContent = participantMessage('validation_intro_title');
+        if (validationIntroText) validationIntroText.textContent = participantMessage('validation_intro_body');
+        validationIntroStartButton.textContent = participantMessage('validation_intro_action');
+        validationIntro.hidden = false;
+        validationIntroStartButton.onclick = () => {
+            validationIntroStartButton.onclick = null;
+            validationIntro.hidden = true;
+            point.style.display = 'block';
+            recordSessionEvent('validation_instruction_acknowledged', { category: 'block' });
+            showNextPoint();
+        };
+        requestAnimationFrame(() => validationIntroStartButton.focus());
+    } else {
+        point.style.display = 'block';
+        showNextPoint();
+    }
 }
 
 /**

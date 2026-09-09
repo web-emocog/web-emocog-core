@@ -1,5 +1,5 @@
 import { ERROR_KINDS, SESSION_STATES } from './contracts.mjs';
-import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js';
+import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20260909-1';
 import { translations } from '../../translations.js?v=20260828-2';
 
 const POLICY_TEXT = {
