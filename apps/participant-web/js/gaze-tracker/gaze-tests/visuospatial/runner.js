@@ -238,16 +238,9 @@ export async function runVisuospatialDrawingTest(options = {}) {
                 const point = { x, y, t: tNow, onScreen, penDown };
                 points.push(point);
 
-                // gazeDot БЕЗ clamp — если за canvas, прячем (не приклеиваем к краю).
-                if (gazeDot) {
-                    if (onScreen) {
-                        gazeDot.style.display = 'block';
-                        gazeDot.style.left = `${x}px`;
-                        gazeDot.style.top = `${y}px`;
-                    } else {
-                        gazeDot.style.display = 'none';
-                    }
-                }
+                // Keep participant gaze prediction hidden. The point still
+                // contributes to the drawing and is available in diagnostics.
+                if (gazeDot) gazeDot.style.display = 'none';
 
                 // Линия рисуется только в пределах canvas И только при удерживаемом Space
                 // (если requireSpace=false, рисуется всегда — для legacy/смены поведения).

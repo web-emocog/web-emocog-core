@@ -95,13 +95,27 @@ function channelQc(row, channel) {
       ? row.features_payload.cognitiveResults
       : [];
     const valid = trials.filter(trial => trial?.qualityValid !== false).length;
+    const validFraction = trials.length ? valid / trials.length : null;
+    let status = 'not_computed';
+    const reasons = [];
+    if (validFraction != null) {
+      if (validFraction < 0.6) {
+        status = 'invalid';
+        reasons.push('low_valid_task_fraction');
+      } else if (validFraction < 0.8) {
+        status = 'borderline';
+        reasons.push('low_valid_task_fraction');
+      } else {
+        status = 'valid';
+      }
+    }
     return {
       channel,
-      status: trials.length ? (overall === 'invalid' ? 'invalid' : 'valid') : 'not_computed',
-      validFraction: trials.length ? valid / trials.length : null,
+      status,
+      validFraction,
       signalConfidence: null,
-      reasons: [],
-      ruleVersion: 'task-qc-1.0.0',
+      reasons,
+      ruleVersion: 'task-qc-1.1.0',
     };
   }
   const aliases = {

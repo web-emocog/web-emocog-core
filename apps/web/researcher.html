@@ -699,24 +699,6 @@ body{
   height:18px;
 }
 
-.crumbs{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-size:13px;
-  color:var(--muted);
-  overflow:hidden;
-}
-
-.crumbs span{
-  white-space:nowrap;
-}
-
-.crumbs .sep{
-  color:var(--muted2);
-  opacity:.5;
-}
-
 .top-bar .right{
   display:flex;
   align-items:center;
@@ -2895,7 +2877,7 @@ body{
     })();
   </script> -->
  
-  <script src="cognitive-task-protocols.js?v=20260825-3"></script>
+  <script src="cognitive-task-protocols.js?v=20260909-1"></script>
   <script src="../shared/rt-registry.js"></script>
 
   <!-- ===== WELCOME SCREEN ===== -->
@@ -3112,21 +3094,7 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
 </svg>
             </button>
-            <button class="iconBtn" id="btnBack" title="Back">
-<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
-</svg>
-            </button>
-            <button class="iconBtn" id="btnForward" title="Forward">
-<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-</svg>
-            </button>
-            <nav class="crumbs" id="breadcrumbs" aria-label="Хлебные крошки">
-              <a class="crumb-home" href="#/overview" id="breadcrumbHome">Главная</a>
-              <span class="sep">/</span>
-              <span id="pageTitle">Главная</span>
-            </nav>
+            <span id="pageTitle" hidden></span>
           </div>
           <div class="right">
             <div class="search-box">
@@ -3135,7 +3103,7 @@ body{
 <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 </svg>
               </span>
-              <input type="search" id="researcherNavSearch" placeholder="Найти раздел" autocomplete="off"/>
+              <input type="search" id="researcherNavSearch" name="wecog-navigation-filter" placeholder="Найти раздел" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other"/>
             </div>
             <div class="wecog-theme-switch" data-wecog-theme-group role="group" aria-label="Цветовая схема">
               <button type="button" class="wecog-theme-option" data-wecog-theme-value="auto"><span data-theme-option-label>Авто</span></button>
@@ -3214,15 +3182,16 @@ body{
       }
     })();
   </script>
-  <script src="researcher-analytics-production.js?v=20260828-2"></script>
-  <script src="researcher-admin-settings.js?v=20260825-3"></script>
+  <script src="researcher-analytics-production.js?v=20260909-1"></script>
+  <script src="researcher-admin-settings.js?v=20260909-1"></script>
   <script src="aoi-geometry.js?v=20260806-1"></script>
   <script src="aoi-protocol.js?v=20260807-1"></script>
   <script src="../shared/survey-contract.js?v=20260828-2"></script>
-  <script src="researcher-builder.js?v=20260828-2"></script>
-  <script src="researcher-stimuli.js?v=20260827-1"></script>
-  <script src="researcher-core.js?v=20260828-3"></script>
+  <script src="../shared/standard-stimuli.js?v=20260909-1"></script>
+  <script src="researcher-builder.js?v=20260909-2"></script>
+  <script src="researcher-stimuli.js?v=20260909-2"></script>
+  <script src="researcher-core.js?v=20260909-2"></script>
   <script src="researcher-api-bridge.js?v=20260819-1"></script>
-  <script src="researcher-navigation.js?v=20260825-1"></script>
+  <script src="researcher-navigation.js?v=20260909-1"></script>
 </body>
 </html>

@@ -152,19 +152,9 @@ async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
   if (targetProtocolId && !options.forceCreate) {
     saved = await apiPatch('/protocols/' + targetProtocolId, payload);
   } else {
-    try {
-      saved = await apiPost('/protocols', Object.assign({ project_id: projectId }, payload));
-    } catch (error) {
-      if (!/^409\b/.test(String(error && error.message || error))) throw error;
-      // Recover only the same stable protocol identity. Matching by title alone
-      // could overwrite a different researcher's protocol after local state loss.
-      var protocols = await apiGet('/protocols?project_id=' + encodeURIComponent(String(projectId)));
-      var matching = Array.isArray(protocols) ? protocols.find(function (protocol) {
-        return String(protocol && protocol.definition && protocol.definition.protocolId || '') === String(definition.protocolId || '');
-      }) : null;
-      if (!matching || !matching.id || !definition.protocolId) throw error;
-      saved = await apiPatch('/protocols/' + matching.id, payload);
-    }
+    // A duplicate stable identity is a user-visible conflict. Never recover it
+    // by patching an existing protocol: that can overwrite another experiment.
+    saved = await apiPost('/protocols', Object.assign({ project_id: projectId }, payload));
   }
   saveBuilderApiState(experimentKey, {
     apiProtocolId: saved.id,
@@ -188,9 +178,10 @@ async function publishBuilderProtocolAndInvitation(exportJson, experimentKey, pr
   var slug = String(protocolSlug || exportJson.protocolId || '').trim();
   if (!slug) throw new Error('Укажите Protocol ID');
   var apiState = loadBuilderApiState(experimentKey);
-  var publishOpts = {};
+  var isNewProtocol = String(experimentKey || '') === 'draft';
+  var publishOpts = isNewProtocol ? { forceCreate: true } : {};
   var existingInvitation = null;
-  var existingCode = apiState.invitationCode;
+  var existingCode = isNewProtocol ? null : apiState.invitationCode;
   if (existingCode) {
     try {
       existingInvitation = await apiGet(
@@ -294,7 +285,11 @@ let uploadedResources = {};
 let parsedExperimentData = null;
 
 // Стимулы
-let stimuliList = JSON.parse(localStorage.getItem('emocog_stimuli')) || [];
+let stimuliList = (JSON.parse(localStorage.getItem('emocog_stimuli')) || []).map(stimulus => (
+  stimulus?.sourceDocumentName && stimulus.type === 'image'
+    ? { ...stimulus, type: 'slides' }
+    : stimulus
+));
 let selectedStimulusId = null;
 let currentStimuliFilter = 'all';  // all / image / video / audio / text
 let folders = JSON.parse(localStorage.getItem('emocog_folders')) || [];
@@ -408,11 +403,6 @@ function setActiveNav(route){
   }
 }
 
-// Breadcrumbs
-function setCrumbs(){
-  // Static for now
-}
-
 // Chips
 function setChips(arr){
   const c=$('#chips');
@@ -459,7 +449,6 @@ function parseHash(h){
 
 // INSTANT render - контент остается видимым
 function render(hashOverride){
-  setCrumbs();
   const {route,parts}=parseHash(hashOverride);
   const view=$('#view');
   let routeKey=route;
@@ -534,6 +523,7 @@ function clearExperimentBuilderDraft() {
   localStorage.removeItem('emocog_protocol_blocks');
   localStorage.removeItem('emocog_protocol_meta_draft');
   localStorage.removeItem('emocog_protocol_step_draft');
+  localStorage.removeItem(builderApiStateKey('draft'));
   if (window.EmocogAnalyticsPlan && typeof window.EmocogAnalyticsPlan.clearDraft === 'function') {
     window.EmocogAnalyticsPlan.clearDraft();
   }
@@ -558,8 +548,6 @@ $('#projectSelect').addEventListener('change',e=>{
 });
 // quick export replaced by + Create menu
 
-$('#btnBack').addEventListener('click',()=>history.back());
-$('#btnForward').addEventListener('click',()=>history.forward());
 
 // Actions block is now always visible in right panel (no dropdown needed)
 
@@ -618,6 +606,10 @@ document.addEventListener('click',(e)=>{
     return;
   }
   setMobileNavigation(false);
+  if(href==='#/experiments/builder'){
+    startNewExperimentBuilder();
+    return;
+  }
   navigate(href);
 },true);
 

@@ -47,6 +47,16 @@ function hasGlobalProtocolAccess(user) {
   return isPlatformAdmin(user);
 }
 
+function rejectProtocolConflict(res, err) {
+  const protocolIdConflict = err.constraint === 'protocols_project_protocol_id_unique';
+  return res.status(409).json({
+    error: protocolIdConflict
+      ? 'A protocol with this Protocol ID already exists in the project'
+      : 'A protocol with this name already exists in the project',
+    code: protocolIdConflict ? 'protocol_id_conflict' : 'protocol_name_conflict',
+  });
+}
+
 router.get(
   '/',
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
@@ -124,12 +134,7 @@ router.post(
       res.status(201).json(r.rows[0]);
     } catch (err) {
       if (err.code === '23503') return res.status(400).json({ error: 'Project not found' });
-      if (err.code === '23505') {
-        return res.status(409).json({
-          error: 'A protocol with this name already exists in the project',
-          code: 'protocol_name_conflict',
-        });
-      }
+      if (err.code === '23505') return rejectProtocolConflict(res, err);
       console.error(err);
       res.status(500).json({ error: 'Create failed' });
     }
@@ -242,12 +247,7 @@ router.patch(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(r.rows[0]);
     } catch (err) {
-      if (err.code === '23505') {
-        return res.status(409).json({
-          error: 'A protocol with this name already exists in the project',
-          code: 'protocol_name_conflict',
-        });
-      }
+      if (err.code === '23505') return rejectProtocolConflict(res, err);
       console.error(err);
       res.status(500).json({ error: 'Update failed' });
     }
