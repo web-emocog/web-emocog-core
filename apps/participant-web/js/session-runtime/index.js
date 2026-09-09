@@ -6,8 +6,8 @@ import {
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore } from './checkpoint-store.mjs';
-import { SessionRuntimeUI } from './runtime-ui.js';
-import { SessionFramePipeline } from './frame-pipeline.js';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20260909-1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20260909-1';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs';
 import { SessionAudioCollector } from '../audio/session-audio.js';
@@ -168,7 +168,7 @@ class ParticipantSessionRuntime {
 
     _scheduleFinalUploadRetry() {
         setTimeout(() => {
-            import('../web-page/tests-updated.js?v=20260828-2')
+            import('../web-page/tests-updated.js?v=20260909-2')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         }, 0);

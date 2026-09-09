@@ -7,18 +7,18 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { finishSession } from './tests-updated.js?v=20260828-2';
+import { finishSession } from './tests-updated.js?v=20260909-2';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260828-2';
+import { translations } from '../../translations.js?v=20260909-2';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js';
+} from '../session-runtime/index.js?v=20260909-1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -60,6 +60,7 @@ let currentBlockAttempt = 1;
 let activeBlockTrialPlan = [];
 let activeTrialQualityContext = null;
 let acknowledgedTaskBlockIndex = null;
+let cognitiveFullscreenOwned = false;
 const MAX_COGNITIVE_BLOCK_ATTEMPTS = 3;
 
 const LOCALE_FIELD_SUFFIX = Object.freeze({
@@ -578,12 +579,14 @@ function normalizeV2Trials(trials) {
             const meta = stimuliMap[String(sid).replace(/^api:/, '')] || null;
             const stimulus = resolveTrialStimulusObject(sid, meta);
             out.push({
+                ...t,
                 id: `${sid}_${index}_${r}`,
                 condition: t.condition || '',
                 correctResponse: mapActionToCorrectResponse(t.action || t.correctResponse),
                 responseMode: t.responseMode || null,
                 stimulus: { ...stimulus, stimulusId: sid },
-                duration: t.duration || null
+                duration: t.duration || null,
+                repetitions: 1
             });
         }
     });
@@ -610,6 +613,7 @@ function toCognitiveBlockFromV2(block, index) {
         blockConfig: {
             ...cfg,
             fixation: cfg.fixation || { duration: cfg.fixationDuration || 500 },
+            useFixation: cfg.useFixation !== false,
             stimulusDuration: cfg.stimulusDuration || 1000,
             showFeedback: !!(cfg.showFeedback || cfg.feedbackConfig),
             rtWindow: cfg.rtWindow || 1000,
@@ -662,6 +666,14 @@ function normalizeProtocolDefinition(definition, options = {}) {
                     block.content?.text || '',
                     block.content
                 ));
+                return;
+            }
+            if (type === 'timer') {
+                outBlocks.push({
+                    id: block.id || `timer_${index}`,
+                    type: 'timer',
+                    content: { ...(block.content || {}), hidden: true }
+                });
             }
         });
         if (outBlocks.length) {
@@ -693,6 +705,14 @@ function normalizeProtocolDefinition(definition, options = {}) {
         }
         if (type === 'questionnaire' || type === 'calibration' || type === 'rest' || type === 'baseline' || type === 'recovery' || type === 'final') {
             outBlocks.push(toInstructionBlock(block?.id || `${type}_${index}`, params.title || 'Этап', params.text || 'Следующий этап протокола.', params));
+            return;
+        }
+        if (type === 'timer') {
+            outBlocks.push({
+                id: block?.id || `timer_${index}`,
+                type: 'timer',
+                content: { ...params, hidden: true }
+            });
             return;
         }
         if (type === 'stimuli' || type === 'cognitive_task') {
@@ -769,6 +789,7 @@ function handleQcPauseState(overlayVisible) {
 }
 
 function resetStimulusViews() {
+    document.body.classList.remove('cognitive-stimulus-presenting');
     if (ex_state.task?.stimulus) {
         ex_state.task.stimulus.style.display = 'none';
     }
@@ -782,13 +803,14 @@ function resetStimulusViews() {
 
 function renderStimulus(trial) {
     resetStimulusViews();
+    document.body.classList.add('cognitive-stimulus-presenting');
 
     const stimulus = trial?.stimulus || {};
     const stimulusType = stimulus.type || 'shape';
     const shapeEl = ex_state.task?.stimulus;
     const imageEl = document.getElementById('cogImage');
 
-    if (stimulusType === 'image' && imageEl) {
+    if ((stimulusType === 'image' || stimulusType === 'slides') && imageEl) {
         imageEl.style.cssText = '';
         if (stimulus.style && typeof stimulus.style === 'object') {
             Object.assign(imageEl.style, stimulus.style);
@@ -973,6 +995,27 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     const cogEmoClear = document.getElementById('cognitiveEmotionHud');
     if (cogEmoClear) cogEmoClear.textContent = '';
 
+    const finishedAt = Date.now();
+    const experimentMeta = state.sessionData.experimentMeta || {};
+    if (Array.isArray(experimentMeta.protocolTimers)) {
+        experimentMeta.protocolTimers = experimentMeta.protocolTimers.map(timer => {
+            if (timer.finishedAt) return timer;
+            const startedAt = Number(timer.startedAt) || Number(state.sessionData.startTime) || finishedAt;
+            return {
+                ...timer,
+                finishedAt,
+                durationMs: Math.max(0, finishedAt - startedAt)
+            };
+        });
+        recordSessionEvent('protocol_timers_complete', {
+            timers: experimentMeta.protocolTimers.map(timer => ({
+                id: timer.id,
+                name: timer.name,
+                durationMs: timer.durationMs
+            }))
+        });
+    }
+
     if (reason === 'error') {
         recordSessionEvent('cognitive_task_error', {
             reason,
@@ -997,6 +1040,7 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
         setSessionPhase('final', { source: 'finishCognitiveTask' });
         console.log('[Cognitive] Задача завершена');
         finishSession();
+        void exitCognitiveFullscreen();
         cognitiveTaskOptions = { autoFinishSession: true, onComplete: null };
     } else {
         setSessionPhase('cognitive_instruction', { source: 'finishCognitiveTask_return' });
@@ -1004,6 +1048,7 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
         if (typeof cognitiveTaskOptions.onComplete === 'function') {
             cognitiveTaskOptions.onComplete(payload);
         }
+        void exitCognitiveFullscreen();
         cognitiveTaskOptions = { autoFinishSession: true, onComplete: null };
     }
 }
@@ -1062,7 +1107,10 @@ export async function loadAndStartCognitiveTask(options = {}) {
             title: experimentProtocol?.title || null,
             version: experimentProtocol?.version || null,
             loadedAt: Date.now(),
-            blockCount: Array.isArray(experimentProtocol?.blocks) ? experimentProtocol.blocks.length : 0
+            blockCount: Array.isArray(experimentProtocol?.blocks) ? experimentProtocol.blocks.length : 0,
+            protocolTimers: Array.isArray(state.sessionData.experimentMeta?.protocolTimers)
+                ? state.sessionData.experimentMeta.protocolTimers
+                : []
         };
 
         currentBlockIndex = repeatBlockIndex >= 0 ? repeatBlockIndex : 0;
@@ -1160,6 +1208,33 @@ function runNextBlock() {
         blockIndex: currentBlockIndex,
         blockType: block?.type || 'unknown'
     });
+
+    if (block.type === 'timer') {
+        const experimentMeta = state.sessionData.experimentMeta || (state.sessionData.experimentMeta = {});
+        const timers = Array.isArray(experimentMeta.protocolTimers)
+            ? experimentMeta.protocolTimers
+            : (experimentMeta.protocolTimers = []);
+        const timerId = String(block.id || `timer_${currentBlockIndex}`);
+        if (!timers.some(timer => String(timer.id) === timerId)) {
+            const startedAt = Number(state.sessionData.startTime) || Date.now();
+            timers.push({
+                id: timerId,
+                name: block.content?.name || block.content?.measurementName || timerId,
+                startedAt,
+                startsAt: block.content?.startsAt || 'session_start',
+                hidden: true
+            });
+            recordSessionEvent('protocol_timer_started', { id: timerId, startedAt });
+        }
+        emitTaskEvent('block_end', {
+            blockIndex: currentBlockIndex,
+            blockType: 'timer',
+            reason: 'hidden_timer_registered'
+        });
+        currentBlockIndex++;
+        runNextBlock();
+        return;
+    }
 
     if (block.type === 'instruction' || block.type === 'instructions') {
         setSessionPhase('cognitive_instruction', { source: 'instruction_block' });
@@ -1492,6 +1567,28 @@ function refreshLocalizedInstructionScreen() {
 
 window.addEventListener('wecog:languagechange', refreshLocalizedInstructionScreen);
 
+async function requestCognitiveFullscreen() {
+    if (document.fullscreenElement || document.webkitFullscreenElement) return;
+    const target = document.documentElement;
+    const request = target.requestFullscreen || target.webkitRequestFullscreen;
+    if (typeof request !== 'function') return;
+    try {
+        await request.call(target);
+        cognitiveFullscreenOwned = true;
+        recordSessionEvent('cognitive_fullscreen_entered', {});
+    } catch (error) {
+        recordSessionEvent('cognitive_fullscreen_unavailable', { message: error?.message || String(error) });
+    }
+}
+
+async function exitCognitiveFullscreen() {
+    if (!cognitiveFullscreenOwned) return;
+    cognitiveFullscreenOwned = false;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (typeof exit !== 'function') return;
+    try { await exit.call(document); } catch (_) { /* Browser may already have exited. */ }
+}
+
 function showTaskBlockInstruction(block) {
     ex_state.task.area.style.display = 'none';
     ex_state.instruction.container.style.display = 'block';
@@ -1517,12 +1614,13 @@ function showTaskBlockInstruction(block) {
     if (checkbox) checkbox.checked = false;
     if (checkContainer) checkContainer.style.display = 'none';
     ex_state.instruction.btn.disabled = false;
-    ex_state.instruction.btn.onclick = (event) => {
+    ex_state.instruction.btn.onclick = async (event) => {
         event.preventDefault();
         recordSessionEvent('cognitive_block_instruction_acknowledged', {
             blockId: block?.id || null,
             blockType: block?.type || 'cognitive_task'
         });
+        if (block?.blockConfig?.fullscreenStimulus) await requestCognitiveFullscreen();
         startTaskBlock(block);
     };
 }
@@ -1588,8 +1686,28 @@ function runTrial() {
     const planItem = trials[currentTrialIndex];
     const trial = planItem.trial;
     const config = block.blockConfig || {};
-    const fixationDuration = config.fixation?.duration || 500;
-    const stimulusDuration = config.stimulusDuration || 1000;
+    const useFixation = config.useFixation !== false && !!config.fixation;
+    const trialFixationMin = Math.max(0, Number(trial?.fixationMin) || 0);
+    const trialFixationMax = Math.max(trialFixationMin, Number(trial?.fixationMax) || trialFixationMin);
+    const hasTrialRandomFixation = useFixation && trialFixationMax > 0;
+    const baseFixationDuration = useFixation
+        ? (hasTrialRandomFixation
+            ? Math.round(trialFixationMin + Math.random() * (trialFixationMax - trialFixationMin))
+            : Math.max(0, Number(config.fixation?.duration) || 500))
+        : 0;
+    const blockRandomMin = Math.max(0, Number(config.interStimulusMinMs) || 0);
+    const blockRandomMax = Math.max(blockRandomMin, Number(config.interStimulusMaxMs) || blockRandomMin);
+    const trialRandomMin = Math.max(0, Number(trial?.randomItiMin) || 0);
+    const trialRandomMax = Math.max(trialRandomMin, Number(trial?.randomItiMax) || trialRandomMin);
+    const useBlockRandomInterval = config.randomInterStimulus === true;
+    const useTrialRandomInterval = !useBlockRandomInterval && trialRandomMax > 0;
+    const randomMin = useBlockRandomInterval ? blockRandomMin : trialRandomMin;
+    const randomMax = useBlockRandomInterval ? blockRandomMax : trialRandomMax;
+    const randomPreStimulusMs = useBlockRandomInterval || useTrialRandomInterval
+        ? Math.round(randomMin + Math.random() * (randomMax - randomMin))
+        : 0;
+    const fixationDuration = baseFixationDuration + randomPreStimulusMs;
+    const stimulusDuration = Math.max(1, Number(trial?.duration) || Number(config.stimulusDuration) || 1000);
 
     const stimulusType = trial?.stimulus?.type || 'shape';
     const trialId = planItem.trialId;
@@ -1619,12 +1737,13 @@ function runTrial() {
         trialIndex: currentTrialIndex,
         condition: trial?.condition ?? null,
         fixationDuration,
+        randomPreStimulusMs,
         stimulusDuration
     });
 
     resetStimulusViews();
     ex_state.task.feedback.style.display = 'none';
-    ex_state.task.fixation.style.display = 'block';
+    ex_state.task.fixation.style.display = useFixation ? 'block' : 'none';
     setSessionPhase('cognitive_instruction', { source: 'trial_fixation' });
     trialPhase = 'fixation';
     fixationRemainingMs = fixationDuration;
@@ -1773,7 +1892,7 @@ function handleResponse(rt, key, decision = {}) {
         setTimeout(() => {
             ex_state.task.feedback.style.display = 'none';
             moveToNextTrial();
-        }, 500);
+        }, Math.max(0, Number(trial?.feedbackDuration) || 500));
     } else {
         moveToNextTrial();
     }
@@ -1832,10 +1951,12 @@ async function finishTaskBlockAttempt(block) {
 }
 
 function moveToNextTrial() {
+    const trial = activeBlockTrialPlan[currentTrialIndex]?.trial;
+    const interTrialDelay = Math.max(0, Number(trial?.iti) || 200);
     setTimeout(() => {
         currentTrialIndex++;
         runTrial();
-    }, 200);
+    }, interTrialDelay);
 }
 
 function cleanupTrial() {

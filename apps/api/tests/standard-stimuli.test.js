@@ -57,13 +57,13 @@ describe('standard-stimuli', () => {
     assert.equal(parseEmotionFromStdId('std_emo_fear_01'), 'fear');
   });
 
-  it('renders distinct emotion placeholders by id without meta', () => {
+  it('renders distinct emotion face images by id without meta', () => {
     const happy = resolveStandardStimulus('std_emo_happy_02', null, { lang: 'en' });
     const sad = resolveStandardStimulus('std_emo_sad_01', null, { lang: 'en' });
-    assert.equal(happy.type, 'text');
-    assert.equal(sad.type, 'text');
-    assert.notEqual(happy.text, sad.text);
-    assert.match(happy.text, /HAPPY/);
-    assert.match(sad.text, /SAD/);
+    assert.equal(happy.type, 'image');
+    assert.equal(sad.type, 'image');
+    assert.match(happy.src, /^data:image\/svg\+xml/);
+    assert.match(sad.src, /^data:image\/svg\+xml/);
+    assert.notEqual(happy.src, sad.src);
   });
 });

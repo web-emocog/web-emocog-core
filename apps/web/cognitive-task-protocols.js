@@ -67,9 +67,9 @@ function cloneProtocolData(value) {
       ))
     );
     return [
-      standardStimulus('std_simple_black_square', 'Simple RT: чёрный квадрат', 'Simple RT: black square', 'text', 'Чёрный квадрат на белом фоне', 'Black square on a white background'),
-      standardStimulus('std_go_green_circle', 'Go: зелёный круг', 'Go: green circle', 'text', 'Go-стимул', 'Go stimulus'),
-      standardStimulus('std_nogo_red_circle', 'No-Go: красный круг', 'No-Go: red circle', 'text', 'No-Go-стимул', 'No-Go stimulus'),
+      standardStimulus('std_simple_black_square', 'Simple RT: чёрный квадрат', 'Simple RT: black square', 'image', 'Чёрный квадрат на белом фоне', 'Black square on a white background'),
+      standardStimulus('std_go_green_circle', 'Go: зелёный круг', 'Go: green circle', 'image', 'Go-стимул', 'Go stimulus'),
+      standardStimulus('std_nogo_red_circle', 'No-Go: красный круг', 'No-Go: red circle', 'image', 'No-Go-стимул', 'No-Go stimulus'),
       ...[
         ['red_red','КРАСНЫЙ красным','RED in red','Конгруэнтный','Congruent'],
         ['blue_blue','СИНИЙ синим','BLUE in blue','Конгруэнтный','Congruent'],
@@ -82,10 +82,10 @@ function cloneProtocolData(value) {
       standardStimulus('std_flanker_left_cong', 'Flanker: <<<<<', 'Flanker: <<<<<', 'text', 'Конгруэнтный, влево', 'Congruent, left'),
       standardStimulus('std_flanker_right_incong', 'Flanker: <<><<', 'Flanker: <<><<', 'text', 'Неконгруэнтный, вправо', 'Incongruent, right'),
       standardStimulus('std_flanker_left_incong', 'Flanker: >><>>', 'Flanker: >><>>', 'text', 'Неконгруэнтный, влево', 'Incongruent, left'),
-      standardStimulus('std_nback_circle', 'N-back: круг', 'N-back: circle', 'text', 'Геометрическая фигура', 'Geometric shape'),
-      standardStimulus('std_nback_square', 'N-back: квадрат', 'N-back: square', 'text', 'Геометрическая фигура', 'Geometric shape'),
-      standardStimulus('std_nback_triangle', 'N-back: треугольник', 'N-back: triangle', 'text', 'Геометрическая фигура', 'Geometric shape'),
-      standardStimulus('std_nback_diamond', 'N-back: ромб', 'N-back: diamond', 'text', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_circle', 'N-back: круг', 'N-back: circle', 'image', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_square', 'N-back: квадрат', 'N-back: square', 'image', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_triangle', 'N-back: треугольник', 'N-back: triangle', 'image', 'Геометрическая фигура', 'Geometric shape'),
+      standardStimulus('std_nback_diamond', 'N-back: ромб', 'N-back: diamond', 'image', 'Геометрическая фигура', 'Geometric shape'),
       standardStimulus('std_pvt_counter', 'PVT: счётчик миллисекунд', 'PVT: millisecond counter', 'text', 'Красный счётчик RT', 'Red RT counter'),
       ...letters,
       ...switches,

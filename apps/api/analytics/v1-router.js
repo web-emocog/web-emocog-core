@@ -97,6 +97,15 @@ function sessionTechnicalDetails(row) {
   const cameraWidth = finiteNumber(tech.cameraWidth, camera.width);
   const cameraHeight = finiteNumber(tech.cameraHeight, camera.height);
   const mobile = browser.mobile === true || tech.mobile === true;
+  const protocolTimers = Array.isArray(payload?.experimentMeta?.protocolTimers)
+    ? payload.experimentMeta.protocolTimers.slice(0, 20).map(timer => ({
+      id: String(timer?.id || '').slice(0, 128),
+      name: String(timer?.name || timer?.id || 'Timer').slice(0, 255),
+      durationMs: finiteNumber(timer?.durationMs),
+      startedAt: finiteNumber(timer?.startedAt),
+      finishedAt: finiteNumber(timer?.finishedAt),
+    }))
+    : [];
   const inferredDevice = mobile
     ? 'mobile_browser'
     : (cameraWidth && cameraHeight ? 'computer_webcam' : 'desktop_browser');
@@ -122,6 +131,7 @@ function sessionTechnicalDetails(row) {
     browserLanguage: browser.language ? String(browser.language).slice(0, 16) : null,
     pixelRatio: finiteNumber(tech.pixelRatio, screen.pixelRatio),
     processorClass: browser.coresBucket ? String(browser.coresBucket).slice(0, 16) : null,
+    protocolTimers,
   };
 }
 

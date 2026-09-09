@@ -119,7 +119,9 @@ test.describe('wecog design system', () => {
     expect(geometry.selectHeight).toBeGreaterThanOrEqual(44);
   });
 
-  test('researcher navigation supports search, breadcrumbs and mobile drawer', async ({ page }) => {
+  test('researcher navigation supports search and mobile drawer without redundant header navigation', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
     await page.goto(
       `${baseUrl}/apps/web/researcher.html?analyticsPreview=1#/experiments`,
       { waitUntil: 'domcontentloaded' }
@@ -134,8 +136,8 @@ test.describe('wecog design system', () => {
     await expect(page.locator('#navManagementTitle')).toHaveText('Управление');
     await expect(page.locator('#nav-experiments')).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('navigation', { name: 'Управление кабинетом' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Хлебные крошки' })).toBeVisible();
-    await expect(page.locator('.crumb-home')).toHaveAttribute('href', '#/overview');
+    await expect(page.getByRole('navigation', { name: 'Хлебные крошки' })).toHaveCount(0);
+    await expect(page.locator('.crumb-home, #btnBack, #btnForward')).toHaveCount(0);
     await expect(page.locator('#nav-billing')).toBeHidden();
 
     const search = page.locator('#researcherNavSearch');
@@ -169,6 +171,7 @@ test.describe('wecog design system', () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth
     );
     expect(overflow).toBe(0);
+    expect(pageErrors).toEqual([]);
   });
 
   test('developer pages share one active shell and preserve module geometry', async ({ page }) => {

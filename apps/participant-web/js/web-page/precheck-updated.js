@@ -7,7 +7,7 @@ import {
     resetHeadPoseReference,
     setHeadPoseGuideMode,
     updateHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js';
+} from '../gaze-tracker/head-pose-guide.js?v=20260909-1';
 
 function dbg(scope, event, data) {
     try {
