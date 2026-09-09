@@ -115,7 +115,7 @@
       <div class="tag">Pre-check</div>
       <h2>Precheck (камера, лицо, освещение)</h2>
       <p>Проверка готовности: освещение, лицо в кадре, поза. Калибровка и кнопка «Начать калибровку» после прохождения.</p>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=precheck&v=20260324" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Precheck</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=precheck&v=20260909" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Precheck</a>
     </div>
     <div class="card">
       <div class="tag">BPM / rPPG</div>
@@ -146,13 +146,13 @@
       <h2>Reaction Time (Go/NoGo)</h2>
       <p>Кликер: считывание нажатий (Space/клик), лог в формате rt_component. Go/NoGo без MVP — только проверка аналитики и считывания. Скачать JSONL и прогнать через <code>rt_component-/scripts/analyze_log.py</code>.</p>
       <a href="developer/rt-test.html?v=20260324">Открыть RT-тест (кликер)</a>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260324" class="secondary" style="margin-left:8px;" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Полный модульный Hub</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260909" class="secondary" style="margin-left:8px;" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Полный модульный Hub</a>
     </div>
     <div class="card">
       <div class="tag">Gaze / Tracking</div>
       <h2>Gaze-on-target и Tracking</h2>
       <p>Калибровка взгляда и тест слежения: откроется сразу тестовый hub (без лэндинга респондента).</p>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260324" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Tracking/Hub</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=tracking&v=20260909" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Tracking/Hub</a>
     </div>
     <div class="card">
       <div class="tag">QC Metrics</div>
@@ -173,11 +173,10 @@
       <a href="developer/experiments.html">Открыть учет экспериментов</a>
     </div>
     <div class="card">
-      <div class="tag">Протокол</div>
-      <h2>Участник по приглашению</h2>
-      <p>Выполнение протокола по коду приглашения (instruction, consent, questionnaire, calibration, stimuli и т.д.).</p>
-      <a href="../participant-web/run_new.html">run_new.html</a>
-      <a href="../participant-web/run_new.html?code=test" class="secondary" style="margin-left:8px;">С кодом ?code=test</a>
+      <div class="tag">Интеграционная проверка</div>
+      <h2>Сессия без приглашения</h2>
+      <p>Тестовый запуск пречека, калибровки и модульного Hub. Пароль участника и ссылка на исследование не требуются.</p>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260909" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть тестовую сессию</a>
     </div>
     <div class="card">
       <div class="tag">Отчёт</div>

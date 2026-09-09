@@ -8,13 +8,13 @@ import {
     pushHubRun
 } from './session-schema.js';
 import { runVPCTest } from './vpc/runner.js';
-import { runVisuospatialDrawingTest } from './visuospatial/runner.js';
+import { runVisuospatialDrawingTest } from './visuospatial/runner.js?v=20260909-1';
 import {
     startGazeTestsAnalysisLoop,
     stopGazeTestsAnalysisLoop,
     isGazeTestsAnalysisLoopRunning
 } from './common/analysis-loop.js';
-import { getSessionRuntime } from '../../session-runtime/index.js';
+import { getSessionRuntime } from '../../session-runtime/index.js?v=20260909-1';
 
 let hubBusy = false;
 let hubEmotionTimer = null;

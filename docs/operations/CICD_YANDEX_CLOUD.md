@@ -10,7 +10,7 @@ The normal release trigger is a merged pull request that updates `main`.
 3. It authenticates to Yandex Cloud through GitHub OIDC; no long-lived cloud key is stored in GitHub.
 4. It pushes both images to Yandex Container Registry under the full commit SHA.
 5. Through a short-lived OS Login certificate it asks the VM's root-owned release controller to prepare the release.
-6. The VM reads production values from Lockbox using its attached runtime service account, pulls the images, creates a PostgreSQL custom-format dump, validates it, and uploads the dump plus checksum to Object Storage.
+6. The VM reads production values from Lockbox using its attached runtime service account, pulls the images, creates and validates a PostgreSQL dump and uploads archive, then uploads checksums and a completion manifest to Object Storage. Empty uploads are recorded in the manifest without uploading an empty archive.
 7. GitHub creates a boot-disk snapshot only after the logical database backup has completed.
 8. The VM applies forward migrations, starts the images, and checks database readiness and web health.
 9. If health checks fail, the controller starts the previously recorded application images again. It does not automatically reverse database migrations.
@@ -217,7 +217,7 @@ The retention policy is intentionally bounded:
 
 The VM also retains only the current and previous local `wecog-api` and `wecog-web` image tags after a healthy deployment or rollback. This cleanup matches those two exact registry repository names and does not prune unrelated Docker images or containers.
 
-The manually created baseline snapshot and the manually uploaded baseline archives are protected because automated cleanup selects only labelled snapshots and objects under the `postgresql/` prefix. Successful dump files are deleted from the VM immediately after both the dump and its checksum reach Object Storage.
+The manually created baseline snapshot and the manually uploaded baseline archives are protected because automated cleanup selects only labelled snapshots and objects under the `postgresql/` prefix. Successful backup files are deleted from the VM after the entire set and completion manifest reach Object Storage.
 
 ### Configure Object Storage lifecycle once
 
@@ -505,6 +505,152 @@ or multiple application instances are introduced, move `blackbox-exporter` and
 `otel-collector` to a separate monitoring VM or external probe. Keep the same
 target names and metric labels so existing dashboards and alerts continue to
 work.
+
+## Database + uploads backups and freshness alerts
+
+This extension needs a **separate, reviewed bootstrap installation and monitoring
+reload**. Merging application images alone does not update the VM's release
+controller, helper or Collector. Until installed, the existing VM continues its
+database-only backups. No cloud resources, permissions or alerts are created by
+the repository changes themselves.
+
+### Backup format and limits
+
+Both `wecog-release backup` (daily) and release preparation create one set below
+`postgresql/{daily|pre-deploy}/{timestamp}-{short-sha}/` in the existing private,
+KMS-encrypted bucket. The existing 35-day lifecycle prefix covers **all** files
+in this set, including uploads; baseline archives remain outside that prefix.
+Timestamps include nanoseconds to avoid overwriting same-second runs.
+For a pre-deploy set, the recorded release SHA is the **requested deployment**;
+the dump is taken before its migrations. Do not treat that SHA as proof of the
+dump's schema version or automatically restore it over the live database.
+
+Each completed set contains:
+
+- `wecog-….dump` and `.dump.sha256`;
+- `wecog-….uploads.tar.gz` and its `.sha256`, only when regular files exist;
+- `wecog-….manifest.json`, uploaded **last**, with release, reason, file count,
+  sizes and SHA-256 hashes. Empty uploads are explicit: `empty: true`, count `0`,
+  archive `null`. A missing uploads directory is an error, not an empty backup.
+
+A new-format prefix without the manifest is **incomplete**. Do not use it as a
+complete DB+files restore point. Older, database-only backups remain usable for
+database recovery. A successful upload means the storage API acknowledged all
+objects; it is not an independent download/restore drill. Checksums detect
+corruption, not malicious replacement of both an object and its checksum.
+
+The Python standard-library helper rejects links and special files, refuses to
+overwrite local archives, checks regular-file identity/size/mtime/ctime while
+copying, rescans the inventory, and reads the archive and gzip checksum before
+uploading. Limits are 100,000 files and 10 GiB of uncompressed file content per
+backup; exceeding them fails the operation and requires a reviewed capacity or
+storage design change. Production files and names are never printed by the
+helper. Successful local artifacts are removed; interrupted artifacts retain the
+existing two-day cleanup policy. Full daily copies multiply retained storage by
+the number of restore points, so review capacity before large imports.
+
+**Consistency limitation:** PostgreSQL's dump and the filesystem archive are
+not a shared transactional snapshot. Detected file changes fail the archive, but
+this does not prove cross-resource consistency (for example, deletion between
+the DB dump and the file inventory). Use a quiet window with upload/deletion
+writes paused for coordinated recovery evidence. Never automatically restore the
+live DB or overwrite live uploads after a health-check failure.
+
+### Metrics and alert setup
+
+The release controller atomically publishes numeric-only `.prom` files in
+`/var/lib/wecog/metrics`. Its JSON state is `0600`; exported files are `0644`
+inside a root-owned `0755` directory mounted read-only into node-exporter.
+The existing node-exporter gains `textfile` and `time` collectors. The existing
+OTel Collector forwards only the listed metrics with `target_name=production_vm`.
+No additional VM, container, key or bucket is needed.
+
+Metrics have only two fixed `reason` values, `daily` and `pre-deploy`:
+
+- `wecog_backup_last_success_timestamp_seconds`: time when the complete set was
+  uploaded, initially zero, never advanced by failures;
+- `wecog_backup_last_attempt_timestamp_seconds`: start of an attempt;
+- `wecog_backup_last_run_success`: last completed result, `1` or `0`;
+- `wecog_backup_in_progress`: `1` while working; starting does not clear the
+  previous result, preventing a successful running backup from looking failed;
+- `wecog_backup_uploads_files`: count in the last successful set.
+
+Failures during Lockbox/image preparation, dump, archive or upload fail the
+command and try to publish failure state. Abrupt power loss, SIGKILL, configuration
+failure before instrumentation, or inability to write metrics can leave stale
+state; **freshness and No data alerts are therefore required**, not just the
+success flag. Daily and pre-deploy history are independent, so a new deployment
+cannot conceal a stopped daily timer. A skipped backup before the first recorded
+release is not marked successful.
+
+After the first successful new-format daily backup, create alerts in Monium
+using the existing `wecog-production-alerts` channel and
+`project=folder_b1gakvq29fuiic89917k, service=wecog, cluster=production,
+target_name=production_vm`:
+
+| Alert | Query and condition | Window |
+| --- | --- | --- |
+| Backup failure | `name=wecog_backup_last_run_success`, select both reasons; Alarm `< 1` for any series | all values, 2m |
+| Daily backup too old | A: `name=node_time_seconds`; B: `name=wecog_backup_last_success_timestamp_seconds, reason=daily`; C: `A - B`; check C, Warning `> 93600` (26h), Alarm `> 108000` (30h) | all values, 5m |
+| Backup telemetry failure | `name=node_textfile_scrape_error`; Alarm `> 0` | all values, 2m |
+
+Use the strict absence policy: **Alarm** for both no points and no matching
+metrics, and a 60s evaluation delay. Enable notifications for Alarm and recovery
+to OK, and Warning if desired. A healthy HTTP probe alone is not backup evidence.
+Use a temporary test alert with a deliberately crossed threshold to verify
+delivery, then delete that test alert; do not break a production backup to test
+email. Failure injection belongs in the local tests. `in_progress` can remain
+`1` after a hard kill; freshness still becomes an alarm.
+
+See the [node-exporter textfile collector](https://github.com/prometheus/node_exporter#textfile-collector)
+and [Monium alert setup](https://yandex.cloud/ru/docs/monium/operations/alert/create-alert).
+Unix times are gauge values, not Prometheus sample timestamps.
+
+### Future rollout (operator only; do not run before approval)
+
+1. Preserve the current installed controller, helper if present, Compose and
+   monitoring configuration in a root-only rollback directory. Choose a quiet
+   window with no backup/deploy running; `bootstrap.sh` must not race a release.
+2. Install the complete reviewed bundle through `bootstrap.sh`, including the
+   new helper. Do not copy only `wecog-release`. Existing `release.conf`,
+   `monitoring.conf` and prior metric successes are preserved; the versioned
+   Compose and Collector files are replaced. Bootstrap initializes metrics but
+   does not restart the running monitoring containers.
+3. Run `sudo systemctl reload wecog-monitoring.service` to recreate **only the
+   monitoring** containers with the new collector flags/mounts/configuration.
+4. Run `sudo systemctl start wecog-backup.service`; inspect its result and journal.
+   Verify the completed set in Object Storage, including the manifest's explicit
+   empty-uploads state when applicable. No application deployment is necessary.
+5. Verify `wecog_backup_last_run_success{reason="daily"}=1` and a current success
+   timestamp in Monium, then configure/test the alerts above. Until a pre-deploy
+   backup has run with the new controller, its initialized result is zero; enable
+   the pre-deploy failure series only after that first successful run.
+6. Download the dump/checksum and, for a nonempty set, archive/checksum from the
+   same manifest. Check both using `sha256sum --check` on the VM (`shasum -a 256
+   --check` on macOS). Restore the DB only into a dedicated test DB as in the
+   existing drill. For files, use the installed helper on the VM:
+
+   ```bash
+   sudo python3 /opt/wecog/backup-support.py verify-uploads \
+     /ABSOLUTE/PATH/TO/DOWNLOADED.uploads.tar.gz \
+     --restore-to-new-directory /var/backups/wecog-uploads-restore-UNIQUE
+   ```
+
+   Replace both placeholders with explicit paths. The destination **must not
+   exist**; live uploads cannot be overwritten. The helper validates all members
+   and gzip integrity before creating it, accepts only regular relative files,
+   and prints a file count, never filenames. Compare the count and sample file
+   hashes with the chosen set. Restored files are root-owned and protected; moving
+   them into production, changing ownership to UID 10001, or deleting the drill
+   directory requires a separate operator decision. For an empty set, no file
+   archive exists; test this path using local fixtures, not fake production data.
+
+Rollback: restore the preserved controller and monitoring files and reload the
+monitoring service. Keep the new backup objects and metric history; do not delete
+data or revert SQL. If returning to the old DB-only controller, disable or adjust
+the new backup alerts explicitly: old code does not update their metric files.
+Until rollout and cloud alert creation are completed, these changes provide no
+new production backup or notification coverage.
 
 ## Growth path
 

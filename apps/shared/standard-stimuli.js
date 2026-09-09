@@ -31,16 +31,6 @@ const FLANKER_TEXT = Object.freeze({
   std_flanker_left_incong: '>><>>',
 });
 
-const EMO_VISUAL = {
-  neutral:  { emoji: '😐', bg: 'rgba(148,163,184,.22)', border: 'rgba(148,163,184,.45)' },
-  happy:    { emoji: '😊', bg: 'rgba(245,158,11,.18)', border: 'rgba(245,158,11,.42)' },
-  anger:    { emoji: '😠', bg: 'rgba(220,38,38,.14)', border: 'rgba(220,38,38,.38)' },
-  sad:      { emoji: '😢', bg: 'rgba(59,130,246,.14)', border: 'rgba(59,130,246,.38)' },
-  fear:     { emoji: '😨', bg: 'rgba(139,92,246,.14)', border: 'rgba(139,92,246,.38)' },
-  surprise: { emoji: '😲', bg: 'rgba(6,182,212,.14)', border: 'rgba(6,182,212,.38)' },
-  disgust:  { emoji: '🤢', bg: 'rgba(22,163,74,.14)', border: 'rgba(22,163,74,.38)' },
-};
-
 const EMO_LABEL = {
   ru: { neutral: 'нейтрально', happy: 'радость', anger: 'гнев', sad: 'грусть', fear: 'страх', surprise: 'удивление', disgust: 'отвращение' },
   en: { neutral: 'neutral', happy: 'happy', anger: 'anger', sad: 'sad', fear: 'fear', surprise: 'surprise', disgust: 'disgust' },
@@ -62,11 +52,36 @@ function resolveEmotionKey(stimulusId, meta) {
   return String(meta?.emotion || parseEmotionFromStdId(stimulusId) || 'neutral').toLowerCase();
 }
 
+function emotionFaceDataUri(emotionKey, stimulusId) {
+  const key = String(emotionKey || 'neutral').toLowerCase();
+  const match = String(stimulusId || '').match(/_(\d+)$/);
+  const variant = Math.max(1, Number(match?.[1]) || 1);
+  const skin = ['#f2c9a5', '#c98762', '#8c573f', '#e2ad83', '#6e4435', '#f0bd91'][(variant - 1) % 6];
+  const hair = ['#3b2a22', '#16181d', '#6b3e26', '#b77936', '#4b362e', '#25211f'][(variant - 1) % 6];
+  const features = {
+    neutral: '<path d="M225 185h54M361 185h54"/><circle cx="252" cy="220" r="9" fill="#172033"/><circle cx="388" cy="220" r="9" fill="#172033"/><path d="M258 326h124"/>',
+    happy: '<path d="M220 193q32-24 64 0M356 193q32-24 64 0"/><path d="M226 226q26 24 52 0M362 226q26 24 52 0"/><path d="M238 302q82 100 164 0"/>',
+    anger: '<path d="M218 200l66-28M356 172l66 28"/><circle cx="252" cy="226" r="10" fill="#172033"/><circle cx="388" cy="226" r="10" fill="#172033"/><path d="M246 350q74-72 148 0"/>',
+    sad: '<path d="M218 180q34-26 66 8M356 188q32-34 66-8"/><circle cx="252" cy="226" r="9" fill="#172033"/><circle cx="388" cy="226" r="9" fill="#172033"/><path d="M246 354q74-76 148 0"/><path d="M416 244q18 30 0 55q-18-25 0-55" fill="#69aee8" stroke="none"/>',
+    fear: '<path d="M216 174q36-30 70 0M354 174q34-30 70 0"/><ellipse cx="252" cy="224" rx="13" ry="20" fill="#172033"/><ellipse cx="388" cy="224" rx="13" ry="20" fill="#172033"/><ellipse cx="320" cy="332" rx="44" ry="54"/>',
+    surprise: '<path d="M216 170q36-30 70 0M354 170q34-30 70 0"/><circle cx="252" cy="224" r="12" fill="#172033"/><circle cx="388" cy="224" r="12" fill="#172033"/><ellipse cx="320" cy="326" rx="38" ry="52"/>',
+    disgust: '<path d="M218 184l66 18M356 202l66-18"/><circle cx="252" cy="226" r="9" fill="#172033"/><path d="M367 222q22 18 44 0"/><path d="M246 330q42-58 84-4q34 44 72-6"/>'
+  }[key] || '<path d="M225 185h54M361 185h54"/><circle cx="252" cy="220" r="9" fill="#172033"/><circle cx="388" cy="220" r="9" fill="#172033"/><path d="M258 326h124"/>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">'
+    + '<rect width="640" height="480" rx="36" fill="#edf1f4"/>'
+    + '<path d="M170 206q4-154 150-154t150 154v110q0 130-150 130T170 316z" fill="' + skin + '" stroke="#172033" stroke-width="8"/>'
+    + '<path d="M174 205q0-153 146-153t146 153q-40-72-146-72t-146 72z" fill="' + hair + '" stroke="#172033" stroke-width="8"/>'
+    + '<g fill="none" stroke="#172033" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">' + features + '</g>'
+    + '<path d="M320 224l-14 70h30" fill="none" stroke="#9a684e" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '</svg>';
+  return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+}
+
 const DEFAULT_FALLBACK_STIMULUS = Object.freeze({
   type: 'shape',
   style: {
-    width: '140px',
-    height: '140px',
+    width: 'clamp(180px, 22vw, 340px)',
+    height: 'clamp(180px, 22vw, 340px)',
     borderRadius: '8px',
     backgroundColor: '#5C66BD',
   },
@@ -116,8 +131,8 @@ function resolveStandardStimulus(stimulusId, meta, options) {
 
   if (id === 'std_simple_black_square') {
     return shapeStimulus({
-      width: '120px',
-      height: '120px',
+      width: 'clamp(180px, 20vw, 320px)',
+      height: 'clamp(180px, 20vw, 320px)',
       borderRadius: '10px',
       backgroundColor: '#020617',
     }, id);
@@ -125,8 +140,8 @@ function resolveStandardStimulus(stimulusId, meta, options) {
 
   if (id === 'std_go_green_circle') {
     return shapeStimulus({
-      width: '140px',
-      height: '140px',
+      width: 'clamp(190px, 22vw, 340px)',
+      height: 'clamp(190px, 22vw, 340px)',
       borderRadius: '50%',
       backgroundColor: '#16a34a',
     }, id);
@@ -134,8 +149,8 @@ function resolveStandardStimulus(stimulusId, meta, options) {
 
   if (id === 'std_nogo_red_circle') {
     return shapeStimulus({
-      width: '140px',
-      height: '140px',
+      width: 'clamp(190px, 22vw, 340px)',
+      height: 'clamp(190px, 22vw, 340px)',
       borderRadius: '50%',
       backgroundColor: '#dc2626',
     }, id);
@@ -147,7 +162,7 @@ function resolveStandardStimulus(stimulusId, meta, options) {
     const inkKey = raw[1] || raw[0] || 'red';
     const words = STROOP_WORDS[lang] || STROOP_WORDS.ru;
     return textStimulus(words[wordKey] || name, {
-      fontSize: 'clamp(48px, 9vw, 92px)',
+      fontSize: 'clamp(64px, 11vw, 150px)',
       fontWeight: '900',
       letterSpacing: '0.04em',
       color: colorFromToken(inkKey, '#0f172a'),
@@ -161,7 +176,7 @@ function resolveStandardStimulus(stimulusId, meta, options) {
   if (id.startsWith('std_flanker_')) {
     const text = FLANKER_TEXT[id] || metaText || String(name).split(':').pop()?.trim() || '';
     return textStimulus(text, {
-      fontSize: 'clamp(54px, 10vw, 100px)',
+      fontSize: 'clamp(68px, 12vw, 160px)',
       fontWeight: '900',
       letterSpacing: '0.08em',
       color: '#0f172a',
@@ -176,35 +191,33 @@ function resolveStandardStimulus(stimulusId, meta, options) {
     const shape = id.replace('std_nback_', '');
     if (shape === 'circle') {
       return shapeStimulus({
-        width: '130px',
-        height: '130px',
+        width: 'clamp(190px, 22vw, 340px)',
+        height: 'clamp(190px, 22vw, 340px)',
         borderRadius: '50%',
         backgroundColor: '#5c66bd',
       }, id);
     }
     if (shape === 'square') {
       return shapeStimulus({
-        width: '130px',
-        height: '130px',
+        width: 'clamp(190px, 22vw, 340px)',
+        height: 'clamp(190px, 22vw, 340px)',
         borderRadius: '16px',
         backgroundColor: '#5c66bd',
       }, id);
     }
     if (shape === 'triangle') {
       return shapeStimulus({
-        width: '0',
-        height: '0',
-        borderLeft: '76px solid transparent',
-        borderRight: '76px solid transparent',
-        borderBottom: '132px solid #5c66bd',
-        backgroundColor: 'transparent',
+        width: 'clamp(220px, 25vw, 380px)',
+        height: 'clamp(190px, 22vw, 330px)',
+        clipPath: 'polygon(50% 0, 100% 100%, 0 100%)',
+        backgroundColor: '#5c66bd',
         borderRadius: '0',
       }, id);
     }
     if (shape === 'diamond') {
       return shapeStimulus({
-        width: '120px',
-        height: '120px',
+        width: 'clamp(170px, 19vw, 290px)',
+        height: 'clamp(170px, 19vw, 290px)',
         borderRadius: '12px',
         backgroundColor: '#5c66bd',
         transform: 'rotate(45deg)',
@@ -215,7 +228,7 @@ function resolveStandardStimulus(stimulusId, meta, options) {
   if (id === 'std_pvt_counter') {
     return textStimulus('000', {
       fontFamily: 'ui-monospace, monospace',
-      fontSize: 'clamp(56px, 10vw, 104px)',
+      fontSize: 'clamp(72px, 12vw, 160px)',
       fontWeight: '900',
       color: '#dc2626',
       backgroundColor: 'transparent',
@@ -234,7 +247,7 @@ function resolveStandardStimulus(stimulusId, meta, options) {
       ? generatedText
       : candidate;
     return textStimulus(text, {
-      fontSize: 'clamp(58px, 11vw, 110px)',
+      fontSize: 'clamp(72px, 13vw, 170px)',
       fontWeight: '900',
       letterSpacing: '0.08em',
       color: '#0f172a',
@@ -247,27 +260,13 @@ function resolveStandardStimulus(stimulusId, meta, options) {
 
   if (id.startsWith('std_emo_')) {
     const emotionKey = resolveEmotionKey(id, meta);
-    const vis = EMO_VISUAL[emotionKey] || EMO_VISUAL.neutral;
-    const label = emotionDisplayLabel(emotionKey, lang);
-    return textStimulus(vis.emoji + '\n' + label.toUpperCase(), {
-      fontSize: '16px',
-      fontWeight: '800',
-      letterSpacing: '0.08em',
-      color: '#0f172a',
-      backgroundColor: vis.bg,
-      width: 'min(340px, 70vw)',
-      minHeight: '180px',
-      borderRadius: '24px',
-      border: '1px solid ' + vis.border,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '12px',
-      whiteSpace: 'pre-wrap',
-      textAlign: 'center',
-      lineHeight: '1.2',
-    }, id);
+    return imageStimulus(emotionFaceDataUri(emotionKey, id), id, {
+      width: 'min(82vw, 920px)',
+      maxWidth: '96%',
+      maxHeight: '92%',
+      objectFit: 'contain',
+      borderRadius: '22px',
+    });
   }
 
   return null;
@@ -305,11 +304,12 @@ function resolveParticipantStimulus(params) {
   return fallback;
 }
 
-const api = {
+const standardStimuliApi = {
   normalizeStimulusId,
   parseEmotionFromStdId,
   resolveEmotionKey,
   emotionDisplayLabel,
+  emotionFaceDataUri,
   colorFromToken,
   resolveStandardStimulus,
   resolveParticipantStimulus,
@@ -318,8 +318,8 @@ const api = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = api;
+  module.exports = standardStimuliApi;
 }
 if (typeof window !== 'undefined') {
-  window.StandardStimuli = api;
+  window.StandardStimuli = standardStimuliApi;
 }

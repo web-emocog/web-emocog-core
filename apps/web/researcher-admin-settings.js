@@ -230,8 +230,8 @@ function SettingsView(){
       <h3>${t('settingsTitle')}</h3>
       <p style="margin-top:6px;">${t('settingsSub')}</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
-        <input type="password" class="select" style="max-width:260px;background:#fff;" placeholder="${t('currentPassword')}" />
-        <input type="password" class="select" style="max-width:300px;background:#fff;" placeholder="${t('newPassword')}" />
+        <input type="password" name="wecog-current-password" autocomplete="current-password" class="select" style="max-width:260px;background:#fff;" placeholder="${t('currentPassword')}" />
+        <input type="password" name="wecog-new-password" autocomplete="new-password" class="select" style="max-width:300px;background:#fff;" placeholder="${t('newPassword')}" />
         <button class="quick-btn" style="font-weight:700;">${t('changePassword')}</button>
       </div>
     </div>

@@ -42,6 +42,7 @@ build/
 *.dump.sha256
 backups/
 _audit_*.txt
+apps/api/uploads/
 
 # IDE
 .idea/

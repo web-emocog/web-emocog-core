@@ -23,9 +23,22 @@ async function hydrateApiStimulusPreview(stimulus) {
   const response = await fetch(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' });
   if (!response.ok) throw typeof apiFailError === 'function' ? await apiFailError(response) : new Error(String(response.status));
   const blob = await response.blob();
-  if (stimulus.url && String(stimulus.url).startsWith('blob:')) URL.revokeObjectURL(stimulus.url);
-  stimulus.url = URL.createObjectURL(blob);
+  if (stimulus._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
+  stimulus._previewObjectUrl = URL.createObjectURL(blob);
   return stimulus;
+}
+
+function persistStimuliList() {
+  const serializable = stimuliList.map(stimulus => {
+    const copy = { ...stimulus };
+    delete copy._previewObjectUrl;
+    delete copy._previewHydrating;
+    if (copy.apiContentUrl && String(copy.url || '').startsWith('blob:')) {
+      copy.url = absoluteStimulusApiUrl(copy.apiContentUrl);
+    }
+    return copy;
+  });
+  localStorage.setItem('emocog_stimuli', JSON.stringify(serializable));
 }
 
 function convertedStimulusFromApi(row, sourceFile, index, count) {
@@ -35,7 +48,7 @@ function convertedStimulusFromApi(row, sourceFile, index, count) {
   return {
     id,
     name: row?.name || `${sourceFile.name.replace(/\.[^.]+$/, '')}_${index + 1}.jpg`,
-    type: 'image',
+    type: 'slides',
     info: `${CURRENT_LANG === 'en' ? 'Page' : 'Страница'} ${index + 1}/${count}`,
     url: absoluteStimulusApiUrl(apiContentUrl),
     apiContentUrl,
@@ -51,7 +64,59 @@ function isConvertibleStimulusDocument(file) {
   return /\.(pdf|ppt|pptx)$/i.test(String(file?.name || ''));
 }
 
-async function convertDocumentToStimuli(file) {
+function showStimulusImportProgress(fileName) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10020;background:rgba(10,15,35,.58);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `<div style="width:min(460px,94vw);padding:24px;border-radius:18px;background:var(--card-bg);border:1px solid var(--stroke);box-shadow:var(--shadow);color:var(--text);">
+    <div style="font-size:16px;font-weight:800;">${CURRENT_LANG === 'en' ? 'Preparing stimuli' : 'Подготовка стимулов'}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:6px;overflow-wrap:anywhere;">${escapeStimulusHtml(fileName)}</div>
+    <div data-progress-label style="font-size:13px;font-weight:650;margin-top:18px;">${CURRENT_LANG === 'en' ? 'Uploading and converting the document…' : 'Загрузка и конвертация документа…'}</div>
+    <div style="height:9px;border-radius:999px;background:var(--panel2);overflow:hidden;margin-top:10px;"><div data-progress-bar style="height:100%;width:12%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),var(--good));transition:width .2s;"></div></div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px;">${CURRENT_LANG === 'en' ? 'Do not refresh the page until processing is complete.' : 'Не обновляйте страницу до завершения обработки.'}</div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const label = overlay.querySelector('[data-progress-label]');
+  const bar = overlay.querySelector('[data-progress-bar]');
+  return {
+    update(current, total, phase) {
+      const safeTotal = Math.max(1, Number(total) || 1);
+      const safeCurrent = Math.min(safeTotal, Math.max(0, Number(current) || 0));
+      bar.style.width = `${Math.max(12, Math.round((safeCurrent / safeTotal) * 100))}%`;
+      label.textContent = phase || (CURRENT_LANG === 'en'
+        ? `Preparing page ${safeCurrent} of ${safeTotal}`
+        : `Подготовка страницы ${safeCurrent} из ${safeTotal}`);
+    },
+    close() { overlay.remove(); }
+  };
+}
+
+function wireStimulusDropzone(zone, acceptFile, onFiles) {
+  if (!zone) return;
+  const reset = () => {
+    zone.style.transform = '';
+    zone.style.filter = '';
+  };
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    zone.style.transform = 'translateY(-2px)';
+    zone.style.filter = 'brightness(1.04)';
+  });
+  zone.addEventListener('dragleave', reset);
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    reset();
+    const files = Array.from(event.dataTransfer?.files || []).filter(acceptFile);
+    if (!files.length) {
+      toast(CURRENT_LANG === 'en' ? 'These file types are not supported.' : 'Этот тип файлов не поддерживается.', 'error');
+      return;
+    }
+    Promise.resolve(onFiles(files)).catch(error => {
+      toast(`${CURRENT_LANG === 'en' ? 'Import failed.' : 'Ошибка импорта.'} ${error?.message || ''}`.trim(), 'error');
+    });
+  });
+}
+
+async function convertDocumentToStimuli(file, onProgress) {
   if (!isConvertibleStimulusDocument(file)) {
     throw new Error(CURRENT_LANG === 'en' ? 'Only PDF, PPT, and PPTX files are supported.' : 'Поддерживаются только файлы PDF, PPT и PPTX.');
   }
@@ -67,6 +132,7 @@ async function convertDocumentToStimuli(file) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('project_id', String(projectId));
+  onProgress?.(0, 1, CURRENT_LANG === 'en' ? 'Uploading and converting the document…' : 'Загрузка и конвертация документа…');
   const result = await apiPost('/stimuli/convert', formData);
   const rows = Array.isArray(result?.stimuli)
     ? result.stimuli
@@ -81,8 +147,49 @@ async function convertDocumentToStimuli(file) {
       : 'Сервис конвертации не вернул изображения.');
   }
   const converted = rows.map((row, index) => convertedStimulusFromApi(row, file, index, rows.length));
-  await Promise.allSettled(converted.map(stimulus => hydrateApiStimulusPreview(stimulus)));
+  for (let index = 0; index < converted.length; index += 1) {
+    onProgress?.(index + 1, converted.length);
+    try { await hydrateApiStimulusPreview(converted[index]); } catch (_) { /* API URL remains available for retry. */ }
+  }
   return converted;
+}
+
+function stimulusTypeFromFile(file) {
+  const mime = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || '').toLowerCase();
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('text/') || name.endsWith('.txt')) return 'text';
+  return 'other';
+}
+
+function readStimulusDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('File read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function stimulusPreviewHtml(stimulus) {
+  const name = escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : stimulus?.name || '');
+  const url = escapeStimulusHtml(stimulus?._previewObjectUrl || stimulus?.url || '');
+  if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && url) return `<img src="${url}" alt="${name}" style="width:100%;height:100%;display:block;object-fit:contain;">`;
+  if (stimulus?.type === 'video' && url) return `<video src="${url}" muted preload="metadata" style="width:100%;height:100%;display:block;object-fit:contain;"></video>`;
+  if (stimulus?.type === 'audio' && url) return `<audio src="${url}" controls preload="metadata" style="width:92%;height:34px;"></audio>`;
+  const standard = window.StandardStimuli?.resolveStandardStimulus?.(stimulus?.id, stimulus, { lang: CURRENT_LANG });
+  if (standard?.type === 'image' && standard.src) return `<img src="${escapeStimulusHtml(standard.src)}" alt="${name}" style="width:100%;height:100%;display:block;object-fit:contain;">`;
+  if (standard?.type === 'text') {
+    return `<div style="font-size:clamp(18px,3vw,32px);font-weight:900;color:${escapeStimulusHtml(standard.style?.color || 'var(--text)')};white-space:nowrap;transform:scale(.78);">${escapeStimulusHtml(standard.text)}</div>`;
+  }
+  if (standard?.type === 'shape') {
+    const style = standard.style || {};
+    const shapeCss = Object.entries(style).map(([key, value]) => `${key.replace(/[A-Z]/g, char => '-' + char.toLowerCase())}:${value}`).join(';');
+    return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;"><div style="${escapeStimulusHtml(shapeCss)};transform:scale(.48);"></div></div>`;
+  }
+  return `<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="34" height="34" style="color:var(--muted);"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>`;
 }
 
 function StimuliAOIView() {
@@ -177,7 +284,7 @@ function StimuliAOIView() {
 
   const gallery = document.createElement('div');
   gallery.id = 'stimuliGallery';
-  gallery.style.cssText = 'flex:1; display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,120px)); gap:12px; overflow-y:auto; padding:4px 20px 20px; align-content:start;';
+  gallery.style.cssText = 'flex:1; display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:14px; overflow-y:auto; padding:4px 20px 20px; align-content:start;';
   root.appendChild(gallery);
 
   const uploadArea = document.createElement('div');
@@ -205,7 +312,7 @@ function StimuliAOIView() {
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
           </div>
           <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">${CURRENT_LANG === 'en' ? 'Presentations and PDFs' : 'Презентации и PDF'}</div>
-          <div style="font-size:12px; color:var(--muted); line-height:1.4;">${CURRENT_LANG === 'en' ? 'Automatically converted into image stimuli' : 'Автоматически конвертируются в картинки-стимулы'}</div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4;">${CURRENT_LANG === 'en' ? 'Automatically converted into separate slides' : 'Автоматически конвертируются в отдельные слайды'}</div>
           <div style="font-size:10px;color:var(--muted2);line-height:1.4;margin-top:7px;">${CURRENT_LANG === 'en' ? 'Requires a connection to the conversion API' : 'Требуется подключение к API конвертации'}</div>
           <input type="file" id="input_docs" accept=".pdf,.ppt,.pptx" multiple style="display:none;">
         </div>
@@ -217,8 +324,7 @@ function StimuliAOIView() {
   uploadArea.querySelector('#dropzone_media').onclick = () => uploadArea.querySelector('#input_media').click();
   uploadArea.querySelector('#dropzone_docs').onclick = () => uploadArea.querySelector('#input_docs').click();
 
-  uploadArea.querySelector('#input_docs').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
+  async function importDocumentFiles(files, folder) {
     if (!files.length) return;
     const dropzone = uploadArea.querySelector('#dropzone_docs');
     dropzone.style.pointerEvents = 'none';
@@ -226,17 +332,29 @@ function StimuliAOIView() {
     let convertedCount = 0;
     try {
       for (const file of files) {
-        toast(CURRENT_LANG === 'en' ? `Converting ${file.name}…` : `Конвертация ${file.name}…`);
-        const converted = await convertDocumentToStimuli(file);
+        const progress = showStimulusImportProgress(file.name);
+        let converted;
+        try {
+          converted = await convertDocumentToStimuli(file, (current, total, phase) => progress.update(current, total, phase));
+        } finally {
+          progress.close();
+        }
         stimuliList.unshift(...converted);
+        if (folder) {
+          folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...converted.map(stimulus => String(stimulus.id))])];
+          localStorage.setItem('emocog_folders', JSON.stringify(folders));
+        }
         convertedCount += converted.length;
-        localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+        persistStimuliList();
       }
-      renderStimuliGallery(gallery);
-      showTab('library');
+      if (folder) renderFolderView();
+      else {
+        renderStimuliGallery(gallery);
+        showTab('library');
+      }
       toast(CURRENT_LANG === 'en'
-        ? `${convertedCount} image stimuli added.`
-        : `Добавлено изображений-стимулов: ${convertedCount}.`);
+        ? `${convertedCount} slides added.`
+        : `Добавлено слайдов: ${convertedCount}.`);
     } catch (error) {
       const unavailable = /\b404\b/.test(String(error?.message || ''));
       const prefix = unavailable
@@ -246,15 +364,56 @@ function StimuliAOIView() {
     } finally {
       dropzone.style.pointerEvents = '';
       dropzone.style.opacity = '';
-      e.target.value = '';
     }
+  }
+
+  async function importMediaFiles(files, folder) {
+    if (!files.length) return;
+    const dropzone = uploadArea.querySelector('#dropzone_media');
+    const progress = showStimulusImportProgress(files.length === 1
+      ? files[0].name
+      : (CURRENT_LANG === 'en' ? `${files.length} media files` : `${files.length} медиафайлов`));
+    dropzone.style.pointerEvents = 'none';
+    dropzone.style.opacity = '.55';
+    try {
+      const newIds = (await handleFileUpload(files, (current, total) => {
+        progress.update(current, total, CURRENT_LANG === 'en'
+          ? `Uploading file ${current} of ${total}`
+          : `Загрузка файла ${current} из ${total}`);
+      })).map(String);
+      if (folder) {
+        folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...newIds])];
+        localStorage.setItem('emocog_folders', JSON.stringify(folders));
+        renderFolderView();
+      } else {
+        renderStimuliGallery(gallery);
+        showTab('library');
+      }
+      toast(CURRENT_LANG === 'en' ? 'Media files added.' : 'Медиафайлы добавлены.');
+      return newIds;
+    } catch (error) {
+      toast(`${CURRENT_LANG === 'en' ? 'Media upload failed.' : 'Ошибка загрузки медиа.'} ${error?.message || ''}`.trim(), 'error');
+      return [];
+    } finally {
+      progress.close();
+      dropzone.style.pointerEvents = '';
+      dropzone.style.opacity = '';
+    }
+  }
+
+  uploadArea.querySelector('#input_docs').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    await importDocumentFiles(files);
+    e.target.value = '';
   });
+  wireStimulusDropzone(uploadArea.querySelector('#dropzone_docs'), isConvertibleStimulusDocument, importDocumentFiles);
+  wireStimulusDropzone(uploadArea.querySelector('#dropzone_media'), file => !isConvertibleStimulusDocument(file), importMediaFiles);
 
   const folderView = document.createElement('div');
   folderView.id = 'stimuliFolderView';
   folderView.style.cssText = 'display:none; flex:1; flex-direction:column; gap:12px; overflow:hidden;';
   folderView.innerHTML = `
-    <div id="folderViewContent" style="flex:1; display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,120px)); gap:12px; overflow-y:auto; padding:12px 20px 4px; align-content:start;"></div>
+    <div id="folderViewContent" style="flex:1; display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:14px; overflow-y:auto; padding:12px 20px 4px; align-content:start;"></div>
     <div style="display:flex; gap:8px; flex-shrink:0; padding:8px 20px 12px; border-top:1px solid var(--stroke); flex-wrap:wrap;">
       <button class="quick-btn" id="folderAddLibraryBtn" style="flex:1; min-width:140px; max-width:220px; justify-content:center; font-size:12px; padding:8px 12px;">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;">
@@ -322,11 +481,9 @@ function StimuliAOIView() {
       content.innerHTML = `<div style="grid-column:1/-1; color:var(--muted); font-size:13px; padding:24px 0;">${t('folderEmpty')}</div>`;
     } else {
       content.innerHTML = folderStimuli.map(s => `
-        <div class="stimulus-card" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;">
-          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
-            ${getIconForType(s.type)}
-          </svg>
-          <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
+        <div class="stimulus-card" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;width:auto;height:176px;justify-content:flex-start;padding:9px;">
+          <div style="width:100%;height:118px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;">${stimulusPreviewHtml(s)}</div>
+          <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;max-width:100%;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
           <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
           <button class="remove-from-folder-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;" title="${CURRENT_LANG === 'en' ? 'Remove' : 'Убрать'}">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -360,9 +517,10 @@ function StimuliAOIView() {
     const cardsHtml = available.length === 0
       ? `<div style="grid-column:1/-1;color:var(--muted);font-size:14px;padding:24px 0;text-align:center;">${CURRENT_LANG === 'en' ? 'All stimuli have already been added to this folder' : 'Все стимулы уже добавлены в эту папку'}</div>`
       : available.map(s => {
-          const thumb = (s.type === 'image' && s.url)
+          const previewUrl = s._previewObjectUrl || s.url;
+          const thumb = ((s.type === 'image' || s.type === 'slides') && previewUrl)
             ? `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#eee;">
-                <img src="${escapeStimulusHtml(s.url)}" style="width:100%;height:100%;object-fit:cover;display:block;">
+                <img src="${escapeStimulusHtml(previewUrl)}" style="width:100%;height:100%;object-fit:cover;display:block;">
               </div>`
             : `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:rgba(92,102,189,.07);display:flex;align-items:center;justify-content:center;">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="color:var(--muted);">${getIconForType(s.type)}</svg>
@@ -445,34 +603,10 @@ function StimuliAOIView() {
     });
   });
 
-  uploadArea.querySelector('#input_media').addEventListener('change', function(e) {
+  uploadArea.querySelector('#input_media').addEventListener('change', async function(e) {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    if (typeof handleFileUpload === 'function') {
-      handleFileUpload(files);
-    } else {
-      // для локальной работы
-      files.forEach(file => {
-        const reader = new FileReader();
-        reader.onload = ev => {
-          stimuliList.push({
-            id: 'stim_' + Date.now() + Math.floor(Math.random()*1000),
-            name: file.name,
-            type: file.type.startsWith('image') ? 'image' : (file.type.startsWith('video') ? 'video' : 'other'),
-            url: ev.target.result,
-            info: (file.size/1024).toFixed(1) + ' KB',
-            createdAt: new Date().toISOString()
-          });
-          localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
-        };
-        reader.readAsDataURL(file);
-      });
-    }
-
-    setTimeout(() => {
-      toast(CURRENT_LANG === 'en' ? 'Media files added!' : 'Медиафайлы добавлены!');
-      showTab('library');
-    }, 500);
+    await importMediaFiles(files);
     this.value = '';
   });
 
@@ -483,21 +617,9 @@ function StimuliAOIView() {
     const files = Array.from(e.target.files || []);
     const documents = files.filter(isConvertibleStimulusDocument);
     const mediaFiles = files.filter(file => !isConvertibleStimulusDocument(file));
-    const newIds = mediaFiles.length ? handleFileUpload(mediaFiles).map(String) : [];
-    folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...newIds])];
-    localStorage.setItem('emocog_folders', JSON.stringify(folders));
     try {
-      for (const file of documents) {
-        toast(CURRENT_LANG === 'en' ? `Converting ${file.name}…` : `Конвертация ${file.name}…`);
-        const converted = await convertDocumentToStimuli(file);
-        stimuliList.unshift(...converted);
-        const convertedIds = converted.map(stimulus => String(stimulus.id));
-        folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...convertedIds])];
-        localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
-        localStorage.setItem('emocog_folders', JSON.stringify(folders));
-      }
-      renderFolderView();
-      if (documents.length) toast(CURRENT_LANG === 'en' ? 'Document pages added to the folder.' : 'Страницы документов добавлены в папку.');
+      if (mediaFiles.length) await importMediaFiles(mediaFiles, folder);
+      if (documents.length) await importDocumentFiles(documents, folder);
     } catch (error) {
       renderFolderView();
       toast(`${CURRENT_LANG === 'en' ? 'Conversion failed.' : 'Ошибка при конвертации.'} ${error?.message || ''}`.trim(), 'error');
@@ -514,21 +636,50 @@ function StimuliAOIView() {
   return root;
 }
 
-function handleFileUpload(files) {
+async function handleFileUpload(files, onProgress) {
   const newIds = [];
-  files.forEach(file => {
-    let type = 'other';
-    if (file.type.startsWith('image/')) type = 'image';
-    else if (file.type.startsWith('video/')) type = 'video';
-    else if (file.type.startsWith('audio/')) type = 'audio';
-    else if (file.type.startsWith('text/') || file.name.endsWith('.txt')) type = 'text';
-    else if (file.name.endsWith('.pptx') || file.name.endsWith('.ppt') || file.type.includes('presentation')) type = 'slides';
-    const id = String(Date.now() + Math.random());
-    const newItem = { id, name: file.name, type, info: `${(file.size/1024).toFixed(1)} KB`, url: URL.createObjectURL(file) };
+  const useApi = typeof apiPost === 'function' && typeof resolveApiProjectId === 'function'
+    && typeof hasResearcherApiToken === 'function' && hasResearcherApiToken();
+  const projectId = useApi ? await resolveApiProjectId() : null;
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+    const file = files[fileIndex];
+    onProgress?.(fileIndex + 1, files.length);
+    const type = stimulusTypeFromFile(file);
+    let newItem;
+    if (useApi) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('project_id', String(projectId));
+      formData.append('name', file.name);
+      const row = await apiPost('/stimuli/upload', formData);
+      const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(row.id)}/content`;
+      newItem = {
+        id: String(row.id),
+        name: row.name || file.name,
+        type,
+        info: `${(Number(row.size_bytes || file.size) / 1024).toFixed(1)} KB`,
+        url: absoluteStimulusApiUrl(apiContentUrl),
+        apiContentUrl,
+        apiStimulusId: row.id,
+        mimeType: row.mime_type || file.type,
+        createdAt: row.created_at || new Date().toISOString()
+      };
+      try { await hydrateApiStimulusPreview(newItem); } catch (_) { /* Retry on the next library render. */ }
+    } else {
+      const id = String(Date.now() + Math.random());
+      newItem = {
+        id,
+        name: file.name,
+        type,
+        info: `${(file.size / 1024).toFixed(1)} KB`,
+        url: await readStimulusDataUrl(file),
+        createdAt: new Date().toISOString()
+      };
+    }
     stimuliList.unshift(newItem);
-    newIds.push(id);
-  });
-  localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+    newIds.push(String(newItem.id));
+  }
+  persistStimuliList();
   return newIds;
 }
 
@@ -606,14 +757,17 @@ function renderStimuliGallery(container) {
   container.innerHTML = filtered.length === 0
     ? `<div style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:24px 0;">${CURRENT_LANG === 'en' ? 'No stimuli. Upload files using the Upload tab.' : 'Нет стимулов. Загрузите файлы через вкладку «Загрузка».'}</div>`
     : filtered.map(s => `
-    <div class="stimulus-card ${String(s.id) === String(selectedStimulusId) ? 'selected' : ''}" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;">
-      <button class="stim-delete-btn" data-id="${escapeStimulusHtml(s.id)}" title="${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}">
-        <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
-      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
-        ${getIconForType(s.type)}
-      </svg>
-      <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
+    <div class="stimulus-card ${String(s.id) === String(selectedStimulusId) ? 'selected' : ''}" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;width:auto;height:176px;justify-content:flex-start;padding:9px;">
+      ${s.standard ? '' : `<div style="position:absolute;top:5px;right:5px;z-index:3;display:flex;gap:4px;">
+        <button class="stim-edit-btn" data-id="${escapeStimulusHtml(s.id)}" title="${CURRENT_LANG === 'en' ? 'Rename' : 'Изменить название'}" style="width:24px;height:24px;border:1px solid var(--stroke);border-radius:7px;background:var(--card-bg);color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 17l-4 1 1-4L16.5 3.5a2.5 2.5 0 013.536 3.536L9 17z"/></svg>
+        </button>
+        <button class="stim-delete-btn" data-id="${escapeStimulusHtml(s.id)}" title="${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}" style="position:static;">
+          <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>`}
+      <div style="width:100%;height:118px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;">${stimulusPreviewHtml(s)}</div>
+      <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
       <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
     </div>
   `).join('');
@@ -624,9 +778,40 @@ function renderStimuliGallery(container) {
       deleteStimulusFromLibrary(button.dataset.id);
     });
   });
+  container.querySelectorAll('.stim-edit-btn').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      renameStimulusInLibrary(button.dataset.id, container);
+    });
+  });
   container.querySelectorAll('.stimulus-card').forEach(card => {
     card.addEventListener('click', () => selectStimulus(card.dataset.id));
   });
+}
+
+async function renameStimulusInLibrary(id, container) {
+  const stimulus = stimuliList.find(item => String(item.id) === String(id));
+  if (!stimulus || stimulus.standard) return;
+  const proposed = window.prompt(
+    CURRENT_LANG === 'en' ? 'Stimulus title' : 'Название стимула',
+    stimulus.name || ''
+  );
+  if (proposed == null) return;
+  const name = proposed.trim();
+  if (!name || name === stimulus.name) return;
+  try {
+    if (stimulus.apiStimulusId && typeof apiPatch === 'function') {
+      const updated = await apiPatch('/stimuli/' + encodeURIComponent(stimulus.apiStimulusId), { name });
+      stimulus.name = updated?.name || name;
+    } else {
+      stimulus.name = name;
+    }
+    persistStimuliList();
+    renderStimuliGallery(container || document.getElementById('stimuliGallery'));
+    toast(CURRENT_LANG === 'en' ? 'Stimulus renamed' : 'Название стимула сохранено');
+  } catch (error) {
+    toast(`${CURRENT_LANG === 'en' ? 'Could not rename stimulus.' : 'Не удалось изменить название.'} ${error?.message || ''}`.trim(), 'error');
+  }
 }
 
 function deleteStimulusFromLibrary(id) {
@@ -635,7 +820,7 @@ function deleteStimulusFromLibrary(id) {
   folders.forEach(f => {
     if (f.stimuliIds) f.stimuliIds = f.stimuliIds.filter(x => String(x) !== String(id));
   });
-  localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+  persistStimuliList();
   localStorage.setItem('emocog_folders', JSON.stringify(folders));
   if (String(selectedStimulusId) === String(id)) selectedStimulusId = null;
   const gallery = document.getElementById('stimuliGallery');
@@ -705,7 +890,7 @@ function normalizeAoi(aoi, stimulusId, fallbackOrder = 1) {
 function persistStimulusAois(stimulus, aois) {
   stimulus.aois = (aois || []).map((aoi, index) => normalizeAoi(aoi, stimulus.id, index + 1)).filter(Boolean);
   stimulus.aoiSchemaVersion = AOI_SCHEMA_VERSION;
-  localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+  persistStimuliList();
 }
 
 // Legacy import only: new protocols keep AOIs in each blockConfig.aoiDefinitions.
@@ -724,7 +909,7 @@ function applyStimuliDefinitionsToLibrary(definitions) {
     stimulus.aois = (definition.aois || []).map((aoi, index) => normalizeAoi(aoi, stimulusId, index + 1)).filter(Boolean);
     changed = true;
   });
-  if (changed) localStorage.setItem('emocog_stimuli', JSON.stringify(stimuliList));
+  if (changed) persistStimuliList();
 }
 
 function openAoiEditor(stimulusId, options = {}) {
@@ -768,7 +953,7 @@ function openAoiEditor(stimulusId, options = {}) {
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 310px;flex:1;min-height:0;">
       <div id="aoiViewport" style="padding:18px;display:flex;align-items:center;justify-content:center;background:var(--panel2);min-width:0;min-height:0;overflow:hidden;">
         <div id="aoiStage" style="position:relative;width:100%;aspect-ratio:16/9;background:#fff;border:1px solid #d8deea;border-radius:12px;box-shadow:0 8px 24px rgba(30,41,59,.10);overflow:hidden;user-select:none;touch-action:none;flex:none;">
-          ${stimulus.type === 'image' && stimulus.url
+          ${(stimulus.type === 'image' || stimulus.type === 'slides') && stimulus.url
             ? `<img id="aoiMedia" src="${aoiEscape(stimulus.url)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
             : stimulus.type === 'video' && stimulus.url
               ? `<video id="aoiMedia" src="${aoiEscape(stimulus.url)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`

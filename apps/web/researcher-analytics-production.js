@@ -1806,6 +1806,14 @@
   }
 
   function technicalDetailsHtml(session, algorithms) {
+    const timerRows = Array.isArray(session.protocolTimers)
+      ? session.protocolTimers
+        .filter(timer => Number.isFinite(Number(timer.durationMs)))
+        .map(timer => [
+          `${tr('Таймер','Timer')}: ${timer.name || timer.id}`,
+          `${(Number(timer.durationMs) / 1000).toFixed(1)} ${tr('с','s')}`
+        ])
+      : [];
     const rows = [
       [tr('Устройство','Device'), deviceClassLabel(session.deviceClass)],
       [tr('Экран','Screen'), resolutionLabel(session.resolution)],
@@ -1816,7 +1824,8 @@
       [tr('Браузер','Browser'), session.browserFamily],
       [tr('Язык браузера','Browser language'), session.browserLanguage],
       [tr('Плотность пикселей','Pixel ratio'), session.pixelRatio],
-      [tr('Класс процессора','Processor class'), session.processorClass]
+      [tr('Класс процессора','Processor class'), session.processorClass],
+      ...timerRows
     ].filter(([, value]) => value !== null && value !== undefined && value !== '');
     return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:10px;">${rows.map(([label, value]) => `<div style="padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;background:rgba(100,116,139,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(label)}</div><div style="font-size:10px;font-weight:650;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div><div style="font-size:9px;color:var(--muted);margin-top:9px;line-height:1.5;">${tr('Версии алгоритмов','Algorithm versions')}: ${escapeHtml(algorithms || '—')}</div>`;
   }
