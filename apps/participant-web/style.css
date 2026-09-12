@@ -291,11 +291,13 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     cursor: pointer;
     z-index: 2001;
     transform: translate(-50%, -50%);
-    transition: transform 0.12s ease, opacity 0.12s ease;
+    transition: none;
+    animation: none;
+    box-shadow: none;
 }
 
 .fullscreen-calib-point:hover {
-    transform: translate(-50%, -50%) scale(1.2);
+    transform: translate(-50%, -50%);
 }
 
 .calib-instruction {
