@@ -746,6 +746,86 @@ test.describe('Participant session runtime', () => {
     await expect(page.locator('#wecog-session-alert')).toBeHidden();
   });
 
+  test('calibration marker moves instantly without leaving a stale target', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+
+    const markerState = await page.evaluate(async () => {
+      const screen = document.getElementById('fullscreenCalibration') as HTMLElement;
+      const point = document.getElementById('fullscreenCalibPoint') as HTMLElement;
+      screen.classList.add('active');
+      point.style.display = 'block';
+      point.style.left = '20%';
+      point.style.top = '20%';
+
+      const afterPaint = () => new Promise<void>(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      await afterPaint();
+
+      const firstRect = point.getBoundingClientRect();
+      const firstCenter = {
+        x: firstRect.left + firstRect.width / 2,
+        y: firstRect.top + firstRect.height / 2,
+      };
+
+      point.style.left = '80%';
+      point.style.top = '80%';
+      await afterPaint();
+
+      const secondRect = point.getBoundingClientRect();
+      const secondCenter = {
+        x: secondRect.left + secondRect.width / 2,
+        y: secondRect.top + secondRect.height / 2,
+      };
+      const style = getComputedStyle(point);
+
+      return {
+        markerCount: document.querySelectorAll('#fullscreenCalibPoint').length,
+        transitionDuration: style.transitionDuration,
+        animationName: style.animationName,
+        boxShadow: style.boxShadow,
+        staleTarget: document.elementFromPoint(firstCenter.x, firstCenter.y)?.id || '',
+        currentTarget: document.elementFromPoint(secondCenter.x, secondCenter.y)?.id || '',
+      };
+    });
+
+    expect(markerState).toEqual({
+      markerCount: 1,
+      transitionDuration: '0s',
+      animationName: 'none',
+      boxShadow: 'none',
+      staleTarget: 'fullscreenCalibration',
+      currentTarget: 'fullscreenCalibPoint',
+    });
+  });
+
+  test('acknowledging calibration instructions reveals the first marker', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.sessionData.precheck = { pass_fail: true };
+      shared.runtime.precheckData = { pass_fail: true };
+      shared.runtime.sessionRuntime.startContinuousModules = async () => true;
+      const moduleUrl = new URL('js/web-page/tests-updated.js', window.location.href).href;
+      const { startCalibration } = await import(moduleUrl);
+      void startCalibration();
+    });
+
+    await expect(page.locator('#calibrationIntro')).toBeVisible();
+    await page.locator('#calibrationIntroStartBtn').click();
+    await expect(page.locator('#fullscreenCalibration')).toHaveClass(/active/);
+    await expect(page.locator('#fullscreenCalibPoint')).toBeVisible();
+
+    const markerState = await page.locator('#fullscreenCalibPoint').evaluate(point => ({
+      display: getComputedStyle(point).display,
+      left: (point as HTMLElement).style.left,
+      top: (point as HTMLElement).style.top,
+    }));
+    expect(markerState).toEqual({ display: 'block', left: '5%', top: '5%' });
+  });
+
   test('precheck and calibration show only an anonymized reference/current head contour', async ({ page }) => {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     const result = await page.evaluate(async () => {

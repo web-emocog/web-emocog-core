@@ -438,7 +438,7 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260909-1/);
+    assert.match(tests, /ui-updated\.js\?v=20260912-1/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {
