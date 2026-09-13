@@ -485,6 +485,9 @@ function StimuliAOIView() {
           <div style="width:100%;height:118px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;">${stimulusPreviewHtml(s)}</div>
           <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;max-width:100%;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
           <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
+          ${s.standard ? '' : `<button class="folder-stim-edit-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:26px;width:20px;height:20px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);cursor:pointer;color:var(--muted);padding:2px;display:flex;align-items:center;justify-content:center;" title="${CURRENT_LANG === 'en' ? 'Rename' : 'Изменить название'}">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 17l-4 1 1-4L16.5 3.5a2.5 2.5 0 013.536 3.536L9 17z"/></svg>
+          </button>`}
           <button class="remove-from-folder-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;" title="${CURRENT_LANG === 'en' ? 'Remove' : 'Убрать'}">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
@@ -497,6 +500,12 @@ function StimuliAOIView() {
           folder.stimuliIds = (folder.stimuliIds || []).filter(x => x !== id);
           localStorage.setItem('emocog_folders', JSON.stringify(folders));
           renderFolderView();
+        });
+      });
+      content.querySelectorAll('.folder-stim-edit-btn').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          renameStimulusInLibrary(button.dataset.id, null, renderFolderView);
         });
       });
     }
@@ -789,7 +798,7 @@ function renderStimuliGallery(container) {
   });
 }
 
-async function renameStimulusInLibrary(id, container) {
+async function renameStimulusInLibrary(id, container, onRenamed) {
   const stimulus = stimuliList.find(item => String(item.id) === String(id));
   if (!stimulus || stimulus.standard) return;
   const proposed = window.prompt(
@@ -807,7 +816,8 @@ async function renameStimulusInLibrary(id, container) {
       stimulus.name = name;
     }
     persistStimuliList();
-    renderStimuliGallery(container || document.getElementById('stimuliGallery'));
+    if (typeof onRenamed === 'function') onRenamed();
+    else renderStimuliGallery(container || document.getElementById('stimuliGallery'));
     toast(CURRENT_LANG === 'en' ? 'Stimulus renamed' : 'Название стимула сохранено');
   } catch (error) {
     toast(`${CURRENT_LANG === 'en' ? 'Could not rename stimulus.' : 'Не удалось изменить название.'} ${error?.message || ''}`.trim(), 'error');

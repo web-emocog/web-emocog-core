@@ -144,7 +144,7 @@
       document.title = 'wecog — ' + portalCopy.title.toLowerCase();
 
       function destinationForRole(role) {
-        var researcherRoles = ['org_admin', 'PI', 'researcher', 'analyst', 'assistant', 'admin'];
+        var researcherRoles = ['org_admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer', 'admin'];
         var developerRoles = ['developer', 'admin'];
         if (requestedPortal === 'researcher') {
           return researcherRoles.indexOf(role) >= 0 ? '../researcher.html' : null;
