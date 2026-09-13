@@ -90,10 +90,22 @@ function safeDownloadName(value) {
     .slice(0, 200);
 }
 
+function contentDisposition(disposition, value) {
+  const type = disposition === 'attachment' ? 'attachment' : 'inline';
+  const unicodeName = safeDownloadName(value);
+  const asciiName = unicodeName
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/\\/g, '_') || 'download';
+  const encodedName = encodeURIComponent(unicodeName)
+    .replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${type}; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
+}
+
 module.exports = {
   resolveServerOwnedUploadPath,
   resolveReadableServerOwnedUploadPath,
   rejectClientOwnedContentPath,
   getStoredContentPath,
   safeDownloadName,
+  contentDisposition,
 };

@@ -16,6 +16,7 @@ const {
   resolveServerOwnedUploadPath,
   resolveReadableServerOwnedUploadPath,
   rejectClientOwnedContentPath,
+  contentDisposition,
 } = require('../security/upload-paths');
 const {
   ALLOWED_UPLOAD_MIME_TYPES,
@@ -301,6 +302,16 @@ describe('S2-01 upload root confinement', () => {
     assert.equal(rejectClientOwnedContentPath({ title: 'safe' }).ok, true);
     assert.equal(rejectClientOwnedContentPath({ content_path: '../x' }).ok, false);
     assert.equal(rejectClientOwnedContentPath({ contentPath: '/tmp/x' }).ok, false);
+  });
+
+  it('encodes non-ASCII stimulus names in Content-Disposition headers', () => {
+    const value = contentDisposition('inline', 'мяу-мяу.jpg');
+    assert.match(value, /^inline; filename="[\x20-\x7e]+";/);
+    assert.match(value, /filename\*=UTF-8''%D0%BC%D1%8F%D1%83/);
+    assert.doesNotThrow(() => {
+      const response = new (require('node:http').ServerResponse)({ method: 'GET' });
+      response.setHeader('Content-Disposition', value);
+    });
   });
 
   it('allows only passive media types and verifies their signatures', () => {
