@@ -2560,16 +2560,21 @@ function ExperimentBuilderView(options = {}) {
       uploadPanel.style.background = 'rgba(92,102,189,.04)';
       uploadBuilderStimuli(e.dataTransfer.files);
     });
-    stimuliList
-      .filter(stimulus => stimulus?.apiContentUrl && !stimulus?._previewObjectUrl && !stimulus?._previewHydrating)
-      .forEach(stimulus => {
-        if (typeof hydrateApiStimulusPreview !== 'function') return;
-        stimulus._previewHydrating = true;
-        hydrateApiStimulusPreview(stimulus)
-          .catch(() => {})
-          .finally(() => { stimulus._previewHydrating = false; });
-      });
+    hydrateBuilderStimulusPreviews(() => {
+      if (wrapper.isConnected) renderStep2Stimuli();
+    });
     setTimeout(() => applyAutoI18n(wrapper), 0);
+  }
+
+  function hydrateBuilderStimulusPreviews(onHydrated) {
+    if (typeof hydrateApiStimulusPreview !== 'function') return;
+    const pending = stimuliList.filter(stimulus => stimulus?.apiContentUrl && !stimulus?._previewObjectUrl);
+    if (!pending.length) return;
+    Promise.allSettled(pending.map(stimulus => hydrateApiStimulusPreview(stimulus)))
+      .then(results => {
+        const loaded = results.some(result => result.status === 'fulfilled' && result.value?._previewObjectUrl);
+        if (loaded && typeof onHydrated === 'function') onHydrated();
+      });
   }
 
   function aoiStimulusIdsForBlock(block) {
@@ -2610,11 +2615,12 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function renderAoiStimulusThumbnail(stimulus, stimulusId) {
-    if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && stimulus.url) {
-      return `<img src="${previewEscape(stimulus.url)}" alt="${previewEscape(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : (stimulus.name || stimulusId))}" style="width:100%;height:100%;object-fit:contain;">`;
+    const previewUrl = stimulus?._previewObjectUrl || stimulus?.url || stimulus?.src || '';
+    if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && previewUrl) {
+      return `<img src="${previewEscape(previewUrl)}" alt="${previewEscape(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : (stimulus.name || stimulusId))}" style="width:100%;height:100%;object-fit:contain;">`;
     }
-    if (stimulus?.type === 'video' && stimulus.url) {
-      return `<video src="${previewEscape(stimulus.url)}" muted style="width:100%;height:100%;object-fit:contain;"></video>`;
+    if (stimulus?.type === 'video' && previewUrl) {
+      return `<video src="${previewEscape(previewUrl)}" muted style="width:100%;height:100%;object-fit:contain;"></video>`;
     }
     return `<div style="transform:scale(.34);transform-origin:center;display:flex;align-items:center;justify-content:center;min-width:360px;min-height:240px;">${renderPreviewStimulus(stimulus, { stimulusId })}</div>`;
   }
@@ -2742,6 +2748,10 @@ function ExperimentBuilderView(options = {}) {
           blockIndex: parseInt(button.dataset.blockIndex, 10)
         });
       });
+    });
+    const aoiList = canvasCol.querySelector('#builderAoiBlocks');
+    hydrateBuilderStimulusPreviews(() => {
+      if (aoiList?.isConnected && currentStep === 4) renderStep4Aoi();
     });
     canvasCol.querySelector('#aoiQueueButton')?.addEventListener('click', () => {
       if (queueItems.length) openQueueItem(queueItems[0], 0);
