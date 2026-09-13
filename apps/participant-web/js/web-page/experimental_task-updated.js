@@ -7,18 +7,18 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { finishSession } from './tests-updated.js?v=20260913-2';
+import { finishSession } from './tests-updated.js?v=20260913-3';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260913-2';
+import { translations } from '../../translations.js?v=20260913-3';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260913-2';
+} from '../session-runtime/index.js?v=20260913-3';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -1336,10 +1336,15 @@ function showTimedParticipantBlock(block, kind) {
     const startedAt = Date.now();
     const deadline = startedAt + durationMs;
     const runtime = getSessionRuntime();
+    if (isAudio && runtime?.audioCollector?.started !== true) runtime?.startAudioModule?.();
     const collector = runtime?.audioCollector;
-    const audioWindowStart = Array.isArray(collector?.windows) ? collector.windows.length : 0;
+    const audioWindowStartPromise = isAudio
+        ? Promise.resolve(collector?.flushBoundary?.())
+            .catch(() => null)
+            .then(() => Array.isArray(collector?.windows) ? collector.windows.length : 0)
+        : Promise.resolve(0);
     const title = isAudio
-        ? (block.label || t.runtime_audio_test_title || translations.en.runtime_audio_test_title)
+        ? (block.content?.taskName || block.label || t.runtime_audio_test_title || translations.en.runtime_audio_test_title)
         : (block.label || t.runtime_rest_title || translations.en.runtime_rest_title);
     const prompt = isAudio
         ? (block.content?.prompt || t.runtime_audio_test_prompt || translations.en.runtime_audio_test_prompt)
@@ -1367,25 +1372,54 @@ function showTimedParticipantBlock(block, kind) {
         audioAvailable: isAudio ? collector?.started === true : null
     });
 
-    const complete = () => {
+    let completing = false;
+    const complete = async () => {
+        if (completing) return;
+        completing = true;
         if (timedProtocolBlockInterval) clearInterval(timedProtocolBlockInterval);
         timedProtocolBlockInterval = null;
         ex_state.instruction.btn.style.display = '';
         if (isAudio) {
+            const audioWindowStart = await audioWindowStartPromise;
+            try { await collector?.flushBoundary?.(); } catch (_) { /* The session continues without audio. */ }
             const windows = Array.isArray(collector?.windows) ? collector.windows.slice(audioWindowStart) : [];
             const scopedWindows = windows.filter(window => !window?.blockId || String(window.blockId) === String(block.id));
             const experimentMeta = state.sessionData.experimentMeta || (state.sessionData.experimentMeta = {});
             const tests = Array.isArray(experimentMeta.audioTests)
                 ? experimentMeta.audioTests
                 : (experimentMeta.audioTests = []);
-            tests.push({
+            const taskResult = collector?.summarizeTaskWindows?.(
+                scopedWindows,
+                block.content?.testType || 'reading',
+                {
+                    blockId: String(block.id || `audio_test_${currentBlockIndex}`),
+                    title,
+                    durationMs: Date.now() - startedAt,
+                    audioAvailable: collector?.started === true,
+                    completedAt: Date.now()
+                }
+            ) || {
+                schemaVersion: 'audio_task.v1',
                 blockId: String(block.id || `audio_test_${currentBlockIndex}`),
+                title,
                 testType: block.content?.testType || 'reading',
+                status: 'audio_unavailable',
                 durationMs: Date.now() - startedAt,
-                audioAvailable: collector?.started === true,
-                windowCount: scopedWindows.length,
-                acceptedWindowCount: scopedWindows.filter(window => window?.accepted === true).length,
-                completedAt: Date.now()
+                audioAvailable: false,
+                windowCount: 0,
+                acceptedWindowCount: 0,
+                rejectedWindowCount: 0,
+                completedAt: Date.now(),
+                metrics: {},
+                rawAudioStored: false,
+                rawAudioTransmitted: false
+            };
+            tests.push(taskResult);
+            emitTaskEvent('audio_test_scored', {
+                blockIndex: currentBlockIndex,
+                testType: taskResult.testType,
+                status: taskResult.status,
+                completionScore: taskResult.metrics?.completionScore ?? null
             });
         }
         emitTaskEvent(isAudio ? 'audio_test_complete' : 'rest_complete', {

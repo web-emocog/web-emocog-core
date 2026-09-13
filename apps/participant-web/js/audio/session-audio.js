@@ -192,6 +192,55 @@ export function summarizeAudioWindows(windows, metadata = {}) {
     };
 }
 
+export function summarizeAudioTaskWindows(windows, testType = 'reading', metadata = {}) {
+    const list = Array.isArray(windows) ? windows : [];
+    const accepted = list.filter(window => window?.accepted === true);
+    const biomarkerMean = key => mean(accepted.map(window => finite(window?.biomarkers?.[key])));
+    const qcMean = key => mean(accepted.map(window => finite(window?.qc?.[key])));
+    const quality = qcMean('qualityScore');
+    const reliability = mean(accepted.map(window => finite(window?.reliability)));
+    const speechCoverage = mean(accepted.map(window => (
+        finite(window?.qc?.speechFraction) ?? finite(window?.biomarkers?.speech_fraction)
+    )));
+    const scoreParts = [quality, reliability, speechCoverage].filter(Number.isFinite);
+    const audioAvailable = metadata.audioAvailable === true;
+    const status = !audioAvailable
+        ? 'audio_unavailable'
+        : (!list.length ? 'not_recorded' : (accepted.length ? 'completed' : 'insufficient_signal'));
+    return {
+        schemaVersion: 'audio_task.v1',
+        blockId: String(metadata.blockId || '').slice(0, 128),
+        title: String(metadata.title || '').slice(0, 255),
+        testType: String(testType || 'reading').slice(0, 64),
+        status,
+        durationMs: finite(metadata.durationMs),
+        audioAvailable,
+        windowCount: list.length,
+        acceptedWindowCount: accepted.length,
+        rejectedWindowCount: Math.max(0, list.length - accepted.length),
+        completedAt: finite(metadata.completedAt),
+        metrics: {
+            recordingQuality: quality,
+            featureReliability: reliability,
+            speechCoverage,
+            completionScore: scoreParts.length ? clamp01(mean(scoreParts)) : null,
+            rmsMean: qcMean('rms'),
+            clippingRatioMean: qcMean('clippingRatio'),
+            pitchMeanHz: biomarkerMean('pitch_mean_hz'),
+            pitchStdHz: biomarkerMean('pitch_std_hz'),
+            pitchVariability: biomarkerMean('pitch_variability'),
+            jitterLocal: biomarkerMean('jitter_local'),
+            shimmerLocal: biomarkerMean('shimmer_local'),
+            hnrDb: biomarkerMean('hnr_db'),
+            pauseRate: biomarkerMean('pause_rate'),
+            averagePauseDuration: biomarkerMean('avg_pause_duration'),
+            meanUtteranceDuration: biomarkerMean('mean_utterance_duration')
+        },
+        rawAudioStored: false,
+        rawAudioTransmitted: false
+    };
+}
+
 export class SessionAudioCollector {
     constructor(options = {}) {
         this.state = options.state;
@@ -454,6 +503,17 @@ export class SessionAudioCollector {
     _flushPendingWindow() {
         if (this.pendingSamples <= 0) return;
         this._queueWindow(this._consume(this.pendingSamples));
+    }
+
+    async flushBoundary() {
+        if (this.started) this._flushPendingWindow();
+        await this.analysisQueue;
+        this._storeSummary(this.status);
+        return this.windows.length;
+    }
+
+    summarizeTaskWindows(windows, testType, metadata = {}) {
+        return summarizeAudioTaskWindows(windows, testType, metadata);
     }
 
     async pause() {
