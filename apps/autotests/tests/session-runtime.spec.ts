@@ -119,6 +119,10 @@ test.describe('Participant session runtime', () => {
   test('preloads uploaded invitation stimuli before the cognitive task starts', async ({ page }) => {
     const invitationCode = 'INV-STIMULUS-PRELOAD';
     let contentRequests = 0;
+    const imageBytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    );
     await page.route('**/invitations/by-code/**', async route => {
       const url = new URL(route.request().url());
       if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli/42/content`)) {
@@ -126,7 +130,7 @@ test.describe('Participant session runtime', () => {
         await route.fulfill({
           status: 200,
           contentType: 'image/png',
-          body: Buffer.from('participant-stimulus-binary'),
+          body: imageBytes,
         });
         return;
       }
@@ -183,9 +187,14 @@ test.describe('Participant session runtime', () => {
         meta: row,
       });
       const response = await fetch(resolved.src);
+      const image = new Image();
+      image.src = resolved.src;
+      await image.decode();
       return {
         source: resolved.src,
         size: (await response.blob()).size,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
         retainedUrls: runtime.invitationStimulusObjectUrls.length,
       };
     });
@@ -193,7 +202,94 @@ test.describe('Participant session runtime', () => {
     expect(contentRequests).toBe(1);
     expect(preloaded.source).toMatch(/^blob:/);
     expect(preloaded.size).toBeGreaterThan(0);
+    expect(preloaded.naturalWidth).toBe(1);
+    expect(preloaded.naturalHeight).toBe(1);
     expect(preloaded.retainedUrls).toBe(1);
+
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      const moduleUrl = new URL(
+        'js/web-page/experimental_task-updated.js',
+        window.location.href,
+      ).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({
+        protocol: shared.runtime.invitationProtocolDefinition,
+        autoFinishSession: false,
+      });
+    });
+    await page.locator('#cogStartBtn').click();
+    const renderedImage = page.locator('#cogImage');
+    await expect(renderedImage).toBeVisible();
+    await expect.poll(() => renderedImage.evaluate((element: HTMLImageElement) => ({
+      src: element.src,
+      naturalWidth: element.naturalWidth,
+    }))).toMatchObject({ src: expect.stringMatching(/^blob:/), naturalWidth: 1 });
+  });
+
+  test('does not replace an API image with a blue shape when preloading fails', async ({ page }) => {
+    const invitationCode = 'INV-STIMULUS-DIRECT-FALLBACK';
+    await page.route('**/invitations/by-code/**', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli/77/content`)) {
+        await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli`)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{
+            id: 77,
+            name: 'Temporarily unavailable image',
+            mime_type: 'image/png',
+            metadata: {},
+            content_url: `/invitations/by-code/${invitationCode}/stimuli/77/content`,
+          }]),
+        });
+        return;
+      }
+      if (url.pathname.endsWith(`/by-code/${invitationCode}`)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            invitation_id: 77,
+            code: invitationCode,
+            protocol_id: 77,
+            project_id: 1,
+            definition: {
+              version: 'v2.0_universal',
+              blocks: [{
+                id: 'uploaded-image-task',
+                type: 'cognitive_task',
+                taskType: 'simple_rt',
+                trials: [{ stimulusId: 'api:77', condition: 'target', action: 'space' }],
+              }],
+            },
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto(`${PAGE_URL}?code=${invitationCode}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean(
+      (window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap?.['77']
+    ));
+    const resolved = await page.evaluate(() => {
+      const row = (window as any).__WECOG_STATE__.runtime.invitationStimuliMap['77'];
+      const stimulus = (window as any).StandardStimuli.resolveParticipantStimulus({
+        stimulusId: 'api:77',
+        meta: row,
+      });
+      return { type: stimulus.type, src: stimulus.src, background: stimulus.style?.backgroundColor };
+    });
+    expect(resolved.type).toBe('image');
+    expect(resolved.src).toContain(`/by-code/${invitationCode}/stimuli/77/content`);
+    expect(resolved.background).toBeUndefined();
   });
 
   test('opens contact and questionnaire immediately after consent without reload', async ({ page }) => {
