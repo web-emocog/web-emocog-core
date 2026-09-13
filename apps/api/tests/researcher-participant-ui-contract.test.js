@@ -430,6 +430,47 @@ describe('researcher navigation contract', () => {
     assert.match(participant, /requestCognitiveFullscreen/);
   });
 
+  it('keeps calibration, timed rest and audio-test flows recoverable and visible', () => {
+    const calibration = read('participant-web/js/web-page/tests-updated.js');
+    const participant = read('participant-web/js/web-page/experimental_task-updated.js');
+    const translations = read('participant-web/translations.js');
+    assert.match(calibration, /finishValidationSafely/);
+    assert.match(calibration, /validation_calculation_failed/);
+    assert.match(calibration, /validationResultMetrics/);
+    assert.match(participant, /showTimedParticipantBlock\(block, 'rest'\)/);
+    assert.match(participant, /role', 'timer'/);
+    assert.match(participant, /showTimedParticipantBlock\(block, 'audio_test'\)/);
+    assert.match(participant, /experimentMeta\.audioTests/);
+    assert.match(translations, /Не моргайте в момент нажатия/);
+    assert.match(translations, /Смотрите на каждый зелёный круг/);
+    assert.match(translations, /Ничего не нажимайте/);
+  });
+
+  it('supports researcher project management and folder-level stimulus rename', () => {
+    const core = read('web/researcher-core.js');
+    const permissions = read('api/security/permissions.js');
+    const projects = read('api/routes/projects.js');
+    const stimuli = read('web/researcher-stimuli.js');
+    assert.match(core, /openModal\('rename'/);
+    assert.match(core, /apiPatch\('\/projects\/'/);
+    assert.match(core, /apiDelete\('\/projects\/'/);
+    assert.match(permissions, /OPERATIONS\.PROJECT_DELETE/);
+    assert.match(projects, /requireRole\('admin', 'PI', 'researcher'\)/);
+    assert.match(stimuli, /folder-stim-edit-btn/);
+    assert.match(stimuli, /renameStimulusInLibrary\(button\.dataset\.id, null, renderFolderView\)/);
+  });
+
+  it('locks analytics to the current project and exposes safe audio summaries', () => {
+    const analytics = read('web/researcher-analytics-production.js');
+    const router = read('api/analytics/v1-router.js');
+    assert.match(analytics, /wecog:projectchange/);
+    assert.match(analytics, /Текущий проект/);
+    assert.match(analytics, /audioAnalyticsHtml/);
+    assert.match(router, /function sessionAudioDetails/);
+    assert.match(router, /rawAudioStored: false/);
+    assert.match(router, /audio: sessionAudioDetails\(row\)/);
+  });
+
   it('loads each stateful participant module through one cache version', () => {
     const app = read('participant-web/js/web-page/app-updated.js');
     const tests = read('participant-web/js/web-page/tests-updated.js');
@@ -438,7 +479,14 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260912-1/);
+    assert.match(tests, /ui-updated\.js\?v=20260913-2/);
+    assert.match(app, /tests-updated\.js\?v=20260913-2/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260913-2/);
+    assert.match(task, /tests-updated\.js\?v=20260913-2/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260913-2/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260913-2/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260913-2/);
+    assert.match(runtime, /tests-updated\.js\?v=20260913-2/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {

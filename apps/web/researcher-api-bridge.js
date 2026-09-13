@@ -270,10 +270,16 @@
   }
 
   function setSelectedProjectId(id, name) {
+    const previous = getSelectedProjectId();
     try {
       if (id != null) localStorage.setItem(PROJECT_ID_KEY, String(id));
       if (name && global.state) global.state.project = name;
     } catch (_) {}
+    if (id != null && String(previous || '') !== String(id)) {
+      global.dispatchEvent(new CustomEvent('wecog:projectchange', {
+        detail: { projectId: String(id), projectName: name || '' }
+      }));
+    }
   }
 
   function populateProjectSelect(projects) {

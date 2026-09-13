@@ -232,17 +232,17 @@ export const translations = {
         file_copied: "ID скопирован!",
         
         // Gaze validation display texts
-        validation_complete: "✅ Валидация завершена!",
+        validation_complete: "Проверка завершена",
         validation_accuracy: "Точность",
         validation_precision: "Стабильность",
         
         // Calibration instructions
-        calib_click_instruction: "👆 Кликайте на красную точку, смотря на неё",
+        calib_click_instruction: "Смотрите на красный круг и нажимайте на него. Не моргайте в момент нажатия.",
         calib_progress: "Точка",
-        calib_complete: "✅ Калибровка завершена!",
+        calib_complete: "Калибровка завершена",
         
         // Validation instructions
-        validation_look_instruction: "👁️ Смотрите на зелёную точку (не кликайте)",
+        validation_look_instruction: "Смотрите на зелёный круг до его перемещения. Ничего не нажимайте.",
         
         // Grammar
         point_of: "из",
@@ -506,17 +506,17 @@ export const translations = {
         file_copied: "ID copied!",
         
         // Gaze validation display texts
-        validation_complete: "✅ Validation complete!",
+        validation_complete: "Validation complete",
         validation_accuracy: "Accuracy",
         validation_precision: "Precision",
         
         // Calibration instructions
-        calib_click_instruction: "👆 Click on the red dot while looking at it",
+        calib_click_instruction: "Look at the red circle and press it. Do not blink while pressing.",
         calib_progress: "Point",
-        calib_complete: "✅ Calibration complete!",
+        calib_complete: "Calibration complete",
         
         // Validation instructions
-        validation_look_instruction: "👁️ Look at the green dot (don't click)",
+        validation_look_instruction: "Look at the green circle until it moves. Do not press anything.",
         
         // Grammar
         point_of: "of",
@@ -1074,8 +1074,8 @@ const participantUploadLocaleAdditions = {
 };
 
 const participantValidationLocaleAdditions = {
-    ru: { validation_intro_kicker: 'Проверка точности', validation_intro_title: 'Теперь проверим взгляд', validation_intro_body: 'Смотрите на каждый зелёный круг до его перемещения. Нажимать на круги или клавиши не нужно.', validation_intro_action: 'Начать проверку', validation_result_passed_advice: 'Точность достаточная. Повторять калибровку не нужно; можно продолжить сессию.', validation_result_failed_advice: 'Точность ниже допустимого уровня. Повторите калибровку перед продолжением.' },
-    en: { validation_intro_kicker: 'Accuracy check', validation_intro_title: 'Now we will check your gaze', validation_intro_body: 'Look at each green circle until it moves. Do not click the circles or press any keys.', validation_intro_action: 'Start the check', validation_result_passed_advice: 'Accuracy is sufficient. You do not need to recalibrate and may continue the session.', validation_result_failed_advice: 'Accuracy is below the required level. Recalibrate before continuing.' },
+    ru: { calibration_intro_body: 'Сядьте удобно и держите голову естественно. Смотрите на каждый красный круг и нажимайте на него. Не моргайте в момент нажатия.', validation_intro_kicker: 'Проверка точности', validation_intro_title: 'Теперь проверим взгляд', validation_intro_body: 'Смотрите на каждый зелёный круг до его перемещения. Ничего не нажимайте.', validation_intro_action: 'Начать проверку', validation_result_passed_advice: 'Точность достаточная. Повторять калибровку не нужно; можно продолжить сессию.', validation_result_failed_advice: 'Точность ниже допустимого уровня. Повторите калибровку перед продолжением.', runtime_rest_title: 'Отдых', runtime_rest_body: 'Отдохните перед следующим заданием.', runtime_audio_test_title: 'Аудиотест', runtime_audio_test_prompt: 'Говорите вслух до завершения отсчёта.' },
+    en: { calibration_intro_body: 'Sit comfortably and keep your head in a natural position. Look at each red circle and press it. Do not blink while pressing.', validation_intro_kicker: 'Accuracy check', validation_intro_title: 'Now we will check your gaze', validation_intro_body: 'Look at each green circle until it moves. Do not press anything.', validation_intro_action: 'Start the check', validation_result_passed_advice: 'Accuracy is sufficient. You do not need to recalibrate and may continue the session.', validation_result_failed_advice: 'Accuracy is below the required level. Recalibrate before continuing.', runtime_rest_title: 'Rest', runtime_rest_body: 'Take a break before the next task.', runtime_audio_test_title: 'Audio test', runtime_audio_test_prompt: 'Speak aloud until the countdown ends.' },
     zh: { validation_intro_kicker: '准确度检查', validation_intro_title: '现在检查视线', validation_intro_body: '注视每个绿色圆点，直到它移动。请勿点击圆点或按键。', validation_intro_action: '开始检查', validation_result_passed_advice: '准确度符合要求，无需重新校准，可以继续。', validation_result_failed_advice: '准确度低于要求，请先重新校准。' },
     es: { validation_intro_kicker: 'Comprobación de precisión', validation_intro_title: 'Ahora comprobaremos la mirada', validation_intro_body: 'Mire cada círculo verde hasta que se mueva. No haga clic ni pulse ninguna tecla.', validation_intro_action: 'Iniciar comprobación', validation_result_passed_advice: 'La precisión es suficiente. No necesita recalibrar y puede continuar.', validation_result_failed_advice: 'La precisión está por debajo del nivel requerido. Repita la calibración.' },
     hi: { validation_intro_kicker: 'सटीकता जाँच', validation_intro_title: 'अब नज़र की जाँच होगी', validation_intro_body: 'हर हरे गोले को उसके हिलने तक देखें। क्लिक या कोई कुंजी न दबाएँ।', validation_intro_action: 'जाँच शुरू करें', validation_result_passed_advice: 'सटीकता पर्याप्त है। दोबारा कैलिब्रेशन की ज़रूरत नहीं है।', validation_result_failed_advice: 'सटीकता आवश्यक स्तर से कम है। कैलिब्रेशन दोहराएँ।' },

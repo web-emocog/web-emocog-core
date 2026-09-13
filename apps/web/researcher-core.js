@@ -662,6 +662,13 @@ bootstrapAdminAccess();
       modalCreate: 'Создать',
       modalCancel: 'Отмена',
       selectHint: '← Выберите или создайте проект',
+      renameTitle: 'Переименовать проект',
+      renameSub: 'Введите новое название проекта.',
+      renameAction: 'Сохранить',
+      rename: 'Переименовать',
+      remove: 'Удалить',
+      removeConfirm: 'Удалить проект «{name}»? Протоколы и материалы проекта будут удалены. Это действие нельзя отменить.',
+      removeError: 'Не удалось удалить проект.',
     },
     en: {
       title: 'Welcome<br>to <span class="hl">wecog</span>',
@@ -678,12 +685,20 @@ bootstrapAdminAccess();
       modalCreate: 'Create',
       modalCancel: 'Cancel',
       selectHint: '← Select or create a project',
+      renameTitle: 'Rename project',
+      renameSub: 'Enter a new project name.',
+      renameAction: 'Save',
+      rename: 'Rename',
+      remove: 'Delete',
+      removeConfirm: 'Delete project “{name}”? Its protocols and media will be deleted. This action cannot be undone.',
+      removeError: 'Project could not be deleted.',
     }
   };
 
   const STORAGE_KEY = 'emocog_ws_projects';
   let wsLang = 'ru';
   let selectedProjectId = null;
+  let editingProjectId = null;
 
   // ── helpers ──
   function loadProjects() {
@@ -721,7 +736,7 @@ bootstrapAdminAccess();
     if (!found) {
       // Insert at top
       const opt = document.createElement('option');
-      opt.value = projectName;
+      opt.value = String(projectId);
       opt.textContent = projectName;
       sel.insertBefore(opt, sel.firstChild);
       sel.selectedIndex = 0;
@@ -773,6 +788,14 @@ bootstrapAdminAccess();
           <div class="ws-proj-name">${escapeUiHtml(p.name)}</div>
           <div class="ws-proj-date">${escapeUiHtml(fmtDate(p.createdAt))}</div>
         </div>
+        <div class="ws-proj-actions">
+          <button type="button" class="ws-proj-action ws-proj-rename" data-action="rename" title="${escapeUiHtml(texts.rename)}" aria-label="${escapeUiHtml(texts.rename)}">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          </button>
+          <button type="button" class="ws-proj-action ws-proj-remove" data-action="remove" title="${escapeUiHtml(texts.remove)}" aria-label="${escapeUiHtml(texts.remove)}">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12m-9 0V5h6v2m-7 0 1 12h6l1-12M10 11v5m4-5v5"/></svg>
+          </button>
+        </div>
         <div class="ws-proj-check">
           ${selectedProjectId === p.id
             ? '<svg fill="none" stroke="#fff" stroke-width="3" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>'
@@ -786,6 +809,21 @@ bootstrapAdminAccess();
       item.addEventListener('click', () => {
         selectedProjectId = item.dataset.id;
         renderProjects();
+      });
+    });
+    container.querySelectorAll('.ws-proj-rename').forEach(button => {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        const item = button.closest('.ws-proj-item');
+        const project = list.find(row => String(row.id) === String(item && item.dataset.id));
+        if (project) openModal('rename', project);
+      });
+    });
+    container.querySelectorAll('.ws-proj-remove').forEach(button => {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        const item = button.closest('.ws-proj-item');
+        removeProject(item && item.dataset.id, item && item.dataset.name);
       });
     });
   }
@@ -830,11 +868,9 @@ bootstrapAdminAccess();
     if (panelTitle) panelTitle.textContent = texts.panelTitle;
     if (panelSub) panelSub.textContent = texts.panelSub;
     if (createLabel) createLabel.textContent = texts.createBtn;
-    if (modalTitle) modalTitle.textContent = texts.modalTitle;
-    if (modalSub) modalSub.textContent = texts.modalSub;
     if (modalInput) modalInput.placeholder = texts.modalPlaceholder;
-    if (modalCreate) modalCreate.textContent = texts.modalCreate;
     if (modalCancel) modalCancel.textContent = texts.modalCancel;
+    applyModalModeTexts();
 
     const ruBtn = document.getElementById('wsLangRu');
     const enBtn = document.getElementById('wsLangEn');
@@ -854,9 +890,21 @@ bootstrapAdminAccess();
   var modal = document.getElementById('wsCreateModal');
   var wsModalInputEl = document.getElementById('wsModalInput');
 
-  function openModal() {
+  function applyModalModeTexts() {
+    const texts = WS_TEXTS[wsLang];
+    const modalTitle = document.getElementById('wsModalTitle');
+    const modalSub = document.getElementById('wsModalSub');
+    const modalCreate = document.getElementById('wsModalCreateLabel');
+    if (modalTitle) modalTitle.textContent = editingProjectId ? texts.renameTitle : texts.modalTitle;
+    if (modalSub) modalSub.textContent = editingProjectId ? texts.renameSub : texts.modalSub;
+    if (modalCreate) modalCreate.textContent = editingProjectId ? texts.renameAction : texts.modalCreate;
+  }
+
+  function openModal(mode, project) {
     if (!modal) return;
-    if (wsModalInputEl) { wsModalInputEl.value = ''; }
+    editingProjectId = mode === 'rename' && project ? String(project.id) : null;
+    if (wsModalInputEl) { wsModalInputEl.value = editingProjectId ? project.name : ''; }
+    applyModalModeTexts();
     const errorEl = document.getElementById('wsModalError');
     if (errorEl) { errorEl.textContent = ''; errorEl.style.display = 'none'; }
     modal.classList.add('open');
@@ -864,16 +912,40 @@ bootstrapAdminAccess();
   }
   function closeModal() {
     if (modal) modal.classList.remove('open');
+    editingProjectId = null;
   }
 
   var createProjectBtn = document.getElementById('wsCreateProjectBtn');
-  if (createProjectBtn) createProjectBtn.addEventListener('click', openModal);
+  if (createProjectBtn) createProjectBtn.addEventListener('click', () => openModal('create'));
 
   var cancelBtn = document.getElementById('wsModalCancelBtn');
   if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
 
   if (modal) {
     modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+  }
+
+  async function removeProject(projectId, projectName) {
+    if (!projectId) return;
+    const texts = WS_TEXTS[wsLang];
+    if (!window.confirm(texts.removeConfirm.replace('{name}', projectName || projectId))) return;
+    try {
+      if (typeof apiDelete !== 'function') throw new Error(texts.removeError);
+      await apiDelete('/projects/' + encodeURIComponent(projectId));
+      if (String(selectedProjectId) === String(projectId)) {
+        selectedProjectId = null;
+        localStorage.removeItem('emocog_selected_project_id');
+        localStorage.removeItem('emocog_selected_workspace_project_id');
+      }
+      if (window.EmocogResearcherBridge) {
+        await window.EmocogResearcherBridge.syncProjectsFromApi();
+      } else {
+        saveProjects(loadProjects().filter(project => String(project.id) !== String(projectId)));
+        renderProjects();
+      }
+    } catch (error) {
+      window.alert(error && error.message ? error.message : texts.removeError);
+    }
   }
 
   var doCreate = async function() {
@@ -887,8 +959,22 @@ bootstrapAdminAccess();
     if (errorEl) { errorEl.textContent = ''; errorEl.style.display = 'none'; }
     if (createButton) createButton.disabled = true;
     try {
-      if (typeof apiGet !== 'function' || typeof apiPost !== 'function') {
+      if (typeof apiGet !== 'function' || typeof apiPost !== 'function' || typeof apiPatch !== 'function') {
         throw new Error('API недоступен. Проверьте соединение и повторите попытку.');
+      }
+      if (editingProjectId) {
+        await apiPatch('/projects/' + encodeURIComponent(editingProjectId), { name: name });
+        selectedProjectId = String(editingProjectId);
+        localStorage.setItem('emocog_selected_project_id', selectedProjectId);
+        if (window.EmocogResearcherBridge) {
+          await window.EmocogResearcherBridge.syncProjectsFromApi();
+        } else {
+          const localProjects = loadProjects().map(project => String(project.id) === selectedProjectId ? { ...project, name } : project);
+          saveProjects(localProjects);
+          renderProjects();
+        }
+        closeModal();
+        return;
       }
       var projects = await apiGet('/projects');
       var organizationId = projects[0] && projects[0].organization_id;
