@@ -520,17 +520,33 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260913-4/);
-    assert.match(app, /tests-updated\.js\?v=20260913-4/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260913-4/);
-    assert.match(task, /tests-updated\.js\?v=20260913-4/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260913-4/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260913-4/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260913-4/);
-    assert.match(runtime, /tests-updated\.js\?v=20260913-4/);
-    assert.match(app, /protocol-invite-utils\.js\?v=20260913-4/);
-    assert.match(tests, /protocol-invite-utils\.js\?v=20260913-4/);
-    assert.match(task, /protocol-invite-utils\.js\?v=20260913-4/);
+    assert.match(tests, /ui-updated\.js\?v=20260913-5/);
+    assert.match(app, /tests-updated\.js\?v=20260913-5/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260913-5/);
+    assert.match(task, /tests-updated\.js\?v=20260913-5/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260913-5/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260913-5/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260913-5/);
+    assert.match(runtime, /tests-updated\.js\?v=20260913-5/);
+    assert.match(app, /protocol-invite-utils\.js\?v=20260913-5/);
+    assert.match(tests, /protocol-invite-utils\.js\?v=20260913-5/);
+    assert.match(task, /protocol-invite-utils\.js\?v=20260913-5/);
+  });
+
+  it('preloads participant media, keeps selected sessions inspectable, and restores editor data', () => {
+    const participant = read('participant-web/js/web-page/app-updated.js');
+    const calibration = read('participant-web/js/web-page/tests-updated.js');
+    const analytics = read('web/researcher-analytics-production.js');
+    const builder = read('web/researcher-builder.js');
+    assert.match(participant, /preloadInvitationStimulus/);
+    assert.match(participant, /URL\.createObjectURL\(blob\)/);
+    assert.match(participant, /invitationStimulusObjectUrls/);
+    assert.match(calibration, /const SAMPLES_PER_POINT = 60/);
+    assert.match(calibration, /const SETTLE_DELAY_MS = 1000/);
+    assert.match(analytics, /qcMode: sessionMode \? 'all' : state\.query\.qcMode/);
+    assert.match(builder, /function normalizePersistedBuilderBlock/);
+    assert.match(builder, /Array\.isArray\(block\.trials\) \? block\.trials/);
+    assert.match(builder, /slides: Array\.isArray\(b\.content\?\.slides\) \? b\.content\.slides : \[\]/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {
