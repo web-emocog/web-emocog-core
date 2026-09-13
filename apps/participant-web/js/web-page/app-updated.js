@@ -15,7 +15,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260913-7';
+} from './ui-updated.js?v=20260914-1';
 
 import { 
     startPreCheck, 
@@ -25,16 +25,16 @@ import {
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260913-7';
+} from './tests-updated.js?v=20260914-1';
 
 import {
     deriveInvitationHubMetrics,
     getInvitationSessionPlan,
     getParticipantShell
-} from './protocol-invite-utils.js?v=20260913-7';
+} from './protocol-invite-utils.js?v=20260914-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260913-7';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260914-1';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -98,10 +98,13 @@ async function preloadInvitationStimulus(contentUrl) {
         || typeof URL === 'undefined'
         || typeof URL.createObjectURL !== 'function'
     ) return null;
-    const response = await fetch(contentUrl, { credentials: 'include' });
+    const response = await fetch(contentUrl, { credentials: 'include', cache: 'no-store' });
     if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
     const blob = await response.blob();
     if (!blob.size) throw new Error('Stimulus preload returned an empty file');
+    if (blob.type && !blob.type.toLowerCase().startsWith('image/')) {
+        throw new Error(`Stimulus preload returned ${blob.type} instead of an image`);
+    }
     return URL.createObjectURL(blob);
 }
 
@@ -439,7 +442,9 @@ async function loadInvitationProtocolByCode(code) {
                                     displayUrl = await preloadInvitationStimulus(contentUrl);
                                     if (displayUrl) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
                                 } catch (error) {
-                                    displayUrl = null;
+                                    // Keep the public invitation URL as a direct browser fallback.
+                                    // Dropping it here used to turn a valid API stimulus into a blue shape.
+                                    displayUrl = contentUrl;
                                     console.warn('[Invitation] Failed to preload stimulus binary:', error);
                                 }
                             }
