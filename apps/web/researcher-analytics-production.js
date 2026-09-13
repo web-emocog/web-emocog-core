@@ -1859,10 +1859,29 @@
       [tr('Проанализировано','Analyzed'), seconds(audio.durationMs)]
     ];
     const tests = Array.isArray(audio.tests) ? audio.tests : [];
+    const taskTypeLabel = type => ({
+      reading: tr('Чтение фразы','Phrase reading'),
+      sustained_vowel: tr('Протяжный звук «а»','Sustained “ah”'),
+      oral_ddk: tr('Повторение «па-та-ка»','“Pa-ta-ka” repetition')
+    })[type] || type || tr('Аудиотест','Audio test');
+    const taskStatusLabel = status => ({
+      completed: tr('рассчитано','scored'),
+      insufficient_signal: tr('мало качественного сигнала','insufficient signal'),
+      not_recorded: tr('нет записи','not recorded'),
+      audio_unavailable: tr('микрофон недоступен','microphone unavailable')
+    })[status] || statusLabel(status || 'not_computed');
+    const taskMetricSummary = test => {
+      const metrics = test?.metrics || {};
+      const parts = [];
+      if (Number.isFinite(Number(metrics.speechCoverage))) parts.push(`${tr('речь','speech')} ${percent(metrics.speechCoverage)}`);
+      if (test?.testType === 'sustained_vowel' && Number.isFinite(Number(metrics.pitchStdHz))) parts.push(`F0 SD ${Number(metrics.pitchStdHz).toFixed(1)} Hz`);
+      if (test?.testType !== 'sustained_vowel' && Number.isFinite(Number(metrics.pauseRate))) parts.push(`${tr('паузы','pauses')} ${Number(metrics.pauseRate).toFixed(2)}`);
+      return parts.join(' · ') || '—';
+    };
     return `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Аудиотесты и голосовые признаки','Audio tests and voice features')}</div><div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Отображаются только рассчитанные признаки и QC. Исходный голос не сохраняется и не передаётся.','Only derived features and QC are shown. Raw voice is neither stored nor transmitted.')}</div></div><span style="font-size:9px;color:${audio.consentGranted ? 'var(--good)' : 'var(--muted)'};">${audio.consentGranted ? tr('Согласие получено','Consent granted') : tr('Нет согласия или аудио отключено','No consent or audio disabled')}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px;">${cards.map(([label, value]) => `<div style="padding:10px;border:1px solid var(--stroke);border-radius:10px;background:rgba(15,118,110,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:14px;font-weight:750;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div>
-      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:590px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Блок','Block')}</th><th>${tr('Тип','Type')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Окна','Windows')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.blockId || '—')}</td><td style="text-align:center;">${escapeHtml(test.testType || 'audio_test')}</td><td style="text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="text-align:center;color:${test.audioAvailable ? 'var(--good)' : 'var(--warn)'};">${test.audioAvailable ? tr('записано','recorded') : tr('нет аудио','no audio')}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
+      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:820px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Задание','Task')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Окна','Windows')}</th><th>${tr('Оценка качества','Quality score')}</th><th>${tr('Показатели','Metrics')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.title || taskTypeLabel(test.testType))}<div style="font-size:8px;color:var(--muted);font-weight:500;margin-top:2px;">${escapeHtml(taskTypeLabel(test.testType))}</div></td><td style="text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="text-align:center;font-weight:700;">${escapeHtml(percent(test.metrics?.completionScore))}</td><td style="text-align:center;">${escapeHtml(taskMetricSummary(test))}</td><td style="text-align:center;color:${test.status === 'completed' ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(taskStatusLabel(test.status))}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
       <div style="font-size:8px;color:var(--muted2);margin-top:8px;">${escapeHtml(audio.algorithmVersion || '')}${audio.disclaimer ? ` · ${escapeHtml(audio.disclaimer)}` : ''}</div>
     </section>`;
   }
