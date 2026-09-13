@@ -22,7 +22,7 @@ const { withTransaction, lockSessionKey } = require('../db/transaction');
 const {
   resolveReadableServerOwnedUploadPath,
   getStoredContentPath,
-  safeDownloadName,
+  contentDisposition,
 } = require('../security/upload-paths');
 const { INLINE_MEDIA_TYPES } = require('../security/stimulus-files');
 const config = require('../config');
@@ -234,7 +234,7 @@ router.get(
       res.setHeader('Content-Type', mimeType || 'application/octet-stream');
       res.setHeader(
         'Content-Disposition',
-        `${INLINE_MEDIA_TYPES.has(mimeType) ? 'inline' : 'attachment'}; filename="${safeDownloadName(stimulus.name)}"`
+        contentDisposition(INLINE_MEDIA_TYPES.has(mimeType) ? 'inline' : 'attachment', stimulus.name)
       );
       return res.sendFile(resolved.absolutePath);
     } catch (err) {

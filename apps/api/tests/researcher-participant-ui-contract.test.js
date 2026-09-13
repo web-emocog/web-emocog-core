@@ -520,17 +520,17 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260913-5/);
-    assert.match(app, /tests-updated\.js\?v=20260913-5/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260913-5/);
-    assert.match(task, /tests-updated\.js\?v=20260913-5/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260913-5/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260913-5/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260913-5/);
-    assert.match(runtime, /tests-updated\.js\?v=20260913-5/);
-    assert.match(app, /protocol-invite-utils\.js\?v=20260913-5/);
-    assert.match(tests, /protocol-invite-utils\.js\?v=20260913-5/);
-    assert.match(task, /protocol-invite-utils\.js\?v=20260913-5/);
+    assert.match(tests, /ui-updated\.js\?v=20260913-7/);
+    assert.match(app, /tests-updated\.js\?v=20260913-7/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260913-7/);
+    assert.match(task, /tests-updated\.js\?v=20260913-7/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260913-7/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260913-7/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260913-7/);
+    assert.match(runtime, /tests-updated\.js\?v=20260913-7/);
+    assert.match(app, /protocol-invite-utils\.js\?v=20260913-7/);
+    assert.match(tests, /protocol-invite-utils\.js\?v=20260913-7/);
+    assert.match(task, /protocol-invite-utils\.js\?v=20260913-7/);
   });
 
   it('preloads participant media, keeps selected sessions inspectable, and restores editor data', () => {
