@@ -132,6 +132,28 @@ test('audio QC accepts a clean browser-length voiced window with finite reliabil
   assert.equal(result.qc.reasons.length, 0);
 });
 
+test('three audio task profiles produce safe local task summaries', async () => {
+  const { analyzeAudioWindow, summarizeAudioTaskWindows } = await import(audioModuleUrl);
+  const window = analyzeAudioWindow(syntheticSpeech(16000, 12), 16000);
+  assert.equal(window.accepted, true);
+  for (const testType of ['reading', 'sustained_vowel', 'oral_ddk']) {
+    const summary = summarizeAudioTaskWindows([window], testType, {
+      blockId: `audio-${testType}`,
+      title: testType,
+      durationMs: 12000,
+      audioAvailable: true,
+      completedAt: 12345,
+    });
+    assert.equal(summary.schemaVersion, 'audio_task.v1');
+    assert.equal(summary.testType, testType);
+    assert.equal(summary.status, 'completed');
+    assert.equal(summary.acceptedWindowCount, 1);
+    assert.ok(summary.metrics.completionScore > 0);
+    assert.equal(summary.rawAudioStored, false);
+    assert.equal(Object.hasOwn(summary, 'windows'), false);
+  }
+});
+
 test('rejected audio does not publish a misleading zero reliability', async () => {
   const { analyzeAudioWindow } = await import(audioModuleUrl);
   const result = analyzeAudioWindow(new Float32Array(16000 * 12), 16000);
@@ -203,6 +225,36 @@ test('audio lifecycle flushes phase windows and releases every media resource', 
   assert.equal(first.windowCount, 3);
   assert.deepEqual(second, first);
   assert.equal(first.rawAudioStored, false);
+});
+
+test('audio task boundary flush analyzes a short task before protocol advances', async () => {
+  const { SessionAudioCollector } = await import(audioModuleUrl);
+  const collector = new SessionAudioCollector({
+    state: stateWithConsent(true),
+    clock: fakeClock(),
+    enabled: true,
+    WorkerCtor: null,
+    AudioContextCtor: FakeAudioContext,
+    mediaDevices: {},
+  });
+  collector.started = true;
+  collector.everStarted = true;
+  collector.status = 'running';
+  collector.permission = 'granted';
+  collector.sampleRate = 16000;
+  collector.pendingChunks = [syntheticSpeech(16000, 8)];
+  collector.pendingSamples = collector.pendingChunks[0].length;
+  assert.equal(await collector.flushBoundary(), 1);
+  assert.equal(collector.pendingSamples, 0);
+  const task = collector.summarizeTaskWindows(collector.windows, 'sustained_vowel', {
+    blockId: 'audio-vowel',
+    title: 'Sustained vowel',
+    durationMs: 8000,
+    audioAvailable: true,
+  });
+  assert.equal(task.windowCount, 1);
+  assert.equal(task.status, 'completed');
+  await collector.stop();
 });
 
 test('AudioWorklet setup failure falls back without disabling the session', async () => {

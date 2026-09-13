@@ -140,13 +140,36 @@ function sessionAudioDetails(row) {
   const summary = payload?.audioSummary || payload?.audio_summary;
   const tests = Array.isArray(payload?.experimentMeta?.audioTests)
     ? payload.experimentMeta.audioTests.slice(0, 50).map(test => ({
+      schemaVersion: String(test?.schemaVersion || 'audio_task.v1').slice(0, 64),
       blockId: String(test?.blockId || '').slice(0, 128),
+      title: String(test?.title || '').slice(0, 255),
       testType: String(test?.testType || 'audio_test').slice(0, 64),
+      status: String(test?.status || 'not_computed').slice(0, 64),
       durationMs: finiteNumber(test?.durationMs),
       audioAvailable: test?.audioAvailable === true,
       windowCount: finiteNumber(test?.windowCount),
       acceptedWindowCount: finiteNumber(test?.acceptedWindowCount),
+      rejectedWindowCount: finiteNumber(test?.rejectedWindowCount),
       completedAt: finiteNumber(test?.completedAt),
+      metrics: {
+        recordingQuality: finiteNumber(test?.metrics?.recordingQuality),
+        featureReliability: finiteNumber(test?.metrics?.featureReliability),
+        speechCoverage: finiteNumber(test?.metrics?.speechCoverage),
+        completionScore: finiteNumber(test?.metrics?.completionScore),
+        rmsMean: finiteNumber(test?.metrics?.rmsMean),
+        clippingRatioMean: finiteNumber(test?.metrics?.clippingRatioMean),
+        pitchMeanHz: finiteNumber(test?.metrics?.pitchMeanHz),
+        pitchStdHz: finiteNumber(test?.metrics?.pitchStdHz),
+        pitchVariability: finiteNumber(test?.metrics?.pitchVariability),
+        jitterLocal: finiteNumber(test?.metrics?.jitterLocal),
+        shimmerLocal: finiteNumber(test?.metrics?.shimmerLocal),
+        hnrDb: finiteNumber(test?.metrics?.hnrDb),
+        pauseRate: finiteNumber(test?.metrics?.pauseRate),
+        averagePauseDuration: finiteNumber(test?.metrics?.averagePauseDuration),
+        meanUtteranceDuration: finiteNumber(test?.metrics?.meanUtteranceDuration),
+      },
+      rawAudioStored: false,
+      rawAudioTransmitted: false,
     }))
     : [];
   if ((!summary || typeof summary !== 'object') && tests.length === 0) return null;
