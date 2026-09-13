@@ -226,7 +226,9 @@ jobs:
 
   release-gate:
     name: Required release gate
-    if: always()
+    # Superseded runs are cancelled by the workflow concurrency policy. Do not
+    # relabel those stale runs as failures, while still evaluating real failures.
+    if: ${{ always() && !cancelled() }}
     needs: [api-security, postgres-release, browser-regression]
     runs-on: ubuntu-24.04
     steps:

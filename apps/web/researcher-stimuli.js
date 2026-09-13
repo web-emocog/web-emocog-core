@@ -173,6 +173,74 @@ function readStimulusDataUrl(file) {
   });
 }
 
+function requestStimulusUploadDetails(files) {
+  const sourceFiles = Array.from(files || []);
+  if (!sourceFiles.length) return Promise.resolve([]);
+  const entries = sourceFiles.map(file => ({
+    file,
+    name: String(file.name || '').replace(/\.[^.]+$/, '') || (CURRENT_LANG === 'en' ? 'Untitled stimulus' : 'Стимул без названия'),
+    previewObjectUrl: (String(file.type || '').startsWith('image/')
+      && typeof URL !== 'undefined'
+      && typeof URL.createObjectURL === 'function')
+      ? URL.createObjectURL(file)
+      : ''
+  }));
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10015;background:rgba(10,15,35,.62);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const rows = entries.map((entry, index) => `
+      <div data-upload-row="${index}" style="display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;padding:10px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel2);">
+        <div style="width:72px;height:58px;border-radius:9px;overflow:hidden;background:var(--card-bg);display:flex;align-items:center;justify-content:center;">
+          ${entry.previewObjectUrl
+            ? `<img src="${escapeStimulusHtml(entry.previewObjectUrl)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block;">`
+            : `<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="26" height="26" style="color:var(--muted);">${getIconForType(stimulusTypeFromFile(entry.file))}</svg>`}
+        </div>
+        <label style="min-width:0;font-size:11px;color:var(--muted);">
+          ${CURRENT_LANG === 'en' ? 'Stimulus title' : 'Название стимула'}
+          <input data-upload-name value="${escapeStimulusHtml(entry.name)}" maxlength="255" style="display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;background:var(--card-bg);color:var(--text);font-size:13px;">
+        </label>
+      </div>`).join('');
+    overlay.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="stimulusUploadTitle" style="width:min(620px,96vw);max-height:min(760px,90vh);display:flex;flex-direction:column;padding:22px;border-radius:18px;background:var(--card-bg);border:1px solid var(--stroke);box-shadow:var(--shadow);color:var(--text);">
+      <div id="stimulusUploadTitle" style="font-size:17px;font-weight:800;">${CURRENT_LANG === 'en' ? 'Check previews and titles' : 'Проверьте превью и названия'}</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:5px;">${CURRENT_LANG === 'en' ? 'The title can be changed before upload and edited later in the library.' : 'Название можно изменить до загрузки, а затем отредактировать в библиотеке.'}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;overflow:auto;margin-top:16px;">${rows}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+        <button type="button" data-upload-cancel class="quick-btn">${CURRENT_LANG === 'en' ? 'Cancel' : 'Отмена'}</button>
+        <button type="button" data-upload-confirm class="quick-btn" style="background:var(--accent);border-color:var(--accent);color:#fff;font-weight:750;">${CURRENT_LANG === 'en' ? 'Upload' : 'Загрузить'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    const close = confirmed => {
+      if (confirmed) {
+        overlay.querySelectorAll('[data-upload-row]').forEach(row => {
+          const index = Number(row.dataset.uploadRow);
+          const value = row.querySelector('[data-upload-name]')?.value?.trim();
+          if (entries[index]) entries[index].name = value || entries[index].name;
+        });
+      } else {
+        entries.forEach(entry => {
+          if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl);
+        });
+      }
+      overlay.remove();
+      document.removeEventListener('keydown', onKeydown);
+      resolve(confirmed ? entries : null);
+    };
+    const onKeydown = event => {
+      if (event.key === 'Escape') close(false);
+      if (event.key === 'Enter' && event.target?.tagName !== 'TEXTAREA') close(true);
+    };
+    overlay.querySelector('[data-upload-cancel]').addEventListener('click', () => close(false));
+    overlay.querySelector('[data-upload-confirm]').addEventListener('click', () => close(true));
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(false); });
+    document.addEventListener('keydown', onKeydown);
+    const firstInput = overlay.querySelector('[data-upload-name]');
+    firstInput?.focus();
+    firstInput?.select();
+  });
+}
+
 function stimulusPreviewHtml(stimulus) {
   const name = escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : stimulus?.name || '');
   const url = escapeStimulusHtml(stimulus?._previewObjectUrl || stimulus?.url || '');
@@ -369,14 +437,16 @@ function StimuliAOIView() {
 
   async function importMediaFiles(files, folder) {
     if (!files.length) return;
+    const uploadEntries = await requestStimulusUploadDetails(files);
+    if (!uploadEntries) return [];
     const dropzone = uploadArea.querySelector('#dropzone_media');
-    const progress = showStimulusImportProgress(files.length === 1
-      ? files[0].name
-      : (CURRENT_LANG === 'en' ? `${files.length} media files` : `${files.length} медиафайлов`));
+    const progress = showStimulusImportProgress(uploadEntries.length === 1
+      ? uploadEntries[0].name
+      : (CURRENT_LANG === 'en' ? `${uploadEntries.length} media files` : `${uploadEntries.length} медиафайлов`));
     dropzone.style.pointerEvents = 'none';
     dropzone.style.opacity = '.55';
     try {
-      const newIds = (await handleFileUpload(files, (current, total) => {
+      const newIds = (await handleFileUpload(uploadEntries, (current, total) => {
         progress.update(current, total, CURRENT_LANG === 'en'
           ? `Uploading file ${current} of ${total}`
           : `Загрузка файла ${current} из ${total}`);
@@ -392,6 +462,10 @@ function StimuliAOIView() {
       toast(CURRENT_LANG === 'en' ? 'Media files added.' : 'Медиафайлы добавлены.');
       return newIds;
     } catch (error) {
+      uploadEntries.forEach(entry => {
+        const retained = stimuliList.some(stimulus => stimulus?._previewObjectUrl === entry.previewObjectUrl);
+        if (entry.previewObjectUrl && !retained) URL.revokeObjectURL(entry.previewObjectUrl);
+      });
       toast(`${CURRENT_LANG === 'en' ? 'Media upload failed.' : 'Ошибка загрузки медиа.'} ${error?.message || ''}`.trim(), 'error');
       return [];
     } finally {
@@ -598,7 +672,7 @@ function StimuliAOIView() {
     const remoteStimuli = stimuliList.filter(stimulus => stimulus?.apiContentUrl);
     if (remoteStimuli.length) {
       Promise.allSettled(remoteStimuli.map(stimulus => hydrateApiStimulusPreview(stimulus)))
-        .then(() => renderStimuliGallery(gallery));
+        .then(() => currentTab === 'folder' ? renderFolderView() : renderStimuliGallery(gallery));
     }
   }, 0);
 
@@ -651,7 +725,9 @@ async function handleFileUpload(files, onProgress) {
     && typeof hasResearcherApiToken === 'function' && hasResearcherApiToken();
   const projectId = useApi ? await resolveApiProjectId() : null;
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
-    const file = files[fileIndex];
+    const entry = files[fileIndex]?.file ? files[fileIndex] : { file: files[fileIndex], name: files[fileIndex]?.name, previewObjectUrl: '' };
+    const file = entry.file;
+    const customName = String(entry.name || file.name || '').trim() || file.name;
     onProgress?.(fileIndex + 1, files.length);
     const type = stimulusTypeFromFile(file);
     let newItem;
@@ -659,29 +735,31 @@ async function handleFileUpload(files, onProgress) {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('project_id', String(projectId));
-      formData.append('name', file.name);
+      formData.append('name', customName);
       const row = await apiPost('/stimuli/upload', formData);
       const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(row.id)}/content`;
       newItem = {
         id: String(row.id),
-        name: row.name || file.name,
+        name: row.name || customName,
         type,
         info: `${(Number(row.size_bytes || file.size) / 1024).toFixed(1)} KB`,
         url: absoluteStimulusApiUrl(apiContentUrl),
         apiContentUrl,
         apiStimulusId: row.id,
         mimeType: row.mime_type || file.type,
-        createdAt: row.created_at || new Date().toISOString()
+        createdAt: row.created_at || new Date().toISOString(),
+        _previewObjectUrl: entry.previewObjectUrl || ''
       };
       try { await hydrateApiStimulusPreview(newItem); } catch (_) { /* Retry on the next library render. */ }
     } else {
       const id = String(Date.now() + Math.random());
       newItem = {
         id,
-        name: file.name,
+        name: customName,
         type,
         info: `${(file.size / 1024).toFixed(1)} KB`,
         url: await readStimulusDataUrl(file),
+        _previewObjectUrl: entry.previewObjectUrl || '',
         createdAt: new Date().toISOString()
       };
     }

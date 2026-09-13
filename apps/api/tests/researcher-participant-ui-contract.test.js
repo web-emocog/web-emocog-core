@@ -441,6 +441,8 @@ describe('researcher navigation contract', () => {
     assert.match(participant, /role', 'timer'/);
     assert.match(participant, /showTimedParticipantBlock\(block, 'audio_test'\)/);
     assert.match(participant, /experimentMeta\.audioTests/);
+    assert.match(participant, /flushBoundary/);
+    assert.match(participant, /summarizeTaskWindows/);
     assert.match(translations, /Не моргайте в момент нажатия/);
     assert.match(translations, /Смотрите на каждый зелёный круг/);
     assert.match(translations, /Ничего не нажимайте/);
@@ -458,6 +460,19 @@ describe('researcher navigation contract', () => {
     assert.match(projects, /requireRole\('admin', 'PI', 'researcher'\)/);
     assert.match(stimuli, /folder-stim-edit-btn/);
     assert.match(stimuli, /renameStimulusInLibrary\(button\.dataset\.id, null, renderFolderView\)/);
+  });
+
+  it('previews uploads before saving and exposes three distinct audio tasks', () => {
+    const stimuli = read('web/researcher-stimuli.js');
+    const builder = read('web/researcher-builder.js');
+    assert.match(stimuli, /requestStimulusUploadDetails/);
+    assert.match(stimuli, /Проверьте превью и названия/);
+    assert.match(stimuli, /formData\.append\('name', customName\)/);
+    assert.match(stimuli, /_previewObjectUrl: entry\.previewObjectUrl/);
+    assert.match(builder, /type:'audio_reading'/);
+    assert.match(builder, /type:'audio_sustained_vowel'/);
+    assert.match(builder, /type:'audio_oral_ddk'/);
+    assert.match(builder, /userBlocks\.some\(block => block\.type === 'audio_test'\)/);
   });
 
   it('locks analytics to the current project and exposes safe audio summaries', () => {
@@ -479,14 +494,14 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260913-2/);
-    assert.match(app, /tests-updated\.js\?v=20260913-2/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260913-2/);
-    assert.match(task, /tests-updated\.js\?v=20260913-2/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260913-2/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260913-2/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260913-2/);
-    assert.match(runtime, /tests-updated\.js\?v=20260913-2/);
+    assert.match(tests, /ui-updated\.js\?v=20260913-3/);
+    assert.match(app, /tests-updated\.js\?v=20260913-3/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260913-3/);
+    assert.match(task, /tests-updated\.js\?v=20260913-3/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260913-3/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260913-3/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260913-3/);
+    assert.match(runtime, /tests-updated\.js\?v=20260913-3/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {
