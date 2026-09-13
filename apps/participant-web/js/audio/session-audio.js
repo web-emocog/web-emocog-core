@@ -83,6 +83,32 @@ function compactBiomarkers(features, accepted) {
     return Object.fromEntries(allowed.map(key => [key, finite(features[key])]));
 }
 
+const BLOCKING_ANALYSIS_REASONS = new Set([
+    'quality_ood',
+    'low_quality_score',
+    'strict_low_quality',
+    'strict_ood'
+]);
+
+export function audioWindowAcceptance(qc, analysis, analysisError = null) {
+    const analysisReasons = (analysis?.decision?.reasons || []).map(String);
+    const blockingAnalysisReasons = analysisReasons.filter(reason => (
+        BLOCKING_ANALYSIS_REASONS.has(reason)
+    ));
+    const accepted = !analysisError
+        && !qc.silence
+        && !qc.clipping
+        && !qc.short
+        && !qc.unsupportedSampleRate
+        && analysis?.quality?.is_ood !== true
+        && blockingAnalysisReasons.length === 0;
+    return {
+        accepted,
+        featureReliable: analysis?.decision?.status === 'ok',
+        analysisReasons
+    };
+}
+
 export function analyzeAudioWindow(samples, sampleRate, context = {}) {
     const qc = signalQc(samples, sampleRate);
     let analysis = null;
@@ -97,25 +123,20 @@ export function analyzeAudioWindow(samples, sampleRate, context = {}) {
     } catch (error) {
         analysisError = error?.message || String(error);
     }
-    const coreAccepted = analysis?.decision?.status === 'ok' && analysis?.quality?.is_ood !== true;
-    const accepted = !analysisError
-        && !qc.silence
-        && !qc.clipping
-        && !qc.short
-        && !qc.unsupportedSampleRate
-        && coreAccepted;
+    const acceptance = audioWindowAcceptance(qc, analysis, analysisError);
+    const accepted = acceptance.accepted;
     const reasons = [
         ...(qc.silence ? ['silence'] : []),
         ...(qc.clipping ? ['clipping'] : []),
         ...(qc.short ? ['short_window'] : []),
         ...(qc.unsupportedSampleRate ? ['unsupported_sample_rate'] : []),
-        ...((analysis?.decision?.reasons || []).map(String)),
+        ...acceptance.analysisReasons,
         ...(analysisError ? ['analysis_error'] : [])
     ];
     const coreQuality = finite(analysis?.quality?.score) ?? 0;
-    const reliability = accepted
+    const reliability = accepted && acceptance.featureReliable
         ? clamp01(coreQuality * (1 - Math.min(1, qc.clippingRatio * 5)))
-        : null;
+        : (accepted ? 0 : null);
     return {
         schemaVersion: AUDIO_SESSION_VERSION,
         algorithmVersion: `open_vocal_biomarkers.${CORE_VERSION}`,
@@ -141,7 +162,7 @@ export function analyzeAudioWindow(samples, sampleRate, context = {}) {
             snrProxyDb: finite(analysis?.quality?.snr_proxy_db),
             speechFraction: finite(analysis?.quality?.speech_fraction)
         },
-        markers: compactMarkers(analysis?.markers, accepted),
+        markers: compactMarkers(analysis?.markers, accepted && acceptance.featureReliable),
         biomarkers: compactBiomarkers(analysis?.raw_features, accepted),
         disclaimer: DISCLAIMER
     };
@@ -443,7 +464,7 @@ export class SessionAudioCollector {
         if (!this.WorkerCtor || this.worker) return false;
         try {
             this.worker = new this.WorkerCtor(
-                new URL('./audio-window-worker.js', import.meta.url),
+                new URL('./audio-window-worker.js?v=20260913-6', import.meta.url),
                 { type: 'module', name: 'wecog-audio-analysis' }
             );
             this.worker.onmessage = event => {

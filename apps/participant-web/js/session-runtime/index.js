@@ -10,7 +10,7 @@ import { SessionRuntimeUI } from './runtime-ui.js?v=20260909-1';
 import { SessionFramePipeline } from './frame-pipeline.js?v=20260909-1';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs';
-import { SessionAudioCollector } from '../audio/session-audio.js';
+import { SessionAudioCollector } from '../audio/session-audio.js?v=20260913-6';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 
@@ -168,7 +168,7 @@ class ParticipantSessionRuntime {
 
     _scheduleFinalUploadRetry() {
         setTimeout(() => {
-            import('../web-page/tests-updated.js?v=20260913-5')
+            import('../web-page/tests-updated.js?v=20260913-6')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         }, 0);
