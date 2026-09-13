@@ -5,22 +5,22 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { translations } from '../../translations.js?v=20260913-4';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260913-4';
+import { translations } from '../../translations.js?v=20260913-5';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260913-5';
 import { stopPreCheck } from './precheck-updated.js?v=20260909-1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260913-4';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260913-5';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
-} from './protocol-invite-utils.js?v=20260913-4';
+} from './protocol-invite-utils.js?v=20260913-5';
 import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20260913-4';
+} from '../gaze-tracker/gaze-tests/index.js?v=20260913-5';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
@@ -44,7 +44,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260913-4';
+} from '../session-runtime/index.js?v=20260913-5';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -917,8 +917,9 @@ export function startGazeValidation() {
     state.flags.isValidating = true;
     state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
     
-    const SAMPLES_PER_POINT = 30; // ~1 секунда при 30 FPS
+    const SAMPLES_PER_POINT = 60; // ~2 секунды при 30 FPS
     const SAMPLE_INTERVAL = 33; // ~30 FPS
+    const SETTLE_DELAY_MS = 1000;
     let currentSamples = [];
     let sampleCount = 0;
     let samplingInterval = null;
@@ -1080,7 +1081,7 @@ export function startGazeValidation() {
                 }
             }, SAMPLE_INTERVAL);
             state.runtime.validationSamplingInterval = samplingInterval;
-        }, 500); // 500ms задержка перед сбором
+        }, SETTLE_DELAY_MS);
     }
 
     function finishCorrectionStage() {
@@ -1200,7 +1201,7 @@ export function startGazeValidation() {
         samplingDelayTimeout = setTimeout(() => {
             samplingDelayTimeout = null;
             showNextPoint();
-        }, 500);
+        }, SETTLE_DELAY_MS);
     }
 
     function pointsForSignal(points, xKey, yKey) {

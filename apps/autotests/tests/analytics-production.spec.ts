@@ -82,6 +82,48 @@ test('analytics plan preserves training/main overrides', async ({ page }) => {
   expect(result.blockOverrides.main.selectedMetricIds).toContain('aoi.dwell_time_ms');
 });
 
+test('existing runtime-shaped protocols restore their stimuli in the editor', async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem('emocog_my_experiments', JSON.stringify([{
+      id: 'runtime-shaped-edit',
+      title: 'Published protocol',
+      protocolId: 'published-protocol',
+      status: 'draft',
+      savedStep: 3,
+      blocks: [{
+        id: 'published-task',
+        type: 'cognitive_task',
+        label: 'Published task',
+        taskType: 'simple_rt',
+        blockConfig: {
+          taskType: 'simple_rt',
+          stimulusDuration: 1200,
+          stimuliSource: 'library',
+        },
+        trials: [{
+          stimulusId: 'std_simple_black_square',
+          condition: 'target',
+          action: 'space',
+          duration: 1200,
+          repetitions: 3,
+        }],
+      }],
+    }]));
+    // @ts-expect-error application global
+    const builder = ExperimentBuilderView({
+      experimentId: 'runtime-shaped-edit',
+      startStep: 3,
+    });
+    document.getElementById('view')?.replaceChildren(builder);
+  });
+
+  await expect(page.locator('#view')).toContainText('Published task');
+  await expect(page.locator('#view')).toContainText('3 проб');
+  await page.locator('.open-trials-btn').click();
+  await expect(page.locator('#trialsContainer')).toBeVisible();
+  await expect(page.locator('.t-stimulus').first()).toHaveValue('std_simple_black_square');
+});
+
 test('session dashboard hides backend failure details but logs them technically', async ({ page }) => {
   const technicalLogs: string[] = [];
   page.on('console', message => {
@@ -119,6 +161,7 @@ test('completed session shows AOI/heatmap, stays aligned after resize, and expor
     const state = window.EmocogAnalyticsProduction.store.state;
     return { id: state.snapshot.id, hash: state.snapshot.datasetHash, qcMode: state.snapshot.queryEcho.filters.qcMode };
   });
+  expect(snapshot.qcMode).toBe('all');
   const canvas = page.locator('.analytics-heatmap-canvas');
   const before = await canvas.boundingBox();
   await page.setViewportSize({ width: 980, height: 760 });

@@ -1,4 +1,62 @@
-//(???)
+function normalizePersistedBuilderBlock(block) {
+  if (!block || typeof block !== 'object') return block;
+  const content = block.content && typeof block.content === 'object' ? block.content : {};
+  const config = block.blockConfig && typeof block.blockConfig === 'object' ? block.blockConfig : {};
+
+  if (block.type === 'cognitive_task') {
+    const taskType = content.taskType || block.taskType || config.taskType
+      || content.rt_task || block.rt_task || config.rt_task || 'simple_rt';
+    const trials = Array.isArray(content.trials)
+      ? content.trials
+      : (Array.isArray(block.trials) ? block.trials : []);
+    const feedback = config.feedbackConfig && typeof config.feedbackConfig === 'object'
+      ? config.feedbackConfig
+      : {};
+    return {
+      ...block,
+      content: {
+        ...config,
+        ...content,
+        taskType,
+        rt_task: content.rt_task || block.rt_task || config.rt_task || taskType,
+        trials,
+        selected_metrics: content.selected_metrics || config.selected_metrics || block.selected_metrics || null,
+        showFeedback: content.showFeedback ?? config.showFeedback ?? Boolean(config.feedbackConfig),
+        feedbackCorrect: content.feedbackCorrect || feedback.correctText || '',
+        feedbackIncorrect: content.feedbackIncorrect || feedback.incorrectText || '',
+        useFixation: content.useFixation ?? config.useFixation ?? Boolean(config.fixation),
+        fixationDuration: content.fixationDuration || config.fixation?.duration || 500,
+        useAOI: content.useAOI ?? config.useAOI ?? false,
+        aoiSchemaVersion: content.aoiSchemaVersion || config.aoiSchemaVersion || null,
+        aoiDefinitions: content.aoiDefinitions || config.aoiDefinitions || {}
+      }
+    };
+  }
+
+  if (block.type === 'passive') {
+    const slides = Array.isArray(content.slides)
+      ? content.slides
+      : (Array.isArray(block.slides)
+        ? block.slides
+        : (Array.isArray(block.trials) ? block.trials : []));
+    return {
+      ...block,
+      content: {
+        ...config,
+        ...content,
+        slides,
+        useFixation: content.useFixation ?? config.useFixation ?? Boolean(config.fixation),
+        fixationDuration: content.fixationDuration || config.fixation?.duration || 500,
+        useAOI: content.useAOI ?? config.useAOI ?? false,
+        aoiSchemaVersion: content.aoiSchemaVersion || config.aoiSchemaVersion || null,
+        aoiDefinitions: content.aoiDefinitions || config.aoiDefinitions || {}
+      }
+    };
+  }
+
+  return { ...block, content: { ...content } };
+}
+
 function ExperimentBuilderView(options = {}) {
   const startStep = options.startStep !== undefined ? options.startStep : 0;
   const experimentId = options.experimentId || null;
@@ -175,7 +233,11 @@ function ExperimentBuilderView(options = {}) {
   if (experimentId) {
     const saved = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
     editingExp = saved.find(e => e.id === experimentId) || null;
-    experimentBlocks = (editingExp && editingExp.blocks) ? JSON.parse(JSON.stringify(editingExp.blocks)).filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type)) : [];
+    experimentBlocks = (editingExp && editingExp.blocks)
+      ? JSON.parse(JSON.stringify(editingExp.blocks))
+        .map(normalizePersistedBuilderBlock)
+        .filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type))
+      : [];
     protocolMeta = {
       title: editingExp?.metadata?.title || editingExp?.title || '',
       protocolId: editingExp?.metadata?.protocolId || editingExp?.protocolId || '',
@@ -4168,6 +4230,12 @@ function ExperimentBuilderView(options = {}) {
             };
           }
           out.trials = defaultExportTrialsForCognitiveBlock(b.content);
+          out.content = {
+            ...(b.content || {}),
+            taskType,
+            rt_task: out.rt_task,
+            trials: out.trials
+          };
           attachBlockAois(out.blockConfig, b.content, out.trials);
         } else if (b.type === 'passive') {
           out.blockConfig = {
@@ -4186,6 +4254,10 @@ function ExperimentBuilderView(options = {}) {
               duration: b.content?.fixationDuration || 500
             };
           }
+          out.content = {
+            ...(b.content || {}),
+            slides: Array.isArray(b.content?.slides) ? b.content.slides : []
+          };
           attachBlockAois(out.blockConfig, b.content, b.content?.slides || []);
         } else if (b.type === 'rest') {
           out.content = {
