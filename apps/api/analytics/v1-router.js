@@ -135,10 +135,33 @@ function sessionTechnicalDetails(row) {
   };
 }
 
-function sessionAudioDetails(row) {
+function protocolAudioTests(definition) {
+  const blocks = Array.isArray(definition?.blocks) ? definition.blocks : [];
+  return blocks
+    .filter(block => String(block?.type || '').toLowerCase() === 'audio_test')
+    .slice(0, 50)
+    .map((block, index) => ({
+      schemaVersion: 'audio_task.v1',
+      blockId: String(block?.id || `audio_test_${index}`).slice(0, 128),
+      title: String(block?.content?.taskName || block?.label || 'Audio test').slice(0, 255),
+      testType: String(block?.content?.testType || 'audio_test').slice(0, 64),
+      status: 'not_recorded',
+      durationMs: finiteNumber(block?.content?.durationMs, block?.content?.duration),
+      audioAvailable: false,
+      windowCount: 0,
+      acceptedWindowCount: 0,
+      rejectedWindowCount: 0,
+      completedAt: null,
+      metrics: {},
+      rawAudioStored: false,
+      rawAudioTransmitted: false,
+    }));
+}
+
+function sessionAudioDetails(row, protocolDefinition = null) {
   const payload = row?.features_payload || {};
   const summary = payload?.audioSummary || payload?.audio_summary;
-  const tests = Array.isArray(payload?.experimentMeta?.audioTests)
+  const recordedTests = Array.isArray(payload?.experimentMeta?.audioTests)
     ? payload.experimentMeta.audioTests.slice(0, 50).map(test => ({
       schemaVersion: String(test?.schemaVersion || 'audio_task.v1').slice(0, 64),
       blockId: String(test?.blockId || '').slice(0, 128),
@@ -172,10 +195,15 @@ function sessionAudioDetails(row) {
       rawAudioTransmitted: false,
     }))
     : [];
+  const recordedIds = new Set(recordedTests.map(test => test.blockId).filter(Boolean));
+  const tests = [
+    ...recordedTests,
+    ...protocolAudioTests(protocolDefinition).filter(test => !recordedIds.has(test.blockId)),
+  ].slice(0, 50);
   if ((!summary || typeof summary !== 'object') && tests.length === 0) return null;
   return {
-    status: String(summary?.status || (tests.length ? 'completed' : 'not_computed')).slice(0, 64),
-    enabled: summary?.enabled === true,
+    status: String(summary?.status || (recordedTests.length ? 'completed' : 'not_recorded')).slice(0, 64),
+    enabled: summary?.enabled === true || tests.length > 0,
     consentGranted: summary?.consentGranted === true,
     permission: String(summary?.permission || 'not_requested').slice(0, 64),
     rawAudioStored: false,
@@ -274,7 +302,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
         ...technical,
       },
       quality: sessionQualityDetails(row),
-      audio: sessionAudioDetails(row),
+      audio: sessionAudioDetails(row, hydrated.protocol?.definition),
       qcChannels: hydrated.snapshot.queryEcho.filters.qcChannels.map(channel => channelQc(row, channel)),
       metrics: buildSessionMetrics(row, hydrated.snapshot.queryEcho),
       exclusions: (Array.isArray(row.features_payload?.cognitiveResults)

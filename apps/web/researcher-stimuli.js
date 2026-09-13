@@ -18,14 +18,29 @@ function escapeStimulusHtml(value) {
 
 async function hydrateApiStimulusPreview(stimulus) {
   if (!stimulus?.apiContentUrl || typeof fetch !== 'function') return stimulus;
+  if (stimulus._previewObjectUrl) return stimulus;
+  if (stimulus._previewHydrationPromise) return stimulus._previewHydrationPromise;
   const url = absoluteStimulusApiUrl(stimulus.apiContentUrl);
   if (!url) return stimulus;
-  const response = await fetch(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' });
-  if (!response.ok) throw typeof apiFailError === 'function' ? await apiFailError(response) : new Error(String(response.status));
-  const blob = await response.blob();
-  if (stimulus._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
-  stimulus._previewObjectUrl = URL.createObjectURL(blob);
-  return stimulus;
+  stimulus._previewHydrating = true;
+  stimulus._previewHydrationPromise = (async () => {
+    const response = await fetch(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' });
+    if (!response.ok) throw typeof apiFailError === 'function' ? await apiFailError(response) : new Error(String(response.status));
+    const blob = await response.blob();
+    if (stimulus._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
+    stimulus._previewObjectUrl = URL.createObjectURL(blob);
+    return stimulus;
+  })();
+  try {
+    return await stimulus._previewHydrationPromise;
+  } finally {
+    stimulus._previewHydrating = false;
+    delete stimulus._previewHydrationPromise;
+  }
+}
+
+function stimulusPreviewSource(stimulus) {
+  return stimulus?._previewObjectUrl || stimulus?.url || stimulus?.src || '';
 }
 
 function persistStimuliList() {
@@ -33,6 +48,7 @@ function persistStimuliList() {
     const copy = { ...stimulus };
     delete copy._previewObjectUrl;
     delete copy._previewHydrating;
+    delete copy._previewHydrationPromise;
     if (copy.apiContentUrl && String(copy.url || '').startsWith('blob:')) {
       copy.url = absoluteStimulusApiUrl(copy.apiContentUrl);
     }
@@ -1000,9 +1016,17 @@ function applyStimuliDefinitionsToLibrary(definitions) {
   if (changed) persistStimuliList();
 }
 
-function openAoiEditor(stimulusId, options = {}) {
+async function openAoiEditor(stimulusId, options = {}) {
   const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
   if (!stimulus) return;
+  if (stimulus.apiContentUrl && !stimulus._previewObjectUrl) {
+    try {
+      await hydrateApiStimulusPreview(stimulus);
+    } catch (error) {
+      console.warn('[Stimuli] Failed to load AOI preview:', error);
+    }
+  }
+  const mediaUrl = stimulusPreviewSource(stimulus);
 
   const hasScopedAois = Object.prototype.hasOwnProperty.call(options, 'initialAois');
   let aois = (hasScopedAois ? options.initialAois : stimulus.aois || [])
@@ -1041,10 +1065,10 @@ function openAoiEditor(stimulusId, options = {}) {
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 310px;flex:1;min-height:0;">
       <div id="aoiViewport" style="padding:18px;display:flex;align-items:center;justify-content:center;background:var(--panel2);min-width:0;min-height:0;overflow:hidden;">
         <div id="aoiStage" style="position:relative;width:100%;aspect-ratio:16/9;background:#fff;border:1px solid #d8deea;border-radius:12px;box-shadow:0 8px 24px rgba(30,41,59,.10);overflow:hidden;user-select:none;touch-action:none;flex:none;">
-          ${(stimulus.type === 'image' || stimulus.type === 'slides') && stimulus.url
-            ? `<img id="aoiMedia" src="${aoiEscape(stimulus.url)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
-            : stimulus.type === 'video' && stimulus.url
-              ? `<video id="aoiMedia" src="${aoiEscape(stimulus.url)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`
+          ${(stimulus.type === 'image' || stimulus.type === 'slides') && mediaUrl
+            ? `<img id="aoiMedia" src="${aoiEscape(mediaUrl)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
+            : stimulus.type === 'video' && mediaUrl
+              ? `<video id="aoiMedia" src="${aoiEscape(mediaUrl)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`
               : options.previewHtml
                 ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;">${options.previewHtml}</div>`
                 : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#111827;font-size:42px;font-weight:800;">${aoiEscape(stimulus.text || stimulus.name)}</div>`}
