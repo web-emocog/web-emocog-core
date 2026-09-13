@@ -16,6 +16,8 @@ const POST_CALIBRATION_BLOCK_TYPES = new Set([
     'passive',
     'survey',
     'rest',
+    'timer',
+    'audio_test',
     'finish'
 ]);
 
