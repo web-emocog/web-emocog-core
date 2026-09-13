@@ -219,7 +219,7 @@ router.patch(
 
 router.delete(
   '/:id',
-  requireRole('admin', 'PI'),
+  requireRole('admin', 'PI', 'researcher'),
   requireOperation(OPERATIONS.PROJECT_DELETE),
   [param('id').isInt()],
   async (req, res) => {

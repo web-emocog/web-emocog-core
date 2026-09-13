@@ -5,11 +5,11 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { translations } from '../../translations.js?v=20260909-2';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260912-1';
+import { translations } from '../../translations.js?v=20260913-2';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260913-2';
 import { stopPreCheck } from './precheck-updated.js?v=20260909-1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260912-1';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260913-2';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -20,7 +20,7 @@ import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20260909-1';
+} from '../gaze-tracker/gaze-tests/index.js?v=20260913-2';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
@@ -44,7 +44,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260909-1';
+} from '../session-runtime/index.js?v=20260913-2';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -366,7 +366,7 @@ function waitForCalibrationIntroduction(options = {}) {
     if (text) {
         text.textContent = targeted
             ? `${t.qc_failed_full} ${t.calib_click_instruction}`
-            : `${t.runtime_policy_body} ${t.calib_click_instruction}`;
+            : (t.calibration_intro_body || t.calib_click_instruction);
     }
     button.textContent = targeted ? t.runtime_recalibrate : t.runtime_instruction_action;
     intro.hidden = false;
@@ -848,6 +848,15 @@ export function startGazeValidation() {
     const calibrationActions = document.getElementById('calibrationActions');
     const recalibrateButton = document.getElementById('recalibrateGazeBtn');
     const continueButton = document.getElementById('continueAfterValidationBtn');
+    const validationIntro = document.getElementById('validationIntro');
+    const validationIntroKicker = document.getElementById('validationIntroKicker');
+    const validationIntroTitle = document.getElementById('validationIntroTitle');
+    const validationIntroText = document.getElementById('validationIntroText');
+    const validationIntroStartButton = document.getElementById('validationIntroStartBtn');
+    const validationResult = document.getElementById('validationResult');
+    const validationResultTitle = document.getElementById('validationResultTitle');
+    const validationResultMetrics = document.getElementById('validationResultMetrics');
+    const validationResultAdvice = document.getElementById('validationResultAdvice');
     if (calibrationActions) calibrationActions.style.display = 'none';
     
     // Показываем экран валидации (используем тот же fullscreen)
@@ -913,6 +922,9 @@ export function startGazeValidation() {
     let currentSamples = [];
     let sampleCount = 0;
     let samplingInterval = null;
+    let samplingDelayTimeout = null;
+    let correctionTransitionStarted = false;
+    let validationFinishStarted = false;
     
     // === GAZE: single-flight prediction цикл на время валидации ===
     const video = document.getElementById('precheckVideo');
@@ -983,10 +995,14 @@ export function startGazeValidation() {
     function showNextPoint() {
         if (currentPoint >= activePositions.length) {
             if (validationStage === 'correction') {
+                if (correctionTransitionStarted) return;
+                correctionTransitionStarted = true;
                 finishCorrectionStage();
             } else {
+                if (validationFinishStarted) return;
+                validationFinishStarted = true;
                 stopValidationPredictionLoop();
-                finishValidation();
+                finishValidationSafely();
             }
             return;
         }
@@ -1007,7 +1023,9 @@ export function startGazeValidation() {
         sampleCount = 0;
         
         // Небольшая задержка перед началом сбора (чтобы глаза успели перейти)
-        setTimeout(() => {
+        samplingDelayTimeout = setTimeout(() => {
+            samplingDelayTimeout = null;
+            if (!state.flags.isValidating) return;
             // Начинаем сбор семплов
             samplingInterval = setInterval(() => {
                 const prediction = state.runtime.currentGazePrediction;
@@ -1066,79 +1084,112 @@ export function startGazeValidation() {
     }
 
     function finishCorrectionStage() {
-        const rawValidationPoints = state.runtime.validationPoints;
-        const rawMetrics = calculateValidationMetrics(rawValidationPoints, validationViewport);
-        const filteredValidation = filterValidationPointsForMetrics(rawValidationPoints, 0.8);
-        const filteredValidationPoints = filteredValidation.points;
-        const filteredMetrics = calculateValidationMetrics(
-            filteredValidationPoints,
-            validationViewport
-        );
-        postCalibrationCorrection = {
-            fitted: false,
-            applied: false,
-            sampleFilter: filteredValidation.stats
-        };
-
-        const fittedCorrection = fitResidualBias(filteredValidationPoints, validationViewport);
-        if (fittedCorrection) {
-            const correctedPoints = applyResidualBiasCorrection(
-                filteredValidationPoints,
-                fittedCorrection
-            );
-            const correctedMetrics = calculateValidationMetrics(
-                correctedPoints,
-                validationViewport
-            );
-            const loocv = evaluateResidualBiasLOOCV(
+        try {
+            const rawValidationPoints = state.runtime.validationPoints;
+            const rawMetrics = calculateValidationMetrics(rawValidationPoints, validationViewport);
+            const filteredValidation = filterValidationPointsForMetrics(rawValidationPoints, 0.8);
+            const filteredValidationPoints = filteredValidation.points;
+            const filteredMetrics = calculateValidationMetrics(
                 filteredValidationPoints,
                 validationViewport
             );
-            const shouldApply = correctedMetrics.accuracyPx <= filteredMetrics.accuracyPx
-                && shouldApplyResidualBiasCorrection(loocv);
-            const correctionId = generateCorrectionId();
             postCalibrationCorrection = {
-                correctionId,
-                fitted: true,
-                applied: shouldApply,
-                source: fittedCorrection.source,
-                sampleCount: fittedCorrection.sampleCount,
-                kind: fittedCorrection.kind,
-                offsetX: Math.round(fittedCorrection.offsetX * 10) / 10,
-                offsetY: Math.round(fittedCorrection.offsetY * 10) / 10,
-                trajectory: fittedCorrection.trajectory,
-                rawMetrics,
-                filteredMetrics,
-                correctedInSampleMetrics: correctedMetrics,
-                loocv: loocv || { available: false }
+                fitted: false,
+                applied: false,
+                sampleFilter: filteredValidation.stats
             };
-            if (shouldApply) {
-                state.runtime.gazeTracker?.setPostCalibrationCorrection?.({
-                    ...fittedCorrection,
-                    correctionId
+
+            const fittedCorrection = fitResidualBias(filteredValidationPoints, validationViewport);
+            if (fittedCorrection) {
+                const correctedPoints = applyResidualBiasCorrection(
+                    filteredValidationPoints,
+                    fittedCorrection
+                );
+                const correctedMetrics = calculateValidationMetrics(
+                    correctedPoints,
+                    validationViewport
+                );
+                const loocv = evaluateResidualBiasLOOCV(
+                    filteredValidationPoints,
+                    validationViewport
+                );
+                const shouldApply = correctedMetrics.accuracyPx <= filteredMetrics.accuracyPx
+                    && shouldApplyResidualBiasCorrection(loocv);
+                const correctionId = generateCorrectionId();
+                postCalibrationCorrection = {
+                    correctionId,
+                    fitted: true,
+                    applied: shouldApply,
+                    source: fittedCorrection.source,
+                    sampleCount: fittedCorrection.sampleCount,
+                    kind: fittedCorrection.kind,
+                    offsetX: Math.round(fittedCorrection.offsetX * 10) / 10,
+                    offsetY: Math.round(fittedCorrection.offsetY * 10) / 10,
+                    trajectory: fittedCorrection.trajectory,
+                    rawMetrics,
+                    filteredMetrics,
+                    correctedInSampleMetrics: correctedMetrics,
+                    loocv: loocv || { available: false }
+                };
+                if (shouldApply) {
+                    state.runtime.gazeTracker?.setPostCalibrationCorrection?.({
+                        ...fittedCorrection,
+                        correctionId
+                    });
+                }
+                dbg('gaze', 'loocv:evaluateResidualBiasLOOCV', {
+                    applied: shouldApply,
+                    loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
+                    rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
+                    worsenedTargetCount: loocv?.worsenedTargetCount ?? null,
+                    targetCount: loocv?.targetCount ?? null
                 });
             }
-            dbg('gaze', 'loocv:evaluateResidualBiasLOOCV', {
-                applied: shouldApply,
-                loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
-                rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
-                worsenedTargetCount: loocv?.worsenedTargetCount ?? null,
-                targetCount: loocv?.targetCount ?? null
+
+            correctionStageResult = {
+                pointCount: rawValidationPoints.length,
+                points: rawValidationPoints,
+                rawMetrics,
+                filteredMetrics,
+                postCalibrationCorrection
+            };
+            recordSessionEvent('validation_correction_stage_complete', {
+                correctionApplied: postCalibrationCorrection.applied,
+                loocvRmsHeldOutPx:
+                    postCalibrationCorrection.loocv?.loocvRmsHeldOutPx ?? null
+            });
+        } catch (error) {
+            state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
+            let rawMetrics = null;
+            try {
+                rawMetrics = calculateValidationMetrics(
+                    state.runtime.validationPoints,
+                    validationViewport
+                );
+            } catch (_) {
+                rawMetrics = null;
+            }
+            postCalibrationCorrection = {
+                fitted: false,
+                applied: false,
+                error: 'correction_calculation_failed'
+            };
+            correctionStageResult = {
+                pointCount: state.runtime.validationPoints.length,
+                points: state.runtime.validationPoints,
+                rawMetrics,
+                filteredMetrics: null,
+                postCalibrationCorrection
+            };
+            recordSessionEvent('validation_correction_stage_failed', {
+                category: 'technical',
+                severity: 'warning',
+                message: error?.message || String(error)
+            });
+            dbgErr('gaze', 'validation:correction-stage-failed', {
+                message: error?.message || String(error)
             });
         }
-
-        correctionStageResult = {
-            pointCount: rawValidationPoints.length,
-            points: rawValidationPoints,
-            rawMetrics,
-            filteredMetrics,
-            postCalibrationCorrection
-        };
-        recordSessionEvent('validation_correction_stage_complete', {
-            correctionApplied: postCalibrationCorrection.applied,
-            loocvRmsHeldOutPx:
-                postCalibrationCorrection.loocv?.loocvRmsHeldOutPx ?? null
-        });
         validationStage = 'benchmark';
         activePositions = benchmarkPositions;
         currentPoint = 0;
@@ -1146,7 +1197,10 @@ export function startGazeValidation() {
         sampleCount = 0;
         instructionText.innerText =
             translations[state.currentLang].validation_look_instruction;
-        setTimeout(showNextPoint, 500);
+        samplingDelayTimeout = setTimeout(() => {
+            samplingDelayTimeout = null;
+            showNextPoint();
+        }, 500);
     }
 
     function pointsForSignal(points, xKey, yKey) {
@@ -1160,11 +1214,86 @@ export function startGazeValidation() {
         }));
     }
 
+    function finishValidationSafely() {
+        try {
+            finishValidation();
+        } catch (error) {
+            state.flags.isValidating = false;
+            if (state.runtime.validationSamplingInterval) {
+                clearInterval(state.runtime.validationSamplingInterval);
+                state.runtime.validationSamplingInterval = null;
+            }
+            if (samplingDelayTimeout) {
+                clearTimeout(samplingDelayTimeout);
+                samplingDelayTimeout = null;
+            }
+            stopValidationPredictionLoop();
+            state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
+
+            const technicalError = error?.message || String(error);
+            state.sessionData.gazeValidation = {
+                timestamp: Date.now(),
+                coordinateSpace: 'content_viewport',
+                targetBlindPrediction: true,
+                correctionSet: correctionStageResult,
+                benchmarkPoints: state.runtime.validationBenchmarkPoints,
+                points: [],
+                metrics: null,
+                postCalibrationCorrection: {
+                    ...postCalibrationCorrection,
+                    applied: false,
+                    error: 'validation_calculation_failed'
+                },
+                passed: false,
+                technicalError
+            };
+            recordSessionEvent('validation_calculation_failed', {
+                category: 'technical',
+                severity: 'error',
+                message: technicalError
+            });
+            dbgErr('gaze', 'validation:calculation-failed', { message: technicalError });
+
+            instructionText.textContent = participantMessage('validation_complete');
+            if (validationResultTitle) {
+                validationResultTitle.textContent = participantMessage('validation_complete');
+            }
+            if (validationResultMetrics) {
+                validationResultMetrics.textContent = state.currentLang === 'en'
+                    ? 'Accuracy could not be calculated.'
+                    : 'Точность не удалось рассчитать.';
+            }
+            if (validationResultAdvice) {
+                validationResultAdvice.textContent = participantMessage('validation_result_failed_advice');
+            }
+            progressText.innerText = '';
+            point.style.display = 'none';
+            point.style.backgroundColor = '#DC2626';
+            point.style.cursor = 'pointer';
+            if (validationResult) validationResult.hidden = false;
+            if (continueButton) continueButton.style.display = 'none';
+            if (recalibrateButton) {
+                recalibrateButton.style.display = '';
+                recalibrateButton.textContent = participantMessage('runtime_recalibrate');
+                recalibrateButton.onclick = () => {
+                    if (calibrationActions) calibrationActions.style.display = 'none';
+                    if (validationResult) validationResult.hidden = true;
+                    startCalibration();
+                };
+            }
+            if (calibrationActions) calibrationActions.style.display = 'flex';
+        }
+    }
+
     function finishValidation() {
         state.flags.isValidating = false;
         if (state.runtime.validationSamplingInterval) {
             clearInterval(state.runtime.validationSamplingInterval);
             state.runtime.validationSamplingInterval = null;
+        }
+        if (samplingDelayTimeout) {
+            clearTimeout(samplingDelayTimeout);
+            samplingDelayTimeout = null;
         }
         stopValidationPredictionLoop();
         state.runtime._validationGazeInterval = null;
@@ -1364,6 +1493,7 @@ export function startGazeValidation() {
         if (validationIntroTitle) validationIntroTitle.textContent = participantMessage('validation_intro_title');
         if (validationIntroText) validationIntroText.textContent = participantMessage('validation_intro_body');
         validationIntroStartButton.textContent = participantMessage('validation_intro_action');
+        point.style.display = 'none';
         validationIntro.hidden = false;
         validationIntroStartButton.onclick = () => {
             validationIntroStartButton.onclick = null;

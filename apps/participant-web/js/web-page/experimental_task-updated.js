@@ -7,18 +7,18 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { finishSession } from './tests-updated.js?v=20260912-1';
+import { finishSession } from './tests-updated.js?v=20260913-2';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260909-2';
+import { translations } from '../../translations.js?v=20260913-2';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260909-1';
+} from '../session-runtime/index.js?v=20260913-2';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -61,6 +61,7 @@ let activeBlockTrialPlan = [];
 let activeTrialQualityContext = null;
 let acknowledgedTaskBlockIndex = null;
 let cognitiveFullscreenOwned = false;
+let timedProtocolBlockInterval = null;
 const MAX_COGNITIVE_BLOCK_ATTEMPTS = 3;
 
 const LOCALE_FIELD_SUFFIX = Object.freeze({
@@ -659,7 +660,16 @@ function normalizeProtocolDefinition(definition, options = {}) {
                 ));
                 return;
             }
-            if (type === 'passive' || type === 'rest') {
+            if (type === 'rest' || type === 'audio_test') {
+                outBlocks.push({
+                    id: block.id || `${type}_${index}`,
+                    type,
+                    label: block.label || type,
+                    content: { ...(block.content || {}) }
+                });
+                return;
+            }
+            if (type === 'passive') {
                 outBlocks.push(toInstructionBlock(
                     block.id || `${type}_${index}`,
                     block.label || type,
@@ -703,7 +713,16 @@ function normalizeProtocolDefinition(definition, options = {}) {
             outBlocks.push(toSurveyBlock(block, index));
             return;
         }
-        if (type === 'questionnaire' || type === 'calibration' || type === 'rest' || type === 'baseline' || type === 'recovery' || type === 'final') {
+        if (type === 'rest' || type === 'audio_test') {
+            outBlocks.push({
+                id: block?.id || `${type}_${index}`,
+                type,
+                label: block?.label || params.title || type,
+                content: { ...params }
+            });
+            return;
+        }
+        if (type === 'questionnaire' || type === 'calibration' || type === 'baseline' || type === 'recovery' || type === 'final') {
             outBlocks.push(toInstructionBlock(block?.id || `${type}_${index}`, params.title || 'Этап', params.text || 'Следующий этап протокола.', params));
             return;
         }
@@ -983,6 +1002,10 @@ function emitStimulusOffIfNeeded(rtMs, reason) {
 function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (cognitiveFinished) return;
     cognitiveFinished = true;
+    if (timedProtocolBlockInterval) {
+        clearInterval(timedProtocolBlockInterval);
+        timedProtocolBlockInterval = null;
+    }
 
     cleanupTrial();
     resetStimulusViews();
@@ -1236,6 +1259,18 @@ function runNextBlock() {
         return;
     }
 
+    if (block.type === 'rest') {
+        setSessionPhase('rest', { source: 'rest_block' });
+        showTimedParticipantBlock(block, 'rest');
+        return;
+    }
+
+    if (block.type === 'audio_test') {
+        setSessionPhase('audio_test', { source: 'audio_test_block' });
+        showTimedParticipantBlock(block, 'audio_test');
+        return;
+    }
+
     if (block.type === 'instruction' || block.type === 'instructions') {
         setSessionPhase('cognitive_instruction', { source: 'instruction_block' });
         showInstructions(block);
@@ -1265,6 +1300,114 @@ function runNextBlock() {
     });
     currentBlockIndex++;
     runNextBlock();
+}
+
+function protocolBlockDurationMs(content, fallbackSeconds) {
+    const explicitMs = Number(content?.durationMs);
+    if (Number.isFinite(explicitMs) && explicitMs > 0) {
+        return Math.max(1000, Math.min(60 * 60 * 1000, explicitMs));
+    }
+    const numeric = Number(content?.duration);
+    const duration = Number.isFinite(numeric) && numeric > 0 ? numeric : fallbackSeconds;
+    const milliseconds = content?.durationUnit === 'seconds'
+        ? duration * 1000
+        : (duration >= 1000 ? duration : duration * 1000);
+    return Math.max(1000, Math.min(60 * 60 * 1000, milliseconds));
+}
+
+function formatCountdown(milliseconds) {
+    const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+}
+
+function showTimedParticipantBlock(block, kind) {
+    if (timedProtocolBlockInterval) clearInterval(timedProtocolBlockInterval);
+    ex_state.task.area.style.display = 'none';
+    ex_state.instruction.container.style.display = 'block';
+    ex_state.instruction.text.classList.remove('survey-runtime');
+    ex_state.instruction.text.style.textAlign = 'center';
+    ex_state.instruction.text.style.whiteSpace = 'pre-wrap';
+
+    const t = translations[state.currentLang] || translations.en;
+    const isAudio = kind === 'audio_test';
+    const durationMs = protocolBlockDurationMs(block.content, isAudio ? 12 : 30);
+    const startedAt = Date.now();
+    const deadline = startedAt + durationMs;
+    const runtime = getSessionRuntime();
+    const collector = runtime?.audioCollector;
+    const audioWindowStart = Array.isArray(collector?.windows) ? collector.windows.length : 0;
+    const title = isAudio
+        ? (block.label || t.runtime_audio_test_title || translations.en.runtime_audio_test_title)
+        : (block.label || t.runtime_rest_title || translations.en.runtime_rest_title);
+    const prompt = isAudio
+        ? (block.content?.prompt || t.runtime_audio_test_prompt || translations.en.runtime_audio_test_prompt)
+        : (block.content?.text || t.runtime_rest_body || translations.en.runtime_rest_body);
+
+    ex_state.instruction.title.textContent = title;
+    ex_state.instruction.text.innerHTML = '';
+    const promptElement = document.createElement('div');
+    promptElement.textContent = prompt;
+    promptElement.style.cssText = 'font-size:clamp(18px,2.3vw,28px);line-height:1.55;max-width:760px;margin:0 auto;';
+    const countdownElement = document.createElement('div');
+    countdownElement.setAttribute('role', 'timer');
+    countdownElement.setAttribute('aria-live', 'polite');
+    countdownElement.style.cssText = 'font-size:clamp(46px,8vw,84px);font-weight:800;letter-spacing:.04em;margin-top:28px;color:var(--accent,#5c66bd);font-variant-numeric:tabular-nums;';
+    ex_state.instruction.text.append(promptElement, countdownElement);
+
+    const checkContainer = document.getElementById('cogCheckContainer');
+    if (checkContainer) checkContainer.style.display = 'none';
+    ex_state.instruction.btn.style.display = 'none';
+
+    emitTaskEvent(isAudio ? 'audio_test_start' : 'rest_start', {
+        blockIndex: currentBlockIndex,
+        durationMs,
+        testType: isAudio ? (block.content?.testType || 'reading') : null,
+        audioAvailable: isAudio ? collector?.started === true : null
+    });
+
+    const complete = () => {
+        if (timedProtocolBlockInterval) clearInterval(timedProtocolBlockInterval);
+        timedProtocolBlockInterval = null;
+        ex_state.instruction.btn.style.display = '';
+        if (isAudio) {
+            const windows = Array.isArray(collector?.windows) ? collector.windows.slice(audioWindowStart) : [];
+            const scopedWindows = windows.filter(window => !window?.blockId || String(window.blockId) === String(block.id));
+            const experimentMeta = state.sessionData.experimentMeta || (state.sessionData.experimentMeta = {});
+            const tests = Array.isArray(experimentMeta.audioTests)
+                ? experimentMeta.audioTests
+                : (experimentMeta.audioTests = []);
+            tests.push({
+                blockId: String(block.id || `audio_test_${currentBlockIndex}`),
+                testType: block.content?.testType || 'reading',
+                durationMs: Date.now() - startedAt,
+                audioAvailable: collector?.started === true,
+                windowCount: scopedWindows.length,
+                acceptedWindowCount: scopedWindows.filter(window => window?.accepted === true).length,
+                completedAt: Date.now()
+            });
+        }
+        emitTaskEvent(isAudio ? 'audio_test_complete' : 'rest_complete', {
+            blockIndex: currentBlockIndex,
+            elapsedMs: Date.now() - startedAt
+        });
+        emitTaskEvent('block_end', {
+            blockIndex: currentBlockIndex,
+            blockType: block.type,
+            reason: 'timer_complete'
+        });
+        currentBlockIndex++;
+        runNextBlock();
+    };
+
+    const update = () => {
+        const remaining = deadline - Date.now();
+        countdownElement.textContent = formatCountdown(remaining);
+        if (remaining <= 0) complete();
+    };
+    update();
+    if (deadline > Date.now()) timedProtocolBlockInterval = setInterval(update, 250);
 }
 
 function showInstructions(block) {
