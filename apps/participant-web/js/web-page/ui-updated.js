@@ -10,7 +10,7 @@ import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './pr
 import { measureRenderFPS } from './camera.js';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
-import { getParticipantShell } from './protocol-invite-utils.js?v=20260913-6';
+import { getParticipantShell } from './protocol-invite-utils.js?v=20260913-7';
 import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
 
 const MVP_STEP = {
@@ -72,7 +72,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20260913-6');
+        const mod = await import('./tests-updated.js?v=20260913-7');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;

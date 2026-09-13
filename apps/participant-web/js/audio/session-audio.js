@@ -136,7 +136,7 @@ export function analyzeAudioWindow(samples, sampleRate, context = {}) {
     const coreQuality = finite(analysis?.quality?.score) ?? 0;
     const reliability = accepted && acceptance.featureReliable
         ? clamp01(coreQuality * (1 - Math.min(1, qc.clippingRatio * 5)))
-        : (accepted ? 0 : null);
+        : null;
     return {
         schemaVersion: AUDIO_SESSION_VERSION,
         algorithmVersion: `open_vocal_biomarkers.${CORE_VERSION}`,
@@ -464,7 +464,7 @@ export class SessionAudioCollector {
         if (!this.WorkerCtor || this.worker) return false;
         try {
             this.worker = new this.WorkerCtor(
-                new URL('./audio-window-worker.js?v=20260913-6', import.meta.url),
+                new URL('./audio-window-worker.js?v=20260913-7', import.meta.url),
                 { type: 'module', name: 'wecog-audio-analysis' }
             );
             this.worker.onmessage = event => {
