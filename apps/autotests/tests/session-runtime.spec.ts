@@ -116,6 +116,86 @@ test.describe('Participant session runtime', () => {
     expect(ingestRequests).toBe(0);
   });
 
+  test('preloads uploaded invitation stimuli before the cognitive task starts', async ({ page }) => {
+    const invitationCode = 'INV-STIMULUS-PRELOAD';
+    let contentRequests = 0;
+    await page.route('**/invitations/by-code/**', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli/42/content`)) {
+        contentRequests += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: Buffer.from('participant-stimulus-binary'),
+        });
+        return;
+      }
+      if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli`)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{
+            id: 42,
+            name: 'Uploaded target',
+            mime_type: 'image/png',
+            metadata: {},
+            content_url: `/invitations/by-code/${invitationCode}/stimuli/42/content`,
+          }]),
+        });
+        return;
+      }
+      if (url.pathname.endsWith(`/by-code/${invitationCode}`)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            invitation_id: 42,
+            code: invitationCode,
+            protocol_id: 42,
+            project_id: 1,
+            protocol_name: 'Stimulus preload E2E',
+            definition: {
+              version: 'v2.0_universal',
+              blocks: [{
+                id: 'uploaded-image-task',
+                type: 'cognitive_task',
+                taskType: 'simple_rt',
+                blockConfig: { stimulusDuration: 1000 },
+                trials: [{ stimulusId: '42', condition: 'target', action: 'space' }],
+              }],
+            },
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto(`${PAGE_URL}?code=${invitationCode}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean(
+      (window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap?.['42']
+    ));
+    const preloaded = await page.evaluate(async () => {
+      const runtime = (window as any).__WECOG_STATE__.runtime;
+      const row = runtime.invitationStimuliMap['42'];
+      const resolved = (window as any).StandardStimuli.resolveParticipantStimulus({
+        stimulusId: '42',
+        meta: row,
+      });
+      const response = await fetch(resolved.src);
+      return {
+        source: resolved.src,
+        size: (await response.blob()).size,
+        retainedUrls: runtime.invitationStimulusObjectUrls.length,
+      };
+    });
+
+    expect(contentRequests).toBe(1);
+    expect(preloaded.source).toMatch(/^blob:/);
+    expect(preloaded.size).toBeGreaterThan(0);
+    expect(preloaded.retainedUrls).toBe(1);
+  });
+
   test('opens contact and questionnaire immediately after consent without reload', async ({ page }) => {
     const invitationCode = 'INV-QUESTIONNAIRE-E2E';
     await page.route('**/invitations/by-code/**', async route => {
