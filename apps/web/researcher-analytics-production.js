@@ -851,7 +851,8 @@
         blockIds: state.query.blockId ? [state.query.blockId] : [],
         stimulusIds: state.query.stimulusId ? [state.query.stimulusId] : [],
         aoiIds: state.query.aoiId ? [state.query.aoiId] : [],
-        qcMode: state.query.qcMode,
+        // A deliberately selected session must remain inspectable even when QC marked it invalid.
+        qcMode: sessionMode ? 'all' : state.query.qcMode,
         qcChannels: state.query.qcChannels.slice(),
         minValidFraction: null,
         minSignalConfidence: null,
@@ -1574,7 +1575,9 @@
           ${simpleSelectHtml('analyticsBlockFilter', tr('Блок / задача','Block / task'), blocks, state.query.blockId, disabled, tr('Все блоки','All blocks'))}
           ${simpleSelectHtml('analyticsStimulusFilter', tr('Стимул','Stimulus'), stimuli, state.query.stimulusId, disabled || !state.query.blockId, tr('Все стимулы','All stimuli'))}
           ${simpleSelectHtml('analyticsAoiFilter', 'AOI', aois, state.query.aoiId, disabled || !state.query.stimulusId, tr('Все AOI','All AOIs'))}
-          <label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><select id="analyticsQcMode" style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);color:var(--text);font-size:12px;"><option value="valid_only" ${state.query.qcMode === 'valid_only' ? 'selected' : ''}>${tr('Только валидные','Valid only')}</option><option value="valid_and_borderline" ${state.query.qcMode === 'valid_and_borderline' ? 'selected' : ''}>${tr('Валидные + пограничные','Valid + borderline')}</option><option value="all" ${state.query.qcMode === 'all' ? 'selected' : ''}>${tr('Все, включая невалидные','All, including invalid')}</option></select></label>
+          ${state.query.mode === 'session'
+            ? `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><input value="${tr('Выбранная сессия · любой QC','Selected session · any QC')}" disabled style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);color:var(--muted);font-size:12px;"></label>`
+            : `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><select id="analyticsQcMode" style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);color:var(--text);font-size:12px;"><option value="valid_only" ${state.query.qcMode === 'valid_only' ? 'selected' : ''}>${tr('Только валидные','Valid only')}</option><option value="valid_and_borderline" ${state.query.qcMode === 'valid_and_borderline' ? 'selected' : ''}>${tr('Валидные + пограничные','Valid + borderline')}</option><option value="all" ${state.query.qcMode === 'all' ? 'selected' : ''}>${tr('Все, включая невалидные','All, including invalid')}</option></select></label>`}
         </div>
         <div style="display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin-top:11px;">
           <fieldset style="border:0;padding:0;margin:0;min-width:220px;"><legend style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">${tr('QC-каналы','QC channels')}</legend><div style="display:flex;gap:10px;flex-wrap:wrap;">${channels.map(channel => `<label style="font-size:11px;color:var(--text);display:flex;gap:5px;align-items:center;"><input class="analytics-qc-channel" type="checkbox" value="${escapeHtml(channel)}" ${state.query.qcChannels.includes(channel) ? 'checked' : ''}>${escapeHtml(channelLabel(channel))}</label>`).join('')}</div></fieldset>

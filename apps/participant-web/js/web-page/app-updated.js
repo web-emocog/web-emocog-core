@@ -15,7 +15,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260913-4';
+} from './ui-updated.js?v=20260913-5';
 
 import { 
     startPreCheck, 
@@ -25,16 +25,16 @@ import {
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260913-4';
+} from './tests-updated.js?v=20260913-5';
 
 import {
     deriveInvitationHubMetrics,
     getInvitationSessionPlan,
     getParticipantShell
-} from './protocol-invite-utils.js?v=20260913-4';
+} from './protocol-invite-utils.js?v=20260913-5';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260913-4';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260913-5';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -80,6 +80,29 @@ function dbgErr(scope, event, data) {
         const d = window.WECOG_DEBUG;
         if (d && d.enabled) d.error(scope, event, data);
     } catch (_) { /* ignore */ }
+}
+
+function revokeInvitationStimulusObjectUrls() {
+    const urls = Array.isArray(state.runtime?.invitationStimulusObjectUrls)
+        ? state.runtime.invitationStimulusObjectUrls
+        : [];
+    urls.forEach((url) => {
+        try { URL.revokeObjectURL(url); } catch (_) { /* ignore */ }
+    });
+    state.runtime.invitationStimulusObjectUrls = [];
+}
+
+async function preloadInvitationStimulus(contentUrl) {
+    if (
+        !contentUrl
+        || typeof URL === 'undefined'
+        || typeof URL.createObjectURL !== 'function'
+    ) return null;
+    const response = await fetch(contentUrl, { credentials: 'include' });
+    if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
+    const blob = await response.blob();
+    if (!blob.size) throw new Error('Stimulus preload returned an empty file');
+    return URL.createObjectURL(blob);
 }
 
 let _gazeDebugSampleN = 0;
@@ -395,6 +418,7 @@ async function loadInvitationProtocolByCode(code) {
         });
 
         let stimuliMap = {};
+        revokeInvitationStimulusObjectUrls();
         if (payload.project_id && stimulusIds.length) {
             try {
                 const stimuliResp = await fetch(
@@ -403,23 +427,35 @@ async function loadInvitationProtocolByCode(code) {
                 if (stimuliResp.ok) {
                     const rows = await stimuliResp.json();
                     if (Array.isArray(rows)) {
-                        rows.forEach((row) => {
+                        const mappedRows = await Promise.all(rows.map(async (row) => {
                             const id = String(row?.id);
-                            if (stimulusIds.includes(id)) {
-                                const contentUrl = typeof row?.content_url === 'string'
-                                    ? base + row.content_url
-                                    : null;
-                                stimuliMap[id] = {
-                                    id,
-                                    name: row?.name || id,
-                                    mime_type: row?.mime_type || null,
-                                    metadata: {
-                                        ...(row?.metadata || {}),
-                                        ...(contentUrl ? { url: contentUrl } : {})
-                                    }
-                                };
+                            if (!stimulusIds.includes(id)) return null;
+                            const contentUrl = typeof row?.content_url === 'string'
+                                ? base + row.content_url
+                                : null;
+                            let displayUrl = contentUrl;
+                            if (contentUrl && String(row?.mime_type || '').toLowerCase().startsWith('image/')) {
+                                try {
+                                    displayUrl = await preloadInvitationStimulus(contentUrl);
+                                    if (displayUrl) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
+                                } catch (error) {
+                                    console.warn('[Invitation] Failed to preload stimulus binary:', error);
+                                }
                             }
-                        });
+                            return {
+                                id,
+                                name: row?.name || id,
+                                mime_type: row?.mime_type || null,
+                                metadata: {
+                                    ...(row?.metadata || {}),
+                                    ...(displayUrl ? { url: displayUrl } : {}),
+                                    ...(contentUrl ? { source_url: contentUrl } : {})
+                                }
+                            };
+                        }));
+                        stimuliMap = Object.fromEntries(
+                            mappedRows.filter(Boolean).map(row => [row.id, row])
+                        );
                     }
                 }
             } catch (e) {
@@ -841,4 +877,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 window.addEventListener('beforeunload', () => {
     getSessionRuntime()?.saveCheckpoint();
     stopPreCheckOnLeave();
+    revokeInvitationStimulusObjectUrls();
 });
