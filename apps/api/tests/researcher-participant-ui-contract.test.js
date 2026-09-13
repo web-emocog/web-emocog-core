@@ -479,10 +479,14 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260909-1/);
-    assert.match(app, /tests-updated\.js\?v=20260913-1/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260913-1/);
-    assert.match(task, /tests-updated\.js\?v=20260913-1/);
+    assert.match(tests, /ui-updated\.js\?v=20260913-2/);
+    assert.match(app, /tests-updated\.js\?v=20260913-2/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260913-2/);
+    assert.match(task, /tests-updated\.js\?v=20260913-2/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260913-2/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260913-2/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260913-2/);
+    assert.match(runtime, /tests-updated\.js\?v=20260913-2/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {

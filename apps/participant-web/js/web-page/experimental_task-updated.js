@@ -7,18 +7,18 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { finishSession } from './tests-updated.js?v=20260913-1';
+import { finishSession } from './tests-updated.js?v=20260913-2';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260913-1';
+import { translations } from '../../translations.js?v=20260913-2';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260909-1';
+} from '../session-runtime/index.js?v=20260913-2';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues

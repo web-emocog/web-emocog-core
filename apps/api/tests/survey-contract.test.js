@@ -247,6 +247,8 @@ describe('survey browser integration contract', () => {
     const participantCss = read('participant-web/style.css');
     const runner = read('participant-web/js/web-page/experimental_task-updated.js');
     const calibration = read('participant-web/js/web-page/tests-updated.js');
+    const calibrationPointRule = participantCss.match(/\.fullscreen-calib-point\s*\{[^}]*\}/)?.[0] || '';
+    const calibrationPointHoverRule = participantCss.match(/\.fullscreen-calib-point:hover\s*\{[^}]*\}/)?.[0] || '';
 
     assert.match(
       landing,
@@ -254,7 +256,15 @@ describe('survey browser integration contract', () => {
     );
     assert.match(participant, /id="calibrationIntro"/);
     assert.match(calibration, /calibration_instruction_acknowledged/);
-    assert.doesNotMatch(participantCss, /fullscreen-calib-point[\s\S]{0,500}transition:\s*all/);
+    assert.match(
+      calibration,
+      /await waitForCalibrationIntroduction\(\{ targeted \}\);[\s\S]{0,180}point\.style\.display = 'block';/
+    );
+    assert.match(calibrationPointRule, /transition:\s*none/);
+    assert.match(calibrationPointRule, /animation:\s*none/);
+    assert.match(calibrationPointRule, /box-shadow:\s*none/);
+    assert.doesNotMatch(calibrationPointRule, /transition:\s*all/);
+    assert.doesNotMatch(calibrationPointHoverRule, /scale\(/);
     assert.match(runner, /if \(checkContainer\) checkContainer\.style\.display = 'none';[\s\S]+btn\.disabled = false;/);
   });
 });
