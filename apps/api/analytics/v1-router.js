@@ -86,6 +86,10 @@ function finiteNumber(...values) {
   return null;
 }
 
+function optionalFiniteNumber(value) {
+  return value === null || value === undefined || value === '' ? null : finiteNumber(value);
+}
+
 function sessionTechnicalDetails(row) {
   const payload = row?.features_payload || {};
   const tech = payload?.meta?.tech || payload?.tech || {};
@@ -158,9 +162,70 @@ function protocolAudioTests(definition) {
     }));
 }
 
+const LEGACY_NON_BLOCKING_AUDIO_REASONS = new Set([
+  'low_voiced_coverage',
+  'low_marker_confidence',
+]);
+
+function meanFinite(values) {
+  const finite = values
+    .filter(value => value !== null && value !== undefined && value !== '')
+    .map(value => finiteNumber(value))
+    .filter(Number.isFinite);
+  return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+}
+
+function isRecoverableLegacyAudioWindow(window) {
+  if (window?.accepted === true) return true;
+  const qc = window?.qc;
+  if (!qc || typeof qc !== 'object') return false;
+  const reasons = Array.isArray(qc.reasons) ? qc.reasons.map(String) : [];
+  if (!reasons.length || reasons.some(reason => !LEGACY_NON_BLOCKING_AUDIO_REASONS.has(reason))) {
+    return false;
+  }
+  const qualityScore = finiteNumber(qc.qualityScore);
+  return qc.silence !== true
+    && qc.clipping !== true
+    && qc.short !== true
+    && qc.isOod !== true
+    && qualityScore !== null
+    && qualityScore >= 0.4;
+}
+
+function recoverLegacyAudioTest(test, windows) {
+  if ((finiteNumber(test.acceptedWindowCount) || 0) > 0 || test.status === 'completed') return test;
+  const scoped = windows.filter(window => String(window?.blockId || '') === test.blockId);
+  const recovered = scoped.filter(isRecoverableLegacyAudioWindow);
+  if (!recovered.length) return test;
+  const recordingQuality = meanFinite(recovered.map(window => window?.qc?.qualityScore));
+  const featureReliability = meanFinite(recovered.map(window => (
+    window?.accepted === true ? window?.reliability : null
+  )));
+  const speechCoverage = meanFinite(recovered.map(window => window?.qc?.speechFraction));
+  const completionScore = meanFinite([recordingQuality, featureReliability, speechCoverage]);
+  const windowCount = Math.max(finiteNumber(test.windowCount) || 0, scoped.length);
+  return {
+    ...test,
+    status: 'completed',
+    windowCount,
+    acceptedWindowCount: recovered.length,
+    rejectedWindowCount: Math.max(0, windowCount - recovered.length),
+    metrics: {
+      ...test.metrics,
+      recordingQuality,
+      featureReliability,
+      speechCoverage,
+      completionScore,
+      rmsMean: meanFinite(recovered.map(window => window?.qc?.rms)),
+      clippingRatioMean: meanFinite(recovered.map(window => window?.qc?.clippingRatio)),
+    },
+  };
+}
+
 function sessionAudioDetails(row, protocolDefinition = null) {
   const payload = row?.features_payload || {};
   const summary = payload?.audioSummary || payload?.audio_summary;
+  const windows = Array.isArray(summary?.windows) ? summary.windows.slice(0, 360) : [];
   const recordedTests = Array.isArray(payload?.experimentMeta?.audioTests)
     ? payload.experimentMeta.audioTests.slice(0, 50).map(test => ({
       schemaVersion: String(test?.schemaVersion || 'audio_task.v1').slice(0, 64),
@@ -168,32 +233,32 @@ function sessionAudioDetails(row, protocolDefinition = null) {
       title: String(test?.title || '').slice(0, 255),
       testType: String(test?.testType || 'audio_test').slice(0, 64),
       status: String(test?.status || 'not_computed').slice(0, 64),
-      durationMs: finiteNumber(test?.durationMs),
+      durationMs: optionalFiniteNumber(test?.durationMs),
       audioAvailable: test?.audioAvailable === true,
       windowCount: finiteNumber(test?.windowCount),
       acceptedWindowCount: finiteNumber(test?.acceptedWindowCount),
       rejectedWindowCount: finiteNumber(test?.rejectedWindowCount),
-      completedAt: finiteNumber(test?.completedAt),
+      completedAt: optionalFiniteNumber(test?.completedAt),
       metrics: {
-        recordingQuality: finiteNumber(test?.metrics?.recordingQuality),
-        featureReliability: finiteNumber(test?.metrics?.featureReliability),
-        speechCoverage: finiteNumber(test?.metrics?.speechCoverage),
-        completionScore: finiteNumber(test?.metrics?.completionScore),
-        rmsMean: finiteNumber(test?.metrics?.rmsMean),
-        clippingRatioMean: finiteNumber(test?.metrics?.clippingRatioMean),
-        pitchMeanHz: finiteNumber(test?.metrics?.pitchMeanHz),
-        pitchStdHz: finiteNumber(test?.metrics?.pitchStdHz),
-        pitchVariability: finiteNumber(test?.metrics?.pitchVariability),
-        jitterLocal: finiteNumber(test?.metrics?.jitterLocal),
-        shimmerLocal: finiteNumber(test?.metrics?.shimmerLocal),
-        hnrDb: finiteNumber(test?.metrics?.hnrDb),
-        pauseRate: finiteNumber(test?.metrics?.pauseRate),
-        averagePauseDuration: finiteNumber(test?.metrics?.averagePauseDuration),
-        meanUtteranceDuration: finiteNumber(test?.metrics?.meanUtteranceDuration),
+        recordingQuality: optionalFiniteNumber(test?.metrics?.recordingQuality),
+        featureReliability: optionalFiniteNumber(test?.metrics?.featureReliability),
+        speechCoverage: optionalFiniteNumber(test?.metrics?.speechCoverage),
+        completionScore: optionalFiniteNumber(test?.metrics?.completionScore),
+        rmsMean: optionalFiniteNumber(test?.metrics?.rmsMean),
+        clippingRatioMean: optionalFiniteNumber(test?.metrics?.clippingRatioMean),
+        pitchMeanHz: optionalFiniteNumber(test?.metrics?.pitchMeanHz),
+        pitchStdHz: optionalFiniteNumber(test?.metrics?.pitchStdHz),
+        pitchVariability: optionalFiniteNumber(test?.metrics?.pitchVariability),
+        jitterLocal: optionalFiniteNumber(test?.metrics?.jitterLocal),
+        shimmerLocal: optionalFiniteNumber(test?.metrics?.shimmerLocal),
+        hnrDb: optionalFiniteNumber(test?.metrics?.hnrDb),
+        pauseRate: optionalFiniteNumber(test?.metrics?.pauseRate),
+        averagePauseDuration: optionalFiniteNumber(test?.metrics?.averagePauseDuration),
+        meanUtteranceDuration: optionalFiniteNumber(test?.metrics?.meanUtteranceDuration),
       },
       rawAudioStored: false,
       rawAudioTransmitted: false,
-    }))
+    })).map(test => recoverLegacyAudioTest(test, windows))
     : [];
   const recordedIds = new Set(recordedTests.map(test => test.blockId).filter(Boolean));
   const tests = [
@@ -201,6 +266,16 @@ function sessionAudioDetails(row, protocolDefinition = null) {
     ...protocolAudioTests(protocolDefinition).filter(test => !recordedIds.has(test.blockId)),
   ].slice(0, 50);
   if ((!summary || typeof summary !== 'object') && tests.length === 0) return null;
+  const recoveredWindows = windows.filter(isRecoverableLegacyAudioWindow);
+  const storedAcceptedCount = finiteNumber(summary?.acceptedWindowCount) || 0;
+  const acceptedWindowCount = Math.max(storedAcceptedCount, recoveredWindows.length);
+  const windowCount = Math.max(finiteNumber(summary?.windowCount) || 0, windows.length);
+  const recoveredQualityMean = meanFinite(recoveredWindows.map(window => window?.qc?.qualityScore));
+  const recoveredReliabilityMean = meanFinite(recoveredWindows.map(window => (
+    window?.accepted === true ? window?.reliability : null
+  )));
+  const storedQualityMean = summary?.qualityMean == null ? null : finiteNumber(summary.qualityMean);
+  const storedReliabilityMean = summary?.reliabilityMean == null ? null : finiteNumber(summary.reliabilityMean);
   return {
     status: String(summary?.status || (recordedTests.length ? 'completed' : 'not_recorded')).slice(0, 64),
     enabled: summary?.enabled === true || tests.length > 0,
@@ -208,13 +283,13 @@ function sessionAudioDetails(row, protocolDefinition = null) {
     permission: String(summary?.permission || 'not_requested').slice(0, 64),
     rawAudioStored: false,
     rawAudioTransmitted: false,
-    windowCount: finiteNumber(summary?.windowCount),
-    acceptedWindowCount: finiteNumber(summary?.acceptedWindowCount),
-    rejectedWindowCount: finiteNumber(summary?.rejectedWindowCount),
+    windowCount,
+    acceptedWindowCount,
+    rejectedWindowCount: Math.max(0, windowCount - acceptedWindowCount),
     droppedWindowCount: finiteNumber(summary?.droppedWindowCount),
     durationMs: finiteNumber(summary?.durationMs),
-    qualityMean: finiteNumber(summary?.qualityMean),
-    reliabilityMean: finiteNumber(summary?.reliabilityMean),
+    qualityMean: storedQualityMean ?? recoveredQualityMean,
+    reliabilityMean: storedReliabilityMean ?? recoveredReliabilityMean,
     algorithmVersion: summary?.algorithmVersion ? String(summary.algorithmVersion).slice(0, 128) : null,
     disclaimer: summary?.disclaimer ? String(summary.disclaimer).slice(0, 500) : null,
     tests,

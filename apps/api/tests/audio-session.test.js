@@ -132,6 +132,42 @@ test('audio QC accepts a clean browser-length voiced window with finite reliabil
   assert.equal(result.qc.reasons.length, 0);
 });
 
+test('audio QC accepts a strong recording when only pitch-derived features are unreliable', async () => {
+  const { audioWindowAcceptance } = await import(audioModuleUrl);
+  const result = audioWindowAcceptance(
+    {
+      silence: false,
+      clipping: false,
+      short: false,
+      unsupportedSampleRate: false,
+    },
+    {
+      quality: { is_ood: false, score: 0.759762 },
+      decision: { status: 'abstain', reasons: ['low_voiced_coverage'] },
+    }
+  );
+  assert.equal(result.accepted, true);
+  assert.equal(result.featureReliable, false);
+});
+
+test('audio QC still rejects genuinely low-quality and out-of-distribution recordings', async () => {
+  const { audioWindowAcceptance } = await import(audioModuleUrl);
+  const qc = {
+    silence: false,
+    clipping: false,
+    short: false,
+    unsupportedSampleRate: false,
+  };
+  assert.equal(audioWindowAcceptance(qc, {
+    quality: { is_ood: false, score: 0.2 },
+    decision: { status: 'abstain', reasons: ['low_quality_score'] },
+  }).accepted, false);
+  assert.equal(audioWindowAcceptance(qc, {
+    quality: { is_ood: true, score: 0.8 },
+    decision: { status: 'abstain', reasons: ['quality_ood'] },
+  }).accepted, false);
+});
+
 test('three audio task profiles produce safe local task summaries', async () => {
   const { analyzeAudioWindow, summarizeAudioTaskWindows } = await import(audioModuleUrl);
   const window = analyzeAudioWindow(syntheticSpeech(16000, 12), 16000);
