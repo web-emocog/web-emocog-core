@@ -288,6 +288,71 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(Object.hasOwn(audio, 'windows'), false);
   });
 
+  await t.test('recovers legacy audio windows rejected only by unreliable pitch features', () => {
+    const source = row();
+    source.features_payload.audio_summary = {
+      schemaVersion: 'audio_session.v1',
+      status: 'completed',
+      enabled: true,
+      consentGranted: true,
+      windowCount: 2,
+      acceptedWindowCount: 0,
+      rejectedWindowCount: 2,
+      windows: [
+        {
+          blockId: 'pa-ta-ka',
+          accepted: false,
+          qc: {
+            reasons: ['low_voiced_coverage'],
+            silence: false,
+            clipping: false,
+            short: false,
+            isOod: false,
+            qualityScore: 0.759762,
+            speechFraction: 0.552,
+            rms: 0.041506,
+            clippingRatio: 0,
+          },
+        },
+        {
+          blockId: 'pa-ta-ka',
+          accepted: false,
+          qc: {
+            reasons: ['short_window', 'quality_ood'],
+            silence: false,
+            clipping: false,
+            short: true,
+            isOod: true,
+            qualityScore: 0.75,
+          },
+        },
+      ],
+    };
+    source.features_payload.experimentMeta = {
+      audioTests: [{
+        blockId: 'pa-ta-ka',
+        title: 'Па-та-ка',
+        testType: 'oral_ddk',
+        status: 'insufficient_signal',
+        audioAvailable: true,
+        windowCount: 2,
+        acceptedWindowCount: 0,
+        rejectedWindowCount: 2,
+        metrics: {},
+      }],
+    };
+    const audio = sessionAudioDetails(source);
+    assert.equal(audio.acceptedWindowCount, 1);
+    assert.equal(audio.rejectedWindowCount, 1);
+    assert.equal(audio.qualityMean, 0.759762);
+    assert.equal(audio.tests[0].status, 'completed');
+    assert.equal(audio.tests[0].acceptedWindowCount, 1);
+    assert.equal(audio.tests[0].metrics.speechCoverage, 0.552);
+    assert.equal(audio.tests[0].metrics.featureReliability, null);
+    assert.equal(audio.tests[0].metrics.pitchMeanHz, null);
+    assert.equal(audio.tests[0].metrics.pauseRate, null);
+  });
+
   await t.test('shows protocol audio tasks when an older session has no audio result', () => {
     const audio = sessionAudioDetails(row(), {
       blocks: [{
