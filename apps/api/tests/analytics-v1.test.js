@@ -12,6 +12,7 @@ const {
 const {
   exportCsv,
   protectSpreadsheetCell,
+  sessionAudioDetails,
   sessionQualityDetails,
   sessionTechnicalDetails,
 } = require('../analytics/v1-router');
@@ -232,6 +233,45 @@ test('analytics v1 contract and computations', async t => {
     assert.deepEqual(quality.failReasons, ['low_pose_ok_pct', 'low_fps_time']);
     assert.equal(quality.percentages.faceVisible, 98.9);
     assert.equal(quality.percentages.gazeValid, 82.7);
+  });
+
+  await t.test('exposes audio test summaries without raw voice data', () => {
+    const source = row();
+    source.features_payload.audio_summary = {
+      schemaVersion: 'audio_session.v1',
+      status: 'completed',
+      enabled: true,
+      consentGranted: true,
+      permission: 'granted',
+      windowCount: 3,
+      acceptedWindowCount: 2,
+      rejectedWindowCount: 1,
+      durationMs: 30000,
+      qualityMean: 0.82,
+      reliabilityMean: 0.76,
+      algorithmVersion: 'open_vocal_biomarkers.1.0.0',
+      rawAudioStored: false,
+      rawAudioTransmitted: false,
+      windows: [{ pcmSamples: [0.1, 0.2] }],
+    };
+    source.features_payload.experimentMeta = {
+      audioTests: [{
+        blockId: 'audio-reading',
+        testType: 'reading',
+        durationMs: 12000,
+        audioAvailable: true,
+        windowCount: 1,
+        acceptedWindowCount: 1,
+        completedAt: 12345,
+      }],
+    };
+    const audio = sessionAudioDetails(source);
+    assert.equal(audio.status, 'completed');
+    assert.equal(audio.acceptedWindowCount, 2);
+    assert.equal(audio.tests[0].blockId, 'audio-reading');
+    assert.equal(audio.rawAudioStored, false);
+    assert.equal(audio.rawAudioTransmitted, false);
+    assert.equal(Object.hasOwn(audio, 'windows'), false);
   });
 
   await t.test('honors summary and long export content without changing the snapshot', () => {

@@ -135,6 +135,41 @@ function sessionTechnicalDetails(row) {
   };
 }
 
+function sessionAudioDetails(row) {
+  const payload = row?.features_payload || {};
+  const summary = payload?.audioSummary || payload?.audio_summary;
+  const tests = Array.isArray(payload?.experimentMeta?.audioTests)
+    ? payload.experimentMeta.audioTests.slice(0, 50).map(test => ({
+      blockId: String(test?.blockId || '').slice(0, 128),
+      testType: String(test?.testType || 'audio_test').slice(0, 64),
+      durationMs: finiteNumber(test?.durationMs),
+      audioAvailable: test?.audioAvailable === true,
+      windowCount: finiteNumber(test?.windowCount),
+      acceptedWindowCount: finiteNumber(test?.acceptedWindowCount),
+      completedAt: finiteNumber(test?.completedAt),
+    }))
+    : [];
+  if ((!summary || typeof summary !== 'object') && tests.length === 0) return null;
+  return {
+    status: String(summary?.status || (tests.length ? 'completed' : 'not_computed')).slice(0, 64),
+    enabled: summary?.enabled === true,
+    consentGranted: summary?.consentGranted === true,
+    permission: String(summary?.permission || 'not_requested').slice(0, 64),
+    rawAudioStored: false,
+    rawAudioTransmitted: false,
+    windowCount: finiteNumber(summary?.windowCount),
+    acceptedWindowCount: finiteNumber(summary?.acceptedWindowCount),
+    rejectedWindowCount: finiteNumber(summary?.rejectedWindowCount),
+    droppedWindowCount: finiteNumber(summary?.droppedWindowCount),
+    durationMs: finiteNumber(summary?.durationMs),
+    qualityMean: finiteNumber(summary?.qualityMean),
+    reliabilityMean: finiteNumber(summary?.reliabilityMean),
+    algorithmVersion: summary?.algorithmVersion ? String(summary.algorithmVersion).slice(0, 128) : null,
+    disclaimer: summary?.disclaimer ? String(summary.disclaimer).slice(0, 500) : null,
+    tests,
+  };
+}
+
 function sessionQualityDetails(row) {
   const qc = row?.qc_payload && typeof row.qc_payload === 'object' ? row.qc_payload : {};
   return {
@@ -216,6 +251,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
         ...technical,
       },
       quality: sessionQualityDetails(row),
+      audio: sessionAudioDetails(row),
       qcChannels: hydrated.snapshot.queryEcho.filters.qcChannels.map(channel => channelQc(row, channel)),
       metrics: buildSessionMetrics(row, hydrated.snapshot.queryEcho),
       exclusions: (Array.isArray(row.features_payload?.cognitiveResults)
@@ -435,3 +471,4 @@ module.exports.exportCsv = exportCsv;
 module.exports.protectSpreadsheetCell = protectSpreadsheetCell;
 module.exports.sessionQualityDetails = sessionQualityDetails;
 module.exports.sessionTechnicalDetails = sessionTechnicalDetails;
+module.exports.sessionAudioDetails = sessionAudioDetails;
