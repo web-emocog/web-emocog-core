@@ -28,7 +28,7 @@ const {
   resolveReadableServerOwnedUploadPath,
   rejectClientOwnedContentPath,
   getStoredContentPath,
-  safeDownloadName,
+  contentDisposition,
 } = require('../security/upload-paths');
 const {
   ALLOWED_UPLOAD_MIME_TYPES,
@@ -557,8 +557,7 @@ router.get(
       const inlineAllowed = INLINE_MEDIA_TYPES.has(String(stim.mime_type || '').toLowerCase());
       res.setHeader(
         'Content-Disposition',
-        (download || !inlineAllowed ? 'attachment' : 'inline')
-          + '; filename="' + safeDownloadName(stim.name) + '"'
+        contentDisposition(download || !inlineAllowed ? 'attachment' : 'inline', stim.name)
       );
       res.sendFile(resolved.absolutePath);
     } catch (err) {
@@ -588,7 +587,7 @@ router.get(
         );
         if (resolved.ok) {
           res.setHeader('Content-Type', stim.mime_type);
-          res.setHeader('Content-Disposition', 'inline; filename="' + safeDownloadName(stim.name) + '"');
+          res.setHeader('Content-Disposition', contentDisposition('inline', stim.name));
           return res.sendFile(resolved.absolutePath);
         }
         // Missing or unsafe previews fall through to the authenticated content URL.
