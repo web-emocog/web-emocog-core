@@ -103,6 +103,29 @@ describe('participant test hub contract', () => {
     }
   });
 
+  it('retains timers and audio tasks after the mandatory calibration shell', async () => {
+    const utilsPath = path.join(
+      root,
+      'participant-web/js/web-page/protocol-invite-utils.js'
+    );
+    const { definitionForCognitiveRunner, getInvitationSessionPlan } = await import(
+      pathToFileURL(utilsPath).href + `?audio=${Date.now()}`
+    );
+    const definition = {
+      blocks: [
+        { id: 'calibration', type: 'calibration' },
+        { id: 'session-timer', type: 'timer' },
+        { id: 'pa-ta-ka', type: 'audio_test', content: { testType: 'oral_ddk' } },
+        { id: 'finish', type: 'finish' },
+      ],
+    };
+    assert.deepEqual(
+      definitionForCognitiveRunner(definition).blocks.map(block => block.id),
+      ['session-timer', 'pa-ta-ka', 'finish']
+    );
+    assert.equal(getInvitationSessionPlan(definition).runProtocolAfterShell, true);
+  });
+
   it('reserves before testing and removes the invitation bearer from the URL', () => {
     const ui = read('participant-web/js/web-page/ui-updated.js');
     const app = read('participant-web/js/web-page/app-updated.js');
@@ -473,6 +496,9 @@ describe('researcher navigation contract', () => {
     assert.match(builder, /type:'audio_sustained_vowel'/);
     assert.match(builder, /type:'audio_oral_ddk'/);
     assert.match(builder, /userBlocks\.some\(block => block\.type === 'audio_test'\)/);
+    assert.match(stimuli, /await hydrateApiStimulusPreview\(stimulus\)/);
+    assert.match(stimuli, /const mediaUrl = stimulusPreviewSource\(stimulus\)/);
+    assert.match(builder, /stimulus\?\._previewObjectUrl \|\| stimulus\?\.url/);
   });
 
   it('locks analytics to the current project and exposes safe audio summaries', () => {
@@ -483,7 +509,7 @@ describe('researcher navigation contract', () => {
     assert.match(analytics, /audioAnalyticsHtml/);
     assert.match(router, /function sessionAudioDetails/);
     assert.match(router, /rawAudioStored: false/);
-    assert.match(router, /audio: sessionAudioDetails\(row\)/);
+    assert.match(router, /audio: sessionAudioDetails\(row, hydrated\.protocol\?\.definition\)/);
   });
 
   it('loads each stateful participant module through one cache version', () => {
@@ -494,14 +520,17 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260913-3/);
-    assert.match(app, /tests-updated\.js\?v=20260913-3/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260913-3/);
-    assert.match(task, /tests-updated\.js\?v=20260913-3/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260913-3/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260913-3/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260913-3/);
-    assert.match(runtime, /tests-updated\.js\?v=20260913-3/);
+    assert.match(tests, /ui-updated\.js\?v=20260913-4/);
+    assert.match(app, /tests-updated\.js\?v=20260913-4/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260913-4/);
+    assert.match(task, /tests-updated\.js\?v=20260913-4/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260913-4/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260913-4/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260913-4/);
+    assert.match(runtime, /tests-updated\.js\?v=20260913-4/);
+    assert.match(app, /protocol-invite-utils\.js\?v=20260913-4/);
+    assert.match(tests, /protocol-invite-utils\.js\?v=20260913-4/);
+    assert.match(task, /protocol-invite-utils\.js\?v=20260913-4/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {

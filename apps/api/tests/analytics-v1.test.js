@@ -288,6 +288,23 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(Object.hasOwn(audio, 'windows'), false);
   });
 
+  await t.test('shows protocol audio tasks when an older session has no audio result', () => {
+    const audio = sessionAudioDetails(row(), {
+      blocks: [{
+        id: 'pa-ta-ka',
+        type: 'audio_test',
+        label: 'Па-та-ка',
+        content: { testType: 'oral_ddk', durationMs: 15000 },
+      }],
+    });
+    assert.equal(audio.status, 'not_recorded');
+    assert.equal(audio.enabled, true);
+    assert.equal(audio.tests.length, 1);
+    assert.equal(audio.tests[0].blockId, 'pa-ta-ka');
+    assert.equal(audio.tests[0].testType, 'oral_ddk');
+    assert.equal(audio.tests[0].durationMs, 15000);
+  });
+
   await t.test('honors summary and long export content without changing the snapshot', () => {
     const snapshot = {
       id: 'snapshot-test',

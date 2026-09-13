@@ -15,7 +15,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260913-3';
+} from './ui-updated.js?v=20260913-4';
 
 import { 
     startPreCheck, 
@@ -25,16 +25,16 @@ import {
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260913-3';
+} from './tests-updated.js?v=20260913-4';
 
 import {
     deriveInvitationHubMetrics,
     getInvitationSessionPlan,
     getParticipantShell
-} from './protocol-invite-utils.js';
+} from './protocol-invite-utils.js?v=20260913-4';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260913-3';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260913-4';
 import {
     getContentViewport,
     contentToLayoutViewport
