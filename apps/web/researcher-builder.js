@@ -434,18 +434,19 @@ function ExperimentBuilderView(options = {}) {
         </div>`;
     }
     if (block.type === 'audio_test') {
+      const selectedAudioPreset = audioTaskPreset(c.testType || 'reading');
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Тип аудиотеста', 'Audio test type')}</label>
           <select class="proto-field" data-field="testType" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">
             <option value="reading" ${c.testType === 'reading' || !c.testType ? 'selected' : ''}>${trb('Чтение фразы', 'Read a phrase')}</option>
-            <option value="counting" ${c.testType === 'counting' ? 'selected' : ''}>${trb('Счёт вслух', 'Count aloud')}</option>
             <option value="sustained_vowel" ${c.testType === 'sustained_vowel' ? 'selected' : ''}>${trb('Протяжный звук', 'Sustained vowel')}</option>
+            <option value="oral_ddk" ${c.testType === 'oral_ddk' ? 'selected' : ''}>${trb('Повторение «па-та-ка»', '“Pa-ta-ka” repetition')}</option>
           </select>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Задание участнику', 'Participant prompt')}</label>
-          <textarea class="proto-field" data-field="prompt" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${previewEscape(c.prompt || defaultContent('audio_test').prompt)}</textarea>
+          <textarea class="proto-field" data-field="prompt" rows="4" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;line-height:1.5;resize:vertical;">${previewEscape(c.prompt || selectedAudioPreset.prompt)}</textarea>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Длительность (сек)', 'Duration (sec)')}</label>
-          <input class="proto-field" data-field="duration" type="number" min="5" max="120" value="${c.duration || 12}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
+          <input class="proto-field" data-field="duration" type="number" min="5" max="120" value="${c.duration || selectedAudioPreset.duration}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
           <div style="font-size:11px;line-height:1.5;color:var(--muted);padding:9px 10px;border-radius:8px;background:rgba(15,118,110,.08);border:1px solid rgba(15,118,110,.18);">${trb('Участник увидит задание и обратный отсчёт. В аналитику попадут только рассчитанные акустические признаки и качество записи; исходный голос не сохраняется.', 'The participant sees the prompt and countdown. Only derived acoustic features and recording quality are sent to analytics; raw voice is not stored.')}</div>
         </div>`;
     }
@@ -644,6 +645,18 @@ function ExperimentBuilderView(options = {}) {
         if (ff) ff.style.display = srcSelect.value === 'folder' ? '' : 'none';
       });
     }
+    const audioTypeSelect = block.type === 'audio_test' ? card.querySelector('[data-field="testType"]') : null;
+    if (audioTypeSelect) {
+      audioTypeSelect.addEventListener('change', event => {
+        event.stopImmediatePropagation();
+        const preset = audioTaskPreset(audioTypeSelect.value);
+        block.content = { ...block.content, ...preset };
+        block.label = preset.taskName;
+        block[CURRENT_LANG === 'en' ? 'labelEn' : 'labelRu'] = preset.taskName;
+        localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
+        renderCanvasBlocks();
+      });
+    }
     card.querySelector('.proto-save-inline')?.addEventListener('click', (e) => {
       e.stopPropagation();
       saveBlockInlineFields(block, card);
@@ -701,6 +714,9 @@ function ExperimentBuilderView(options = {}) {
       passive: pack.blockPassive,
       rest: pack.blockBreak,
       audio_test: trb('Аудиотест', 'Audio test'),
+      audio_reading: trb('Аудио: чтение', 'Audio: reading'),
+      audio_sustained_vowel: trb('Аудио: протяжный звук', 'Audio: sustained vowel'),
+      audio_oral_ddk: trb('Аудио: «па-та-ка»', 'Audio: “pa-ta-ka”'),
       finish: pack.blockFinish,
       instruction: trb('Инструкция', 'Instruction'),
       timer: trb('Таймер', 'Timer'),
@@ -735,6 +751,43 @@ function ExperimentBuilderView(options = {}) {
   }
 
   const BUILDER_CANVAS_PAD = '14px 16px';
+  const AUDIO_BLOCK_ICON = 'M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3zM5 10v2a7 7 0 0014 0v-2M12 19v3m-4 0h8';
+
+  function audioTaskPreset(testType = 'reading') {
+    const presets = {
+      reading: {
+        testType: 'reading',
+        taskName: trb('Чтение фразы', 'Phrase reading'),
+        prompt: trb(
+          'Прочитайте вслух спокойным естественным голосом: «Сегодня хороший день для внимательной и последовательной работы». Повторяйте фразу до окончания таймера.',
+          'Read aloud in a calm, natural voice: “Today is a good day for careful and consistent work.” Repeat the sentence until the timer ends.'
+        ),
+        duration: 15,
+        analysisProfile: 'continuous_speech'
+      },
+      sustained_vowel: {
+        testType: 'sustained_vowel',
+        taskName: trb('Протяжный звук «а»', 'Sustained “ah”'),
+        prompt: trb(
+          'Сделайте спокойный вдох и тяните звук «а» ровным удобным голосом до окончания таймера. Не напрягайтесь; если воздуха не хватило, вдохните и продолжите.',
+          'Take a comfortable breath and sustain “ah” with a steady, comfortable voice until the timer ends. Do not strain; breathe and continue if needed.'
+        ),
+        duration: 8,
+        analysisProfile: 'sustained_phonation'
+      },
+      oral_ddk: {
+        testType: 'oral_ddk',
+        taskName: trb('Повторение «па-та-ка»', '“Pa-ta-ka” repetition'),
+        prompt: trb(
+          'Ровно и отчётливо повторяйте «па-та-ка, па-та-ка…» в удобном быстром темпе до окончания таймера.',
+          'Repeat “pa-ta-ka, pa-ta-ka…” clearly and evenly at a comfortably fast pace until the timer ends.'
+        ),
+        duration: 10,
+        analysisProfile: 'oral_diadochokinesis'
+      }
+    };
+    return { ...(presets[testType] || presets.reading), durationUnit: 'seconds' };
+  }
 
   const BLOCK_TYPES = [
     { type:'consent',        color:'#6366f1', icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
@@ -746,7 +799,10 @@ function ExperimentBuilderView(options = {}) {
     { type:'cognitive_task', color:'#ef4444', icon:'M13 10V3L4 14h7v7l9-11h-7z' },
     { type:'passive',        color:'#ec4899', icon:'M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z' },
     { type:'rest',           color:'#64748b', icon:'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { type:'audio_test',     color:'#0f766e', icon:'M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3zM5 10v2a7 7 0 0014 0v-2M12 19v3m-4 0h8' },
+    { type:'audio_test',     color:'#0f766e', icon:AUDIO_BLOCK_ICON, palette:false },
+    { type:'audio_reading',  runtimeType:'audio_test', color:'#0f766e', icon:AUDIO_BLOCK_ICON },
+    { type:'audio_sustained_vowel', runtimeType:'audio_test', color:'#0d9488', icon:AUDIO_BLOCK_ICON },
+    { type:'audio_oral_ddk', runtimeType:'audio_test', color:'#14b8a6', icon:AUDIO_BLOCK_ICON },
     { type:'timer',          color:'#0891b2', icon:'M12 8v4l3 2m3-9l2 2M6 5L4 7m8 14a8 8 0 100-16 8 8 0 000 16z' },
     { type:'finish',         color:'#5C66BD', icon:'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z' },
   ];
@@ -776,7 +832,10 @@ function ExperimentBuilderView(options = {}) {
       case 'questionnaire':  return { questions:[] };
       case 'passive':        return { slideDuration:5000, slides:[], stimuliSource:'library', stimuliFolder:'' };
       case 'rest':           return { text:trb('Сделайте небольшой перерыв','Take a short break'), duration:30, durationUnit:'seconds' };
-      case 'audio_test':     return { testType:'reading', prompt:trb('Спокойно прочитайте вслух: Сегодня хороший день для внимательной работы.','Read aloud calmly: Today is a good day for focused work.'), duration:12, durationUnit:'seconds' };
+      case 'audio_test':
+      case 'audio_reading':  return audioTaskPreset('reading');
+      case 'audio_sustained_vowel': return audioTaskPreset('sustained_vowel');
+      case 'audio_oral_ddk': return audioTaskPreset('oral_ddk');
       case 'timer':          return { name:trb('Общее время сессии','Total session time'), hidden:true, startsAt:'session_start' };
       case 'finish':         return { title:trb('Эксперимент завершён','Experiment completed'), text:trb('Спасибо за участие!','Thank you for participating!') };
       default:               return {};
@@ -1721,7 +1780,7 @@ function ExperimentBuilderView(options = {}) {
     `;
 
     const palette = canvasCol.querySelector('#blockPalette');
-    BLOCK_TYPES.filter(bt => !SYSTEM_BLOCK_TYPES.includes(bt.type)).forEach(bt => {
+    BLOCK_TYPES.filter(bt => !SYSTEM_BLOCK_TYPES.includes(bt.type) && bt.palette !== false).forEach(bt => {
       const meta = getMeta(bt.type);
       const item = document.createElement('div');
       item.draggable = true;
@@ -2008,16 +2067,23 @@ function ExperimentBuilderView(options = {}) {
 
   function addBlock(type, insertAt) {
     const meta = getMeta(type);
-    const block = { id: createProtocolBlockId(type), type, label: meta.label, content: defaultContent(type) };
+    const runtimeType = meta.runtimeType || type;
+    const content = defaultContent(type);
+    const block = {
+      id: createProtocolBlockId(runtimeType),
+      type: runtimeType,
+      label: content.taskName || meta.label,
+      content
+    };
     const idx = Number.isFinite(insertAt) ? Math.max(0, Math.min(insertAt, experimentBlocks.length)) : experimentBlocks.length;
-    if (type === 'survey' && surveyContract()?.isProtectedInstructionBoundary?.(experimentBlocks, idx)) {
+    if (runtimeType === 'survey' && surveyContract()?.isProtectedInstructionBoundary?.(experimentBlocks, idx)) {
       toast(trb(
         'Опрос нельзя поставить между инструкцией и связанным с ней заданием.',
         'A survey cannot be placed between an instruction and its task.'
       ));
       return;
     }
-    if (type === 'survey' && !getParticipantShellMeta().consent) {
+    if (runtimeType === 'survey' && !getParticipantShellMeta().consent) {
       protocolMeta.participantShell = { ...getParticipantShellMeta(), consent: true };
       const consentToggle = canvasCol.querySelector('#shellConsent');
       if (consentToggle) consentToggle.checked = true;
@@ -3041,7 +3107,7 @@ function ExperimentBuilderView(options = {}) {
       const seconds = timedBlockDurationMs(block.content, 30) / 1000;
       return `${trb('Пауза','Pause')}: ${seconds} ${trb('сек.','sec.')}`;
     }
-    if (block.type === 'audio_test') return `${trb('Аудиотест','Audio test')}: ${block.content?.duration || 12} ${trb('сек.','sec.')}`;
+    if (block.type === 'audio_test') return `${block.content?.taskName || trb('Аудиотест','Audio test')}: ${block.content?.duration || 12} ${trb('сек.','sec.')}`;
     if (block.type === 'finish') return block.content?.text || trb('Финальный экран','Finish screen');
     return block.type;
   }
@@ -3075,6 +3141,18 @@ function ExperimentBuilderView(options = {}) {
           duration:previewDurationMs(block.content?.duration, 30) * (previewDurationMs(block.content?.duration, 30) < 1000 ? 1000 : 1),
           title:localizedBlockLabel(block, trb('Пауза','Pause')),
           text:block.content?.text || trb('Сделайте небольшой перерыв','Take a short break')
+        });
+        return;
+      }
+
+      if (block.type === 'audio_test') {
+        screens.push({
+          kind:'audio_test',
+          block,
+          blockIndex,
+          duration:timedBlockDurationMs(block.content, 12),
+          title:block.content?.taskName || localizedBlockLabel(block, trb('Аудиотест','Audio test')),
+          text:block.content?.prompt || audioTaskPreset(block.content?.testType).prompt
         });
         return;
       }
@@ -3279,10 +3357,11 @@ function ExperimentBuilderView(options = {}) {
           <div style="font-size:18px;line-height:1.65;color:#334155;white-space:pre-wrap;">${previewEscape(screen.text)}</div>
         </div>`;
       }
-      if (screen.kind === 'rest') {
+      if (screen.kind === 'rest' || screen.kind === 'audio_test') {
         return `<div style="text-align:center;">
           <div style="font-size:26px;font-weight:900;color:#0f172a;margin-bottom:10px;">${previewEscape(screen.title)}</div>
-          <div style="font-size:17px;color:#475569;">${previewEscape(screen.text)}</div>
+          <div style="font-size:17px;line-height:1.6;color:#475569;white-space:pre-wrap;max-width:720px;">${previewEscape(screen.text)}</div>
+          ${screen.kind === 'audio_test' ? `<div style="font-size:12px;color:#0f766e;font-weight:750;margin-top:18px;">${trb('Во время сессии здесь идёт локальный анализ микрофона','During the session, microphone analysis runs locally here')}</div>` : ''}
         </div>`;
       }
       if (screen.kind === 'fixation') {
@@ -3832,6 +3911,7 @@ function ExperimentBuilderView(options = {}) {
       bodyMovement: true,
       gamerMode: false
     };
+    if (userBlocks.some(block => block.type === 'audio_test')) sessionFeatureFlags.audio = true;
 
     const entry = {
       id,
