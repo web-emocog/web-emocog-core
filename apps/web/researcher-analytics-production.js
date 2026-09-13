@@ -941,6 +941,19 @@
     },
 
     async initialize(force) {
+      const currentProjectId = selectedStored(PROJECT_KEY);
+      if (currentProjectId && String(currentProjectId) !== String(this.state.query.projectId || '')) {
+        this.state.query.projectId = String(currentProjectId);
+        this.state.query.protocolId = '';
+        this.state.query.protocolVersion = '';
+        this.state.query.sessionId = '';
+        this.state.snapshot = null;
+        this.state.summaryResponse = null;
+        this.state.aoiResponse = null;
+        this.state.heatmapResponse = null;
+        this.state.dirty = true;
+        force = true;
+      }
       if (this.initialized && !force) {
         this.emit();
         return;
@@ -1544,7 +1557,7 @@
     const channels = state.filterOptions.qcChannels.length ? state.filterOptions.qcChannels : ['task', 'gaze'];
     return `<div class="card" style="padding:13px 14px;display:flex;flex-direction:column;gap:12px;">
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-        ${selectHtml('analyticsProjectFilter', tr('Проект','Project'), state.projects, state.query.projectId, 'project', disabled)}
+        ${selectHtml('analyticsProjectFilter', tr('Текущий проект','Current project'), state.projects, state.query.projectId, 'project', true)}
         ${selectHtml('analyticsProtocolFilter', tr('Протокол','Protocol'), state.protocols, state.query.protocolId, 'protocol', disabled)}
         ${simpleSelectHtml('analyticsVersionFilter', tr('Версия','Version'), versions, state.query.protocolVersion, disabled, null)}
         ${state.query.mode === 'session' ? selectHtml('analyticsSessionFilter', tr('Сессия','Session'), state.sessions, state.query.sessionId, 'session', disabled) : ''}
@@ -1834,6 +1847,26 @@
     return exclusions.map((item, index) => `<div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;"><span style="font-weight:700;color:var(--text);">${tr('Проба','Trial')} ${index + 1}</span><span style="color:var(--muted);line-height:1.45;">${escapeHtml(reasonLabel(item.reasonCode))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
   }
 
+  function audioAnalyticsHtml(audio) {
+    if (!audio) return '';
+    const percent = value => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—';
+    const seconds = value => Number.isFinite(Number(value)) ? `${(Number(value) / 1000).toFixed(1)} ${tr('с','s')}` : '—';
+    const cards = [
+      [tr('Статус записи','Recording status'), statusLabel(audio.status || 'not_computed')],
+      [tr('Принятые окна','Accepted windows'), `${audio.acceptedWindowCount ?? 0}/${audio.windowCount ?? 0}`],
+      [tr('Качество сигнала','Signal quality'), percent(audio.qualityMean)],
+      [tr('Надёжность признаков','Feature reliability'), percent(audio.reliabilityMean)],
+      [tr('Проанализировано','Analyzed'), seconds(audio.durationMs)]
+    ];
+    const tests = Array.isArray(audio.tests) ? audio.tests : [];
+    return `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Аудиотесты и голосовые признаки','Audio tests and voice features')}</div><div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Отображаются только рассчитанные признаки и QC. Исходный голос не сохраняется и не передаётся.','Only derived features and QC are shown. Raw voice is neither stored nor transmitted.')}</div></div><span style="font-size:9px;color:${audio.consentGranted ? 'var(--good)' : 'var(--muted)'};">${audio.consentGranted ? tr('Согласие получено','Consent granted') : tr('Нет согласия или аудио отключено','No consent or audio disabled')}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px;">${cards.map(([label, value]) => `<div style="padding:10px;border:1px solid var(--stroke);border-radius:10px;background:rgba(15,118,110,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:14px;font-weight:750;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div>
+      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:590px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Блок','Block')}</th><th>${tr('Тип','Type')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Окна','Windows')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.blockId || '—')}</td><td style="text-align:center;">${escapeHtml(test.testType || 'audio_test')}</td><td style="text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="text-align:center;color:${test.audioAvailable ? 'var(--good)' : 'var(--warn)'};">${test.audioAvailable ? tr('записано','recorded') : tr('нет аудио','no audio')}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
+      <div style="font-size:8px;color:var(--muted2);margin-top:8px;">${escapeHtml(audio.algorithmVersion || '')}${audio.disclaimer ? ` · ${escapeHtml(audio.disclaimer)}` : ''}</div>
+    </section>`;
+  }
+
   function sessionShellHtml(state) {
     if (state.summaryStatus === 'loading' || state.summaryStatus === 'idle') return stateCard('loading', tr('Загружаем карточку сессии','Loading session dashboard'), tr('Получаем task metrics и channel QC для зафиксированного snapshot.','Fetching task metrics and channel QC for the fixed snapshot.'));
     if (state.summaryStatus === 'error') return `<div class="card" style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div style="max-width:520px;"><h2 style="font-size:16px;color:var(--text);margin:0;">${tr('Карточка сессии недоступна','Session dashboard is unavailable')}</h2><button id="analyticsSummaryRetry" class="quick-btn" type="button" style="margin:14px auto 0;background:rgba(92,102,189,.12);color:var(--accent);">${tr('Повторить загрузку','Retry loading')}</button></div></div>`;
@@ -1857,6 +1890,7 @@
       </header>
       <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}<div style="font-size:8px;opacity:.75;margin-top:5px;">${escapeHtml(channel.ruleVersion || '—')}</div></article>`; }).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Выполнение задачи','Task performance')}</div>${taskMetrics.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${taskMetrics.map(metricCardHtml).join('')}</div>` : `<div style="font-size:11px;color:var(--muted);">${tr('Метрики задачи не настроены для этого протокола.','Task metrics are not configured for this protocol.')}</div>`}</section>
+      ${audioAnalyticsHtml(data.audio)}
       ${qcMetrics.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Показатели качества данных','Data quality metrics')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${qcMetrics.map(metricCardHtml).join('')}</div></section>` : ''}
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${trialValid && trialValid.status === 'computed' ? escapeHtml(trialValid.value) : '—'}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${trialExcluded && trialExcluded.status === 'computed' ? escapeHtml(trialExcluded.value) : exclusions.length}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
       ${visualAnalyticsHtml(state)}
@@ -2217,6 +2251,7 @@
   }
 
   global.EmocogAnalyticsProduction = { api, store, view: AnalyticsProductionView, exportView: AnalyticsExportView, hasAuth, buildAnalyticsQuery, buildExportBundle, validateExportBundle, exportBundleCsv, importResultJson };
+  global.addEventListener?.('wecog:projectchange', () => store.initialize(true));
   global.AnalyticsView = AnalyticsProductionView;
   global.SessionCardView = function () { return AnalyticsProductionView('session-card'); };
 })(typeof window !== 'undefined' ? window : globalThis);

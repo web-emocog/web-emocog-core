@@ -88,6 +88,9 @@ describe('role x operation x tenant matrix', () => {
   });
 
   it('keeps analyst read-only and assistant outside analytics/export', () => {
+    assert.equal(canRolePerform('researcher', OPERATIONS.PROJECT_CREATE), true);
+    assert.equal(canRolePerform('researcher', OPERATIONS.PROJECT_UPDATE), true);
+    assert.equal(canRolePerform('researcher', OPERATIONS.PROJECT_DELETE), true);
     assert.equal(canRolePerform('analyst', OPERATIONS.ANALYTICS_READ), true);
     assert.equal(canRolePerform('analyst', OPERATIONS.EXPORT_READ), true);
     assert.equal(canRolePerform('analyst', OPERATIONS.SESSION_WRITE), false);
