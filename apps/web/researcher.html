@@ -2692,6 +2692,12 @@ body{
   font-weight: 800;
 }
 #welcomeScreen .ws-proj-info { flex: 1; min-width: 0; }
+#welcomeScreen .ws-proj-actions { display:flex;gap:4px;flex-shrink:0;opacity:.55;transition:opacity .12s; }
+#welcomeScreen .ws-proj-item:hover .ws-proj-actions,
+#welcomeScreen .ws-proj-actions:focus-within { opacity:1; }
+#welcomeScreen .ws-proj-action { width:28px;height:28px;border:1px solid rgba(92,102,189,.18);border-radius:8px;background:rgba(255,255,255,.7);color:#64748B;display:flex;align-items:center;justify-content:center;cursor:pointer; }
+#welcomeScreen .ws-proj-action:hover { color:#5C66BD;border-color:rgba(92,102,189,.4); }
+#welcomeScreen .ws-proj-remove:hover { color:#DC2626;border-color:rgba(220,38,38,.35);background:rgba(254,226,226,.7); }
 #welcomeScreen .ws-proj-name {
   font-size: 14px;
   font-weight: 700;
@@ -2848,7 +2854,7 @@ body{
       }
       window.EmocogAuthGuard.ensureProtectedPage({
         loginPath: 'developer/login.html',
-        allowedRoles: ['researcher', 'admin', 'org_admin', 'PI', 'analyst', 'assistant']
+        allowedRoles: ['researcher', 'admin', 'org_admin', 'PI', 'analyst', 'assistant', 'developer']
       }).then(function (result) {
         if (!result || !result.ok) return;
         try {
@@ -3182,16 +3188,16 @@ body{
       }
     })();
   </script>
-  <script src="researcher-analytics-production.js?v=20260909-1"></script>
+  <script src="researcher-analytics-production.js?v=20260913-1"></script>
   <script src="researcher-admin-settings.js?v=20260909-1"></script>
   <script src="aoi-geometry.js?v=20260806-1"></script>
   <script src="aoi-protocol.js?v=20260807-1"></script>
   <script src="../shared/survey-contract.js?v=20260828-2"></script>
   <script src="../shared/standard-stimuli.js?v=20260909-1"></script>
-  <script src="researcher-builder.js?v=20260909-2"></script>
-  <script src="researcher-stimuli.js?v=20260909-2"></script>
-  <script src="researcher-core.js?v=20260909-2"></script>
-  <script src="researcher-api-bridge.js?v=20260819-1"></script>
+  <script src="researcher-builder.js?v=20260913-1"></script>
+  <script src="researcher-stimuli.js?v=20260913-1"></script>
+  <script src="researcher-core.js?v=20260913-1"></script>
+  <script src="researcher-api-bridge.js?v=20260913-1"></script>
   <script src="researcher-navigation.js?v=20260909-1"></script>
 </body>
 </html>

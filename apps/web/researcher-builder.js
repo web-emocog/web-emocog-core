@@ -421,12 +421,32 @@ function ExperimentBuilderView(options = {}) {
       return buildSurveyInlineEditor(block);
     }
     if (block.type === 'rest') {
+      const restDuration = Number(c.duration);
+      const restDurationSeconds = Number.isFinite(restDuration) && restDuration > 0
+        ? (c.durationUnit === 'seconds' ? restDuration : (restDuration >= 1000 ? restDuration / 1000 : restDuration))
+        : 30;
       return `
         <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст для участника', 'Text for participant')}</label>
           <textarea class="proto-field" data-field="text" rows="2" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">${previewEscape(c.text || trb('Сделайте небольшой перерыв', 'Take a short break'))}</textarea>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Длительность (сек)', 'Duration (sec)')}</label>
-          <input class="proto-field" data-field="duration" type="number" value="${c.duration || 30}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
+          <input class="proto-field" data-field="duration" type="number" min="1" max="3600" value="${restDurationSeconds}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
+        </div>`;
+    }
+    if (block.type === 'audio_test') {
+      return `
+        <div class="proto-inline-editor" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--stroke);display:flex;flex-direction:column;gap:8px;">
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Тип аудиотеста', 'Audio test type')}</label>
+          <select class="proto-field" data-field="testType" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;">
+            <option value="reading" ${c.testType === 'reading' || !c.testType ? 'selected' : ''}>${trb('Чтение фразы', 'Read a phrase')}</option>
+            <option value="counting" ${c.testType === 'counting' ? 'selected' : ''}>${trb('Счёт вслух', 'Count aloud')}</option>
+            <option value="sustained_vowel" ${c.testType === 'sustained_vowel' ? 'selected' : ''}>${trb('Протяжный звук', 'Sustained vowel')}</option>
+          </select>
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Задание участнику', 'Participant prompt')}</label>
+          <textarea class="proto-field" data-field="prompt" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${previewEscape(c.prompt || defaultContent('audio_test').prompt)}</textarea>
+          <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Длительность (сек)', 'Duration (sec)')}</label>
+          <input class="proto-field" data-field="duration" type="number" min="5" max="120" value="${c.duration || 12}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
+          <div style="font-size:11px;line-height:1.5;color:var(--muted);padding:9px 10px;border-radius:8px;background:rgba(15,118,110,.08);border:1px solid rgba(15,118,110,.18);">${trb('Участник увидит задание и обратный отсчёт. В аналитику попадут только рассчитанные акустические признаки и качество записи; исходный голос не сохраняется.', 'The participant sees the prompt and countdown. Only derived acoustic features and recording quality are sent to analytics; raw voice is not stored.')}</div>
         </div>`;
     }
     if (block.type === 'timer') {
@@ -488,6 +508,9 @@ function ExperimentBuilderView(options = {}) {
       else if (el.type === 'number') block.content[field] = parseFloat(el.value) || 0;
       else block.content[field] = el.value;
     });
+    if (block.type === 'rest' || block.type === 'audio_test') {
+      block.content.durationUnit = 'seconds';
+    }
     const taskTypeSel = card.querySelector('.proto-task-type-sel');
     if (taskTypeSel) {
       block.content.taskType = taskTypeSel.value;
@@ -677,6 +700,7 @@ function ExperimentBuilderView(options = {}) {
       cognitive_task: pack.blockTask,
       passive: pack.blockPassive,
       rest: pack.blockBreak,
+      audio_test: trb('Аудиотест', 'Audio test'),
       finish: pack.blockFinish,
       instruction: trb('Инструкция', 'Instruction'),
       timer: trb('Таймер', 'Timer'),
@@ -722,6 +746,7 @@ function ExperimentBuilderView(options = {}) {
     { type:'cognitive_task', color:'#ef4444', icon:'M13 10V3L4 14h7v7l9-11h-7z' },
     { type:'passive',        color:'#ec4899', icon:'M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z' },
     { type:'rest',           color:'#64748b', icon:'M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { type:'audio_test',     color:'#0f766e', icon:'M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3zM5 10v2a7 7 0 0014 0v-2M12 19v3m-4 0h8' },
     { type:'timer',          color:'#0891b2', icon:'M12 8v4l3 2m3-9l2 2M6 5L4 7m8 14a8 8 0 100-16 8 8 0 000 16z' },
     { type:'finish',         color:'#5C66BD', icon:'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z' },
   ];
@@ -750,7 +775,8 @@ function ExperimentBuilderView(options = {}) {
       case 'cognitive_task': return { taskType:'simple_rt', showFeedback:true, useRT:true, responseMode:'keypress', stimulusDuration:1000, trials:[], stimuliSource:'library', stimuliFolder:'' };
       case 'questionnaire':  return { questions:[] };
       case 'passive':        return { slideDuration:5000, slides:[], stimuliSource:'library', stimuliFolder:'' };
-      case 'rest':           return { text:trb('Сделайте небольшой перерыв','Take a short break'), duration:30 };
+      case 'rest':           return { text:trb('Сделайте небольшой перерыв','Take a short break'), duration:30, durationUnit:'seconds' };
+      case 'audio_test':     return { testType:'reading', prompt:trb('Спокойно прочитайте вслух: Сегодня хороший день для внимательной работы.','Read aloud calmly: Today is a good day for focused work.'), duration:12, durationUnit:'seconds' };
       case 'timer':          return { name:trb('Общее время сессии','Total session time'), hidden:true, startsAt:'session_start' };
       case 'finish':         return { title:trb('Эксперимент завершён','Experiment completed'), text:trb('Спасибо за участие!','Thank you for participating!') };
       default:               return {};
@@ -1683,24 +1709,6 @@ function ExperimentBuilderView(options = {}) {
               <div id="participantShellHint" style="font-size:11px;color:var(--muted);line-height:1.45;max-width:720px;">
                 ${describeParticipantShellForUi(shell)}
               </div>
-              <div style="display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:10px;max-width:720px;">
-                <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellConsent" checked disabled style="accent-color:var(--accent);">
-                  ${trb('Согласие · обязательно', 'Consent · required')}
-                </label>
-                <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellQuestionnaire" checked disabled style="accent-color:var(--accent);">
-                  ${trb('Анкета · обязательно', 'Questionnaire · required')}
-                </label>
-                <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellPrecheck" checked disabled style="accent-color:var(--accent);">
-                  ${trb('Проверка камеры · обязательно', 'Camera pre-check · required')}
-                </label>
-                <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" id="shellCalibration" checked disabled style="accent-color:var(--accent);">
-                  ${trb('Калибровка и LOOCV · обязательно', 'Calibration and LOOCV · required')}
-                </label>
-              </div>
             </div>
             <div id="protoCanvas" style="flex:1;overflow-y:auto;border:2px dashed var(--stroke);border-radius:14px;padding:10px;background:rgba(255,255,255,.2);min-height:200px;"></div>
             <div style="display:flex;justify-content:space-between;margin-top:10px;flex-shrink:0;">
@@ -2062,7 +2070,7 @@ function ExperimentBuilderView(options = {}) {
       const sel = b.id === selectedBlockId;
       const blockLabel = localizedBlockLabel(b, meta.label);
       const inlineEditor = sel ? buildBlockInlineEditor(b) : '';
-      const canEdit = ['instruction', 'survey', 'rest', 'timer', 'finish', 'cognitive_task', 'passive'].includes(b.type);
+      const canEdit = ['instruction', 'survey', 'rest', 'audio_test', 'timer', 'finish', 'cognitive_task', 'passive'].includes(b.type);
 
       parts.push(`
         <div class="proto-card ${sel ? 'proto-card-sel' : ''}" data-id="${previewEscape(b.id)}" data-idx="${i}"
@@ -2994,6 +3002,15 @@ function ExperimentBuilderView(options = {}) {
     return Number.isFinite(n) && n > 0 ? n : fallback;
   }
 
+  function timedBlockDurationMs(content, fallbackSeconds) {
+    const explicitMs = Number(content?.durationMs);
+    if (Number.isFinite(explicitMs) && explicitMs > 0) return Math.round(explicitMs);
+    const value = Number(content?.duration);
+    if (!Number.isFinite(value) || value <= 0) return fallbackSeconds * 1000;
+    if (content?.durationUnit === 'seconds') return Math.round(value * 1000);
+    return Math.round(value >= 1000 ? value : value * 1000);
+  }
+
   function previewBlockStimuliStrip(block) {
     if (block.type !== 'cognitive_task') return '';
     const seen = [];
@@ -3020,7 +3037,11 @@ function ExperimentBuilderView(options = {}) {
       const first = trials[0];
       return `${block.content?.taskType || 'cognitive_task'} · ${total} проб${first ? ` · ${trb('первый стимул:','first stimulus:')} ` + stimulusNameById(first.stimulusId) : ''}`;
     }
-    if (block.type === 'rest') return `${trb('Пауза','Pause')}: ${block.content?.duration || 30} сек.`;
+    if (block.type === 'rest') {
+      const seconds = timedBlockDurationMs(block.content, 30) / 1000;
+      return `${trb('Пауза','Pause')}: ${seconds} ${trb('сек.','sec.')}`;
+    }
+    if (block.type === 'audio_test') return `${trb('Аудиотест','Audio test')}: ${block.content?.duration || 12} ${trb('сек.','sec.')}`;
     if (block.type === 'finish') return block.content?.text || trb('Финальный экран','Finish screen');
     return block.type;
   }
@@ -3973,6 +3994,7 @@ function ExperimentBuilderView(options = {}) {
       bodyMovement: sourceFeatureFlags.bodyMovement !== false,
       gamerMode: sourceFeatureFlags.gamerMode === true
     };
+    if (userBlocks.some(block => block.type === 'audio_test')) sessionFeatureFlags.audio = true;
     if (!sessionFeatureFlags.multimodal) sessionFeatureFlags.gamerMode = false;
 
     const json = {
@@ -4076,7 +4098,15 @@ function ExperimentBuilderView(options = {}) {
           }
           attachBlockAois(out.blockConfig, b.content, b.content?.slides || []);
         } else if (b.type === 'rest') {
-          out.content = { text: b.content?.text || trb('Сделайте небольшой перерыв','Take a short break'), duration: b.content?.duration || 30 };
+          out.content = {
+            text: b.content?.text || trb('Сделайте небольшой перерыв','Take a short break'),
+            durationMs: timedBlockDurationMs(b.content, 30)
+          };
+        } else if (b.type === 'audio_test') {
+          out.content = {
+            ...(b.content || {}),
+            durationMs: timedBlockDurationMs(b.content, 12)
+          };
         } else if (b.type === 'finish') {
           out.content = { title: b.content?.title || trb('Эксперимент завершён','Experiment completed'), text: b.content?.text || trb('Спасибо за участие!','Thank you for participating!') };
         } else {
