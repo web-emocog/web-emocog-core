@@ -71,6 +71,15 @@ describe('S3-01 release hardening', () => {
     assert.match(workflow, /grep -q 'api_shutdown_completed' \/tmp\/wecog-api\.log/);
   });
 
+  it('does not turn a cancelled superseded release run into a failed gate', () => {
+    const workflow = fs.readFileSync(path.resolve(apiRoot, '../../.github/workflows/release-gates.yml'), 'utf8');
+    assert.match(workflow, /release-gate:\s+name: Required release gate/);
+    assert.match(workflow, /if: \$\{\{ always\(\) && !cancelled\(\) \}\}/);
+    assert.match(workflow, /\[\[ "\$API_RESULT" == "success" \]\]/);
+    assert.match(workflow, /\[\[ "\$POSTGRES_RESULT" == "success" \]\]/);
+    assert.match(workflow, /\[\[ "\$BROWSER_RESULT" == "success" \]\]/);
+  });
+
   it('discovers exported OS Login credentials from files instead of CLI text', () => {
     const repositoryRoot = path.resolve(apiRoot, '../..');
     const helper = path.join(repositoryRoot, 'deploy/production/export-oslogin-identity.sh');
