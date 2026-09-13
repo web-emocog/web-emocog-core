@@ -168,7 +168,7 @@ class ParticipantSessionRuntime {
 
     _scheduleFinalUploadRetry() {
         setTimeout(() => {
-            import('../web-page/tests-updated.js?v=20260913-2')
+            import('../web-page/tests-updated.js?v=20260913-3')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         }, 0);

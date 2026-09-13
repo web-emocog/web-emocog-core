@@ -256,12 +256,23 @@ test('analytics v1 contract and computations', async t => {
     };
     source.features_payload.experimentMeta = {
       audioTests: [{
+        schemaVersion: 'audio_task.v1',
         blockId: 'audio-reading',
+        title: 'Phrase reading',
         testType: 'reading',
+        status: 'completed',
         durationMs: 12000,
         audioAvailable: true,
         windowCount: 1,
         acceptedWindowCount: 1,
+        rejectedWindowCount: 0,
+        metrics: {
+          recordingQuality: 0.8,
+          featureReliability: 0.75,
+          speechCoverage: 0.7,
+          completionScore: 0.75,
+          pauseRate: 0.2,
+        },
         completedAt: 12345,
       }],
     };
@@ -269,6 +280,9 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(audio.status, 'completed');
     assert.equal(audio.acceptedWindowCount, 2);
     assert.equal(audio.tests[0].blockId, 'audio-reading');
+    assert.equal(audio.tests[0].status, 'completed');
+    assert.equal(audio.tests[0].metrics.completionScore, 0.75);
+    assert.equal(audio.tests[0].rawAudioStored, false);
     assert.equal(audio.rawAudioStored, false);
     assert.equal(audio.rawAudioTransmitted, false);
     assert.equal(Object.hasOwn(audio, 'windows'), false);
