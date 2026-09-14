@@ -5,22 +5,22 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { translations } from '../../translations.js?v=20260914-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260914-1';
+import { translations } from '../../translations.js?v=20260914-3';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260914-3';
 import { stopPreCheck } from './precheck-updated.js?v=20260909-1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260914-1';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260914-3';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
-} from './protocol-invite-utils.js?v=20260914-1';
+} from './protocol-invite-utils.js?v=20260914-3';
 import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20260914-1';
+} from '../gaze-tracker/gaze-tests/index.js?v=20260914-3';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
@@ -44,7 +44,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260914-1';
+} from '../session-runtime/index.js?v=20260914-3';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
