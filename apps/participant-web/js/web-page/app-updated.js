@@ -15,7 +15,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260914-1';
+} from './ui-updated.js?v=20260913-7';
 
 import { 
     startPreCheck, 
@@ -25,16 +25,16 @@ import {
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260914-1';
+} from './tests-updated.js?v=20260913-7';
 
 import {
     deriveInvitationHubMetrics,
     getInvitationSessionPlan,
     getParticipantShell
-} from './protocol-invite-utils.js?v=20260914-1';
+} from './protocol-invite-utils.js?v=20260913-7';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260914-1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260913-7';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -442,9 +442,7 @@ async function loadInvitationProtocolByCode(code) {
                                     displayUrl = await preloadInvitationStimulus(contentUrl);
                                     if (displayUrl) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
                                 } catch (error) {
-                                    // Keep the public invitation URL as a direct browser fallback.
-                                    // Dropping it here used to turn a valid API stimulus into a blue shape.
-                                    displayUrl = contentUrl;
+                                    displayUrl = null;
                                     console.warn('[Invitation] Failed to preload stimulus binary:', error);
                                 }
                             }

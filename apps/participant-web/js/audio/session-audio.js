@@ -464,7 +464,7 @@ export class SessionAudioCollector {
         if (!this.WorkerCtor || this.worker) return false;
         try {
             this.worker = new this.WorkerCtor(
-                new URL('./audio-window-worker.js?v=20260914-1', import.meta.url),
+                new URL('./audio-window-worker.js?v=20260913-7', import.meta.url),
                 { type: 'module', name: 'wecog-audio-analysis' }
             );
             this.worker.onmessage = event => {
