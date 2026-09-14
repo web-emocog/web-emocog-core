@@ -275,7 +275,16 @@ function resolveStandardStimulus(stimulusId, meta, options) {
 function resolveUrlFromMeta(meta) {
   if (!meta || typeof meta !== 'object') return null;
   const md = meta.metadata || meta;
-  return md.url || md.file_url || md.preview_url || meta.url || meta.src || null;
+  return md.url
+    || md.source_url
+    || md.content_url
+    || md.file_url
+    || md.preview_url
+    || meta.url
+    || meta.source_url
+    || meta.content_url
+    || meta.src
+    || null;
 }
 
 /**
@@ -283,17 +292,41 @@ function resolveUrlFromMeta(meta) {
  */
 function resolveParticipantStimulus(params) {
   params = params || {};
+  const rawStimulusId = String(params.stimulusId || '').trim();
   const stimulusId = normalizeStimulusId(params.stimulusId);
   const meta = params.meta || null;
   const url = params.url || resolveUrlFromMeta(meta);
+  const metadata = meta?.metadata && typeof meta.metadata === 'object' ? meta.metadata : {};
+  const sourceUrl = params.sourceUrl
+    || metadata.source_url
+    || metadata.content_url
+    || meta?.source_url
+    || meta?.content_url
+    || null;
 
   if (url) {
-    return imageStimulus(url, stimulusId || undefined, params.imageStyle || {});
+    return {
+      ...imageStimulus(url, stimulusId || undefined, params.imageStyle || {}),
+      ...(sourceUrl && sourceUrl !== url ? { fallbackSrc: sourceUrl } : {}),
+    };
   }
 
   const standard = resolveStandardStimulus(stimulusId, meta, { lang: params.lang });
   if (standard) {
     return standard;
+  }
+
+  // Database stimuli use numeric ids (optionally namespaced as api:*). They are
+  // media references, never synthetic shapes. Keeping the type prevents a
+  // transient delivery failure from silently displaying the blue fallback.
+  if (/^(?:api:)?[1-9]\d*$/.test(rawStimulusId)) {
+    return {
+      type: 'image',
+      src: '',
+      mediaUnavailable: true,
+      style: params.imageStyle || {},
+      stimulusId: stimulusId || undefined,
+    };
   }
 
   const fallback = {
