@@ -816,8 +816,40 @@ function resetStimulusViews() {
     const imageEl = document.getElementById('cogImage');
     if (imageEl) {
         imageEl.style.display = 'none';
+        imageEl.onload = null;
+        imageEl.onerror = null;
+        delete imageEl.dataset.fallbackSrc;
+        delete imageEl.dataset.fallbackAttempted;
         imageEl.removeAttribute('src');
     }
+}
+
+function renderStimulusMediaError(stimulus) {
+    const imageEl = document.getElementById('cogImage');
+    if (imageEl) imageEl.style.display = 'none';
+    const shapeEl = ex_state.task?.stimulus;
+    if (!shapeEl) return;
+    shapeEl.style.cssText = '';
+    shapeEl.textContent = state.currentLang === 'ru'
+        ? 'Изображение стимула не загрузилось'
+        : 'The stimulus image could not be loaded';
+    Object.assign(shapeEl.style, {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        maxWidth: 'min(90vw, 680px)',
+        padding: '24px',
+        borderRadius: '14px',
+        background: '#fff',
+        color: '#991b1b',
+        fontSize: 'clamp(18px, 2.4vw, 30px)',
+        fontWeight: '700',
+        textAlign: 'center',
+    });
+    recordSessionEvent('stimulus_media_load_failed', {
+        category: 'technical',
+        stimulusId: stimulus?.stimulusId || null,
+    });
 }
 
 function renderStimulus(trial) {
@@ -834,9 +866,21 @@ function renderStimulus(trial) {
         if (stimulus.style && typeof stimulus.style === 'object') {
             Object.assign(imageEl.style, stimulus.style);
         }
-        if (stimulus.src) {
-            imageEl.src = stimulus.src;
+        const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
+        if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
+        imageEl.onerror = () => {
+            if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
+                imageEl.dataset.fallbackAttempted = '1';
+                imageEl.src = imageEl.dataset.fallbackSrc;
+                return;
+            }
+            renderStimulusMediaError(stimulus);
+        };
+        if (!stimulus.src) {
+            renderStimulusMediaError(stimulus);
+            return;
         }
+        imageEl.src = stimulus.src;
         imageEl.style.display = 'block';
         return;
     }

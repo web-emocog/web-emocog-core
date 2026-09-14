@@ -272,6 +272,144 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(stimulus.metadata.text, 'safe stimulus');
   });
 
+  it('isolates projects, protocols and stimuli between researchers in the same organization', async () => {
+    const suffix = randomUUID();
+    const siblingProject = await pool.query(
+      `INSERT INTO projects (organization_id, name, slug)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [organizationId, `Sibling project ${suffix}`, `sibling-${suffix}`]
+    );
+    const siblingProjectId = siblingProject.rows[0].id;
+    const siblingProtocol = await pool.query(
+      `INSERT INTO protocols (project_id, name, definition)
+       VALUES ($1, $2, '{}'::jsonb)
+       RETURNING id`,
+      [siblingProjectId, `Sibling protocol ${suffix}`]
+    );
+    const stimuli = await pool.query(
+      `INSERT INTO stimuli (project_id, name, mime_type, size_bytes, metadata)
+       VALUES
+         ($1, 'Owned stimulus', 'image/png', 8, '{}'::jsonb),
+         ($2, 'Sibling stimulus', 'image/png', 8, '{}'::jsonb)
+       RETURNING id, project_id`,
+      [projectId, siblingProjectId]
+    );
+    const ownStimulusId = stimuli.rows.find(row => Number(row.project_id) === Number(projectId)).id;
+    const siblingStimulusId = stimuli.rows.find(row => Number(row.project_id) === Number(siblingProjectId)).id;
+
+    const ownerEmail = `project-owner-${suffix}@example.test`;
+    const siblingEmail = `project-sibling-${suffix}@example.test`;
+    const researchers = await pool.query(
+      `INSERT INTO users (email, password_hash, role)
+       VALUES ($1, $3, 'researcher'), ($2, $3, 'researcher')
+       RETURNING id, email, role, token_version`,
+      [
+        ownerEmail,
+        siblingEmail,
+        await bcrypt.hash('project-isolation-test-only', 4),
+      ]
+    );
+    createdUserIds.push(...researchers.rows.map(row => row.id));
+    const owner = researchers.rows.find(row => row.email === ownerEmail);
+    const sibling = researchers.rows.find(row => row.email === siblingEmail);
+    await pool.query(
+      `INSERT INTO user_organizations (user_id, organization_id, role)
+       VALUES ($1, $3, 'member'), ($2, $3, 'member')`,
+      [owner.id, sibling.id, organizationId]
+    );
+    await pool.query(
+      `INSERT INTO user_projects (user_id, project_id, role)
+       VALUES ($1, $3, 'researcher'), ($2, $4, 'researcher')`,
+      [owner.id, sibling.id, projectId, siblingProjectId]
+    );
+    const ownerHeaders = {
+      authorization: `Bearer ${issueStaffToken(owner)}`,
+      'content-type': 'application/json',
+    };
+    const siblingHeaders = {
+      authorization: `Bearer ${issueStaffToken(sibling)}`,
+      'content-type': 'application/json',
+    };
+
+    try {
+      const ownerProjectsResponse = await fetch(`${baseUrl}/projects`, { headers: ownerHeaders });
+      assert.equal(ownerProjectsResponse.status, 200);
+      const ownerProjects = await ownerProjectsResponse.json();
+      assert.ok(ownerProjects.some(row => Number(row.id) === Number(projectId)));
+      assert.ok(!ownerProjects.some(row => Number(row.id) === Number(siblingProjectId)));
+
+      const siblingProjectsResponse = await fetch(`${baseUrl}/projects`, { headers: siblingHeaders });
+      assert.equal(siblingProjectsResponse.status, 200);
+      const siblingProjects = await siblingProjectsResponse.json();
+      assert.ok(siblingProjects.some(row => Number(row.id) === Number(siblingProjectId)));
+      assert.ok(!siblingProjects.some(row => Number(row.id) === Number(projectId)));
+
+      const foreignProtocol = await fetch(`${baseUrl}/protocols/${siblingProtocol.rows[0].id}`, {
+        headers: ownerHeaders,
+      });
+      assert.equal(foreignProtocol.status, 404);
+      const foreignProtocolList = await fetch(
+        `${baseUrl}/protocols?project_id=${siblingProjectId}`,
+        { headers: ownerHeaders }
+      );
+      assert.equal(foreignProtocolList.status, 200);
+      assert.deepEqual(await foreignProtocolList.json(), []);
+      const foreignProtocolUpdate = await fetch(`${baseUrl}/protocols/${siblingProtocol.rows[0].id}`, {
+        method: 'PATCH',
+        headers: ownerHeaders,
+        body: JSON.stringify({ name: 'Forbidden rename' }),
+      });
+      assert.equal(foreignProtocolUpdate.status, 404);
+
+      const ownStimuliResponse = await fetch(`${baseUrl}/stimuli?project_id=${projectId}`, {
+        headers: ownerHeaders,
+      });
+      assert.equal(ownStimuliResponse.status, 200);
+      const ownStimuli = await ownStimuliResponse.json();
+      assert.ok(ownStimuli.some(row => Number(row.id) === Number(ownStimulusId)));
+      assert.ok(!ownStimuli.some(row => Number(row.id) === Number(siblingStimulusId)));
+      const foreignStimuli = await fetch(`${baseUrl}/stimuli?project_id=${siblingProjectId}`, {
+        headers: ownerHeaders,
+      });
+      assert.equal(foreignStimuli.status, 403);
+      const foreignStimulusUpdate = await fetch(`${baseUrl}/stimuli/${siblingStimulusId}`, {
+        method: 'PATCH',
+        headers: ownerHeaders,
+        body: JSON.stringify({ name: 'Forbidden stimulus rename' }),
+      });
+      assert.equal(foreignStimulusUpdate.status, 403);
+
+      await pool.query(
+        `UPDATE protocols SET definition = $1::jsonb WHERE id = $2`,
+        [JSON.stringify({
+          blocks: [{
+            type: 'cognitive_task',
+            trials: [
+              { stimulusId: `api:${ownStimulusId}` },
+              { stimulusId: `api:${siblingStimulusId}` },
+            ],
+          }],
+        }), protocolId]
+      );
+      const invitation = await createInvitation(1);
+      const participantStimuliResponse = await fetch(
+        `${baseUrl}/invitations/by-code/${invitation.code}/stimuli`
+      );
+      assert.equal(participantStimuliResponse.status, 200);
+      const participantStimuli = await participantStimuliResponse.json();
+      assert.deepEqual(participantStimuli.map(row => Number(row.id)), [Number(ownStimulusId)]);
+      const siblingContent = await fetch(
+        `${baseUrl}/invitations/by-code/${invitation.code}/stimuli/${siblingStimulusId}/content`
+      );
+      assert.equal(siblingContent.status, 404);
+    } finally {
+      await pool.query(`UPDATE protocols SET definition = '{}'::jsonb WHERE id = $1`, [protocolId]);
+      await pool.query('DELETE FROM projects WHERE id = $1', [siblingProjectId]);
+      await pool.query('DELETE FROM stimuli WHERE id = $1', [ownStimulusId]);
+    }
+  });
+
   it('keeps invitation binding immutable and finish idempotent', async () => {
     const first = await createInvitation(3);
     const second = await createInvitation(3);
