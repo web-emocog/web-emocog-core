@@ -298,20 +298,21 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     const ownStimulusId = stimuli.rows.find(row => Number(row.project_id) === Number(projectId)).id;
     const siblingStimulusId = stimuli.rows.find(row => Number(row.project_id) === Number(siblingProjectId)).id;
 
+    const ownerEmail = `project-owner-${suffix}@example.test`;
+    const siblingEmail = `project-sibling-${suffix}@example.test`;
     const researchers = await pool.query(
       `INSERT INTO users (email, password_hash, role)
        VALUES ($1, $3, 'researcher'), ($2, $3, 'researcher')
-       RETURNING id, email, role, token_version
-       ORDER BY id`,
+       RETURNING id, email, role, token_version`,
       [
-        `project-owner-${suffix}@example.test`,
-        `project-sibling-${suffix}@example.test`,
+        ownerEmail,
+        siblingEmail,
         await bcrypt.hash('project-isolation-test-only', 4),
       ]
     );
     createdUserIds.push(...researchers.rows.map(row => row.id));
-    const owner = researchers.rows[0];
-    const sibling = researchers.rows[1];
+    const owner = researchers.rows.find(row => row.email === ownerEmail);
+    const sibling = researchers.rows.find(row => row.email === siblingEmail);
     await pool.query(
       `INSERT INTO user_organizations (user_id, organization_id, role)
        VALUES ($1, $3, 'member'), ($2, $3, 'member')`,
