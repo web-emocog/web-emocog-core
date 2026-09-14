@@ -40,6 +40,30 @@ describe('standard-stimuli', () => {
     assert.equal(s.src, 'https://example.com/custom.png');
   });
 
+  it('keeps the public source URL as a fallback for a preloaded API image', () => {
+    const s = resolveParticipantStimulus({
+      stimulusId: 'api:42',
+      meta: {
+        metadata: {
+          url: 'blob:https://example.com/preloaded',
+          source_url: 'https://example.com/api/invitations/code/stimuli/42/content',
+        },
+      },
+    });
+    assert.equal(s.type, 'image');
+    assert.equal(s.src, 'blob:https://example.com/preloaded');
+    assert.equal(s.fallbackSrc, 'https://example.com/api/invitations/code/stimuli/42/content');
+  });
+
+  it('uses source_url when participant preloading was unavailable', () => {
+    const s = resolveParticipantStimulus({
+      stimulusId: '42',
+      meta: { metadata: { source_url: 'https://example.com/stimulus.jpg' } },
+    });
+    assert.equal(s.type, 'image');
+    assert.equal(s.src, 'https://example.com/stimulus.jpg');
+  });
+
   it('resolveParticipantStimulus uses std mapping when no url', () => {
     const s = resolveParticipantStimulus({ stimulusId: 'std_nogo_red_circle' });
     assert.equal(s.type, 'shape');
@@ -50,6 +74,13 @@ describe('standard-stimuli', () => {
     const s = resolveParticipantStimulus({ stimulusId: 'user_photo_123' });
     assert.equal(s.type, 'shape');
     assert.equal(s.stimulusId, 'user_photo_123');
+  });
+
+  it('never turns an unresolved database stimulus into the blue fallback shape', () => {
+    const s = resolveParticipantStimulus({ stimulusId: 'api:42' });
+    assert.equal(s.type, 'image');
+    assert.equal(s.src, '');
+    assert.equal(s.mediaUnavailable, true);
   });
 
   it('parses emotion category from std_emo id', () => {
