@@ -7,18 +7,18 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { finishSession } from './tests-updated.js?v=20260914-1';
+import { finishSession } from './tests-updated.js?v=20260914-3';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260914-1';
-import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260914-1';
+import { translations } from '../../translations.js?v=20260914-3';
+import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260914-3';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260914-1';
+} from '../session-runtime/index.js?v=20260914-3';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -862,27 +862,50 @@ function renderStimulus(trial) {
     const imageEl = document.getElementById('cogImage');
 
     if ((stimulusType === 'image' || stimulusType === 'slides') && imageEl) {
-        imageEl.style.cssText = '';
-        if (stimulus.style && typeof stimulus.style === 'object') {
-            Object.assign(imageEl.style, stimulus.style);
-        }
-        const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
-        if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
-        imageEl.onerror = () => {
-            if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
-                imageEl.dataset.fallbackAttempted = '1';
-                imageEl.src = imageEl.dataset.fallbackSrc;
-                return;
-            }
-            renderStimulusMediaError(stimulus);
-        };
         if (!stimulus.src) {
             renderStimulusMediaError(stimulus);
-            return;
+            return Promise.resolve(false);
         }
-        imageEl.src = stimulus.src;
-        imageEl.style.display = 'block';
-        return;
+        return new Promise(resolve => {
+            let settled = false;
+            const settle = value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(loadTimeout);
+                resolve(value);
+            };
+            const fail = () => {
+                if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
+                    imageEl.dataset.fallbackAttempted = '1';
+                    imageEl.src = imageEl.dataset.fallbackSrc;
+                    return;
+                }
+                renderStimulusMediaError(stimulus);
+                settle(false);
+            };
+            const loadTimeout = setTimeout(fail, 10_000);
+
+            imageEl.style.cssText = '';
+            if (stimulus.style && typeof stimulus.style === 'object') {
+                Object.assign(imageEl.style, stimulus.style);
+            }
+            const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
+            if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
+            imageEl.onload = () => {
+                if (!(imageEl.naturalWidth > 0 && imageEl.naturalHeight > 0)) {
+                    fail();
+                    return;
+                }
+                imageEl.style.display = 'block';
+                settle(true);
+            };
+            imageEl.onerror = fail;
+            imageEl.src = stimulus.src;
+            if (imageEl.complete && imageEl.naturalWidth > 0) {
+                imageEl.style.display = 'block';
+                settle(true);
+            }
+        });
     }
 
     if (shapeEl) {
@@ -894,13 +917,14 @@ function renderStimulus(trial) {
                 Object.assign(shapeEl.style, stimulus.style);
             }
             shapeEl.style.display = 'block';
-            return;
+            return Promise.resolve(true);
         }
         if (stimulus.style && typeof stimulus.style === 'object') {
             Object.assign(shapeEl.style, stimulus.style);
         }
         shapeEl.style.display = 'block';
     }
+    return Promise.resolve(Boolean(shapeEl));
 }
 
 function stopCognitiveAnalysisLoop() {
@@ -1976,9 +2000,22 @@ function runTrial() {
     });
     responseCollector.startBaseline();
 
-    pendingFixationCallback = () => {
+    pendingFixationCallback = async () => {
         ex_state.task.fixation.style.display = 'none';
-        renderStimulus(trial);
+        const stimulusReady = await renderStimulus(trial);
+        if (!stimulusReady) {
+            getSessionRuntime()?.reportIssue?.({
+                kind: 'technical',
+                code: 'stimulus_media_load_failed',
+                message: state.currentLang === 'ru'
+                    ? 'Файл стимула не удалось показать участнику.'
+                    : 'The stimulus file could not be shown to the participant.',
+                recoverable: false,
+                invalidatesBlock: true
+            });
+            finishCognitiveTask('error', 'stimulus_media_load_failed');
+            return;
+        }
 
         const stimulusOnPerf = performance.now();
         activeTrialRuntime = {

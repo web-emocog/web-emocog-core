@@ -16,6 +16,7 @@ const {
   resolveServerOwnedUploadPath,
   resolveReadableServerOwnedUploadPath,
   rejectClientOwnedContentPath,
+  getStoredContentPath,
   contentDisposition,
 } = require('../security/upload-paths');
 const {
@@ -302,6 +303,11 @@ describe('S2-01 upload root confinement', () => {
     assert.equal(rejectClientOwnedContentPath({ title: 'safe' }).ok, true);
     assert.equal(rejectClientOwnedContentPath({ content_path: '../x' }).ok, false);
     assert.equal(rejectClientOwnedContentPath({ contentPath: '/tmp/x' }).ok, false);
+  });
+
+  it('keeps legacy contentPath records readable after storage upgrades', () => {
+    assert.equal(getStoredContentPath({ content_path: 'new.png' }), 'new.png');
+    assert.equal(getStoredContentPath({ contentPath: 'legacy.png' }), 'legacy.png');
   });
 
   it('encodes non-ASCII stimulus names in Content-Disposition headers', () => {

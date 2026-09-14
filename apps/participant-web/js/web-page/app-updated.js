@@ -15,7 +15,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260914-1';
+} from './ui-updated.js?v=20260914-3';
 
 import { 
     startPreCheck, 
@@ -25,16 +25,16 @@ import {
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260914-1';
+} from './tests-updated.js?v=20260914-3';
 
 import {
     deriveInvitationHubMetrics,
     getInvitationSessionPlan,
     getParticipantShell
-} from './protocol-invite-utils.js?v=20260914-1';
+} from './protocol-invite-utils.js?v=20260914-3';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260914-1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260914-3';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -105,7 +105,26 @@ async function preloadInvitationStimulus(contentUrl) {
     if (blob.type && !blob.type.toLowerCase().startsWith('image/')) {
         throw new Error(`Stimulus preload returned ${blob.type} instead of an image`);
     }
-    return URL.createObjectURL(blob);
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+        const image = new Image();
+        image.src = objectUrl;
+        if (typeof image.decode === 'function') {
+            await image.decode();
+        } else {
+            await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = () => reject(new Error('Stimulus image could not be decoded'));
+            });
+        }
+        if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) {
+            throw new Error('Stimulus image has invalid dimensions');
+        }
+        return objectUrl;
+    } catch (error) {
+        URL.revokeObjectURL(objectUrl);
+        throw error;
+    }
 }
 
 let _gazeDebugSampleN = 0;
@@ -395,30 +414,18 @@ async function loadInvitationProtocolByCode(code) {
     const response = await fetch(lookupUrl.toString());
     if (!response.ok) {
         dbgErr('api', 'invitation:load:error', { base, status: response.status });
-        throw new Error('Invitation lookup failed: HTTP ' + response.status);
+        let detail = '';
+        try {
+            const errorPayload = await response.json();
+            detail = errorPayload?.message || errorPayload?.error || '';
+        } catch (_) { /* Use the HTTP status below. */ }
+        throw new Error(detail || ('Invitation lookup failed: HTTP ' + response.status));
     }
     const payload = await response.json();
     if (payload && payload.definition && typeof payload.definition === 'object') {
-        const protocolBlocks = Array.isArray(payload.definition?.blocks) ? payload.definition.blocks : [];
-        const stimulusIds = [];
-        const addStimulusId = (value) => {
-            const key = String(value ?? '').replace(/^api:/, '').trim();
-            if (key && !stimulusIds.includes(key)) stimulusIds.push(key);
-        };
-        const addTrialStimuli = (trials) => {
-            if (!Array.isArray(trials)) return;
-            trials.forEach((trial) => addStimulusId(
-                trial?.stimulusId ?? trial?.stimulus_id ?? trial?.stimulus?.stimulusId ?? trial?.stimulus?.id
-            ));
-        };
-        protocolBlocks.forEach((block) => {
-            const ids = Array.isArray(block?.params?.stimuli_ids) ? block.params.stimuli_ids : [];
-            ids.forEach(addStimulusId);
-            addStimulusId(block?.params?.stimulus_id);
-            addTrialStimuli(block?.params?.trials);
-            addTrialStimuli(block?.trials);
-            addTrialStimuli(block?.content?.trials);
-        });
+        const stimulusIds = window.WecogProtocolStimuli?.referencedStimulusIds
+            ? window.WecogProtocolStimuli.referencedStimulusIds(payload.definition)
+            : [];
 
         let stimuliMap = {};
         revokeInvitationStimulusObjectUrls();
@@ -427,10 +434,17 @@ async function loadInvitationProtocolByCode(code) {
                 const stimuliResp = await fetch(
                     base + '/invitations/by-code/' + encodeURIComponent(code) + '/stimuli'
                 );
-                if (stimuliResp.ok) {
-                    const rows = await stimuliResp.json();
-                    if (Array.isArray(rows)) {
-                        const mappedRows = await Promise.all(rows.map(async (row) => {
+                if (!stimuliResp.ok) {
+                    let detail = '';
+                    try {
+                        const errorPayload = await stimuliResp.json();
+                        detail = errorPayload?.message || errorPayload?.error || '';
+                    } catch (_) { /* Use status-only diagnostics. */ }
+                    throw new Error(detail || `Stimulus metadata failed: HTTP ${stimuliResp.status}`);
+                }
+                const rows = await stimuliResp.json();
+                if (Array.isArray(rows)) {
+                    const mappedRows = await Promise.all(rows.map(async (row) => {
                             const id = String(row?.id);
                             if (!stimulusIds.includes(id)) return null;
                             const contentUrl = typeof row?.content_url === 'string'
@@ -458,14 +472,14 @@ async function loadInvitationProtocolByCode(code) {
                                     ...(contentUrl ? { source_url: contentUrl } : {})
                                 }
                             };
-                        }));
-                        stimuliMap = Object.fromEntries(
-                            mappedRows.filter(Boolean).map(row => [row.id, row])
-                        );
-                    }
+                    }));
+                    stimuliMap = Object.fromEntries(
+                        mappedRows.filter(Boolean).map(row => [row.id, row])
+                    );
                 }
             } catch (e) {
                 console.warn('[Invitation] Failed to load stimuli metadata:', e);
+                throw e;
             }
         }
 
@@ -495,10 +509,11 @@ async function loadInvitationProtocolByCode(code) {
         state.runtime.invitationParticipantShell = plan.shell;
         state.runtime.invitationSelectedMetrics = plan.hubMetrics;
         state.runtime.invitationSessionPlan = plan;
+        state.runtime.invitationLoadError = null;
         dbg('api', 'invitation:load:success', {
             protocolId: payload.protocol_id || null,
             projectId: payload.project_id || null,
-            blockCount: protocolBlocks.length,
+            blockCount: Array.isArray(payload.definition?.blocks) ? payload.definition.blocks.length : 0,
             hubMetrics: plan.hubMetrics,
             shell: plan.shell,
             runProtocolAfterShell: plan.runProtocolAfterShell
@@ -627,7 +642,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         } catch (e) {
             console.warn('[Invitation] Failed to load protocol by code:', e);
-            state.sessionData.ids.invitationCode = null;
             state.runtime.invitationProtocolDefinition = null;
             state.runtime.invitationProtocolMeta = null;
             state.runtime.invitationLoadError = {
@@ -638,9 +652,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 message: e?.message || String(e)
             });
             if (inviteHintGlobal) {
-                inviteHintGlobal.textContent = participantInviteBypass
-                    ? 'Приглашение из адреса не загрузилось. Проверьте код или продолжите в тестовом режиме без приглашения.'
-                    : 'Приглашение из адреса страницы не загрузилось. Проверьте ссылку или попросите исследователя новую.';
+                inviteHintGlobal.textContent = e?.message
+                    || 'Приглашение из адреса страницы не загрузилось. Проверьте ссылку или попросите исследователя новую.';
             }
         }
     }
@@ -682,6 +695,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (inviteInput) {
                 const raw = (inviteInput.value || '').trim();
                 if (!raw) {
+                    if (state.runtime?.invitationLoadError && !state.runtime?.invitationProtocolDefinition) {
+                        if (hint) {
+                            hint.textContent = state.runtime.invitationLoadError.message
+                                || 'Протокол не загрузился. Попросите исследователя проверить ссылку и файлы стимулов.';
+                        }
+                        return;
+                    }
                     if (
                         !participantInviteBypass
                         && !state.sessionData.ids.invitationCode
@@ -690,12 +710,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (hint) {
                             hint.textContent =
                                 'Вставьте ссылку-приглашение или код. Если у вас нет приглашения, попросите исследователя отправить ссылку.';
-                        }
-                        return;
-                    }
-                    if (!participantInviteBypass && state.runtime?.invitationLoadError) {
-                        if (hint) {
-                            hint.textContent = 'Приглашение не найдено или больше не действует. Получите новую ссылку у исследователя.';
                         }
                         return;
                     }
