@@ -98,10 +98,13 @@ async function preloadInvitationStimulus(contentUrl) {
         || typeof URL === 'undefined'
         || typeof URL.createObjectURL !== 'function'
     ) return null;
-    const response = await fetch(contentUrl, { credentials: 'include' });
+    const response = await fetch(contentUrl, { credentials: 'include', cache: 'no-store' });
     if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
     const blob = await response.blob();
     if (!blob.size) throw new Error('Stimulus preload returned an empty file');
+    if (blob.type && !blob.type.toLowerCase().startsWith('image/')) {
+        throw new Error(`Stimulus preload returned ${blob.type} instead of an image`);
+    }
     return URL.createObjectURL(blob);
 }
 
