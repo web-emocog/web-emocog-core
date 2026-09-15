@@ -150,10 +150,13 @@ test('completed session shows every AOI heatmap without selection filters and ex
   await expect(page.locator('#analyticsBlockFilter')).toHaveCount(0);
   await expect(page.locator('#analyticsStimulusFilter')).toHaveCount(0);
   const uploadedStimulusLocation = await page.evaluate(() => {
-    // @ts-expect-error application global
+    const appWindow = window as typeof window & {
+      API_BASE?: string;
+      EmocogAnalyticsProduction: { stimulusContentUrl: (path: string) => string };
+    };
     return {
-      apiBase: String(window.API_BASE || '').replace(/\/$/, ''),
-      contentUrl: window.EmocogAnalyticsProduction.stimulusContentUrl('/stimuli/58/content'),
+      apiBase: String(appWindow.API_BASE || '').replace(/\/$/, ''),
+      contentUrl: appWindow.EmocogAnalyticsProduction.stimulusContentUrl('/stimuli/58/content'),
     };
   });
   expect(uploadedStimulusLocation.contentUrl).toBe(`${uploadedStimulusLocation.apiBase}/stimuli/58/content`);
