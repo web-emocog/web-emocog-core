@@ -78,6 +78,7 @@ function compactBiomarkers(features, accepted) {
         'pause_rate',
         'avg_pause_duration',
         'max_pause_duration',
+        'num_pauses',
         'mean_utterance_duration'
     ];
     return Object.fromEntries(allowed.map(key => [key, finite(features[key])]));
@@ -247,6 +248,7 @@ export function summarizeAudioTaskWindows(windows, testType = 'reading', metadat
             completionScore: scoreParts.length ? clamp01(mean(scoreParts)) : null,
             rmsMean: qcMean('rms'),
             clippingRatioMean: qcMean('clippingRatio'),
+            snrProxyDb: qcMean('snrProxyDb'),
             pitchMeanHz: biomarkerMean('pitch_mean_hz'),
             pitchStdHz: biomarkerMean('pitch_std_hz'),
             pitchVariability: biomarkerMean('pitch_variability'),
@@ -255,6 +257,8 @@ export function summarizeAudioTaskWindows(windows, testType = 'reading', metadat
             hnrDb: biomarkerMean('hnr_db'),
             pauseRate: biomarkerMean('pause_rate'),
             averagePauseDuration: biomarkerMean('avg_pause_duration'),
+            maximumPauseDuration: biomarkerMean('max_pause_duration'),
+            pauseCountMean: biomarkerMean('num_pauses'),
             meanUtteranceDuration: biomarkerMean('mean_utterance_duration')
         },
         rawAudioStored: false,
@@ -464,7 +468,7 @@ export class SessionAudioCollector {
         if (!this.WorkerCtor || this.worker) return false;
         try {
             this.worker = new this.WorkerCtor(
-                new URL('./audio-window-worker.js?v=20260913-7', import.meta.url),
+                new URL('./audio-window-worker.js?v=20260915-1', import.meta.url),
                 { type: 'module', name: 'wecog-audio-analysis' }
             );
             this.worker.onmessage = event => {

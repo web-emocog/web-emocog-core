@@ -1,4 +1,4 @@
-import { analyzeAudioWindow } from './session-audio.js?v=20260913-7';
+import { analyzeAudioWindow } from './session-audio.js?v=20260915-1';
 
 self.onmessage = event => {
     const { id, samples, sampleRate, context } = event.data || {};

@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   'image/jpeg',
@@ -62,12 +63,31 @@ function matchesDeclaredMediaType(buffer, mimeType) {
   return false;
 }
 
-async function verifyUploadedFileType(filePath, mimeType) {
+async function verifyUploadedFileType(uploadRoot, relativePath, mimeType) {
   if (!ALLOWED_UPLOAD_MIME_TYPES.has(String(mimeType || '').toLowerCase())) {
     return false;
   }
-  const handle = await fs.promises.open(filePath, 'r');
+  if (typeof relativePath !== 'string' || !relativePath || relativePath.includes('\0')) {
+    return false;
+  }
+
+  const fileName = path.basename(relativePath);
+  if (
+    fileName !== relativePath
+    || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,511}$/.test(fileName)
+  ) {
+    return false;
+  }
+
+  const realRoot = await fs.promises.realpath(path.resolve(uploadRoot));
+  const candidatePath = path.resolve(realRoot, fileName);
+  const realFilePath = await fs.promises.realpath(candidatePath);
+  if (!realFilePath.startsWith(`${realRoot}${path.sep}`)) return false;
+
+  const handle = await fs.promises.open(realFilePath, 'r');
   try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) return false;
     const buffer = Buffer.alloc(16);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     return matchesDeclaredMediaType(buffer.subarray(0, bytesRead), mimeType);

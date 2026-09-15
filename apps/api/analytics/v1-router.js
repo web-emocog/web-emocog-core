@@ -22,6 +22,7 @@ const {
   buildGroupSummary,
   buildHeatmapData,
   buildSessionMetrics,
+  buildSessionVisuals,
   channelQc,
 } = require('./metrics');
 
@@ -88,6 +89,48 @@ function finiteNumber(...values) {
 
 function optionalFiniteNumber(value) {
   return value === null || value === undefined || value === '' ? null : finiteNumber(value);
+}
+
+async function loadLibraryStimuli(projectId, stimulusIds) {
+  const ids = [...new Set((stimulusIds || [])
+    .map(value => String(value == null ? '' : value).replace(/^api:/, ''))
+    .filter(value => /^\d+$/.test(value))
+    .map(Number))];
+  if (!ids.length) return new Map();
+  const result = await pool.query(
+    `SELECT id, name, mime_type, metadata
+     FROM stimuli
+     WHERE project_id = $1 AND id = ANY($2::bigint[])`,
+    [projectId, ids]
+  );
+  return new Map(result.rows.map(row => [String(row.id), row]));
+}
+
+function enrichStimulusDescriptor(stimulus, catalog) {
+  if (!stimulus) return null;
+  const id = String(stimulus.id == null ? '' : stimulus.id).replace(/^api:/, '');
+  if (!/^\d+$/.test(id)) return stimulus;
+  const library = catalog.get(id);
+  if (!library) return { ...stimulus, id, contentUrl: null };
+  const metadata = library.metadata && typeof library.metadata === 'object' ? library.metadata : {};
+  return {
+    ...stimulus,
+    id,
+    name: library.name || stimulus.name || id,
+    type: library.mime_type || stimulus.type || 'image',
+    contentUrl: `/stimuli/${id}/content`,
+    intrinsicWidth: optionalFiniteNumber(
+      metadata.intrinsic_width ?? metadata.intrinsicWidth ?? metadata.width
+    ) ?? stimulus.intrinsicWidth ?? null,
+    intrinsicHeight: optionalFiniteNumber(
+      metadata.intrinsic_height ?? metadata.intrinsicHeight ?? metadata.height
+    ) ?? stimulus.intrinsicHeight ?? null,
+  };
+}
+
+async function enrichSingleStimulus(projectId, data) {
+  const catalog = await loadLibraryStimuli(projectId, [data?.stimulus?.id]);
+  return { ...data, stimulus: enrichStimulusDescriptor(data?.stimulus, catalog) };
 }
 
 function sessionTechnicalDetails(row) {
@@ -246,6 +289,7 @@ function sessionAudioDetails(row, protocolDefinition = null) {
         completionScore: optionalFiniteNumber(test?.metrics?.completionScore),
         rmsMean: optionalFiniteNumber(test?.metrics?.rmsMean),
         clippingRatioMean: optionalFiniteNumber(test?.metrics?.clippingRatioMean),
+        snrProxyDb: optionalFiniteNumber(test?.metrics?.snrProxyDb),
         pitchMeanHz: optionalFiniteNumber(test?.metrics?.pitchMeanHz),
         pitchStdHz: optionalFiniteNumber(test?.metrics?.pitchStdHz),
         pitchVariability: optionalFiniteNumber(test?.metrics?.pitchVariability),
@@ -254,6 +298,8 @@ function sessionAudioDetails(row, protocolDefinition = null) {
         hnrDb: optionalFiniteNumber(test?.metrics?.hnrDb),
         pauseRate: optionalFiniteNumber(test?.metrics?.pauseRate),
         averagePauseDuration: optionalFiniteNumber(test?.metrics?.averagePauseDuration),
+        maximumPauseDuration: optionalFiniteNumber(test?.metrics?.maximumPauseDuration),
+        pauseCountMean: optionalFiniteNumber(test?.metrics?.pauseCountMean),
         meanUtteranceDuration: optionalFiniteNumber(test?.metrics?.meanUtteranceDuration),
       },
       rawAudioStored: false,
@@ -334,7 +380,15 @@ router.get('/filter-options', async (req, res) => {
     if (req.query.protocol_version && String(req.query.protocol_version) !== protocolVersion(protocol.definition)) {
       return res.status(409).json({ error: 'Protocol version does not match', code: 'analytics_protocol_version_mismatch' });
     }
-    return res.json(collectProtocolOptions(protocol.definition));
+    const options = collectProtocolOptions(protocol.definition);
+    const catalog = await loadLibraryStimuli(projectId, options.stimuli.map(stimulus => stimulus.id));
+    options.stimuli = options.stimuli.map(stimulus => {
+      const library = catalog.get(String(stimulus.id).replace(/^api:/, ''));
+      return library
+        ? { ...stimulus, name_ru: library.name, name_en: library.name }
+        : stimulus;
+    });
+    return res.json(options);
   } catch (error) {
     return responseError(res, error);
   }
@@ -421,7 +475,11 @@ router.get('/sessions/:sessionRef/aoi', async (req, res) => {
       coordinateSpace: 'stimulus_normalized_0_1',
       aoiRows: rows.map(item => ({ aoi: item.aoi, metrics: item.metrics })),
     };
-    return res.json(envelope('session_aoi', hydrated.snapshot, data));
+    return res.json(envelope(
+      'session_aoi',
+      hydrated.snapshot,
+      await enrichSingleStimulus(hydrated.protocol.project_id, data)
+    ));
   } catch (error) {
     return responseError(res, error);
   }
@@ -431,7 +489,45 @@ router.get('/sessions/:sessionRef/heatmap', async (req, res) => {
   try {
     const hydrated = await requireSnapshot(req);
     const row = selectedSession(hydrated, req.params.sessionRef);
-    return res.json(envelope('heatmap', hydrated.snapshot, buildHeatmapData(row, hydrated.snapshot.queryEcho)));
+    const data = buildHeatmapData(row, hydrated.snapshot.queryEcho);
+    return res.json(envelope(
+      'heatmap',
+      hydrated.snapshot,
+      await enrichSingleStimulus(hydrated.protocol.project_id, data)
+    ));
+  } catch (error) {
+    return responseError(res, error);
+  }
+});
+
+router.get('/sessions/:sessionRef/visuals', async (req, res) => {
+  try {
+    const hydrated = await requireSnapshot(req);
+    const row = selectedSession(hydrated, req.params.sessionRef);
+    const contexts = buildSessionVisuals(
+      row,
+      hydrated.protocol,
+      hydrated.snapshot.queryEcho
+    );
+    const catalog = await loadLibraryStimuli(
+      hydrated.protocol.project_id,
+      contexts.map(context => context.stimulus?.id)
+    );
+    const enriched = contexts.map(context => {
+      const stimulus = enrichStimulusDescriptor(context.stimulus, catalog);
+      return {
+        ...context,
+        stimulus,
+        heatmap: { ...context.heatmap, stimulus },
+      };
+    });
+    return res.json(envelope('session_visuals', hydrated.snapshot, {
+      status: enriched.length ? 'computed' : 'no_data',
+      reason: enriched.length ? null : 'aoi_not_configured',
+      sessionId: Number(row.id),
+      participantAlias: row.participant_id || null,
+      contexts: enriched,
+    }));
   } catch (error) {
     return responseError(res, error);
   }
@@ -458,10 +554,11 @@ router.get('/groups/summary', async (req, res) => {
 router.get('/groups/heatmap', async (req, res) => {
   try {
     const hydrated = await requireSnapshot(req);
+    const data = buildGroupHeatmap(hydrated.sessionRows, hydrated.snapshot.queryEcho);
     return res.json(envelope(
       'heatmap',
       hydrated.snapshot,
-      buildGroupHeatmap(hydrated.sessionRows, hydrated.snapshot.queryEcho)
+      await enrichSingleStimulus(hydrated.protocol.project_id, data)
     ));
   } catch (error) {
     return responseError(res, error);
@@ -594,6 +691,7 @@ router.get('/exports', requireOperation(OPERATIONS.EXPORT_READ), async (req, res
 module.exports = router;
 module.exports.escapeCsv = escapeCsv;
 module.exports.exportCsv = exportCsv;
+module.exports.enrichStimulusDescriptor = enrichStimulusDescriptor;
 module.exports.protectSpreadsheetCell = protectSpreadsheetCell;
 module.exports.sessionQualityDetails = sessionQualityDetails;
 module.exports.sessionTechnicalDetails = sessionTechnicalDetails;

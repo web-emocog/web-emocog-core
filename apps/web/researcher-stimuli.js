@@ -27,12 +27,22 @@ async function hydrateApiStimulusPreview(stimulus) {
     const response = await fetch(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' });
     if (!response.ok) throw typeof apiFailError === 'function' ? await apiFailError(response) : new Error(String(response.status));
     const blob = await response.blob();
+    if (!blob.size) throw new Error(CURRENT_LANG === 'en' ? 'Stimulus file is empty' : 'Файл стимула пуст');
+    if ((stimulus.type === 'image' || stimulus.type === 'slides') && blob.type && !blob.type.startsWith('image/')) {
+      throw new Error(CURRENT_LANG === 'en' ? 'The server returned a non-image file' : 'Сервер вернул файл, который не является изображением');
+    }
     if (stimulus._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
     stimulus._previewObjectUrl = URL.createObjectURL(blob);
+    stimulus.contentAvailable = true;
+    delete stimulus.contentError;
     return stimulus;
   })();
   try {
     return await stimulus._previewHydrationPromise;
+  } catch (error) {
+    stimulus.contentAvailable = false;
+    stimulus.contentError = error?.message || String(error);
+    throw error;
   } finally {
     stimulus._previewHydrating = false;
     delete stimulus._previewHydrationPromise;
@@ -70,6 +80,7 @@ function convertedStimulusFromApi(row, sourceFile, index, count) {
     apiContentUrl,
     apiStimulusId: row?.id || null,
     mimeType: row?.mime_type || 'image/jpeg',
+    contentAvailable: row?.content_available !== false,
     sourceDocumentName: sourceFile.name,
     sourcePage: metadata.source_page || index + 1,
     createdAt: row?.created_at || new Date().toISOString()
@@ -260,6 +271,9 @@ function requestStimulusUploadDetails(files) {
 function stimulusPreviewHtml(stimulus) {
   const name = escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : stimulus?.name || '');
   const url = escapeStimulusHtml(stimulus?._previewObjectUrl || stimulus?.url || '');
+  if (stimulus?.contentAvailable === false) {
+    return `<div style="padding:12px;text-align:center;color:var(--bad);font-size:11px;line-height:1.35;font-weight:700;">${CURRENT_LANG === 'en' ? 'File unavailable. Replace it before publishing.' : 'Файл недоступен. Замените его до публикации.'}</div>`;
+  }
   if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && url) return `<img src="${url}" alt="${name}" style="width:100%;height:100%;display:block;object-fit:contain;">`;
   if (stimulus?.type === 'video' && url) return `<video src="${url}" muted preload="metadata" style="width:100%;height:100%;display:block;object-fit:contain;"></video>`;
   if (stimulus?.type === 'audio' && url) return `<audio src="${url}" controls preload="metadata" style="width:92%;height:34px;"></audio>`;
@@ -575,6 +589,9 @@ function StimuliAOIView() {
           <div style="width:100%;height:118px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;">${stimulusPreviewHtml(s)}</div>
           <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;max-width:100%;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
           <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
+          ${s.apiStimulusId ? `<button class="folder-stim-replace-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:48px;width:20px;height:20px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);cursor:pointer;color:${s.contentAvailable === false ? 'var(--bad)' : 'var(--muted)'};padding:2px;display:flex;align-items:center;justify-content:center;" title="${CURRENT_LANG === 'en' ? 'Replace file' : 'Заменить файл'}">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0011.8 2M18.5 9A7 7 0 006.7 7"/></svg>
+          </button>` : ''}
           ${s.standard ? '' : `<button class="folder-stim-edit-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:26px;width:20px;height:20px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);cursor:pointer;color:var(--muted);padding:2px;display:flex;align-items:center;justify-content:center;" title="${CURRENT_LANG === 'en' ? 'Rename' : 'Изменить название'}">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 17l-4 1 1-4L16.5 3.5a2.5 2.5 0 013.536 3.536L9 17z"/></svg>
           </button>`}
@@ -596,6 +613,12 @@ function StimuliAOIView() {
         button.addEventListener('click', event => {
           event.stopPropagation();
           renameStimulusInLibrary(button.dataset.id, null, renderFolderView);
+        });
+      });
+      content.querySelectorAll('.folder-stim-replace-btn').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          replaceStimulusContent(button.dataset.id, renderFolderView);
         });
       });
     }
@@ -763,6 +786,7 @@ async function handleFileUpload(files, onProgress) {
         apiContentUrl,
         apiStimulusId: row.id,
         mimeType: row.mime_type || file.type,
+        contentAvailable: row.content_available !== false,
         createdAt: row.created_at || new Date().toISOString(),
         _previewObjectUrl: entry.previewObjectUrl || ''
       };
@@ -865,6 +889,9 @@ function renderStimuliGallery(container) {
         <button class="stim-edit-btn" data-id="${escapeStimulusHtml(s.id)}" title="${CURRENT_LANG === 'en' ? 'Rename' : 'Изменить название'}" style="width:24px;height:24px;border:1px solid var(--stroke);border-radius:7px;background:var(--card-bg);color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 17l-4 1 1-4L16.5 3.5a2.5 2.5 0 013.536 3.536L9 17z"/></svg>
         </button>
+        ${s.apiStimulusId ? `<button class="stim-replace-btn" data-id="${escapeStimulusHtml(s.id)}" title="${CURRENT_LANG === 'en' ? 'Replace file' : 'Заменить файл'}" style="width:24px;height:24px;border:1px solid var(--stroke);border-radius:7px;background:var(--card-bg);color:${s.contentAvailable === false ? 'var(--bad)' : 'var(--muted)'};cursor:pointer;display:flex;align-items:center;justify-content:center;">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0011.8 2M18.5 9A7 7 0 006.7 7"/></svg>
+        </button>` : ''}
         <button class="stim-delete-btn" data-id="${escapeStimulusHtml(s.id)}" title="${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}" style="position:static;">
           <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -885,6 +912,12 @@ function renderStimuliGallery(container) {
     button.addEventListener('click', event => {
       event.stopPropagation();
       renameStimulusInLibrary(button.dataset.id, container);
+    });
+  });
+  container.querySelectorAll('.stim-replace-btn').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      replaceStimulusContent(button.dataset.id, () => renderStimuliGallery(container));
     });
   });
   container.querySelectorAll('.stimulus-card').forEach(card => {
@@ -916,6 +949,50 @@ async function renameStimulusInLibrary(id, container, onRenamed) {
   } catch (error) {
     toast(`${CURRENT_LANG === 'en' ? 'Could not rename stimulus.' : 'Не удалось изменить название.'} ${error?.message || ''}`.trim(), 'error');
   }
+}
+
+function replaceStimulusContent(id, onReplaced) {
+  const stimulus = stimuliList.find(item => String(item.id) === String(id));
+  if (!stimulus?.apiStimulusId || typeof apiPost !== 'function') return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = stimulus.type === 'image' || stimulus.type === 'slides'
+    ? 'image/*'
+    : (stimulus.type === 'audio' ? 'audio/*' : (stimulus.type === 'video' ? 'video/*' : ''));
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const nextType = stimulusTypeFromFile(file);
+    const expectedType = stimulus.type === 'slides' ? 'image' : stimulus.type;
+    if (nextType !== expectedType) {
+      toast(CURRENT_LANG === 'en' ? 'Choose a file of the same media type.' : 'Выберите файл того же типа.', 'error');
+      return;
+    }
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const row = await apiPost(`/stimuli/${encodeURIComponent(stimulus.apiStimulusId)}/content`, formData);
+      if (stimulus._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
+      delete stimulus._previewObjectUrl;
+      stimulus.apiContentUrl = row?.content_url || `/stimuli/${encodeURIComponent(stimulus.apiStimulusId)}/content`;
+      stimulus.url = absoluteStimulusApiUrl(stimulus.apiContentUrl);
+      stimulus.mimeType = row?.mime_type || file.type;
+      stimulus.info = `${(Number(row?.size_bytes || file.size) / 1024).toFixed(1)} KB`;
+      stimulus.contentAvailable = true;
+      delete stimulus.contentError;
+      await hydrateApiStimulusPreview(stimulus);
+      persistStimuliList();
+      onReplaced?.();
+      toast(CURRENT_LANG === 'en' ? 'Stimulus file replaced' : 'Файл стимула восстановлен');
+    } catch (error) {
+      stimulus.contentAvailable = false;
+      stimulus.contentError = error?.message || String(error);
+      persistStimuliList();
+      onReplaced?.();
+      toast(`${CURRENT_LANG === 'en' ? 'Could not replace the file.' : 'Не удалось заменить файл.'} ${error?.message || ''}`.trim(), 'error');
+    }
+  }, { once: true });
+  input.click();
 }
 
 function deleteStimulusFromLibrary(id) {
