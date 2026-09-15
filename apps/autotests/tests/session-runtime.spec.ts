@@ -116,6 +116,22 @@ test.describe('Participant session runtime', () => {
     expect(ingestRequests).toBe(0);
   });
 
+  test('loads the shared stimulus registry before the participant runtime', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const referencedIds = await page.evaluate(() => {
+      const registry = (window as any).WecogProtocolStimuli;
+      return registry?.referencedStimulusIds({
+        blocks: [{
+          type: 'cognitive_task',
+          params: { stimuli_ids: ['api:77'] },
+          trials: [{ stimulusId: '42' }],
+        }],
+      }).sort() ?? null;
+    });
+    expect(referencedIds).toEqual(['42', '77']);
+    expect(await page.evaluate(() => Boolean((window as any).__WECOG_STATE__))).toBe(true);
+  });
+
   test('preloads uploaded invitation stimuli before the cognitive task starts', async ({ page }) => {
     const invitationCode = 'INV-STIMULUS-PRELOAD';
     let contentRequests = 0;

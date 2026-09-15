@@ -378,7 +378,7 @@ describe('researcher navigation contract', () => {
     assert.match(ui, /wecog:languagechange/);
     assert.match(runner, /refreshLocalizedInstructionScreen/);
     assert.match(runner, /captureSurveyDraft/);
-    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260914-1/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260915-1/);
   });
 
   it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
@@ -547,6 +547,34 @@ describe('researcher navigation contract', () => {
     assert.match(builder, /function normalizePersistedBuilderBlock/);
     assert.match(builder, /Array\.isArray\(block\.trials\) \? block\.trials/);
     assert.match(builder, /slides: Array\.isArray\(b\.content\?\.slides\) \? b\.content\.slides : \[\]/);
+  });
+
+  it('keeps the participant stimulus registry and decoded-image readiness connected', () => {
+    const html = read('participant-web/mvp_with_precheck_1-updated.html');
+    const app = read('participant-web/js/web-page/app-updated.js');
+    const task = read('participant-web/js/web-page/experimental_task-updated.js');
+    const registryPosition = html.indexOf('../shared/protocol-stimuli.js?');
+    const runtimePosition = html.indexOf('js/web-page/app-updated.js?');
+    assert.ok(registryPosition >= 0, 'Participant HTML must load the stimulus registry');
+    assert.ok(runtimePosition > registryPosition, 'Load the registry before the invitation runtime');
+
+    const preloadStart = app.indexOf('async function preloadInvitationStimulus(');
+    const preloadEnd = app.indexOf('let _gazeDebugSampleN', preloadStart);
+    assert.ok(preloadStart >= 0 && preloadEnd > preloadStart);
+    const preload = app.slice(preloadStart, preloadEnd);
+    assert.match(preload, /await image\.decode\(\)/);
+    assert.match(preload, /image\.naturalWidth > 0 && image\.naturalHeight > 0/);
+    assert.match(preload, /URL\.revokeObjectURL\(objectUrl\)/);
+
+    const renderStart = task.indexOf('function renderStimulus(trial)');
+    const renderEnd = task.indexOf('function stopCognitiveAnalysisLoop()', renderStart);
+    assert.ok(renderStart >= 0 && renderEnd > renderStart);
+    const render = task.slice(renderStart, renderEnd);
+    assert.match(render, /return new Promise\(resolve =>/);
+    assert.match(render, /imageEl\.onload =/);
+    assert.match(render, /settle\(true\)/);
+    assert.match(render, /settle\(false\)/);
+    assert.match(task, /const stimulusReady = await renderStimulus\(trial\)/);
   });
 
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {

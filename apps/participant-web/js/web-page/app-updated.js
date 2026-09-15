@@ -105,7 +105,26 @@ async function preloadInvitationStimulus(contentUrl) {
     if (blob.type && !blob.type.toLowerCase().startsWith('image/')) {
         throw new Error(`Stimulus preload returned ${blob.type} instead of an image`);
     }
-    return URL.createObjectURL(blob);
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+        const image = new Image();
+        image.src = objectUrl;
+        if (typeof image.decode === 'function') {
+            await image.decode();
+        } else {
+            await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = () => reject(new Error('Stimulus image could not be decoded'));
+            });
+        }
+        if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) {
+            throw new Error('Stimulus image has invalid dimensions');
+        }
+        return objectUrl;
+    } catch (error) {
+        URL.revokeObjectURL(objectUrl);
+        throw error;
+    }
 }
 
 let _gazeDebugSampleN = 0;

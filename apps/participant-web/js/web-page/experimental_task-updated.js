@@ -866,23 +866,46 @@ function renderStimulus(trial) {
             renderStimulusMediaError(stimulus);
             return Promise.resolve(false);
         }
-        const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
-        if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
-        imageEl.onerror = () => {
-            if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
-                imageEl.dataset.fallbackAttempted = '1';
-                imageEl.src = imageEl.dataset.fallbackSrc;
-                return;
+        return new Promise(resolve => {
+            let settled = false;
+            const settle = value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(loadTimeout);
+                resolve(value);
+            };
+            const fail = () => {
+                if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
+                    imageEl.dataset.fallbackAttempted = '1';
+                    imageEl.src = imageEl.dataset.fallbackSrc;
+                    return;
+                }
+                renderStimulusMediaError(stimulus);
+                settle(false);
+            };
+            const loadTimeout = setTimeout(fail, 10_000);
+
+            imageEl.style.cssText = '';
+            if (stimulus.style && typeof stimulus.style === 'object') {
+                Object.assign(imageEl.style, stimulus.style);
             }
-            renderStimulusMediaError(stimulus);
-        };
-        if (!stimulus.src) {
-            renderStimulusMediaError(stimulus);
-            return;
-        }
-        imageEl.src = stimulus.src;
-        imageEl.style.display = 'block';
-        return;
+            const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
+            if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
+            imageEl.onload = () => {
+                if (!(imageEl.naturalWidth > 0 && imageEl.naturalHeight > 0)) {
+                    fail();
+                    return;
+                }
+                imageEl.style.display = 'block';
+                settle(true);
+            };
+            imageEl.onerror = fail;
+            imageEl.src = stimulus.src;
+            if (imageEl.complete && imageEl.naturalWidth > 0) {
+                imageEl.style.display = 'block';
+                settle(true);
+            }
+        });
     }
 
     if (shapeEl) {
