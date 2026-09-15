@@ -350,7 +350,8 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-      if (!(await verifyUploadedFileType(req.file.path, req.file.mimetype))) {
+      const uploadedRelativePath = path.relative(uploadsRoot, req.file.path);
+      if (!(await verifyUploadedFileType(uploadsRoot, uploadedRelativePath, req.file.mimetype))) {
         await removeUploadedFile(req.file);
         return res.status(415).json({
           error: 'Uploaded bytes do not match the declared media type',
@@ -557,7 +558,8 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-      if (!(await verifyUploadedFileType(req.file.path, req.file.mimetype))) {
+      const uploadedRelativePath = path.relative(uploadsRoot, req.file.path);
+      if (!(await verifyUploadedFileType(uploadsRoot, uploadedRelativePath, req.file.mimetype))) {
         await removeUploadedFile(req.file);
         return res.status(415).json({
           error: 'Uploaded bytes do not match the declared media type',
