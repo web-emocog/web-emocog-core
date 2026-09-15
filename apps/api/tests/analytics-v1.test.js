@@ -6,11 +6,13 @@ const {
   buildExportBundle,
   buildGroupSummary,
   buildHeatmapData,
+  buildSessionVisuals,
   buildSessionMetrics,
   channelQc,
 } = require('../analytics/metrics');
 const {
   exportCsv,
+  enrichStimulusDescriptor,
   protectSpreadsheetCell,
   sessionAudioDetails,
   sessionQualityDetails,
@@ -142,6 +144,59 @@ test('analytics v1 contract and computations', async t => {
     assert.deepEqual(heatmap.grid.values, [0.5, 0, 0, 1]);
   });
 
+  await t.test('returns every AOI heatmap context without narrowing the session snapshot', () => {
+    const source = row();
+    source.features_payload.gaze_analytics.presentations.push({
+      ...source.features_payload.gaze_analytics.presentations[0],
+      blockId: 'block-2',
+      stimulusId: '11',
+      stimulusName: 'Dog',
+      presentationId: 'presentation-3',
+    });
+    const multiProtocol = {
+      definition: {
+        blocks: [
+          ...protocol.definition.blocks,
+          {
+            id: 'block-2',
+            title: 'Second task',
+            blockConfig: {
+              aoiDefinitions: {
+                11: [{
+                  id: 'target-right', name: 'Right target', shape: 'rectangle',
+                  points: [{ x: 0.5, y: 0.5 }, { x: 1, y: 1 }], order: 1,
+                }],
+              },
+            },
+          },
+        ],
+      },
+    };
+    const visuals = buildSessionVisuals(source, multiProtocol, query());
+    assert.equal(visuals.length, 2);
+    assert.deepEqual(visuals.map(item => item.stimulus.id), ['10', '11']);
+    assert.equal(visuals[1].blockName, 'Second task');
+    assert.equal(visuals[1].heatmap.nFixations, 1);
+  });
+
+  await t.test('uses project-library metadata for analytics stimulus labels and content', () => {
+    const enriched = enrichStimulusDescriptor({
+      id: 'api:58', name: '58', type: 'image', contentUrl: '/stimuli/58/content',
+      intrinsicWidth: null, intrinsicHeight: null,
+    }, new Map([['58', {
+      id: 58,
+      name: 'Кот исследователя',
+      mime_type: 'image/png',
+      metadata: { width: 1200, height: 800 },
+    }]]));
+    assert.equal(enriched.name, 'Кот исследователя');
+    assert.equal(enriched.id, '58');
+    assert.equal(enriched.contentUrl, '/stimuli/58/content');
+    assert.equal(enriched.intrinsicWidth, 1200);
+    assert.equal(enriched.intrinsicHeight, 800);
+    assert.equal(enrichStimulusDescriptor({ id: '58', contentUrl: '/stimuli/58/content' }, new Map()).contentUrl, null);
+  });
+
   await t.test('builds participant-equal AOI group metrics with QC and device composition', () => {
     const first = row();
     first.features_payload.meta = { tech: { deviceClass: 'desktop_webcam' } };
@@ -271,7 +326,17 @@ test('analytics v1 contract and computations', async t => {
           featureReliability: 0.75,
           speechCoverage: 0.7,
           completionScore: 0.75,
+          rmsMean: 0.042,
+          snrProxyDb: 18.4,
+          pitchMeanHz: 182.5,
+          jitterLocal: 0.012,
+          shimmerLocal: 0.034,
+          hnrDb: 17.9,
           pauseRate: 0.2,
+          averagePauseDuration: 0.42,
+          maximumPauseDuration: 0.8,
+          pauseCountMean: 2,
+          meanUtteranceDuration: 1.7,
         },
         completedAt: 12345,
       }],
@@ -282,6 +347,9 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(audio.tests[0].blockId, 'audio-reading');
     assert.equal(audio.tests[0].status, 'completed');
     assert.equal(audio.tests[0].metrics.completionScore, 0.75);
+    assert.equal(audio.tests[0].metrics.pitchMeanHz, 182.5);
+    assert.equal(audio.tests[0].metrics.maximumPauseDuration, 0.8);
+    assert.equal(audio.tests[0].metrics.pauseCountMean, 2);
     assert.equal(audio.tests[0].rawAudioStored, false);
     assert.equal(audio.rawAudioStored, false);
     assert.equal(audio.rawAudioTransmitted, false);

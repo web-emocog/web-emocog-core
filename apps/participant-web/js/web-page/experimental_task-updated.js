@@ -7,18 +7,18 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js';
-import { finishSession } from './tests-updated.js?v=20260914-3';
+import { finishSession } from './tests-updated.js?v=20260915-1';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260914-3';
-import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260914-3';
+import { translations } from '../../translations.js?v=20260915-1';
+import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260914-3';
+} from '../session-runtime/index.js?v=20260915-1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -95,7 +95,7 @@ function localizedProtocolValue(source, field, fallback = '') {
 
 const STANDARD_TASK_RULES = Object.freeze({
     ru: {
-        simple_rt: 'Когда появится чёрный квадрат, как можно быстрее нажмите Пробел.',
+        simple_rt: 'Когда появится стимул, как можно быстрее нажмите Пробел.',
         go_nogo: 'Зелёный круг: нажмите Пробел. Красный круг: ничего не нажимайте.',
         stroop: 'Отвечайте по ЦВЕТУ ШРИФТА, а не по значению слова. Красный — стрелка влево; синий — стрелка вниз; зелёный — стрелка вправо.',
         flanker: 'Смотрите только на центральную стрелку. Она указывает влево — нажмите стрелку влево; вправо — стрелку вправо. Боковые стрелки игнорируйте.',
@@ -106,7 +106,7 @@ const STANDARD_TASK_RULES = Object.freeze({
         emotion_viewing: 'Спокойно смотрите на каждое изображение до его смены.'
     },
     en: {
-        simple_rt: 'When the black square appears, press Space as quickly as possible.',
+        simple_rt: 'When the stimulus appears, press Space as quickly as possible.',
         go_nogo: 'Green circle: press Space. Red circle: do not press anything.',
         stroop: 'Respond to the INK COLOUR, not the word. Red: Left Arrow; blue: Down Arrow; green: Right Arrow.',
         flanker: 'Look only at the centre arrow. If it points left, press Left Arrow; if it points right, press Right Arrow. Ignore the surrounding arrows.',
