@@ -109,6 +109,19 @@ function publicStimulus(row) {
   };
 }
 
+async function publicStimulusWithAvailability(row) {
+  const result = publicStimulus(row);
+  const resolved = await resolveReadableServerOwnedUploadPath(
+    uploadsRoot,
+    getStoredContentPath(row?.metadata)
+  );
+  return {
+    ...result,
+    content_available: resolved.ok,
+    ...(resolved.ok ? {} : { content_error: resolved.code }),
+  };
+}
+
 async function removeIncomingDocument(file) {
   if (!file?.path) return;
   const relative = path.relative(conversionIncomingRoot, file.path);
@@ -257,7 +270,7 @@ router.get(
       }
       sql += ' ORDER BY created_at DESC';
       const r = await pool.query(sql, params);
-      res.json(r.rows.map(publicStimulus));
+      res.json(await Promise.all(r.rows.map(publicStimulusWithAvailability)));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to load stimuli' });
@@ -276,7 +289,6 @@ router.post(
     body('metadata').optional().isObject(),
   ],
   async (req, res) => {
-    let fileStored = false;
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -330,6 +342,7 @@ router.post(
     }),
   ],
   async (req, res) => {
+    let fileStored = false;
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -337,7 +350,8 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-      if (!(await verifyUploadedFileType(req.file.path, req.file.mimetype))) {
+      const uploadedRelativePath = path.relative(uploadsRoot, req.file.path);
+      if (!(await verifyUploadedFileType(uploadsRoot, uploadedRelativePath, req.file.mimetype))) {
         await removeUploadedFile(req.file);
         return res.status(415).json({
           error: 'Uploaded bytes do not match the declared media type',
@@ -409,7 +423,7 @@ router.post(
       );
 
       fileStored = true;
-      res.status(201).json(publicStimulus(r.rows[0]));
+      res.status(201).json({ ...publicStimulus(r.rows[0]), content_available: true });
     } catch (err) {
       if (!fileStored) {
         try {
@@ -513,7 +527,7 @@ router.post(
       });
       return res.status(201).json({
         source: { name: sourceBase, page_count: conversion.pageCount },
-        stimuli: rows.map(publicStimulus),
+        stimuli: rows.map(row => ({ ...publicStimulus(row), content_available: true })),
       });
     } catch (error) {
       await Promise.allSettled(promotedFiles.map(file => fs.promises.unlink(file)));
@@ -527,6 +541,77 @@ router.post(
         cleanupConversion(conversion),
         removeIncomingDocument(req.file),
       ]);
+    }
+  }
+);
+
+router.post(
+  '/:id/content',
+  upload.single('file'),
+  [param('id').isInt({ min: 1 })],
+  async (req, res) => {
+    let fileStored = false;
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await removeUploadedFile(req.file);
+        return res.status(400).json({ errors: errors.array() });
+      }
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      const uploadedRelativePath = path.relative(uploadsRoot, req.file.path);
+      if (!(await verifyUploadedFileType(uploadsRoot, uploadedRelativePath, req.file.mimetype))) {
+        await removeUploadedFile(req.file);
+        return res.status(415).json({
+          error: 'Uploaded bytes do not match the declared media type',
+          code: 'stimulus_media_signature_mismatch',
+        });
+      }
+
+      const stimulusId = parseInt(req.params.id, 10);
+      const current = await pool.query(
+        'SELECT id, project_id, name, mime_type, metadata FROM stimuli WHERE id = $1',
+        [stimulusId]
+      );
+      const stimulus = current.rows[0];
+      if (!stimulus) {
+        await removeUploadedFile(req.file);
+        return res.status(404).json({ error: 'Stimulus not found' });
+      }
+      if (!(await ensureProjectAccess(stimulus.project_id, req.user))) {
+        await removeUploadedFile(req.file);
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const relativePath = path.relative(uploadsRoot, req.file.path);
+      const replacement = resolveServerOwnedUploadPath(uploadsRoot, relativePath);
+      if (!replacement.ok) {
+        await removeUploadedFile(req.file);
+        return res.status(500).json({ error: 'Server generated an invalid upload path' });
+      }
+      const previous = resolveStoredPath(stimulus.metadata);
+      const metadata = {
+        ...(stimulus.metadata && typeof stimulus.metadata === 'object' ? stimulus.metadata : {}),
+        content_path: replacement.relativePath,
+      };
+      const updated = await pool.query(
+        `UPDATE stimuli
+         SET mime_type = $1, size_bytes = $2, metadata = $3::jsonb, updated_at = current_timestamp
+         WHERE id = $4
+         RETURNING id, project_id, folder_id, name, mime_type, size_bytes, metadata, created_at, updated_at`,
+        [req.file.mimetype || null, req.file.size, JSON.stringify(metadata), stimulusId]
+      );
+      fileStored = true;
+
+      if (previous.ok && previous.absolutePath !== replacement.absolutePath) {
+        await fs.promises.unlink(previous.absolutePath).catch(error => {
+          if (error.code !== 'ENOENT') console.error(error);
+        });
+      }
+      return res.json({ ...publicStimulus(updated.rows[0]), content_available: true });
+    } catch (error) {
+      if (!fileStored) await removeUploadedFile(req.file).catch(cleanupError => console.error(cleanupError));
+      console.error(error);
+      return res.status(500).json({ error: 'Failed to replace stimulus content' });
     }
   }
 );
@@ -659,7 +744,7 @@ router.patch(
          RETURNING id, project_id, folder_id, name, mime_type, size_bytes, metadata, created_at, updated_at`,
         values
       );
-      res.json(publicStimulus(r.rows[0]));
+      res.json(await publicStimulusWithAvailability(r.rows[0]));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to update stimulus' });

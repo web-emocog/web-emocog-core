@@ -29,6 +29,10 @@ const config = require('../config');
 const crypto = require('crypto');
 const path = require('path');
 const { normalizeMandatoryParticipantShell } = require('../protocol/participant-shell');
+const {
+  referencedDatabaseStimulusIds,
+} = require('../../shared/protocol-stimuli');
+const { inspectProtocolStimuli } = require('../stimuli/protocol-availability');
 
 const router = express.Router();
 const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
@@ -47,28 +51,7 @@ async function resolveInvitationByCode(code, queryable = pool) {
   return row ? { row, resolvedVia: 'invitation_code' } : null;
 }
 
-function referencedStimulusIds(definition) {
-  const ids = new Set();
-  const add = value => {
-    const normalized = String(value ?? '').replace(/^api:/, '');
-    if (/^[1-9]\d*$/.test(normalized)) ids.add(Number(normalized));
-  };
-  const addTrials = trials => {
-    if (!Array.isArray(trials)) return;
-    trials.forEach(trial => add(trial?.stimulusId ?? trial?.stimulus_id));
-  };
-  const blocks = Array.isArray(definition?.blocks) ? definition.blocks : [];
-  blocks.forEach(block => {
-    const params = block?.params || {};
-    const stimulusIds = Array.isArray(params.stimuli_ids) ? params.stimuli_ids : [];
-    stimulusIds.forEach(add);
-    add(params.stimulus_id);
-    addTrials(params.trials);
-    addTrials(block?.trials);
-    addTrials(block?.content?.trials);
-  });
-  return [...ids].filter(Number.isSafeInteger);
-}
+const referencedStimulusIds = referencedDatabaseStimulusIds;
 
 function publicStimulusMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
@@ -138,6 +121,18 @@ router.get(
         if (!alreadyAdmitted) {
           return res.status(410).json({ error: 'Invitation run limit reached' });
         }
+      }
+      const stimulusReport = await inspectProtocolStimuli(
+        pool,
+        inv.project_id,
+        inv.protocol_definition
+      );
+      if (!stimulusReport.ok) {
+        return res.status(409).json({
+          error: 'Invitation protocol has unavailable stimulus files',
+          message: 'Эксперимент временно недоступен: исследователь должен восстановить файл стимула.',
+          code: 'invitation_stimulus_unavailable',
+        });
       }
       res.json({
         invitation_id: inv.id,
@@ -415,6 +410,28 @@ router.post(
       const { protocol_id, max_runs, expires_at } = req.body;
       const protocolAllowed = await hasProtocolMembership(pool, protocol_id, req.user);
       if (!protocolAllowed) return res.status(403).json({ error: 'Protocol not found or access denied' });
+      const protocol = await pool.query(
+        'SELECT project_id, definition FROM protocols WHERE id = $1',
+        [protocol_id]
+      );
+      if (!protocol.rows[0]) return res.status(404).json({ error: 'Protocol not found' });
+      const stimulusReport = await inspectProtocolStimuli(
+        pool,
+        protocol.rows[0].project_id,
+        protocol.rows[0].definition
+      );
+      if (!stimulusReport.ok) {
+        const labels = stimulusReport.unavailable
+          .slice(0, 8)
+          .map(item => item.name ? `${item.name} (ID ${item.id})` : `ID ${item.id}`)
+          .join(', ');
+        return res.status(422).json({
+          error: 'Protocol references unavailable stimulus files',
+          message: `Нельзя создать ссылку: недоступны файлы стимулов ${labels}. Восстановите их в библиотеке.`,
+          code: 'protocol_stimulus_unavailable',
+          details: stimulusReport.unavailable,
+        });
+      }
       let code = generateCode();
       let exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
       while (exists.rows[0]) {

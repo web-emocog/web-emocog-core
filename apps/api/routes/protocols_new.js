@@ -17,6 +17,10 @@ const { listProtocolProxyMetrics } = require('./proxy_metrics');
 const { validateProtocolAois } = require('../../web/aoi-protocol');
 const { validateProtocolSurveyBlocks } = require('../../shared/survey-contract');
 const { normalizeMandatoryParticipantShell } = require('../protocol/participant-shell');
+const {
+  inspectProtocolStimuli,
+  rejectUnavailableProtocolStimuli,
+} = require('../stimuli/protocol-availability');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -126,6 +130,8 @@ router.post(
       if (rejectInvalidSurveys(res, definition)) return;
       const projectAllowed = await hasProjectMembership(pool, project_id, req.user);
       if (!projectAllowed) return res.status(403).json({ error: 'Not member of project' });
+      const stimulusReport = await inspectProtocolStimuli(pool, project_id, definition);
+      if (rejectUnavailableProtocolStimuli(res, stimulusReport)) return;
       const r = await pool.query(
         `INSERT INTO protocols (project_id, name, definition) VALUES ($1, $2, $3)
          RETURNING id, project_id, name, definition, created_at, updated_at`,
@@ -207,6 +213,18 @@ router.patch(
         : normalizeMandatoryParticipantShell(req.body.definition);
       if (normalizedDefinition !== undefined && rejectInvalidAois(res, normalizedDefinition)) return;
       if (normalizedDefinition !== undefined && rejectInvalidSurveys(res, normalizedDefinition)) return;
+      if (normalizedDefinition !== undefined) {
+        const current = await pool.query('SELECT project_id FROM protocols WHERE id = $1', [req.params.id]);
+        if (!current.rows[0]) return res.status(404).json({ error: 'Not found' });
+        const projectAllowed = await hasProjectMembership(pool, current.rows[0].project_id, req.user);
+        if (!projectAllowed) return res.status(404).json({ error: 'Not found' });
+        const stimulusReport = await inspectProtocolStimuli(
+          pool,
+          current.rows[0].project_id,
+          normalizedDefinition
+        );
+        if (rejectUnavailableProtocolStimuli(res, stimulusReport)) return;
+      }
       const updates = [];
       const values = [];
       let i = 1;

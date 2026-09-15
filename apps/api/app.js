@@ -2,6 +2,7 @@
  * Express app (Фаза 2). Не удалять исходные файлы; это новый модуль.
  */
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const config = require('./config');
@@ -25,7 +26,7 @@ const {
   buildCorsOptions,
   createSecurityHeaders,
   createRouteAwareJsonParser,
-  createRouteRateLimiter,
+  buildRouteRateLimitOptions,
   requireSecureTransport,
 } = require('./security/http-security');
 
@@ -40,7 +41,7 @@ if (config.forceHttps) {
 }
 app.use(cors(buildCorsOptions(config.http.corsOrigins)));
 app.use(cookieParser());
-app.use(createRouteRateLimiter(config.http.rateLimits));
+app.use(rateLimit(buildRouteRateLimitOptions(config.http.rateLimits)));
 app.use(createRouteAwareJsonParser(config.http.bodyLimits));
 
 app.use('/auth', authRoutes);

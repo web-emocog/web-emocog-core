@@ -378,7 +378,7 @@ describe('researcher navigation contract', () => {
     assert.match(ui, /wecog:languagechange/);
     assert.match(runner, /refreshLocalizedInstructionScreen/);
     assert.match(runner, /captureSurveyDraft/);
-    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260914-1/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260915-1/);
   });
 
   it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
@@ -520,17 +520,17 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260913-7/);
-    assert.match(app, /tests-updated\.js\?v=20260913-7/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260913-7/);
-    assert.match(task, /tests-updated\.js\?v=20260913-7/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260913-7/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260913-7/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260913-7/);
-    assert.match(runtime, /tests-updated\.js\?v=20260913-7/);
-    assert.match(app, /protocol-invite-utils\.js\?v=20260913-7/);
-    assert.match(tests, /protocol-invite-utils\.js\?v=20260913-7/);
-    assert.match(task, /protocol-invite-utils\.js\?v=20260913-7/);
+    assert.match(tests, /ui-updated\.js\?v=20260915-1/);
+    assert.match(app, /tests-updated\.js\?v=20260915-1/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260915-1/);
+    assert.match(task, /tests-updated\.js\?v=20260915-1/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260915-1/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260915-1/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260915-1/);
+    assert.match(runtime, /tests-updated\.js\?v=20260915-1/);
+    assert.match(app, /protocol-invite-utils\.js\?v=20260915-1/);
+    assert.match(tests, /protocol-invite-utils\.js\?v=20260915-1/);
+    assert.match(task, /protocol-invite-utils\.js\?v=20260915-1/);
   });
 
   it('preloads participant media, keeps selected sessions inspectable, and restores editor data', () => {
@@ -549,10 +549,39 @@ describe('researcher navigation contract', () => {
     assert.match(builder, /slides: Array\.isArray\(b\.content\?\.slides\) \? b\.content\.slides : \[\]/);
   });
 
+  it('keeps the participant stimulus registry and decoded-image readiness connected', () => {
+    const html = read('participant-web/mvp_with_precheck_1-updated.html');
+    const app = read('participant-web/js/web-page/app-updated.js');
+    const task = read('participant-web/js/web-page/experimental_task-updated.js');
+    const registryPosition = html.indexOf('../shared/protocol-stimuli.js?');
+    const runtimePosition = html.indexOf('js/web-page/app-updated.js?');
+    assert.ok(registryPosition >= 0, 'Participant HTML must load the stimulus registry');
+    assert.ok(runtimePosition > registryPosition, 'Load the registry before the invitation runtime');
+
+    const preloadStart = app.indexOf('async function preloadInvitationStimulus(');
+    const preloadEnd = app.indexOf('let _gazeDebugSampleN', preloadStart);
+    assert.ok(preloadStart >= 0 && preloadEnd > preloadStart);
+    const preload = app.slice(preloadStart, preloadEnd);
+    assert.match(preload, /await image\.decode\(\)/);
+    assert.match(preload, /image\.naturalWidth > 0 && image\.naturalHeight > 0/);
+    assert.match(preload, /URL\.revokeObjectURL\(objectUrl\)/);
+
+    const renderStart = task.indexOf('function renderStimulus(trial)');
+    const renderEnd = task.indexOf('function stopCognitiveAnalysisLoop()', renderStart);
+    assert.ok(renderStart >= 0 && renderEnd > renderStart);
+    const render = task.slice(renderStart, renderEnd);
+    assert.match(render, /return new Promise\(resolve =>/);
+    assert.match(render, /imageEl\.onload =/);
+    assert.match(render, /settle\(true\)/);
+    assert.match(render, /settle\(false\)/);
+    assert.match(task, /const stimulusReady = await renderStimulus\(trial\)/);
+  });
+
   it('shows real stimulus previews and supports drag and drop with conversion progress', () => {
     const stimuli = read('web/researcher-stimuli.js');
     const builder = read('web/researcher-builder.js');
     const participant = read('participant-web/js/web-page/app-updated.js');
+    const protocolStimuli = read('shared/protocol-stimuli.js');
     const researcher = read('web/researcher.html');
     assert.match(stimuli, /function stimulusPreviewHtml/);
     assert.match(stimuli, /resolveStandardStimulus/);
@@ -564,8 +593,9 @@ describe('researcher navigation contract', () => {
     assert.match(stimuli, /apiPatch\('\/stimuli\/'/);
     assert.match(builder, /handleFileUpload\(mediaFiles/);
     assert.match(builder, /convertDocumentToStimuli\(file/);
-    assert.match(participant, /addTrialStimuli\(block\?\.trials\)/);
-    assert.match(participant, /replace\(\/\^api:\//);
+    assert.ok(participant.includes('WecogProtocolStimuli?.referencedStimulusIds'));
+    assert.ok(protocolStimuli.includes("for (const key of ['stimuliIds', 'stimuli_ids', 'slides'])"));
+    assert.ok(protocolStimuli.includes('Object.values(value).forEach(visit)'));
     assert.match(researcher, /shared\/standard-stimuli\.js/);
   });
 
