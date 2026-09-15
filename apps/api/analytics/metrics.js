@@ -304,7 +304,12 @@ function protocolAois(protocol, query) {
       (Array.isArray(aois) ? aois : []).forEach((aoi, index) => {
         const id = String(aoi?.id || `${blockId}-${stimulusId}-aoi-${index + 1}`);
         if (query.filters.aoiIds.length && !query.filters.aoiIds.some(filterId => String(filterId) === id)) return;
-        rows.push({ blockId, stimulusId, aoi: { ...aoi, id, order: Number(aoi?.order || index + 1) } });
+        rows.push({
+          blockId,
+          blockName: block?.title || block?.label || block?.content?.title || blockId,
+          stimulusId,
+          aoi: { ...aoi, id, order: Number(aoi?.order || index + 1) },
+        });
       });
     });
   });
@@ -541,6 +546,57 @@ function buildHeatmapData(row, query) {
     validObservationDurationMs: presentations.reduce((sum, item) => sum + (finite(item.validObservationDurationMs) ?? 0), 0),
     algorithm: presentation.algorithm || GAZE_ALGORITHM,
   };
+}
+
+function buildSessionVisuals(row, protocol, query) {
+  const unfilteredQuery = {
+    ...query,
+    filters: {
+      ...query.filters,
+      blockIds: [],
+      stimulusIds: [],
+      aoiIds: [],
+    },
+  };
+  const contexts = new Map();
+  protocolAois(protocol, unfilteredQuery).forEach(aoiRow => {
+    const key = JSON.stringify([aoiRow.blockId, aoiRow.stimulusId]);
+    if (!contexts.has(key)) contexts.set(key, aoiRow);
+  });
+  return Array.from(contexts.values()).map(context => {
+    const scopedQuery = {
+      ...query,
+      filters: {
+        ...query.filters,
+        blockIds: [context.blockId],
+        stimulusIds: [context.stimulusId],
+        aoiIds: [],
+      },
+    };
+    const rows = buildAoiRows(row, protocol, scopedQuery);
+    const heatmap = buildHeatmapData(row, scopedQuery);
+    const presentation = selectPresentation(row, scopedQuery);
+    const stimulus = heatmap.stimulus || {
+      id: context.stimulusId,
+      version: '1',
+      name: context.stimulusId,
+      type: 'image',
+      contentUrl: /^\d+$/.test(context.stimulusId) ? `/stimuli/${context.stimulusId}/content` : null,
+      intrinsicWidth: null,
+      intrinsicHeight: null,
+    };
+    return {
+      status: heatmap.status,
+      reason: heatmap.reason,
+      blockId: context.blockId,
+      blockName: context.blockName,
+      presentationId: presentation?.presentationId || null,
+      stimulus,
+      coordinateSpace: 'stimulus_normalized_0_1',
+      aoiRows: rows.map(item => ({ aoi: item.aoi, metrics: item.metrics })),
+      heatmap: { ...heatmap, stimulus },
+    };
+  });
 }
 
 function numericMetricValue(metric) {
@@ -895,6 +951,7 @@ module.exports = {
   buildGroupHeatmap,
   buildGroupSummary,
   buildHeatmapData,
+  buildSessionVisuals,
   buildSessionMetrics,
   channelQc,
   distribution,

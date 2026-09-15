@@ -146,16 +146,25 @@ test('session dashboard hides backend failure details but logs them technically'
   expect(technicalLogs.some(line => line.includes('Session is not included in the snapshot'))).toBeTruthy();
 });
 
-test('completed session shows AOI/heatmap, stays aligned after resize, and exports the same snapshot', async ({ page }) => {
-  await page.locator('details > summary').first().click();
-  await page.locator('#analyticsBlockFilter').selectOption('main-block');
-  await page.locator('#analyticsStimulusFilter').selectOption('stimulus-42');
+test('completed session shows every AOI heatmap without selection filters and exports the same snapshot', async ({ page }) => {
+  await expect(page.locator('#analyticsBlockFilter')).toHaveCount(0);
+  await expect(page.locator('#analyticsStimulusFilter')).toHaveCount(0);
+  const uploadedStimulusLocation = await page.evaluate(() => {
+    // @ts-expect-error application global
+    return {
+      apiBase: String(window.API_BASE || '').replace(/\/$/, ''),
+      contentUrl: window.EmocogAnalyticsProduction.stimulusContentUrl('/stimuli/58/content'),
+    };
+  });
+  expect(uploadedStimulusLocation.contentUrl).toBe(`${uploadedStimulusLocation.apiBase}/stimuli/58/content`);
   await page.locator('#analyticsApplyFilters').click();
+  await expect(page.getByText(/Тепловые карты участника/).first()).toBeVisible();
+  await expect(page.locator('.analytics-stimulus-image')).toBeVisible();
   await expect(page.locator('.analytics-heatmap-canvas')).toBeVisible();
   const targetAoiRow = page.locator('td').filter({ hasText: 'Целевая область' }).first();
   await targetAoiRow.scrollIntoViewIfNeeded();
   await expect(targetAoiRow).toBeVisible();
-  await expect(page.getByText(/Взгляд \/ AOI/).first()).toBeVisible();
+  await expect(page.locator('.analytics-layer-toggle[data-layer="aoi"]')).toBeVisible();
   const snapshot = await page.evaluate(() => {
     // @ts-expect-error application global
     const state = window.EmocogAnalyticsProduction.store.state;
