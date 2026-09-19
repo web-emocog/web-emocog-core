@@ -64,6 +64,18 @@ describe('standard-stimuli', () => {
     assert.equal(s.src, 'https://example.com/stimulus.jpg');
   });
 
+  it('preserves uploaded video media instead of treating it as an image', () => {
+    const s = resolveParticipantStimulus({
+      stimulusId: '42',
+      meta: {
+        mime_type: 'video/webm',
+        metadata: { url: 'blob:https://example.com/video' },
+      },
+    });
+    assert.equal(s.type, 'video');
+    assert.equal(s.src, 'blob:https://example.com/video');
+  });
+
   it('resolveParticipantStimulus uses std mapping when no url', () => {
     const s = resolveParticipantStimulus({ stimulusId: 'std_nogo_red_circle' });
     assert.equal(s.type, 'shape');

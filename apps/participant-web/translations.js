@@ -30,6 +30,9 @@ export const translations = {
         form_title: "Анкета участника",
         form_section_user: "👤 О вас",
         label_age: "Возраст",
+        label_participant_code: "Код участника (необязательно)",
+        placeholder_participant_code: "Например: P-001",
+        participant_code_hint: "Можно указать код исследователя. Защищённый ID сессии создаётся автоматически.",
         label_gender: "Пол",
         opt_select: "Выбрать...",
         opt_m: "Мужской",
@@ -80,7 +83,7 @@ export const translations = {
         label_pose: "Поза головы",
         label_visibility: "Видимость лица",
         status_waiting: "Ожидание...",
-        guide_text: "Расположите лицо в кадре. Веб-камеру — примерно на уровне глаз; смотрите прямо в объектив.",
+        guide_text: "Расположите лицо в кадре. Веб-камера должна быть примерно на уровне глаз; смотрите на экран и контролируйте положение по индикаторам.",
         precheck_criteria_help: "Зелёный индикатор означает, что условие выполнено. Длина полосы не является оценкой результата. Если индикатор жёлтый или красный, следуйте подсказкам.",
         precheck_initial: "Нажмите \"Начать проверку\" чтобы включить камеру",
         precheck_requesting: "⏳ Запрашиваем доступ к камере...",
@@ -124,7 +127,7 @@ export const translations = {
         tip_pose_unstable: "Постарайтесь смотреть прямо в камеру и не двигаться",
         tip_pose_partial_face: "Часть лица не видна. Расположитесь так, чтобы всё лицо было в кадре",
         tip_pose_eyes_off_center: "Глаза не по центру экрана. Сместитесь так, чтобы смотреть прямо в камеру",
-        tip_precheck_camera_eye_level: "Камеру разместите на уровне глаз (верх монитора поднимите или опустите ноутбук), смотрите в объектив — так стабильнее предчек и калибровка.",
+        tip_precheck_camera_eye_level: "Разместите камеру на уровне глаз. Смотрите на экран: индикаторы подскажут, как поправить положение лица.",
         tip_pose_move_right: "Сместитесь немного вправо",
         tip_pose_move_left: "Сместитесь немного влево", 
         tip_pose_move_up: "Поднимите камеру или опуститесь ниже",
@@ -237,7 +240,7 @@ export const translations = {
         validation_precision: "Стабильность",
         
         // Calibration instructions
-        calib_click_instruction: "Смотрите на красный круг и нажимайте на него. Не моргайте в момент нажатия.",
+        calib_click_instruction: "Смотрите на каждый красный круг и нажмите на него два раза. Между нажатиями продолжайте смотреть в центр круга и не моргайте.",
         calib_progress: "Точка",
         calib_complete: "Калибровка завершена",
         
@@ -304,6 +307,9 @@ export const translations = {
         form_title: "Participant Survey",
         form_section_user: "👤 About You",
         label_age: "Age",
+        label_participant_code: "Participant code (optional)",
+        placeholder_participant_code: "For example: P-001",
+        participant_code_hint: "You may enter a researcher-assigned code. A secure session ID is still generated automatically.",
         label_gender: "Gender",
         opt_select: "Select...",
         opt_m: "Male",
@@ -354,7 +360,7 @@ export const translations = {
         label_pose: "Head Pose",
         label_visibility: "Face Visibility",
         status_waiting: "Waiting...",
-        guide_text: "Keep your face in frame. Place the webcam near eye level and look straight into the lens.",
+        guide_text: "Keep your face in frame. Place the webcam near eye level; look at the screen and use the indicators to adjust your position.",
         precheck_criteria_help: "A green indicator means the requirement is met. Bar length is not a score. If an indicator is yellow or red, follow the guidance below.",
         precheck_initial: "Click \"Start Check\" to enable camera",
         precheck_requesting: "⏳ Requesting camera access...",
@@ -398,7 +404,7 @@ export const translations = {
         tip_pose_unstable: "Try to look straight at the camera and don't move",
         tip_pose_partial_face: "Part of your face is not visible. Position yourself so your entire face is in frame",
         tip_pose_eyes_off_center: "Eyes are not centered on screen. Move so you're looking straight at the camera",
-        tip_precheck_camera_eye_level: "Put the webcam near eye level (raise/lower the screen or laptop) and look at the lens — pre-check and calibration work better.",
+        tip_precheck_camera_eye_level: "Place the webcam near eye level. Look at the screen; the indicators will show how to adjust your face position.",
         tip_pose_move_right: "Move slightly to the right",
         tip_pose_move_left: "Move slightly to the left",
         tip_pose_move_up: "Raise the camera or lower yourself",
@@ -511,7 +517,7 @@ export const translations = {
         validation_precision: "Precision",
         
         // Calibration instructions
-        calib_click_instruction: "Look at the red circle and press it. Do not blink while pressing.",
+        calib_click_instruction: "Look at each red circle and click it twice. Keep looking at its centre between clicks and do not blink while clicking.",
         calib_progress: "Point",
         calib_complete: "Calibration complete",
         
@@ -1074,8 +1080,8 @@ const participantUploadLocaleAdditions = {
 };
 
 const participantValidationLocaleAdditions = {
-    ru: { calibration_intro_body: 'Сядьте удобно и держите голову естественно. Смотрите на каждый красный круг и нажимайте на него. Не моргайте в момент нажатия.', validation_intro_kicker: 'Проверка точности', validation_intro_title: 'Теперь проверим взгляд', validation_intro_body: 'Смотрите на каждый зелёный круг до его перемещения. Ничего не нажимайте.', validation_intro_action: 'Начать проверку', validation_result_passed_advice: 'Точность достаточная. Повторять калибровку не нужно; можно продолжить сессию.', validation_result_failed_advice: 'Точность ниже допустимого уровня. Повторите калибровку перед продолжением.', runtime_rest_title: 'Отдых', runtime_rest_body: 'Отдохните перед следующим заданием.', runtime_audio_test_title: 'Аудиотест', runtime_audio_test_prompt: 'Говорите вслух до завершения отсчёта.' },
-    en: { calibration_intro_body: 'Sit comfortably and keep your head in a natural position. Look at each red circle and press it. Do not blink while pressing.', validation_intro_kicker: 'Accuracy check', validation_intro_title: 'Now we will check your gaze', validation_intro_body: 'Look at each green circle until it moves. Do not press anything.', validation_intro_action: 'Start the check', validation_result_passed_advice: 'Accuracy is sufficient. You do not need to recalibrate and may continue the session.', validation_result_failed_advice: 'Accuracy is below the required level. Recalibrate before continuing.', runtime_rest_title: 'Rest', runtime_rest_body: 'Take a break before the next task.', runtime_audio_test_title: 'Audio test', runtime_audio_test_prompt: 'Speak aloud until the countdown ends.' },
+    ru: { calibration_intro_body: 'Сядьте удобно и держите голову естественно. На каждый красный круг нужно нажать два раза, продолжая смотреть в его центр между нажатиями. Не моргайте в момент нажатия.', validation_intro_kicker: 'Проверка точности', validation_intro_title: 'Теперь проверим взгляд', validation_intro_body: 'Смотрите на каждый зелёный круг до его перемещения. Ничего не нажимайте.', validation_intro_action: 'Начать проверку', validation_result_passed_advice: 'Точность достаточная. Повторять калибровку не нужно; можно продолжить сессию.', validation_result_failed_advice: 'Точность ниже допустимого уровня. Повторите калибровку перед продолжением.', runtime_rest_title: 'Отдых', runtime_rest_body: 'Отдохните перед следующим заданием.', runtime_audio_test_title: 'Аудиотест', runtime_audio_test_prompt: 'Говорите вслух до завершения отсчёта.' },
+    en: { calibration_intro_body: 'Sit comfortably and keep your head in a natural position. Click each red circle twice while keeping your gaze on its centre between clicks. Do not blink while clicking.', validation_intro_kicker: 'Accuracy check', validation_intro_title: 'Now we will check your gaze', validation_intro_body: 'Look at each green circle until it moves. Do not press anything.', validation_intro_action: 'Start the check', validation_result_passed_advice: 'Accuracy is sufficient. You do not need to recalibrate and may continue the session.', validation_result_failed_advice: 'Accuracy is below the required level. Recalibrate before continuing.', runtime_rest_title: 'Rest', runtime_rest_body: 'Take a break before the next task.', runtime_audio_test_title: 'Audio test', runtime_audio_test_prompt: 'Speak aloud until the countdown ends.' },
     zh: { validation_intro_kicker: '准确度检查', validation_intro_title: '现在检查视线', validation_intro_body: '注视每个绿色圆点，直到它移动。请勿点击圆点或按键。', validation_intro_action: '开始检查', validation_result_passed_advice: '准确度符合要求，无需重新校准，可以继续。', validation_result_failed_advice: '准确度低于要求，请先重新校准。' },
     es: { validation_intro_kicker: 'Comprobación de precisión', validation_intro_title: 'Ahora comprobaremos la mirada', validation_intro_body: 'Mire cada círculo verde hasta que se mueva. No haga clic ni pulse ninguna tecla.', validation_intro_action: 'Iniciar comprobación', validation_result_passed_advice: 'La precisión es suficiente. No necesita recalibrar y puede continuar.', validation_result_failed_advice: 'La precisión está por debajo del nivel requerido. Repita la calibración.' },
     hi: { validation_intro_kicker: 'सटीकता जाँच', validation_intro_title: 'अब नज़र की जाँच होगी', validation_intro_body: 'हर हरे गोले को उसके हिलने तक देखें। क्लिक या कोई कुंजी न दबाएँ।', validation_intro_action: 'जाँच शुरू करें', validation_result_passed_advice: 'सटीकता पर्याप्त है। दोबारा कैलिब्रेशन की ज़रूरत नहीं है।', validation_result_failed_advice: 'सटीकता आवश्यक स्तर से कम है। कैलिब्रेशन दोहराएँ।' },
@@ -1084,6 +1090,19 @@ const participantValidationLocaleAdditions = {
     bn: { validation_intro_kicker: 'নির্ভুলতা পরীক্ষা', validation_intro_title: 'এখন দৃষ্টি পরীক্ষা করা হবে', validation_intro_body: 'প্রতিটি সবুজ বৃত্ত সরে যাওয়া পর্যন্ত তাকিয়ে থাকুন। ক্লিক বা কোনো কী চাপবেন না।', validation_intro_action: 'পরীক্ষা শুরু করুন', validation_result_passed_advice: 'নির্ভুলতা যথেষ্ট। আবার ক্যালিব্রেশন দরকার নেই।', validation_result_failed_advice: 'নির্ভুলতা প্রয়োজনীয় মাত্রার নিচে। আবার ক্যালিব্রেশন করুন।' },
     pt: { validation_intro_kicker: 'Verificação de precisão', validation_intro_title: 'Agora vamos verificar o olhar', validation_intro_body: 'Olhe para cada círculo verde até ele mudar de posição. Não clique nem prima teclas.', validation_intro_action: 'Iniciar verificação', validation_result_passed_advice: 'A precisão é suficiente. Não é necessário recalibrar.', validation_result_failed_advice: 'A precisão está abaixo do nível exigido. Recalibre antes de continuar.' },
     ur: { validation_intro_kicker: 'درستگی کی جانچ', validation_intro_title: 'اب نگاہ کی جانچ ہوگی', validation_intro_body: 'ہر سبز دائرے کو اس کے منتقل ہونے تک دیکھیں۔ کلک یا کوئی کلید نہ دبائیں۔', validation_intro_action: 'جانچ شروع کریں', validation_result_passed_advice: 'درستگی کافی ہے۔ دوبارہ کیلیبریشن کی ضرورت نہیں۔', validation_result_failed_advice: 'درستگی مطلوبہ سطح سے کم ہے۔ دوبارہ کیلیبریٹ کریں۔' }
+};
+
+const participantIdentityLocaleAdditions = {
+    ru: { label_participant_code: 'Код участника (необязательно)', placeholder_participant_code: 'Например: P-001', participant_code_hint: 'Можно указать код исследователя. Защищённый ID сессии создаётся автоматически.', calibration_intro_body: 'Сядьте удобно и держите голову естественно. Смотрите на каждый красный круг и нажмите на него два раза. Между нажатиями продолжайте смотреть в центр круга.', calib_click_instruction: 'Смотрите на каждый красный круг и нажмите на него два раза. Между нажатиями продолжайте смотреть в центр круга.' },
+    en: { label_participant_code: 'Participant code (optional)', placeholder_participant_code: 'For example: P-001', participant_code_hint: 'You may enter a researcher-assigned code. A secure session ID is still generated automatically.', calibration_intro_body: 'Sit comfortably and keep your head in a natural position. Look at each red circle and click it twice, keeping your gaze on its centre between clicks.', calib_click_instruction: 'Look at each red circle and click it twice. Keep looking at its centre between clicks.' },
+    zh: { label_participant_code: '参与者代码（可选）', placeholder_participant_code: '例如：P-001', participant_code_hint: '您可以输入研究人员分配的代码。系统仍会自动生成安全的会话 ID。', calibration_intro_body: '请舒适就座并自然保持头部。注视每个红色圆圈并点击两次；两次点击之间请继续注视圆心。', calib_click_instruction: '注视每个红色圆圈并点击两次。两次点击之间请继续注视圆心。' },
+    es: { label_participant_code: 'Código de participante (opcional)', placeholder_participant_code: 'Por ejemplo: P-001', participant_code_hint: 'Puede introducir un código asignado por el investigador. El ID seguro de la sesión se genera automáticamente.', calibration_intro_body: 'Siéntese cómodamente y mantenga la cabeza en una posición natural. Mire cada círculo rojo y púlselo dos veces sin apartar la mirada del centro.', calib_click_instruction: 'Mire cada círculo rojo y púlselo dos veces. Mantenga la mirada en el centro entre ambos clics.' },
+    hi: { label_participant_code: 'प्रतिभागी कोड (वैकल्पिक)', placeholder_participant_code: 'उदाहरण: P-001', participant_code_hint: 'आप शोधकर्ता द्वारा दिया गया कोड दर्ज कर सकते हैं। सुरक्षित सत्र ID अपने आप बनेगा।', calibration_intro_body: 'आराम से बैठें और सिर स्वाभाविक रखें। हर लाल गोले के केंद्र को देखते हुए उस पर दो बार क्लिक करें।', calib_click_instruction: 'हर लाल गोले को देखते हुए दो बार क्लिक करें। दोनों क्लिक के बीच केंद्र पर नज़र बनाए रखें।' },
+    ar: { label_participant_code: 'رمز المشارك (اختياري)', placeholder_participant_code: 'مثال: P-001', participant_code_hint: 'يمكنك إدخال رمز يحدده الباحث. يُنشأ معرّف جلسة آمن تلقائيًا.', calibration_intro_body: 'اجلس براحة وحافظ على وضع طبيعي للرأس. انظر إلى كل دائرة حمراء وانقر عليها مرتين مع إبقاء نظرك على مركزها.', calib_click_instruction: 'انظر إلى كل دائرة حمراء وانقر عليها مرتين. أبقِ نظرك على المركز بين النقرتين.' },
+    fr: { label_participant_code: 'Code participant (facultatif)', placeholder_participant_code: 'Par exemple : P-001', participant_code_hint: 'Vous pouvez saisir un code attribué par le chercheur. Un ID de session sécurisé est toujours généré automatiquement.', calibration_intro_body: 'Installez-vous confortablement et gardez la tête dans une position naturelle. Regardez chaque cercle rouge et cliquez deux fois en gardant le regard sur son centre.', calib_click_instruction: 'Regardez chaque cercle rouge et cliquez deux fois. Gardez le regard sur son centre entre les clics.' },
+    bn: { label_participant_code: 'অংশগ্রহণকারী কোড (ঐচ্ছিক)', placeholder_participant_code: 'উদাহরণ: P-001', participant_code_hint: 'গবেষকের দেওয়া কোড লিখতে পারেন। নিরাপদ সেশন ID স্বয়ংক্রিয়ভাবে তৈরি হবে।', calibration_intro_body: 'আরাম করে বসুন এবং মাথা স্বাভাবিক রাখুন। প্রতিটি লাল বৃত্তের কেন্দ্রে তাকিয়ে দুবার ক্লিক করুন।', calib_click_instruction: 'প্রতিটি লাল বৃত্তে দুবার ক্লিক করুন। দুই ক্লিকের মাঝে কেন্দ্রের দিকে তাকিয়ে থাকুন।' },
+    pt: { label_participant_code: 'Código do participante (opcional)', placeholder_participant_code: 'Por exemplo: P-001', participant_code_hint: 'Pode introduzir um código atribuído pelo investigador. O ID seguro da sessão continua a ser gerado automaticamente.', calibration_intro_body: 'Sente-se confortavelmente e mantenha a cabeça numa posição natural. Olhe para cada círculo vermelho e clique duas vezes, mantendo o olhar no centro.', calib_click_instruction: 'Olhe para cada círculo vermelho e clique duas vezes. Mantenha o olhar no centro entre os cliques.' },
+    ur: { label_participant_code: 'شرکاء کا کوڈ (اختیاری)', placeholder_participant_code: 'مثال: P-001', participant_code_hint: 'آپ محقق کا دیا ہوا کوڈ درج کر سکتے ہیں۔ محفوظ سیشن ID خودکار طور پر بنے گی۔', calibration_intro_body: 'آرام سے بیٹھیں اور سر قدرتی حالت میں رکھیں۔ ہر سرخ دائرے کے مرکز کو دیکھتے ہوئے اس پر دو بار کلک کریں۔', calib_click_instruction: 'ہر سرخ دائرے پر دو بار کلک کریں۔ دونوں کلکس کے درمیان مرکز کو دیکھتے رہیں۔' }
 };
 
 const participantProtocolErrorLocaleAdditions = {
@@ -1115,6 +1134,9 @@ Object.entries(participantUploadLocaleAdditions).forEach(([locale, additions]) =
     Object.assign(translations[locale], additions);
 });
 Object.entries(participantValidationLocaleAdditions).forEach(([locale, additions]) => {
+    Object.assign(translations[locale], additions);
+});
+Object.entries(participantIdentityLocaleAdditions).forEach(([locale, additions]) => {
     Object.assign(translations[locale], additions);
 });
 Object.entries(participantProtocolErrorLocaleAdditions).forEach(([locale, additions]) => {

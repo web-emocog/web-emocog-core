@@ -174,6 +174,72 @@ test.describe('wecog design system', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('researcher onboarding steps navigate to the matching workflows', async ({ page }) => {
+    await page.goto(
+      `${baseUrl}/apps/web/researcher.html?analyticsPreview=1#/overview`,
+      { waitUntil: 'domcontentloaded' }
+    );
+
+    const onboarding = page.locator('.onb-step');
+    await expect(onboarding).toHaveCount(4);
+    await expect(onboarding.first()).toHaveAttribute('data-route', '#/experiments/builder');
+    await onboarding.first().click();
+    await expect(page).toHaveURL(/#\/experiments\/builder$/);
+    await expect(page.locator('.bstep')).toHaveCount(9);
+  });
+
+  test('builder steps are freely navigable and emotion stimuli include editable default AOIs', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('emocog_protocol_step_draft', '4');
+      localStorage.setItem('emocog_protocol_meta_draft', JSON.stringify({
+        title: 'Emotion AOI regression',
+        protocolId: 'emotion-aoi-regression',
+        estimatedDuration: '2 минуты',
+        description: 'Default AOI regression',
+        participantShell: {
+          consent: true,
+          questionnaire: false,
+          precheck: false,
+          calibration: false,
+        },
+      }));
+      localStorage.setItem('emocog_protocol_blocks', JSON.stringify([{
+        id: 'emotion-task',
+        type: 'cognitive_task',
+        label: 'Просмотр эмоций',
+        content: {
+          taskType: 'emotion_viewing',
+          useAOI: true,
+          trials: [
+            { stimulusId: 'std_emo_neutral_01', duration: 1000, repetitions: 1 },
+            { stimulusId: 'std_emo_happy_01', duration: 1000, repetitions: 1 },
+          ],
+        },
+      }]));
+    });
+
+    await page.goto(
+      `${baseUrl}/apps/web/researcher.html?analyticsPreview=1#/experiments/builder`,
+      { waitUntil: 'load' }
+    );
+
+    await expect(page.locator('.bstep')).toHaveCount(9);
+    await expect(page.locator('.builder-aoi-card[data-aoi-ready="true"]')).toHaveCount(2);
+    await expect(page.locator('#aoiStepNext')).not.toHaveAttribute('aria-disabled', 'true');
+
+    await page.locator('.builder-aoi-edit').first().click();
+    await expect(page.locator('#aoiEllipse')).toBeEnabled();
+    await expect(page.locator('.aoi-list-row')).toHaveCount(3);
+    await expect(page.locator('#aoiList')).toContainText(/Лицо|Face/);
+    await expect(page.locator('#aoiList')).toContainText(/Глаза|Eyes/);
+    await expect(page.locator('#aoiList')).toContainText(/Рот|Mouth/);
+    await page.locator('#aoiClose').click();
+
+    await page.locator('.bstep[data-step="1"]').click();
+    await expect(page.locator('.bstep[data-step="1"]')).toHaveClass(/bstep-active/);
+    await expect(page.locator('#view')).toContainText(/Выбор задачи|Task selection/);
+  });
+
   test('developer pages share one active shell and preserve module geometry', async ({ page }) => {
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));

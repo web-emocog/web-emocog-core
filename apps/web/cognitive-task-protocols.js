@@ -35,6 +35,15 @@ function cloneProtocolData(value) {
     return isEn ? (stimulus.infoEn || stimulus.info) : (stimulus.infoRu || stimulus.info);
   }
 
+  function emotionFaceAois() {
+    const interval = { startMs: 0, endMs: 4000 };
+    return [
+      { id:'face', name:'Лицо', shape:'ellipse', points:[{x:0.26,y:0.08},{x:0.74,y:0.94}], order:1, isTarget:true, validityInterval:{...interval} },
+      { id:'eyes', name:'Глаза', shape:'ellipse', points:[{x:0.32,y:0.34},{x:0.68,y:0.56}], order:2, isTarget:false, validityInterval:{...interval} },
+      { id:'mouth', name:'Рот', shape:'ellipse', points:[{x:0.36,y:0.60},{x:0.64,y:0.83}], order:3, isTarget:false, validityInterval:{...interval} }
+    ];
+  }
+
   function standardProtocolStimuli() {
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(ch => standardStimulus(
       'std_cpt_' + ch.toLowerCase(),
@@ -63,7 +72,7 @@ function cloneProtocolData(value) {
         'image',
         'Плейсхолдер эмоционального лица',
         'Emotional face placeholder',
-        { emotion:em }
+        { emotion:em, aoiSchemaVersion:'1.2', aois:emotionFaceAois() }
       ))
     );
     return [
@@ -120,7 +129,7 @@ function cloneProtocolData(value) {
     standardProtocolStimuli().forEach(stim => {
       const existing = stimuliList.find(s => String(s.id) === String(stim.id));
       if (existing) {
-        ['name', 'nameRu', 'nameEn', 'type', 'info', 'infoRu', 'infoEn', 'emotion', 'text'].forEach(function (key) {
+        ['name', 'nameRu', 'nameEn', 'type', 'info', 'infoRu', 'infoEn', 'emotion', 'text', 'aoiSchemaVersion', 'aois'].forEach(function (key) {
           if (stim[key] != null && existing[key] !== stim[key]) {
             existing[key] = stim[key];
             stimuliChanged = true;
@@ -148,13 +157,13 @@ function cloneProtocolData(value) {
     'Инструкция: Simple RT - тренировка': {
       title: 'Instruction: Simple RT - practice',
       text: `Welcome! In this task, we will measure your reaction speed.
-A black square will appear in the center of the screen. Your task is to press the Space key as quickly as possible as soon as it appears.
+The stimulus will appear in the center of the screen. Your task is to press the Space key as quickly as possible as soon as it appears.
 A short practice will start now so you can get used to the task. After each response, you will see how quickly you answered.`
     },
     'Инструкция: Simple RT - основной этап': {
       title: 'Instruction: Simple RT - main phase',
       text: `Practice is complete. The main part will now begin.
-The rules stay the same: press Space as quickly as possible when the black square appears. Reaction-time hints will no longer be shown.
+The rules stay the same: press Space as quickly as possible when the stimulus appears. Reaction-time hints will no longer be shown.
 Try to stay focused throughout the task. Respond as quickly as possible while avoiding mistakes.`
     },
     'Инструкция: Go / No-Go - тренировка': {
@@ -434,11 +443,11 @@ Maintain a comfortable position in front of the camera.`
     const protocols = {
       simple_rt: completeProtocol([
         instructionProtocolBlock('Инструкция: Simple RT - тренировка', `Добро пожаловать! В этой задаче мы проверим скорость вашей реакции.
-В центре экрана будет появляться черный квадрат. Ваша задача - нажать клавишу Пробел как можно быстрее сразу после его появления.
+В центре экрана будет появляться стимул. Ваша задача - нажать клавишу Пробел как можно быстрее сразу после его появления.
 Сейчас начнется небольшая тренировка, чтобы вы привыкли к задаче. После каждого нажатия вы будете видеть, насколько быстро вы ответили.`),
         cognitiveProtocolBlock('Simple RT - тренировка', 'simple_rt', { trials:[trial('std_simple_black_square','target','space',2000,10,{ fixationMin:500, fixationMax:1500, iti:500 })], randomize:false, useFixation:true, fixationDuration:500, rtWindow:2000, showFeedback:true }),
         instructionProtocolBlock('Инструкция: Simple RT - основной этап', `Тренировка окончена. Теперь начнется основная часть.
-Правила остаются теми же: жмите Пробел максимально быстро при появлении черного квадрата. Подсказок о времени реакции больше не будет.
+Правила остаются теми же: нажимайте Пробел максимально быстро при появлении стимула. Подсказок о времени реакции больше не будет.
 Постарайтесь сохранять концентрацию на протяжении всей задачи. Отвечайте максимально быстро, но старайтесь не допускать ошибок.`),
         cognitiveProtocolBlock('Simple RT - основной блок', 'simple_rt', { trials:[trial('std_simple_black_square','target','space',2000,30,{ fixationMin:500, fixationMax:1500, iti:500 })], randomize:false, useFixation:true, fixationDuration:500, rtWindow:2000, showFeedback:false })
       ]),
@@ -496,7 +505,7 @@ Maintain a comfortable position in front of the camera.`
 Попробуйте остановить его несколько раз.`),
         cognitiveProtocolBlock('PVT - тренировка', 'pvt', { trials:[trial('std_pvt_counter','counter onset','space',10000,5,{ randomItiMin:2000, randomItiMax:6000, feedbackDuration:1000 })], randomize:false, useFixation:false, rtWindow:10000, stimulusDuration:0, showFeedback:true, feedbackCorrect:'{rt} мс' }),
         instructionProtocolBlock('Инструкция: PVT - основной этап', `Сейчас начнется длительный этап. Он займет несколько минут непрерывной работы.
-Смотрите на центр экрана и жмите Пробел в ту же долю секунды, когда появляется красный счетчик.
+Смотрите на центр экрана и нажимайте Пробел сразу же, как появляется красный счётчик.
 Постарайтесь не отвлекаться от экрана до самого конца теста.`),
         cognitiveProtocolBlock('PVT - 5 минут', 'pvt', { trials:[trial('std_pvt_counter','counter onset','space',10000,1,{ randomItiMin:2000, randomItiMax:10000, feedbackDuration:1000 })], randomize:false, useFixation:false, rtWindow:10000, stimulusDuration:0, protocolDurationMs:300000, showFeedback:true, feedbackCorrect:'{rt} мс' })
       ]),

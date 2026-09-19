@@ -4,30 +4,30 @@ import {
     recordSessionEvent,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js';
-import { translations } from '../../translations.js?v=20260913-7';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260913-7';
-import { stopPreCheck } from './precheck-updated.js?v=20260909-1';
+} from './state.js?v=20260919-1';
+import { translations } from '../../translations.js?v=20260919-1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260919-1';
+import { stopPreCheck } from './precheck-updated.js?v=20260919-1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260913-7';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260919-1';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
-} from './protocol-invite-utils.js?v=20260913-7';
+} from './protocol-invite-utils.js?v=20260915-1';
 import { buildHeatmaps } from './heatmap.js';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20260913-7';
+} from '../gaze-tracker/gaze-tests/index.js?v=20260919-1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260919-1';
 import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
 import {
     getContentViewport,
@@ -44,7 +44,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260913-7';
+} from '../session-runtime/index.js?v=20260919-1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -565,11 +565,11 @@ export async function startCalibration(options = {}) {
     // Усиленная калибровка по ВСЕМУ экрану: 5×5 сетка (25 точек) в snake-порядке.
     // Snake-маршрут уменьшает длинные скачки глаз и делает фиксацию стабильнее.
     const fullCalibrationPositions = [
-        { x: 5, y: 5 }, { x: 27.5, y: 5 }, { x: 50, y: 5 }, { x: 72.5, y: 5 }, { x: 95, y: 5 },
-        { x: 95, y: 27.5 }, { x: 72.5, y: 27.5 }, { x: 50, y: 27.5 }, { x: 27.5, y: 27.5 }, { x: 5, y: 27.5 },
-        { x: 5, y: 50 }, { x: 27.5, y: 50 }, { x: 50, y: 50 }, { x: 72.5, y: 50 }, { x: 95, y: 50 },
-        { x: 95, y: 72.5 }, { x: 72.5, y: 72.5 }, { x: 50, y: 72.5 }, { x: 27.5, y: 72.5 }, { x: 5, y: 72.5 },
-        { x: 5, y: 95 }, { x: 27.5, y: 95 }, { x: 50, y: 95 }, { x: 72.5, y: 95 }, { x: 95, y: 95 }
+        { x: 8, y: 8 }, { x: 29, y: 8 }, { x: 50, y: 8 }, { x: 71, y: 8 }, { x: 92, y: 8 },
+        { x: 92, y: 29 }, { x: 71, y: 29 }, { x: 50, y: 29 }, { x: 29, y: 29 }, { x: 8, y: 29 },
+        { x: 8, y: 50 }, { x: 29, y: 50 }, { x: 50, y: 50 }, { x: 71, y: 50 }, { x: 92, y: 50 },
+        { x: 92, y: 71 }, { x: 71, y: 71 }, { x: 50, y: 71 }, { x: 29, y: 71 }, { x: 8, y: 71 },
+        { x: 8, y: 92 }, { x: 29, y: 92 }, { x: 50, y: 92 }, { x: 71, y: 92 }, { x: 92, y: 92 }
     ];
     const positions = targeted ? targetedPositions : fullCalibrationPositions;
     

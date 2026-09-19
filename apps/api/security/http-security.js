@@ -1,4 +1,5 @@
 const express = require('express');
+const { ipKeyGenerator, rateLimit } = require('express-rate-limit');
 
 function classifyRoute(pathname) {
   const path = String(pathname || '');
@@ -59,41 +60,44 @@ function createRouteAwareJsonParser(bodyLimits) {
   return (req, res, next) => parsers[classifyRoute(req.path)](req, res, next);
 }
 
-function createRouteRateLimiter(rateLimits, options = {}) {
+function buildRouteRateLimitOptions(rateLimits, options = {}) {
   const windowMs = options.windowMs || 60_000;
-  const now = options.now || (() => Date.now());
-  const maxBuckets = options.maxBuckets || 10_000;
-  const buckets = new Map();
-  return (req, res, next) => {
-    const profile = classifyRoute(req.path);
-    const limit = rateLimits[profile];
-    const key = `${profile}:${req.ip || req.socket?.remoteAddress || 'unknown'}`;
-    const timestamp = now();
-    if (!buckets.has(key) && buckets.size >= maxBuckets) {
-      // Keep memory bounded even if an attacker rotates source addresses.
-      buckets.delete(buckets.keys().next().value);
-    }
-    let bucket = buckets.get(key);
-    if (!bucket || timestamp >= bucket.resetAt) {
-      bucket = { count: 0, resetAt: timestamp + windowMs };
-      buckets.set(key, bucket);
-    }
-    bucket.count += 1;
-    res.setHeader('RateLimit-Limit', String(limit));
-    res.setHeader('RateLimit-Remaining', String(Math.max(0, limit - bucket.count)));
-    res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
-    if (bucket.count > limit) {
-      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - timestamp) / 1000));
+  const limiterOptions = {
+    windowMs,
+    limit(req) {
+      const configured = Number(rateLimits[classifyRoute(req.path)]);
+      return Number.isSafeInteger(configured) && configured > 0 ? configured : 1;
+    },
+    keyGenerator(req) {
+      const profile = classifyRoute(req.path);
+      const address = req.ip || req.socket?.remoteAddress || 'unknown';
+      const normalizedAddress = address === 'unknown' ? address : ipKeyGenerator(address);
+      return `${profile}:${normalizedAddress}`;
+    },
+    standardHeaders: 'draft-6',
+    legacyHeaders: false,
+    passOnStoreError: false,
+    handler(req, res) {
+      const resetTime = req.rateLimit?.resetTime;
+      const resetAt = resetTime instanceof Date ? resetTime.getTime() : Date.now() + windowMs;
+      const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
       res.setHeader('Retry-After', String(retryAfter));
       return res.status(429).json({
         error: 'Too many requests',
         code: 'rate_limit_exceeded',
-        route_profile: profile,
+        route_profile: classifyRoute(req.path),
         retry_after_seconds: retryAfter,
       });
-    }
-    return next();
+    },
   };
+
+  if (options.store) limiterOptions.store = options.store;
+  if (options.validate !== undefined) limiterOptions.validate = options.validate;
+  return limiterOptions;
+}
+
+function createRouteRateLimiter(rateLimits, options = {}) {
+  return rateLimit(buildRouteRateLimitOptions(rateLimits, options));
 }
 
 module.exports = {
@@ -102,5 +106,6 @@ module.exports = {
   requireSecureTransport,
   buildCorsOptions,
   createRouteAwareJsonParser,
+  buildRouteRateLimitOptions,
   createRouteRateLimiter,
 };

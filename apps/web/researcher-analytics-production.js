@@ -8,6 +8,7 @@
   const QUERY_KEY = 'emocog_analytics_query_draft_v1';
   const RESULT_IMPORT_MAX_BYTES = 128 * 1024 * 1024;
   const INGEST_PAYLOAD_MAX_BYTES = 1750 * 1024;
+  const stimulusMediaCache = new Map();
 
   const TABS = [
     { id: 'session-card', ru: 'Сессия', en: 'Session' },
@@ -37,6 +38,58 @@
   function importApiUrl(path) {
     const base = String(global.API_BASE || '').replace(/\/$/, '');
     return base ? `${base}${path}` : path;
+  }
+
+  function stimulusContentUrl(value) {
+    const path = String(value || '').trim();
+    if (!path || /^(?:data:|blob:|https?:)/i.test(path)) return path;
+    return importApiUrl(path.startsWith('/') ? path : `/${path}`);
+  }
+
+  async function hydrateStimulusMedia(stimulus) {
+    if (!stimulus?.contentUrl) return stimulus;
+    const url = stimulusContentUrl(stimulus.contentUrl);
+    if (!url || /^(?:data:|blob:)/i.test(url)) {
+      stimulus.contentUrl = url;
+      return stimulus;
+    }
+    let request = stimulusMediaCache.get(url);
+    if (!request) {
+      request = global.fetch(url, {
+        headers: typeof global.apiRequestHeaders === 'function' ? global.apiRequestHeaders(false) : {},
+        credentials: 'include'
+      }).then(async response => {
+        if (!response.ok) throw await parseApiError(response, tr('Файл стимула недоступен', 'Stimulus file unavailable'));
+        const blob = await response.blob();
+        return { url: URL.createObjectURL(blob), type: blob.type || null };
+      }).catch(error => {
+        stimulusMediaCache.delete(url);
+        throw error;
+      });
+      stimulusMediaCache.set(url, request);
+    }
+    const media = await request;
+    stimulus.contentUrl = media.url;
+    if (!stimulus.type && media.type) stimulus.type = media.type;
+    return stimulus;
+  }
+
+  async function hydrateVisualResponse(response) {
+    const contexts = Array.isArray(response?.data?.contexts) ? response.data.contexts : [];
+    await Promise.all(contexts.flatMap(context => [context?.stimulus, context?.heatmap?.stimulus]
+      .filter(Boolean).map(hydrateStimulusMedia)));
+    if (response?.data?.stimulus) await hydrateStimulusMedia(response.data.stimulus);
+    return response;
+  }
+
+  function stimulusMediaHtml(stimulus, className = 'analytics-stimulus-media') {
+    const url = stimulusContentUrl(stimulus?.contentUrl);
+    if (!url) return '';
+    const type = String(stimulus?.type || '').toLowerCase();
+    if (type.startsWith('video/')) {
+      return `<video class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" muted controls playsinline preload="metadata" aria-label="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;"></video>`;
+    }
+    return `<img class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" alt="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;">`;
   }
 
   function resultImportHeaders(idempotencyKey) {
@@ -468,6 +521,34 @@
     return { contractVersion: '1.0', kind: 'heatmap', generatedAt: new Date().toISOString(), snapshot, data: { aggregationLevel: 'session', stimulus: previewStimulus(), coordinateSpace: 'stimulus_normalized_0_1', normalizationMode: 'fixation_duration_weighted', smoothing: { method: 'gaussian', bandwidthNorm: 0.04 }, equalParticipantWeight: false, grid: { width, height, values, maxValue: 1 }, fixationPoints: [{ x: 0.23, y: 0.49, durationMs: 185, signalConfidence: 0.82 }, { x: 0.45, y: 0.42, durationMs: 240, signalConfidence: 0.80 }, { x: 0.52, y: 0.51, durationMs: 310, signalConfidence: 0.79 }, { x: 0.56, y: 0.59, durationMs: 205, signalConfidence: 0.76 }], nParticipants: 1, nSessions: 1, nFixations: 10, validObservationDurationMs: 2240, algorithm: { id: 'fixation-heatmap', version: '1.0.0', parametersHash: 'sha256:heatmap-default-v1' } } };
   }
 
+  function previewSessionVisuals(snapshot) {
+    const aoi = previewSessionAoi(snapshot);
+    const heatmap = previewSessionHeatmap(snapshot);
+    return {
+      contractVersion: '1.0',
+      kind: 'session_visuals',
+      generatedAt: new Date().toISOString(),
+      snapshot,
+      data: {
+        status: 'computed',
+        reason: null,
+        sessionId: aoi.data.sessionId,
+        participantAlias: 'P-042',
+        contexts: [{
+          status: 'computed',
+          reason: null,
+          blockId: aoi.data.blockId,
+          blockName: isEnglish() ? 'Main task' : 'Основная задача',
+          presentationId: aoi.data.presentationId,
+          stimulus: aoi.data.stimulus,
+          coordinateSpace: aoi.data.coordinateSpace,
+          aoiRows: aoi.data.aoiRows,
+          heatmap: heatmap.data,
+        }],
+      },
+    };
+  }
+
   function previewGroupMetric(metricId, unit, values, summary) {
     return {
       metricId, unit, status: 'computed', reason: null,
@@ -596,13 +677,15 @@
     (sessionData && sessionData.metrics || []).forEach(metric => append(metric, { sourceKind: 'session_summary' }));
     const groupData = state.groupResponse && state.groupResponse.data;
     (groupData && groupData.metrics || []).forEach(metric => append(metric, { sourceKind: 'group_summary' }));
-    const aoiData = state.aoiResponse && state.aoiResponse.data;
-    (aoiData && aoiData.aoiRows || []).forEach(row => (row.metrics || []).forEach(metric => append(metric, {
+    const visualData = state.visualResponse && state.visualResponse.data;
+    (visualData && visualData.contexts || []).forEach(context => (
+      context.aoiRows || []
+    ).forEach(row => (row.metrics || []).forEach(metric => append(metric, {
       sourceKind: 'session_aoi',
       aoiId: row.aoi && row.aoi.id || null,
       aoiName: row.aoi && row.aoi.name || null,
       aoiOrder: row.aoi && row.aoi.order == null ? null : row.aoi.order
-    })));
+    }))));
     const modelData = state.comparisonResponse && state.comparisonResponse.data;
     if (modelData && modelData.metricId) append({
       metricId: modelData.metricId,
@@ -746,12 +829,17 @@
     async sessionAoi(sessionId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewSessionAoi(snapshot);
       const path = `/analytics/v1/sessions/${encodeURIComponent(sessionId)}/aoi?snapshot_id=${encodeURIComponent(snapshot.id)}`;
-      return validateAnalyticsResponse(await global.apiGet(path), 'session_aoi', snapshot.id);
+      return hydrateVisualResponse(validateAnalyticsResponse(await global.apiGet(path), 'session_aoi', snapshot.id));
     },
     async sessionHeatmap(sessionId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewSessionHeatmap(snapshot);
       const path = `/analytics/v1/sessions/${encodeURIComponent(sessionId)}/heatmap?snapshot_id=${encodeURIComponent(snapshot.id)}`;
-      return validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id);
+      return hydrateVisualResponse(validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id));
+    },
+    async sessionVisuals(sessionId, snapshot) {
+      if (global.EmocogAnalyticsPreviewFixture) return previewSessionVisuals(snapshot);
+      const path = `/analytics/v1/sessions/${encodeURIComponent(sessionId)}/visuals?snapshot_id=${encodeURIComponent(snapshot.id)}`;
+      return hydrateVisualResponse(validateAnalyticsResponse(await global.apiGet(path), 'session_visuals', snapshot.id));
     },
     async groupSummary(snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewGroupSummary(snapshot);
@@ -761,7 +849,8 @@
     async groupHeatmap(snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewGroupHeatmap(snapshot);
       const path = `/analytics/v1/groups/heatmap?snapshot_id=${encodeURIComponent(snapshot.id)}`;
-      return validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id);
+      const response = validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id);
+      return hydrateVisualResponse(response);
     },
     async comparison(comparisonId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewModelResult(snapshot, comparisonId);
@@ -848,9 +937,9 @@
         sessionIds: sessionMode && row ? [coerceId(row.id)] : [],
         groupIds: levelTwo && comparison ? (comparison.groupIds || []).slice() : (state.query.groupId ? [state.query.groupId] : []),
         conditionIds: state.query.conditionId ? [state.query.conditionId] : (levelTwo && comparison && Array.isArray(comparison.conditionIds) ? comparison.conditionIds.slice() : []),
-        blockIds: state.query.blockId ? [state.query.blockId] : [],
-        stimulusIds: state.query.stimulusId ? [state.query.stimulusId] : [],
-        aoiIds: state.query.aoiId ? [state.query.aoiId] : [],
+        blockIds: !sessionMode && state.query.blockId ? [state.query.blockId] : [],
+        stimulusIds: !sessionMode && state.query.stimulusId ? [state.query.stimulusId] : [],
+        aoiIds: !sessionMode && state.query.aoiId ? [state.query.aoiId] : [],
         // A deliberately selected session must remain inspectable even when QC marked it invalid.
         qcMode: sessionMode ? 'all' : state.query.qcMode,
         qcChannels: state.query.qcChannels.slice(),
@@ -889,6 +978,7 @@
       summaryResponse: null,
       summaryError: null,
       visualStatus: 'idle',
+      visualResponse: null,
       aoiResponse: null,
       heatmapResponse: null,
       visualError: null,
@@ -950,6 +1040,7 @@
         this.state.query.sessionId = '';
         this.state.snapshot = null;
         this.state.summaryResponse = null;
+        this.state.visualResponse = null;
         this.state.aoiResponse = null;
         this.state.heatmapResponse = null;
         this.state.dirty = true;
@@ -1169,6 +1260,7 @@
       this.state.summaryResponse = null;
       this.state.summaryError = null;
       this.state.visualStatus = 'idle';
+      this.state.visualResponse = null;
       this.state.aoiResponse = null;
       this.state.heatmapResponse = null;
       this.state.visualError = null;
@@ -1186,6 +1278,11 @@
 
     async apply() {
       if (this.state.query.mode === 'session' && !selectedSession(this.state)) return;
+      if (this.state.query.mode === 'session') {
+        this.state.query.blockId = '';
+        this.state.query.stimulusId = '';
+        this.state.query.aoiId = '';
+      }
       if (this.state.query.dateFrom && this.state.query.dateTo && this.state.query.dateFrom > this.state.query.dateTo) {
         this.state.snapshotStatus = 'error';
         this.state.snapshotError = new Error(tr('Дата начала не может быть позже даты окончания','Start date cannot be later than end date'));
@@ -1210,6 +1307,7 @@
       this.state.summaryResponse = null;
       this.state.summaryError = null;
       this.state.visualStatus = 'idle';
+      this.state.visualResponse = null;
       this.state.aoiResponse = null;
       this.state.heatmapResponse = null;
       this.state.visualError = null;
@@ -1271,32 +1369,21 @@
     async loadVisualAnalytics() {
       const row = selectedSession(this.state);
       if (!row || !this.state.snapshot) return;
-      if (!this.state.query.blockId || !this.state.query.stimulusId) {
-        this.state.visualStatus = 'context_required';
-        this.state.aoiResponse = null;
-        this.state.heatmapResponse = null;
-        this.state.visualError = null;
-        this.emit();
-        return;
-      }
       const requestId = ++this.visualRequestId;
       this.state.visualStatus = 'loading';
       this.state.visualError = null;
       this.emit();
       try {
-        const responses = await Promise.all([api.sessionAoi(row.id, this.state.snapshot), api.sessionHeatmap(row.id, this.state.snapshot)]);
+        const response = await api.sessionVisuals(row.id, this.state.snapshot);
         if (requestId !== this.visualRequestId || this.state.dirty) return;
-        const aoiStimulus = responses[0] && responses[0].data && responses[0].data.stimulus;
-        const heatmapStimulus = responses[1] && responses[1].data && responses[1].data.stimulus;
-        if (!aoiStimulus || !heatmapStimulus || String(aoiStimulus.id) !== String(heatmapStimulus.id) || String(aoiStimulus.version) !== String(heatmapStimulus.version)) {
-          throw new Error('409 — AOI and heatmap stimulus versions do not match');
-        }
-        this.state.aoiResponse = responses[0];
-        this.state.heatmapResponse = responses[1];
+        this.state.visualResponse = response;
+        this.state.aoiResponse = null;
+        this.state.heatmapResponse = null;
         this.state.visualStatus = 'ready';
         this.emit();
       } catch (error) {
         if (requestId !== this.visualRequestId) return;
+        this.state.visualResponse = null;
         this.state.aoiResponse = null;
         this.state.heatmapResponse = null;
         this.state.visualStatus = 'error';
@@ -1572,9 +1659,9 @@
           ${state.query.mode === 'group' && state.groupLevel === 'level-2' ? simpleSelectHtml('analyticsComparisonFilter', tr('Сравнение','Comparison'), comparisons, state.query.comparisonId, disabled, tr('Выберите сравнение','Select a comparison')) : ''}
           ${state.query.mode === 'group' && state.groupLevel === 'level-1' ? simpleSelectHtml('analyticsGroupFilter', tr('Группа','Group'), groups, state.query.groupId, disabled, tr('Все группы','All groups')) : ''}
           ${state.query.mode === 'group' ? simpleSelectHtml('analyticsConditionFilter', tr('Условие','Condition'), conditions, state.query.conditionId, disabled, tr('Все условия','All conditions')) : ''}
-          ${simpleSelectHtml('analyticsBlockFilter', tr('Блок / задача','Block / task'), blocks, state.query.blockId, disabled, tr('Все блоки','All blocks'))}
-          ${simpleSelectHtml('analyticsStimulusFilter', tr('Стимул','Stimulus'), stimuli, state.query.stimulusId, disabled || !state.query.blockId, tr('Все стимулы','All stimuli'))}
-          ${simpleSelectHtml('analyticsAoiFilter', 'AOI', aois, state.query.aoiId, disabled || !state.query.stimulusId, tr('Все AOI','All AOIs'))}
+          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsBlockFilter', tr('Блок / задача','Block / task'), blocks, state.query.blockId, disabled, tr('Все блоки','All blocks')) : ''}
+          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsStimulusFilter', tr('Стимул','Stimulus'), stimuli, state.query.stimulusId, disabled || !state.query.blockId, tr('Все стимулы','All stimuli')) : ''}
+          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsAoiFilter', 'AOI', aois, state.query.aoiId, disabled || !state.query.stimulusId, tr('Все AOI','All AOIs')) : ''}
           ${state.query.mode === 'session'
             ? `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><input value="${tr('Выбранная сессия · любой QC','Selected session · any QC')}" disabled style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);color:var(--muted);font-size:12px;"></label>`
             : `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><select id="analyticsQcMode" style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);color:var(--text);font-size:12px;"><option value="valid_only" ${state.query.qcMode === 'valid_only' ? 'selected' : ''}>${tr('Только валидные','Valid only')}</option><option value="valid_and_borderline" ${state.query.qcMode === 'valid_and_borderline' ? 'selected' : ''}>${tr('Валидные + пограничные','Valid + borderline')}</option><option value="all" ${state.query.qcMode === 'all' ? 'selected' : ''}>${tr('Все, включая невалидные','All, including invalid')}</option></select></label>`}
@@ -1774,6 +1861,13 @@
         const height = Math.abs(points[1].y - points[0].y) * 1000;
         return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="7" fill="rgba(92,102,189,.10)" stroke="#5c66bd" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
       }
+      if (aoi.shape === 'ellipse' && points.length >= 2) {
+        const minX = Math.min(points[0].x, points[1].x) * 1000;
+        const minY = Math.min(points[0].y, points[1].y) * 1000;
+        const maxX = Math.max(points[0].x, points[1].x) * 1000;
+        const maxY = Math.max(points[0].y, points[1].y) * 1000;
+        return `<ellipse cx="${(minX + maxX) / 2}" cy="${(minY + maxY) / 2}" rx="${(maxX - minX) / 2}" ry="${(maxY - minY) / 2}" fill="rgba(16,185,129,.10)" stroke="#059669" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+      }
       if (aoi.shape === 'polygon' && points.length >= 3) return `<polygon points="${points.map(point => `${point.x * 1000},${point.y * 1000}`).join(' ')}" fill="rgba(245,158,11,.10)" stroke="#d97706" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
       return '';
     }).join('');
@@ -1805,7 +1899,7 @@
     return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('AOI и тепловая карта','AOI and heatmap')}</div><div style="font-size:9px;color:var(--muted);margin-top:3px;">${escapeHtml(stimulus.name)} · v${escapeHtml(stimulus.version)} · ${escapeHtml(aoiData.blockId)} · ${escapeHtml(aoiData.presentationId)}</div></div><div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''} ${heatmapHasData ? '' : 'disabled'}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''} ${points.length ? '' : 'disabled'}> ${tr('Фиксации','Fixations')}</label></div></div>
       <div style="max-width:920px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">
-        ${stimulus.contentUrl ? `<img src="${escapeHtml(stimulus.contentUrl)}" alt="${escapeHtml(stimulus.name)}" style="display:block;width:100%;height:100%;object-fit:contain;">` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Изображение стимула недоступно','Stimulus image is unavailable')}</div>`}
+        ${stimulus.contentUrl ? stimulusMediaHtml(stimulus) : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Медиафайл стимула недоступен','Stimulus media is unavailable')}</div>`}
         ${state.layers.heatmap && heatmapHasData ? `<canvas class="analytics-heatmap-canvas" role="img" aria-label="${escapeHtml(tr('Heatmap фиксаций одной сессии; числовые значения доступны в AOI-таблице ниже','Session fixation heatmap; numeric values are available in the AOI table below'))}" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.66;"></canvas>` : ''}
         ${state.layers.heatmap && !heatmapHasData ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.78);color:var(--muted);font-size:11px;">${tr('Нет валидных фиксаций для heatmap','No valid fixations for the heatmap')}</div>` : ''}
         ${aoiOverlayHtml(rows, points, state.layers)}
@@ -1813,6 +1907,40 @@
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:9px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} bandwidth=${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>N ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${tr('валидное время','valid time')}=${escapeHtml(heatmap.validObservationDurationMs)} ${tr('мс','ms')} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div>
       ${rows.length ? `<div style="overflow:auto;margin-top:13px;border:1px solid var(--stroke);border-radius:11px;"><table style="width:100%;min-width:1160px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(92,102,189,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">AOI</th><th>${tr('Достигнута','Reached')}</th><th>TTFF</th><th>${tr('Время','Dwell')}</th><th>${tr('Доля','Share')}</th><th>${tr('Фиксации / мин','Fixations / min')}</th><th>${tr('Медиана фиксации','Fixation median')}</th><th>${tr('Посещения','Visits')}</th><th>${tr('Возвраты','Revisits')}</th><th>${tr('Валидность / QC','Validity / QC')}</th></tr></thead><tbody>${rows.map(row => { const qc = (row.metrics || []).find(metric => metric.qc) && (row.metrics || []).find(metric => metric.qc).qc; return `<tr style="border-top:1px solid var(--stroke);"><td style="padding:9px;font-weight:650;color:var(--text);">${escapeHtml(row.aoi.order)} · ${escapeHtml(row.aoi.name)}${row.aoi.isTarget ? ` <span style="color:var(--accent);">${tr('цель','target')}</span>` : ''}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.target_reached', true))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.ttff_ms'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.dwell_time_ms'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.dwell_time_pct'))}</td><td style="text-align:center;">${escapeHtml(aoiFixationText(row))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.fixation_duration_median_ms'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.visit_count'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.revisit_count'))}</td><td style="text-align:center;">${qc && qc.validFraction != null ? Math.round(qc.validFraction * 100) + '%' : '—'} · ${escapeHtml(statusLabel(qc && qc.status))}</td></tr>`; }).join('')}</tbody></table></div>` : `<div style="margin-top:12px;font-size:10px;color:var(--muted);">${tr('Для выбранного стимула AOI не настроены.','No AOIs are configured for the selected stimulus.')}</div>`}
     </section>`;
+  }
+
+  function visualContextHtml(context, state, index) {
+    const rows = Array.isArray(context?.aoiRows) ? context.aoiRows : [];
+    const heatmap = context?.heatmap || {};
+    const points = Array.isArray(heatmap.fixationPoints) ? heatmap.fixationPoints : [];
+    const stimulus = context?.stimulus || heatmap.stimulus || {};
+    const heatmapHasData = heatmap.nFixations > 0 && heatmap.grid && heatmap.grid.maxValue > 0;
+    const ratio = stimulus.intrinsicWidth && stimulus.intrinsicHeight
+      ? `${stimulus.intrinsicWidth}/${stimulus.intrinsicHeight}`
+      : '16/9';
+    const contentUrl = stimulusContentUrl(stimulus.contentUrl);
+    return `<article style="padding:14px 0;border-top:${index ? '1px solid var(--stroke)' : '0'};">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:9px;"><div><div style="font-size:12px;font-weight:750;color:var(--text);">${escapeHtml(stimulus.name || stimulus.id || tr('Стимул','Stimulus'))}</div><div style="font-size:9px;color:var(--muted);margin-top:3px;">${escapeHtml(context.blockName || context.blockId || '—')} · v${escapeHtml(stimulus.version || '1')} · ${escapeHtml(context.presentationId || tr('показ не найден','presentation unavailable'))}</div></div><span style="font-size:9px;color:${context.status === 'computed' ? 'var(--good)' : 'var(--muted)'};">${context.status === 'computed' ? tr('Данные рассчитаны','Computed') : tr('Нет данных показа','No presentation data')}</span></div>
+      <div style="max-width:920px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">
+        <div class="analytics-stimulus-fallback" style="position:absolute;inset:0;display:${contentUrl ? 'none' : 'flex'};align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Изображение стимула недоступно','Stimulus image is unavailable')}</div>
+        ${contentUrl ? stimulusMediaHtml({ ...stimulus, contentUrl }, 'analytics-stimulus-image') : ''}
+        ${state.layers.heatmap && heatmapHasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="session-list" data-visual-index="${index}" role="img" aria-label="${escapeHtml(tr('Тепловая карта фиксаций участника','Participant fixation heatmap'))}" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.66;"></canvas>` : ''}
+        ${state.layers.heatmap && !heatmapHasData ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.78);color:var(--muted);font-size:11px;">${tr('Нет валидных фиксаций для тепловой карты','No valid fixations for the heatmap')}</div>` : ''}
+        ${aoiOverlayHtml(rows, points, state.layers)}
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace || context.coordinateSpace || '—')} · ${escapeHtml(heatmap.normalizationMode || '—')}</span><span>N ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations || 0)} · ${tr('валидное время','valid time')}=${escapeHtml(heatmap.validObservationDurationMs || 0)} ${tr('мс','ms')}</span></div>
+      ${rows.length ? `<div style="overflow:auto;margin-top:11px;border:1px solid var(--stroke);border-radius:11px;"><table style="width:100%;min-width:1160px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(92,102,189,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">AOI</th><th>${tr('Достигнута','Reached')}</th><th>TTFF</th><th>${tr('Время','Dwell')}</th><th>${tr('Доля','Share')}</th><th>${tr('Фиксации / мин','Fixations / min')}</th><th>${tr('Медиана фиксации','Fixation median')}</th><th>${tr('Посещения','Visits')}</th><th>${tr('Возвраты','Revisits')}</th><th>${tr('Валидность / QC','Validity / QC')}</th></tr></thead><tbody>${rows.map(row => { const qcMetric = (row.metrics || []).find(metric => metric.qc); const qc = qcMetric && qcMetric.qc; return `<tr style="border-top:1px solid var(--stroke);"><td style="padding:9px;font-weight:650;color:var(--text);">${escapeHtml(row.aoi.order)} · ${escapeHtml(row.aoi.name)}${row.aoi.isTarget ? ` <span style="color:var(--accent);">${tr('цель','target')}</span>` : ''}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.target_reached', true))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.ttff_ms'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.dwell_time_ms'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.dwell_time_pct'))}</td><td style="text-align:center;">${escapeHtml(aoiFixationText(row))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.fixation_duration_median_ms'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.visit_count'))}</td><td style="text-align:center;">${escapeHtml(aoiMetricText(row, 'aoi.revisit_count'))}</td><td style="text-align:center;">${qc && qc.validFraction != null ? Math.round(qc.validFraction * 100) + '%' : '—'} · ${escapeHtml(statusLabel(qc && qc.status))}</td></tr>`; }).join('')}</tbody></table></div>` : ''}
+    </article>`;
+  }
+
+  function sessionVisualAnalyticsHtml(state) {
+    if (state.visualStatus === 'loading' || state.visualStatus === 'idle') return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);font-size:10px;color:var(--muted);">${tr('Загружаем все тепловые карты участника…','Loading all participant heatmaps…')}</section>`;
+    if (state.visualStatus === 'error') return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:700;color:var(--bad);">${tr('Не удалось загрузить AOI/тепловые карты','Could not load AOI/heatmaps')}</div><div style="font-size:9px;color:var(--muted);margin-top:5px;">${escapeHtml(state.visualError && state.visualError.message || '')}</div><button id="analyticsVisualRetry" class="quick-btn" type="button" style="margin-top:9px;">${tr('Повторить','Retry')}</button></section>`;
+    const data = state.visualResponse && state.visualResponse.data;
+    const contexts = Array.isArray(data?.contexts) ? data.contexts : [];
+    if (!contexts.length) return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')}</div><div style="font-size:10px;color:var(--muted);margin-top:6px;">${tr('В протоколе нет стимулов с размеченными AOI.','The protocol has no stimuli with AOI annotations.')}</div></section>`;
+    const participant = data.participantAlias || selectedSession(state)?.participant_id || '—';
+    return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><details open><summary style="cursor:pointer;font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')} ${escapeHtml(participant)} · ${contexts.length}</summary><div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''}> ${tr('Фиксации','Fixations')}</label></div>${contexts.map((context, index) => visualContextHtml(context, state, index)).join('')}</details></section>`;
   }
 
   function resolutionLabel(value) {
@@ -1852,8 +1980,9 @@
 
   function audioAnalyticsHtml(audio) {
     if (!audio) return '';
-    const percent = value => Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—';
-    const seconds = value => Number.isFinite(Number(value)) ? `${(Number(value) / 1000).toFixed(1)} ${tr('с','s')}` : '—';
+    const hasNumber = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+    const percent = value => hasNumber(value) ? `${Math.round(Number(value) * 100)}%` : '—';
+    const seconds = value => hasNumber(value) ? `${(Number(value) / 1000).toFixed(1)} ${tr('с','s')}` : '—';
     const cards = [
       [tr('Статус записи','Recording status'), statusLabel(audio.status || 'not_computed')],
       [tr('Принятые окна','Accepted windows'), `${audio.acceptedWindowCount ?? 0}/${audio.windowCount ?? 0}`],
@@ -1876,15 +2005,39 @@
     const taskMetricSummary = test => {
       const metrics = test?.metrics || {};
       const parts = [];
-      if (Number.isFinite(Number(metrics.speechCoverage))) parts.push(`${tr('речь','speech')} ${percent(metrics.speechCoverage)}`);
-      if (test?.testType === 'sustained_vowel' && Number.isFinite(Number(metrics.pitchStdHz))) parts.push(`F0 SD ${Number(metrics.pitchStdHz).toFixed(1)} Hz`);
-      if (test?.testType !== 'sustained_vowel' && Number.isFinite(Number(metrics.pauseRate))) parts.push(`${tr('паузы','pauses')} ${Number(metrics.pauseRate).toFixed(2)}`);
+      if (hasNumber(metrics.speechCoverage)) parts.push(`${tr('речь','speech')} ${percent(metrics.speechCoverage)}`);
+      if (hasNumber(metrics.pitchMeanHz)) parts.push(`F0 ${Number(metrics.pitchMeanHz).toFixed(1)} Hz`);
+      if (hasNumber(metrics.pauseRate)) parts.push(`${tr('паузы','pauses')} ${Number(metrics.pauseRate).toFixed(2)}/${tr('с','s')}`);
       return parts.join(' · ') || '—';
+    };
+    const taskMetricDetails = test => {
+      const metrics = test?.metrics || {};
+      const rows = [
+        [tr('Качество записи','Recording quality'), metrics.recordingQuality, percent],
+        [tr('Надёжность признаков','Feature reliability'), metrics.featureReliability, percent],
+        [tr('Доля речи','Speech coverage'), metrics.speechCoverage, percent],
+        ['RMS', metrics.rmsMean, value => Number(value).toFixed(4)],
+        [tr('Клиппинг','Clipping'), metrics.clippingRatioMean, percent],
+        ['SNR proxy', metrics.snrProxyDb, value => `${Number(value).toFixed(1)} dB`],
+        [tr('Средняя F0','Mean F0'), metrics.pitchMeanHz, value => `${Number(value).toFixed(1)} Hz`],
+        ['F0 SD', metrics.pitchStdHz, value => `${Number(value).toFixed(1)} Hz`],
+        [tr('Вариативность F0','F0 variability'), metrics.pitchVariability, percent],
+        ['Jitter local', metrics.jitterLocal, percent],
+        ['Shimmer local', metrics.shimmerLocal, percent],
+        ['HNR', metrics.hnrDb, value => `${Number(value).toFixed(1)} dB`],
+        [tr('Частота пауз','Pause rate'), metrics.pauseRate, value => `${Number(value).toFixed(2)}/${tr('с','s')}`],
+        [tr('Средняя пауза','Mean pause'), metrics.averagePauseDuration, value => `${Number(value).toFixed(2)} ${tr('с','s')}`],
+        [tr('Максимальная пауза','Maximum pause'), metrics.maximumPauseDuration, value => `${Number(value).toFixed(2)} ${tr('с','s')}`],
+        [tr('Среднее число пауз в окне','Mean pauses per window'), metrics.pauseCountMean, value => Number(value).toFixed(1)],
+        [tr('Средняя длительность высказывания','Mean utterance duration'), metrics.meanUtteranceDuration, value => `${Number(value).toFixed(2)} ${tr('с','s')}`]
+      ].filter(([, value]) => hasNumber(value));
+      if (!rows.length) return escapeHtml(taskMetricSummary(test));
+      return `<details style="min-width:220px;"><summary style="cursor:pointer;white-space:nowrap;">${escapeHtml(taskMetricSummary(test))}</summary><div style="display:grid;grid-template-columns:minmax(135px,1fr) auto;gap:5px 12px;margin-top:7px;padding:8px;border:1px solid var(--stroke);border-radius:8px;background:var(--card-bg);text-align:left;">${rows.map(([label, value, formatter]) => `<span style="color:var(--muted);">${escapeHtml(label)}</span><strong style="color:var(--text);text-align:right;">${escapeHtml(formatter(value))}</strong>`).join('')}</div></details>`;
     };
     return `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Аудиотесты и голосовые признаки','Audio tests and voice features')}</div><div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Отображаются только рассчитанные признаки и QC. Исходный голос не сохраняется и не передаётся.','Only derived features and QC are shown. Raw voice is neither stored nor transmitted.')}</div></div><span style="font-size:9px;color:${audio.consentGranted ? 'var(--good)' : 'var(--muted)'};">${audio.consentGranted ? tr('Согласие получено','Consent granted') : tr('Нет согласия или аудио отключено','No consent or audio disabled')}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px;">${cards.map(([label, value]) => `<div style="padding:10px;border:1px solid var(--stroke);border-radius:10px;background:rgba(15,118,110,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:14px;font-weight:750;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div>
-      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:820px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Задание','Task')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Окна','Windows')}</th><th>${tr('Оценка качества','Quality score')}</th><th>${tr('Показатели','Metrics')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.title || taskTypeLabel(test.testType))}<div style="font-size:8px;color:var(--muted);font-weight:500;margin-top:2px;">${escapeHtml(taskTypeLabel(test.testType))}</div></td><td style="text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="text-align:center;font-weight:700;">${escapeHtml(percent(test.metrics?.completionScore))}</td><td style="text-align:center;">${escapeHtml(taskMetricSummary(test))}</td><td style="text-align:center;color:${test.status === 'completed' ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(taskStatusLabel(test.status))}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
+      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:900px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Задание','Task')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Окна','Windows')}</th><th>${tr('Оценка качества','Quality score')}</th><th>${tr('Показатели','Metrics')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);vertical-align:top;"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.title || taskTypeLabel(test.testType))}<div style="font-size:8px;color:var(--muted);font-weight:500;margin-top:2px;">${escapeHtml(taskTypeLabel(test.testType))}</div></td><td style="padding-top:9px;text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="padding-top:9px;text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="padding-top:9px;text-align:center;font-weight:700;">${escapeHtml(percent(test.metrics?.completionScore))}</td><td style="padding:8px;text-align:center;">${taskMetricDetails(test)}</td><td style="padding-top:9px;text-align:center;color:${test.status === 'completed' ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(taskStatusLabel(test.status))}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
       <div style="font-size:8px;color:var(--muted2);margin-top:8px;">${escapeHtml(audio.algorithmVersion || '')}${audio.disclaimer ? ` · ${escapeHtml(audio.disclaimer)}` : ''}</div>
     </section>`;
   }
@@ -1915,7 +2068,7 @@
       ${audioAnalyticsHtml(data.audio)}
       ${qcMetrics.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Показатели качества данных','Data quality metrics')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${qcMetrics.map(metricCardHtml).join('')}</div></section>` : ''}
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${trialValid && trialValid.status === 'computed' ? escapeHtml(trialValid.value) : '—'}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${trialExcluded && trialExcluded.status === 'computed' ? escapeHtml(trialExcluded.value) : exclusions.length}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
-      ${visualAnalyticsHtml(state)}
+      ${sessionVisualAnalyticsHtml(state)}
       <details style="padding:12px 18px;border-bottom:1px solid var(--stroke);"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Технические данные сессии','Session technical details')}</summary>${technicalDetailsHtml(session, algorithms)}</details>
       <footer style="padding:10px 18px;font-size:9px;color:var(--muted);">snapshot ${escapeHtml(response.snapshot.id)} · ${escapeHtml(response.snapshot.datasetHash)} · contract ${escapeHtml(response.contractVersion)} · ${tr('сформировано','generated')} ${escapeHtml(formatDateTime(response.generatedAt))}</footer>
     </div>`;
@@ -1968,7 +2121,7 @@
     const stimulus = heatmap.stimulus;
     const hasData = heatmap.nFixations > 0 && heatmap.grid && heatmap.grid.maxValue > 0;
     const ratio = stimulus.intrinsicWidth && stimulus.intrinsicHeight ? `${stimulus.intrinsicWidth}/${stimulus.intrinsicHeight}` : '16/9';
-    return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Групповая heatmap','Group heatmap')} · ${escapeHtml(stimulus.name)}</div><div style="max-width:820px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">${stimulus.contentUrl ? `<img src="${escapeHtml(stimulus.contentUrl)}" alt="${escapeHtml(stimulus.name)}" style="display:block;width:100%;height:100%;object-fit:contain;">` : ''}${hasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="group" role="img" aria-label="${escapeHtml(tr('Групповая heatmap с равным весом участников; параметры и N указаны под изображением','Group heatmap with equal participant weight; parameters and N are listed below'))}" style="position:absolute;inset:0;width:100%;height:100%;opacity:.66;"></canvas>` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.8);color:var(--muted);font-size:10px;">${tr('Недостаточно валидных фиксаций','Insufficient valid fixations')}</div>`}</div><div style="display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} ${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>${tr('Равный вес участников','Equal participant weight')}: ${heatmap.equalParticipantWeight ? tr('да','yes') : tr('нет','no')} · N=${escapeHtml(heatmap.nParticipants)} · ${tr('сессий','sessions')}=${escapeHtml(heatmap.nSessions)} · ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div></section>`;
+    return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Групповая heatmap','Group heatmap')} · ${escapeHtml(stimulus.name)}</div><div style="max-width:820px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">${stimulus.contentUrl ? stimulusMediaHtml(stimulus) : ''}${hasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="group" role="img" aria-label="${escapeHtml(tr('Групповая heatmap с равным весом участников; параметры и N указаны под изображением','Group heatmap with equal participant weight; parameters and N are listed below'))}" style="position:absolute;inset:0;width:100%;height:100%;opacity:.66;"></canvas>` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.8);color:var(--muted);font-size:10px;">${tr('Недостаточно валидных фиксаций','Insufficient valid fixations')}</div>`}</div><div style="display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} ${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>${tr('Равный вес участников','Equal participant weight')}: ${heatmap.equalParticipantWeight ? tr('да','yes') : tr('нет','no')} · N=${escapeHtml(heatmap.nParticipants)} · ${tr('сессий','sessions')}=${escapeHtml(heatmap.nSessions)} · ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div></section>`;
   }
 
   function groupDashboardHtml(state) {
@@ -2118,8 +2271,15 @@
   }
 
   function drawHeatmapCanvas(canvas) {
-    const response = canvas && canvas.dataset.heatmapKind === 'group' ? store.state.groupHeatmapResponse : store.state.heatmapResponse;
-    const data = response && response.data;
+    let data = null;
+    if (canvas && canvas.dataset.heatmapKind === 'group') {
+      data = store.state.groupHeatmapResponse && store.state.groupHeatmapResponse.data;
+    } else if (canvas && canvas.dataset.heatmapKind === 'session-list') {
+      const index = Number.parseInt(canvas.dataset.visualIndex, 10);
+      data = store.state.visualResponse?.data?.contexts?.[index]?.heatmap || null;
+    } else {
+      data = store.state.heatmapResponse && store.state.heatmapResponse.data;
+    }
     const grid = data && data.grid;
     if (!canvas || !grid || !grid.width || !grid.height || !Array.isArray(grid.values) || grid.values.length !== grid.width * grid.height) return;
     const rect = canvas.getBoundingClientRect();
@@ -2149,6 +2309,15 @@
   }
 
   function bindHeatmapCanvases(root) {
+    root.querySelectorAll('.analytics-stimulus-media').forEach(image => {
+      const showFallback = () => {
+        image.style.display = 'none';
+        const fallback = image.parentElement?.querySelector('.analytics-stimulus-fallback');
+        if (fallback) fallback.style.display = 'flex';
+      };
+      image.addEventListener('error', showFallback, { once: true });
+      if (image.tagName === 'IMG' && image.complete && !image.naturalWidth) showFallback();
+    });
     root.querySelectorAll('.analytics-heatmap-canvas').forEach(canvas => {
       drawHeatmapCanvas(canvas);
       if (typeof global.ResizeObserver === 'function') {
@@ -2272,7 +2441,7 @@
     return wrapper;
   }
 
-  global.EmocogAnalyticsProduction = { api, store, view: AnalyticsProductionView, exportView: AnalyticsExportView, hasAuth, buildAnalyticsQuery, buildExportBundle, validateExportBundle, exportBundleCsv, importResultJson };
+  global.EmocogAnalyticsProduction = { api, store, view: AnalyticsProductionView, exportView: AnalyticsExportView, hasAuth, buildAnalyticsQuery, buildExportBundle, validateExportBundle, exportBundleCsv, importResultJson, stimulusContentUrl };
   global.addEventListener?.('wecog:projectchange', () => store.initialize(true));
   global.AnalyticsView = AnalyticsProductionView;
   global.SessionCardView = function () { return AnalyticsProductionView('session-card'); };
