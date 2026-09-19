@@ -15,7 +15,7 @@ export const state = {
     
     // Основные данные сессии (то, что идет в JSON)
     sessionData: {
-        ids: { session: null, participant: null, invitationCode: null },
+        ids: { session: null, participant: null, participantAlias: null, invitationCode: null },
         user: { interfaceLanguage: 'ru' }, // Будет обновлено при старте
         tech: {}, 
         precheck: {},

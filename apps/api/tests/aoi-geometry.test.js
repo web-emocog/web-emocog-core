@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const geometry = require('../../web/aoi-geometry');
 const protocolAoi = require('../../web/aoi-protocol');
+const { fixationInsideAoi } = require('../analytics/metrics');
 
 test('AOI normalized geometry', async t => {
   await t.test('normalizes a rectangle independently of viewport resolution', () => {
@@ -32,6 +33,26 @@ test('AOI normalized geometry', async t => {
     assert.equal(triangle.ok, true);
     assert.equal(triangle.points.length, 3);
   });
+
+  await t.test('normalizes an ellipse as a resolution-independent bounding box', () => {
+    const ellipse = geometry.normalizeGeometry('ellipse', [
+      { x: 0.75, y: 0.9 }, { x: 0.2, y: 0.1 },
+    ]);
+    assert.deepEqual(ellipse, {
+      ok: true,
+      points: [{ x: 0.2, y: 0.1 }, { x: 0.75, y: 0.9 }],
+    });
+    assert.equal(geometry.normalizeGeometry('ellipse', [{ x: 0.2, y: 0.1 }, { x: 0.2, y: 0.9 }]).ok, false);
+  });
+});
+
+test('ellipse AOI hit testing', () => {
+  const ellipse = {
+    shape: 'ellipse',
+    points: [{ x: 0.2, y: 0.1 }, { x: 0.8, y: 0.9 }],
+  };
+  assert.equal(fixationInsideAoi({ x: 0.5, y: 0.5 }, ellipse), true);
+  assert.equal(fixationInsideAoi({ x: 0.2, y: 0.1 }, ellipse), false);
 });
 
 test('AOI protocol round-trip contract', async t => {

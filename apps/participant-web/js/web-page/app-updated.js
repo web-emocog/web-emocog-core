@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20260919-1';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260915-1';
+} from './ui-updated.js?v=20260919-1';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20260909-1';
+} from './precheck-updated.js?v=20260919-1';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260915-1';
+} from './tests-updated.js?v=20260919-1';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,7 +34,7 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260915-1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260919-1';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -92,7 +92,7 @@ function revokeInvitationStimulusObjectUrls() {
     state.runtime.invitationStimulusObjectUrls = [];
 }
 
-async function preloadInvitationStimulus(contentUrl) {
+async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
     if (
         !contentUrl
         || typeof URL === 'undefined'
@@ -102,23 +102,50 @@ async function preloadInvitationStimulus(contentUrl) {
     if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
     const blob = await response.blob();
     if (!blob.size) throw new Error('Stimulus preload returned an empty file');
-    if (blob.type && !blob.type.toLowerCase().startsWith('image/')) {
-        throw new Error(`Stimulus preload returned ${blob.type} instead of an image`);
+    const expectedMime = String(declaredMimeType || '').toLowerCase();
+    const actualMime = String(blob.type || expectedMime).toLowerCase();
+    const mediaKind = actualMime.startsWith('video/') || expectedMime.startsWith('video/')
+        ? 'video'
+        : 'image';
+    if (actualMime && !actualMime.startsWith(`${mediaKind}/`)) {
+        throw new Error(`Stimulus preload returned unexpected media type ${actualMime}`);
     }
     const objectUrl = URL.createObjectURL(blob);
     try {
-        const image = new Image();
-        image.src = objectUrl;
-        if (typeof image.decode === 'function') {
-            await image.decode();
-        } else {
+        if (mediaKind === 'video') {
+            const video = document.createElement('video');
+            video.muted = true;
+            video.playsInline = true;
+            video.preload = 'metadata';
             await new Promise((resolve, reject) => {
-                image.onload = resolve;
-                image.onerror = () => reject(new Error('Stimulus image could not be decoded'));
+                const timeout = setTimeout(() => reject(new Error('Stimulus video metadata timed out')), 15000);
+                const cleanup = () => {
+                    clearTimeout(timeout);
+                    video.onloadedmetadata = null;
+                    video.onerror = null;
+                };
+                video.onloadedmetadata = () => { cleanup(); resolve(); };
+                video.onerror = () => { cleanup(); reject(new Error('Stimulus video could not be decoded')); };
+                video.src = objectUrl;
+                video.load();
             });
-        }
-        if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) {
-            throw new Error('Stimulus image has invalid dimensions');
+            if (!(video.videoWidth > 0 && video.videoHeight > 0)) {
+                throw new Error('Stimulus video has invalid dimensions');
+            }
+        } else {
+            const image = new Image();
+            image.src = objectUrl;
+            if (typeof image.decode === 'function') {
+                await image.decode();
+            } else {
+                await new Promise((resolve, reject) => {
+                    image.onload = resolve;
+                    image.onerror = () => reject(new Error('Stimulus image could not be decoded'));
+                });
+            }
+            if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) {
+                throw new Error('Stimulus image has invalid dimensions');
+            }
         }
         return objectUrl;
     } catch (error) {
@@ -451,9 +478,10 @@ async function loadInvitationProtocolByCode(code) {
                                 ? base + row.content_url
                                 : null;
                             let displayUrl = contentUrl;
-                            if (contentUrl && String(row?.mime_type || '').toLowerCase().startsWith('image/')) {
+                            const mimeType = String(row?.mime_type || '').toLowerCase();
+                            if (contentUrl && (mimeType.startsWith('image/') || mimeType.startsWith('video/'))) {
                                 try {
-                                    displayUrl = await preloadInvitationStimulus(contentUrl);
+                                    displayUrl = await preloadInvitationStimulus(contentUrl, mimeType);
                                     if (displayUrl) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
                                 } catch (error) {
                                     // Keep the public invitation URL as a direct browser fallback.

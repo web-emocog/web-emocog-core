@@ -288,6 +288,18 @@ function fixationInsideAoi(fixation, aoi) {
     return fixation.x >= Math.min(...xs) && fixation.x <= Math.max(...xs)
       && fixation.y >= Math.min(...ys) && fixation.y <= Math.max(...ys);
   }
+  if (aoi.shape === 'ellipse' && points.length >= 2) {
+    const minX = Math.min(points[0].x, points[1].x);
+    const maxX = Math.max(points[0].x, points[1].x);
+    const minY = Math.min(points[0].y, points[1].y);
+    const maxY = Math.max(points[0].y, points[1].y);
+    const rx = (maxX - minX) / 2;
+    const ry = (maxY - minY) / 2;
+    if (!(rx > 0 && ry > 0)) return false;
+    const cx = minX + rx;
+    const cy = minY + ry;
+    return (((fixation.x - cx) / rx) ** 2) + (((fixation.y - cy) / ry) ** 2) <= 1;
+  }
   return points.length >= 3 && pointInPolygon(fixation, points);
 }
 
@@ -956,6 +968,7 @@ module.exports = {
   channelQc,
   distribution,
   finite,
+  fixationInsideAoi,
   metricBase,
   normalizedGrid,
   protocolAois,

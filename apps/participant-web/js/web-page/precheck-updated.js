@@ -1,6 +1,6 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
-import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js';
-import { translations } from '../../translations.js?v=20260828-2';
+import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20260919-1';
+import { translations } from '../../translations.js?v=20260919-1';
 import { measureCameraFPS } from './camera.js';
 import {
     captureHeadPoseReference,

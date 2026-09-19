@@ -119,7 +119,7 @@ router.get(
         `SELECT
            s.id,
            s.session_id,
-           s.participant_id,
+           COALESCE(NULLIF(sf.payload->'ids'->>'participantAlias', ''), s.participant_id) AS participant_id,
            s.project_id,
            s.protocol_id,
            s.started_at,
