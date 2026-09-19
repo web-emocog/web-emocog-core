@@ -65,7 +65,7 @@ test.describe('Participant session runtime', () => {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     const targets = await page.evaluate(async () => {
       const moduleUrl = new URL(
-        'js/web-page/tests-updated.js',
+        'js/web-page/tests-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { getWorstValidationTargets } = await import(moduleUrl);
@@ -226,7 +226,7 @@ test.describe('Participant session runtime', () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js',
+        'js/web-page/experimental_task-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -242,6 +242,234 @@ test.describe('Participant session runtime', () => {
       src: element.src,
       naturalWidth: element.naturalWidth,
     }))).toMatchObject({ src: expect.stringMatching(/^blob:/), naturalWidth: 1 });
+  });
+
+  test('preloads and presents an uploaded video in a passive block', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    const videoBase64 = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4;
+      canvas.height = 4;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas context is unavailable');
+      context.fillStyle = '#dc2626';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const stream = canvas.captureStream(10);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = event => chunks.push(event.data);
+      const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
+      recorder.start();
+      await new Promise(resolve => setTimeout(resolve, 180));
+      context.fillStyle = '#2563eb';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      recorder.stop();
+      await stopped;
+      stream.getTracks().forEach(track => track.stop());
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    });
+
+    const invitationCode = 'INV-VIDEO-PRELOAD';
+    const videoBytes = Buffer.from(videoBase64, 'base64');
+    await page.route('**/invitations/by-code/**', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli/99/content`)) {
+        await route.fulfill({ status: 200, contentType: 'video/webm', body: videoBytes });
+        return;
+      }
+      if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli`)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{
+            id: 99,
+            name: 'Uploaded passive video',
+            mime_type: 'video/webm',
+            metadata: {},
+            content_url: `/invitations/by-code/${invitationCode}/stimuli/99/content`,
+          }]),
+        });
+        return;
+      }
+      if (url.pathname.endsWith(`/by-code/${invitationCode}`)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            invitation_id: 99,
+            code: invitationCode,
+            protocol_id: 99,
+            project_id: 1,
+            definition: {
+              version: 'v2.0_universal',
+              blocks: [{
+                id: 'uploaded-video-passive',
+                type: 'passive',
+                content: {
+                  trials: [{ stimulusId: '99', duration: 1000 }],
+                  useFixation: false,
+                  fullscreenStimulus: false,
+                },
+              }],
+            },
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto(`${PAGE_URL}?code=${invitationCode}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean(
+      (window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap?.['99']?.metadata?.url
+    ));
+    const media = await page.evaluate(() => {
+      const shared = (window as any).__WECOG_STATE__;
+      const row = shared.runtime.invitationStimuliMap['99'];
+      const resolved = (window as any).StandardStimuli.resolveParticipantStimulus({
+        stimulusId: '99',
+        meta: row,
+      });
+      return {
+        type: resolved.type,
+        source: resolved.src,
+        retainedUrls: shared.runtime.invitationStimulusObjectUrls.length,
+      };
+    });
+    expect(media).toEqual({
+      type: 'video',
+      source: expect.stringMatching(/^blob:/),
+      retainedUrls: 1,
+    });
+
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20260919-1', window.location.href).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({
+        protocol: shared.runtime.invitationProtocolDefinition,
+        autoFinishSession: false,
+      });
+    });
+    await page.locator('#cogStartBtn').click();
+    const renderedVideo = page.locator('#cogVideo');
+    await expect(renderedVideo).toBeVisible();
+    await expect.poll(() => renderedVideo.evaluate((element: HTMLVideoElement) => ({
+      source: element.currentSrc || element.src,
+      width: element.videoWidth,
+      height: element.videoHeight,
+    }))).toMatchObject({
+      source: expect.stringMatching(/^blob:/),
+      width: 4,
+      height: 4,
+    });
+    await expect(page.locator('body')).not.toHaveClass(/cognitive-stimulus-fullscreen/);
+  });
+
+  test('passive viewing randomizes trials and applies configured random intervals', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      Math.random = () => 0;
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20260919-1', window.location.href).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({
+        autoFinishSession: false,
+        protocol: {
+          version: 'v2.0-passive-randomization-e2e',
+          blocks: [{
+            id: 'passive-randomized',
+            type: 'passive',
+            content: {
+              trials: [
+                { stimulusId: 'std_emo_happy_01', duration: 50 },
+                { stimulusId: 'std_emo_sad_01', duration: 50 },
+                { stimulusId: 'std_emo_neutral_01', duration: 50 },
+              ],
+              randomize: true,
+              randomInterStimulus: true,
+              interStimulusMinMs: 100,
+              interStimulusMaxMs: 100,
+              useFixation: false,
+              fullscreenStimulus: false,
+            },
+          }],
+        },
+      });
+    });
+
+    await page.locator('#cogStartBtn').click();
+    await expect(page.locator('#cogImage')).toBeVisible();
+    await expect(page.locator('body')).not.toHaveClass(/cognitive-stimulus-fullscreen/);
+    const stage = await page.locator('#cognitiveStimulusArea').boundingBox();
+    const viewport = page.viewportSize();
+    expect(stage).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(stage!.width).toBeLessThan(viewport!.width);
+
+    await expect.poll(() => page.evaluate(
+      () => (window as any).__WECOG_STATE__.sessionData.cognitiveResults.length
+    )).toBe(3);
+    const result = await page.evaluate(() => {
+      const shared = (window as any).__WECOG_STATE__;
+      return {
+        sourceOrder: shared.sessionData.cognitiveResults.map((item: any) => item.sourceTrialIndex),
+        intervals: shared.sessionData.events
+          .filter((event: any) => event.type === 'trial_start' && event.blockId === 'passive-randomized')
+          .map((event: any) => event.randomPreStimulusMs),
+      };
+    });
+    expect(result.sourceOrder).toEqual([1, 2, 0]);
+    expect(result.intervals).toEqual([100, 100, 100]);
+  });
+
+  test('keeps fullscreen layout stable between passive stimuli', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20260919-1', window.location.href).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({
+        autoFinishSession: false,
+        protocol: {
+          version: 'v2.0-passive-fullscreen-e2e',
+          blocks: [{
+            id: 'passive-fullscreen',
+            type: 'passive',
+            content: {
+              trials: [
+                { stimulusId: 'std_emo_happy_01', duration: 120, iti: 350 },
+                { stimulusId: 'std_emo_sad_01', duration: 120, iti: 0 },
+              ],
+              useFixation: false,
+              fullscreenStimulus: true,
+            },
+          }],
+        },
+      });
+    });
+
+    await page.locator('#cogStartBtn').click();
+    await expect(page.locator('body')).toHaveClass(/cognitive-stimulus-fullscreen/);
+    await expect(page.locator('#cogImage')).toBeVisible();
+    await expect(page.locator('#cogImage')).toBeHidden();
+    await expect(page.locator('body')).toHaveClass(/cognitive-stimulus-fullscreen/);
+    await expect(page.locator('#cogImage')).toBeVisible();
+    await expect.poll(() => page.evaluate(
+      () => (window as any).__WECOG_STATE__.sessionData.cognitiveResults.length
+    )).toBe(2);
+    await expect(page.locator('body')).not.toHaveClass(/cognitive-stimulus-fullscreen/);
   });
 
   test('does not replace an API image with a blue shape when preloading fails', async ({ page }) => {
@@ -375,7 +603,7 @@ test.describe('Participant session runtime', () => {
         }],
       };
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js',
+        'js/web-page/experimental_task-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -427,7 +655,7 @@ test.describe('Participant session runtime', () => {
         }],
       };
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js',
+        'js/web-page/experimental_task-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -448,7 +676,7 @@ test.describe('Participant session runtime', () => {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.runtime.invitationProtocolDefinition = null;
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js',
+        'js/web-page/experimental_task-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -492,7 +720,7 @@ test.describe('Participant session runtime', () => {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.runtime.invitationProtocolDefinition = null;
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js',
+        'js/web-page/experimental_task-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -550,7 +778,7 @@ test.describe('Participant session runtime', () => {
         }],
       };
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js',
+        'js/web-page/experimental_task-updated.js?v=20260919-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -750,8 +978,8 @@ test.describe('Participant session runtime', () => {
     const result = await page.evaluate(async () => {
       document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
       document.getElementById('step5')?.classList.add('active');
-      const precheckUrl = new URL('js/web-page/precheck-updated.js', window.location.href).href;
-      const stateUrl = new URL('js/web-page/state.js', window.location.href).href;
+      const precheckUrl = new URL('js/web-page/precheck-updated.js?v=20260919-1', window.location.href).href;
+      const stateUrl = new URL('js/web-page/state.js?v=20260919-1', window.location.href).href;
       const [{ checkAllIndicators }, { state, CONSTANTS }] = await Promise.all([
         import(precheckUrl),
         import(stateUrl),
@@ -865,7 +1093,7 @@ test.describe('Participant session runtime', () => {
 
     await page.evaluate(async () => {
       const stateModule = await import(new URL(
-        'js/web-page/state.js',
+        'js/web-page/state.js?v=20260919-1',
         window.location.href,
       ).href);
       stateModule.setSessionPhase('cognitive_instruction', { force: true });
@@ -883,7 +1111,7 @@ test.describe('Participant session runtime', () => {
 
     await page.evaluate(async () => {
       const stateModule = await import(new URL(
-        'js/web-page/state.js',
+        'js/web-page/state.js?v=20260919-1',
         window.location.href,
       ).href);
       stateModule.setSessionPhase('calibration', { force: true });
@@ -892,7 +1120,7 @@ test.describe('Participant session runtime', () => {
 
     const pauseRejected = await page.evaluate(async () => {
       const stateModule = await import(new URL(
-        'js/web-page/state.js',
+        'js/web-page/state.js?v=20260919-1',
         window.location.href,
       ).href);
       stateModule.setSessionPhase('cognitive_stimulus', { force: true });
@@ -1000,7 +1228,7 @@ test.describe('Participant session runtime', () => {
       shared.sessionData.precheck = { pass_fail: true };
       shared.runtime.precheckData = { pass_fail: true };
       shared.runtime.sessionRuntime.startContinuousModules = async () => true;
-      const moduleUrl = new URL('js/web-page/tests-updated.js', window.location.href).href;
+      const moduleUrl = new URL('js/web-page/tests-updated.js?v=20260919-1', window.location.href).href;
       const { startCalibration } = await import(moduleUrl);
       void startCalibration();
     });
@@ -1015,7 +1243,7 @@ test.describe('Participant session runtime', () => {
       left: (point as HTMLElement).style.left,
       top: (point as HTMLElement).style.top,
     }));
-    expect(markerState).toEqual({ display: 'block', left: '5%', top: '5%' });
+    expect(markerState).toEqual({ display: 'block', left: '8%', top: '8%' });
   });
 
   test('precheck and calibration show only an anonymized reference/current head contour', async ({ page }) => {
@@ -1356,7 +1584,7 @@ test.describe('Participant session runtime', () => {
       // Resolved by the browser from the application origin, not the TS project.
       const { finishSession } = await import(
         // @ts-expect-error The production JS module intentionally has no .d.ts file.
-        '/apps/participant-web/js/web-page/tests-updated.js'
+        '/apps/participant-web/js/web-page/tests-updated.js?v=20260919-1'
       );
       const first = await finishSession();
       const firstFinishAttemptId = shared.sessionData.lifecycle.finishAttemptId;

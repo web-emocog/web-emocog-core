@@ -42,7 +42,12 @@ const invitationsRouter = require('../routes/invitations_new');
 function validPayload() {
   return {
     schemaVersion: 'session_feature.v1',
-    ids: { session: 'S-S2-01', participant: 'P-1', invitationCode: 'INV-1' },
+    ids: {
+      session: 'S-S2-01',
+      participant: 'P-1',
+      participantAlias: 'LAB_P-001',
+      invitationCode: 'INV-1',
+    },
     meta: { user: { interfaceLanguage: 'ru' }, tech: {} },
     lifecycle: {
       schemaVersion: 'session_lifecycle.v1',
@@ -154,6 +159,16 @@ describe('S2-01 ingest allowlist and PII policy', () => {
 
   it('accepts the typed minimal envelope', () => {
     assert.deepEqual(validateSessionFeaturePayload(validPayload()), []);
+  });
+
+  it('rejects unsafe participant aliases while accepting researcher codes', () => {
+    const payload = validPayload();
+    payload.ids.participantAlias = 'participant name';
+    assert.ok(validateSessionFeaturePayload(payload).some(error => (
+      error.path === '/ids/participantAlias' && error.keyword === 'pattern'
+    )));
+    payload.ids.participantAlias = 'LAB_УЧАСТНИК-01';
+    assert.deepEqual(validateSessionFeaturePayload(payload), []);
   });
 
   it('rejects malformed sections and incoherent lifecycle states', () => {

@@ -26,7 +26,7 @@ const TOP_LEVEL_FIELDS = new Set([
   'testHub',
   'gazeTests',
 ]);
-const IDS_FIELDS = new Set(['session', 'participant', 'invitationCode']);
+const IDS_FIELDS = new Set(['session', 'participant', 'participantAlias', 'invitationCode']);
 const META_FIELDS = new Set(['user', 'tech']);
 const META_USER_FIELDS = new Set(['interfaceLanguage']);
 const AUDIO_SUMMARY_FIELDS = new Set([
@@ -513,6 +513,18 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   }
   if (isObject(payload.ids)) {
     validateOptionalString(payload.ids.participant, '/ids/participant', 64, errors);
+    validateOptionalString(payload.ids.participantAlias, '/ids/participantAlias', 64, errors);
+    if (
+      typeof payload.ids.participantAlias === 'string'
+      && !/^[\p{L}\p{N}_-]{1,64}$/u.test(payload.ids.participantAlias)
+    ) {
+      addError(
+        errors,
+        '/ids/participantAlias',
+        'pattern',
+        'participant alias may contain only letters, numbers, hyphens, and underscores'
+      );
+    }
     validateOptionalString(payload.ids.invitationCode, '/ids/invitationCode', 64, errors);
   }
   if (payload.meta !== undefined && payload.meta !== null && !isObject(payload.meta)) {

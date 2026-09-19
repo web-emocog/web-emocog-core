@@ -70,21 +70,21 @@
   }
 
   function normalizeGeometry(shape, sourcePoints) {
-    if (shape !== 'rectangle' && shape !== 'polygon') {
+    if (shape !== 'rectangle' && shape !== 'ellipse' && shape !== 'polygon') {
       return { ok: false, code: 'aoi_shape_invalid' };
     }
     if (!Array.isArray(sourcePoints)) return { ok: false, code: 'aoi_points_invalid' };
     const points = sourcePoints.map(normalizePoint);
     if (points.some(point => point == null)) return { ok: false, code: 'aoi_coordinate_invalid' };
 
-    if (shape === 'rectangle') {
-      if (points.length !== 2) return { ok: false, code: 'aoi_rectangle_points_invalid' };
+    if (shape === 'rectangle' || shape === 'ellipse') {
+      if (points.length !== 2) return { ok: false, code: `aoi_${shape}_points_invalid` };
       const minX = Math.min(points[0].x, points[1].x);
       const minY = Math.min(points[0].y, points[1].y);
       const maxX = Math.max(points[0].x, points[1].x);
       const maxY = Math.max(points[0].y, points[1].y);
       if (maxX - minX < MIN_SIZE || maxY - minY < MIN_SIZE) {
-        return { ok: false, code: 'aoi_rectangle_empty' };
+        return { ok: false, code: `aoi_${shape}_empty` };
       }
       return { ok: true, points: [{ x: minX, y: minY }, { x: maxX, y: maxY }] };
     }
