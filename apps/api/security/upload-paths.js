@@ -81,7 +81,9 @@ function rejectClientOwnedContentPath(metadata) {
 
 function getStoredContentPath(metadata) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
-  return metadata.content_path || null;
+  // contentPath was used by the first upload implementation. Keep it readable
+  // so an existing stimulus does not lose its binary after a server upgrade.
+  return metadata.content_path || metadata.contentPath || null;
 }
 
 function safeDownloadName(value) {

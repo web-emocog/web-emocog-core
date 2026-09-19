@@ -368,6 +368,7 @@ router.post(
     body('ids').optional().isObject(),
     body('ids.session').optional().isString(),
     body('ids.participant').optional().isString(),
+    body('ids.participantAlias').optional({ nullable: true }).isString().matches(/^[\p{L}\p{N}_-]{1,64}$/u),
     body('meta').optional({ nullable: true }).isObject(),
     body('precheck').optional({ nullable: true }).isObject(),
     body('qcSummary').optional({ nullable: true }).isObject(),

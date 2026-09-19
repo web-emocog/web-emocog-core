@@ -203,7 +203,7 @@ test('15-minute gaze retention stays bounded', async ({ page }) => {
       // @ts-expect-error Production browser module intentionally has no .d.ts.
       import('/apps/participant-web/js/web-page/app-updated.js'),
       // @ts-expect-error Production browser module intentionally has no .d.ts.
-      import('/apps/participant-web/js/web-page/state.js'),
+      import('/apps/participant-web/js/web-page/state.js?v=20260919-1'),
     ]);
     state.sessionData.eyeTracking = [];
     for (let index = 0; index < 32_001; index += 1) {

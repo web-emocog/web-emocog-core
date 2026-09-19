@@ -16,12 +16,14 @@ const {
   resolveServerOwnedUploadPath,
   resolveReadableServerOwnedUploadPath,
   rejectClientOwnedContentPath,
+  getStoredContentPath,
   contentDisposition,
 } = require('../security/upload-paths');
 const {
   ALLOWED_UPLOAD_MIME_TYPES,
   INLINE_MEDIA_TYPES,
   matchesDeclaredMediaType,
+  verifyUploadedFileType,
 } = require('../security/stimulus-files');
 const {
   classifyRoute,
@@ -40,7 +42,12 @@ const invitationsRouter = require('../routes/invitations_new');
 function validPayload() {
   return {
     schemaVersion: 'session_feature.v1',
-    ids: { session: 'S-S2-01', participant: 'P-1', invitationCode: 'INV-1' },
+    ids: {
+      session: 'S-S2-01',
+      participant: 'P-1',
+      participantAlias: 'LAB_P-001',
+      invitationCode: 'INV-1',
+    },
     meta: { user: { interfaceLanguage: 'ru' }, tech: {} },
     lifecycle: {
       schemaVersion: 'session_lifecycle.v1',
@@ -152,6 +159,16 @@ describe('S2-01 ingest allowlist and PII policy', () => {
 
   it('accepts the typed minimal envelope', () => {
     assert.deepEqual(validateSessionFeaturePayload(validPayload()), []);
+  });
+
+  it('rejects unsafe participant aliases while accepting researcher codes', () => {
+    const payload = validPayload();
+    payload.ids.participantAlias = 'participant name';
+    assert.ok(validateSessionFeaturePayload(payload).some(error => (
+      error.path === '/ids/participantAlias' && error.keyword === 'pattern'
+    )));
+    payload.ids.participantAlias = 'LAB_УЧАСТНИК-01';
+    assert.deepEqual(validateSessionFeaturePayload(payload), []);
   });
 
   it('rejects malformed sections and incoherent lifecycle states', () => {
@@ -304,6 +321,11 @@ describe('S2-01 upload root confinement', () => {
     assert.equal(rejectClientOwnedContentPath({ contentPath: '/tmp/x' }).ok, false);
   });
 
+  it('keeps legacy contentPath records readable after storage upgrades', () => {
+    assert.equal(getStoredContentPath({ content_path: 'new.png' }), 'new.png');
+    assert.equal(getStoredContentPath({ contentPath: 'legacy.png' }), 'legacy.png');
+  });
+
   it('encodes non-ASCII stimulus names in Content-Disposition headers', () => {
     const value = contentDisposition('inline', 'мяу-мяу.jpg');
     assert.match(value, /^inline; filename="[\x20-\x7e]+";/);
@@ -329,6 +351,26 @@ describe('S2-01 upload root confinement', () => {
     assert.equal(matchesDeclaredMediaType(Buffer.from('%PDF-1.7'), 'application/pdf'), true);
   });
 
+  it('verifies uploaded media only inside the server-owned root', async () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wecog-upload-signature-'));
+    const localRoot = path.join(temp, 'uploads');
+    const outside = path.join(temp, 'outside.png');
+    const validName = '4b8fbca1-3f3f-40bf-b86c-e7b438c8862f_image.png';
+    const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    fs.mkdirSync(localRoot);
+    fs.writeFileSync(path.join(localRoot, validName), pngSignature);
+    fs.writeFileSync(outside, pngSignature);
+    fs.symlinkSync(outside, path.join(localRoot, 'linked.png'));
+    try {
+      assert.equal(await verifyUploadedFileType(localRoot, validName, 'image/png'), true);
+      assert.equal(await verifyUploadedFileType(localRoot, '../outside.png', 'image/png'), false);
+      assert.equal(await verifyUploadedFileType(localRoot, 'linked.png', 'image/png'), false);
+      assert.equal(await verifyUploadedFileType(localRoot, validName, 'image/svg+xml'), false);
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
   it('does not follow an in-root symlink outside uploads root', async () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wecog-upload-path-'));
     const localRoot = path.join(temp, 'uploads');
@@ -351,6 +393,10 @@ describe('S1 typed transport boundary', () => {
     const appSource = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
     assert.doesNotMatch(appSource, /app\.use\(['"]\/events/);
     assert.match(appSource, /app\.use\(['"]\/ingest/);
+    assert.match(
+      appSource,
+      /app\.use\(rateLimit\(buildRouteRateLimitOptions\(config\.http\.rateLimits\)\)\)/
+    );
   });
 });
 
@@ -467,55 +513,66 @@ describe('S2-01 route-specific HTTP controls', () => {
     assert.equal(ingest.body.value.length, 150);
   });
 
-  it('rate-limits each route profile independently', () => {
-    let now = 1000;
+  it('rate-limits each route profile independently', async () => {
     const limiter = createRouteRateLimiter(
       { auth: 2, ingest: 3, default: 4 },
-      { now: () => now, windowMs: 1000 }
+      { windowMs: 60_000, validate: false }
     );
-    const run = pathValue => {
-      const req = { path: pathValue, ip: '127.0.0.1' };
+    const run = pathValue => new Promise((resolve, reject) => {
+      const req = { path: pathValue, ip: '127.0.0.1', headers: {}, socket: {} };
       const response = {
         headers: {},
         statusCode: 200,
         setHeader(name, value) { this.headers[name] = value; },
+        getHeader(name) { return this.headers[name]; },
         status(value) { this.statusCode = value; return this; },
-        json(value) { this.body = value; return this; },
+        json(value) {
+          this.body = value;
+          resolve({ response: this, nextCalled: false });
+          return this;
+        },
       };
-      let nextCalled = false;
-      limiter(req, response, () => { nextCalled = true; });
-      return { response, nextCalled };
-    };
-    assert.equal(run('/auth/login').nextCalled, true);
-    assert.equal(run('/auth/login').nextCalled, true);
-    assert.equal(run('/auth/login').response.statusCode, 429);
-    assert.equal(run('/ingest').nextCalled, true);
-    now = 2001;
-    assert.equal(run('/auth/login').nextCalled, true);
+      Promise.resolve(limiter(req, response, () => {
+        resolve({ response, nextCalled: true });
+      })).catch(reject);
+    });
+    assert.equal((await run('/auth/login')).nextCalled, true);
+    assert.equal((await run('/auth/login')).nextCalled, true);
+    const rejected = await run('/auth/login');
+    assert.equal(rejected.response.statusCode, 429);
+    assert.equal(rejected.response.body.route_profile, 'auth');
+    assert.ok(Number(rejected.response.headers['Retry-After']) >= 1);
+    assert.equal((await run('/ingest')).nextCalled, true);
   });
 
-  it('keeps rate-limit memory bounded when source addresses rotate', () => {
+  it('keeps independent rate-limit counters for different addresses', async () => {
     const limiter = createRouteRateLimiter(
       { auth: 1, ingest: 1, default: 1 },
-      { now: () => 1000, windowMs: 60_000, maxBuckets: 1 }
+      { windowMs: 60_000, validate: false }
     );
-    const run = ip => {
-      const req = { path: '/auth/login', ip };
+    const run = ip => new Promise((resolve, reject) => {
+      const req = { path: '/auth/login', ip, headers: {}, socket: {} };
       const response = {
+        headers: {},
         statusCode: 200,
-        setHeader() {},
+        setHeader(name, value) { this.headers[name] = value; },
+        getHeader(name) { return this.headers[name]; },
         status(value) { this.statusCode = value; return this; },
-        json(value) { this.body = value; return this; },
+        json(value) {
+          this.body = value;
+          resolve({ response: this, nextCalled: false });
+          return this;
+        },
       };
-      let nextCalled = false;
-      limiter(req, response, () => { nextCalled = true; });
-      return { response, nextCalled };
-    };
+      Promise.resolve(limiter(req, response, () => {
+        resolve({ response, nextCalled: true });
+      })).catch(reject);
+    });
 
-    assert.equal(run('192.0.2.1').nextCalled, true);
-    assert.equal(run('192.0.2.1').response.statusCode, 429);
-    assert.equal(run('192.0.2.2').nextCalled, true);
-    assert.equal(run('192.0.2.1').nextCalled, true);
+    assert.equal((await run('192.0.2.1')).nextCalled, true);
+    assert.equal((await run('192.0.2.1')).response.statusCode, 429);
+    assert.equal((await run('192.0.2.2')).nextCalled, true);
+    assert.equal((await run('192.0.2.1')).response.statusCode, 429);
   });
 });
 

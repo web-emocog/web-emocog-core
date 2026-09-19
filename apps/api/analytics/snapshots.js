@@ -166,7 +166,9 @@ async function loadProtocol(queryable, projectId, protocolId) {
 
 async function loadCandidateSessions(queryable, projectId, protocolId) {
   const result = await queryable.query(
-    `SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id,
+    `SELECT s.id, s.session_id,
+            COALESCE(NULLIF(f.payload->'ids'->>'participantAlias', ''), s.participant_id) AS participant_id,
+            s.project_id, s.protocol_id,
             s.started_at, s.stopped_at, s.updated_at,
             q.qc_score, q.validity AS qc_validity, q.fail_reasons,
             q.payload AS qc_payload, q.updated_at AS qc_updated_at,

@@ -7,7 +7,7 @@
     <title>wecog — исследование</title>
     <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
 
-    <link rel="stylesheet" href="style.css?v=20260912-1">
+    <link rel="stylesheet" href="style.css?v=20260919-1">
     <link rel="stylesheet" href="participant-redesign.css?v=20260820-3">
     <script>
       (function () {
@@ -58,7 +58,7 @@
             <div class="calibration-intro-card" role="dialog" aria-modal="true" aria-labelledby="calibrationIntroTitle">
                 <div class="calibration-intro-kicker" id="calibrationIntroKicker">Калибровка взгляда</div>
                 <h2 id="calibrationIntroTitle">Перед началом</h2>
-                <p id="calibrationIntroText">Сядьте удобно и держите голову естественно. Смотрите на каждый красный круг и нажимайте на него. Не моргайте в момент нажатия.</p>
+                <p id="calibrationIntroText">Сядьте удобно и держите голову естественно. На каждый красный круг нужно нажать два раза, продолжая смотреть в его центр между нажатиями. Не моргайте в момент нажатия.</p>
                 <button type="button" id="calibrationIntroStartBtn" class="btn">Начать калибровку</button>
             </div>
         </div>
@@ -83,7 +83,7 @@
             </div>
         </div>
         <div class="calib-instruction">
-            <span id="calibInstructionText" class="calibration-live-copy">Смотрите на красный круг и нажимайте на него. Не моргайте в момент нажатия.</span>
+            <span id="calibInstructionText" class="calibration-live-copy">Смотрите на красный круг и нажмите на него два раза. Между нажатиями продолжайте смотреть в центр круга.</span>
             <div class="calib-progress">
                 <span id="calibProgressText" class="calibration-live-copy">Точка 1 из 25</span>
             </div>
@@ -231,6 +231,12 @@
                         </select>
                     </div>
                 </div>
+                <div class="form-group">
+                    <label for="participantCode" data-i18n="label_participant_code">Код участника (необязательно)</label>
+                    <input type="text" id="participantCode" maxlength="64" autocomplete="off" placeholder="P-001" data-i18n-placeholder="placeholder_participant_code">
+                    <small data-i18n="participant_code_hint">Можно указать код исследователя. Защищённый ID сессии создаётся автоматически.</small>
+                    <div id="participantCodeError" class="form-error" role="alert" hidden></div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label data-i18n="label_lang">Родной язык</label>
@@ -311,7 +317,7 @@
                     <video id="precheckVideo" autoplay playsinline muted></video>
                     <canvas id="overlayCanvas"></canvas>
                     <div class="face-guide"></div>
-                    <div class="guide-text" data-i18n="guide_text">Расположите лицо внутри рамки</div>
+                    <div class="guide-text" data-i18n="guide_text">Расположите лицо в кадре и смотрите на экран; положение контролируйте по индикаторам</div>
                 </div>
                 
                 <!-- Индикаторы -->
@@ -480,6 +486,7 @@
                     <div id="cognitiveEmotionHud" style="position:absolute;top:8px;left:8px;right:8px;text-align:center;font-size:13px;z-index:25;pointer-events:none;color:#333;"></div>
                     <div id="cogShape" class="cog-shape"></div>
                     <img id="cogImage" class="cog-image" style="display: none;">
+                    <video id="cogVideo" class="cog-image cog-video" style="display: none;" playsinline preload="auto"></video>
                     <div id="cogFixation" class="cog-fixation">+</div>
                     <div id="cogFeedback" class="cog-feedback" style="display: none;"></div>
                 </div>
@@ -534,10 +541,11 @@
         };
       }
     </script>
-    <script src="../shared/standard-stimuli.js?v=20260914-1"></script>
-    <script src="../web/cognitive-task-protocols.js?v=20260909-1"></script>
+    <script src="../shared/protocol-stimuli.js?v=20260915-1"></script>
+    <script src="../shared/standard-stimuli.js?v=20260919-1"></script>
+    <script src="../web/cognitive-task-protocols.js?v=20260919-1"></script>
     <script src="../shared/survey-contract.js?v=20260828-2"></script>
-    <script type="module" src="js/web-page/app-updated.js?v=20260913-7"></script>
+    <script type="module" src="js/web-page/app-updated.js?v=20260919-1"></script>
     <script>
       (function () {
         const ru = document.getElementById('langRu');
