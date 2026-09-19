@@ -1,5 +1,5 @@
-import { state, clearTaskContext, setSessionPhase, recordSessionEvent } from '../../web-page/state.js';
-import { translations } from '../../../translations.js?v=20260828-2';
+import { state, clearTaskContext, setSessionPhase, recordSessionEvent } from '../../web-page/state.js?v=20260919-1';
+import { translations } from '../../../translations.js?v=20260919-1';
 import { getEmotionSample } from '../../emotion-stub-new.js';
 import { TEST_IDS, TEST_PHASES } from './constants.js';
 import {
@@ -13,8 +13,8 @@ import {
     startGazeTestsAnalysisLoop,
     stopGazeTestsAnalysisLoop,
     isGazeTestsAnalysisLoopRunning
-} from './common/analysis-loop.js?v=20260915-1';
-import { getSessionRuntime } from '../../session-runtime/index.js?v=20260915-1';
+} from './common/analysis-loop.js?v=20260919-1';
+import { getSessionRuntime } from '../../session-runtime/index.js?v=20260919-1';
 
 let hubBusy = false;
 let hubEmotionTimer = null;

@@ -1,4 +1,4 @@
-import { state, setSessionPhase, setTaskContext, clearTaskContext, recordSessionEvent } from '../../../web-page/state.js';
+import { state, setSessionPhase, setTaskContext, clearTaskContext, recordSessionEvent } from '../../../web-page/state.js?v=20260919-1';
 import { TEST_PHASES, VISUOSPATIAL_CONFIG } from '../constants.js';
 import { pickRandomPrompt } from './prompts.js';
 import { computeVisuospatialMetrics } from './metrics.js';

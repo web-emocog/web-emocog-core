@@ -17,6 +17,7 @@ test('participant final aggregates pass ingest policy and remain visible to rese
     ids: {
       session: 'S-FINAL-CONTRACT',
       participant: 'P-FINAL-CONTRACT',
+      participantAlias: 'LAB_УЧАСТНИК-01',
       invitationCode: 'INV-FINAL-CONTRACT',
     },
     user: {
@@ -120,6 +121,7 @@ test('participant final aggregates pass ingest policy and remain visible to rese
   assert.equal(payload.multimodal_summary.rawVideoStored, false);
   assert.equal(payload.multimodal_heatmap.coordinateSpace, 'stimulus_normalized_0_1');
   assert.equal(payload.emotion_summary.n, 10);
+  assert.equal(payload.ids.participantAlias, 'LAB_УЧАСТНИК-01');
 
   const researcherRow = {
     id: 1,

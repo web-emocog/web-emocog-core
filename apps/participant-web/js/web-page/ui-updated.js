@@ -4,11 +4,11 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
-import { state, recordSessionEvent } from './state.js';
-import { translations } from '../../translations.js?v=20260828-2';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20260909-1';
+import { state, recordSessionEvent } from './state.js?v=20260919-1';
+import { translations } from '../../translations.js?v=20260919-1';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20260919-1';
 import { measureRenderFPS } from './camera.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260828-2';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260919-1';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
 import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
@@ -72,7 +72,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20260915-1');
+        const mod = await import('./tests-updated.js?v=20260919-1');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;
@@ -427,6 +427,19 @@ export function submitForm() {
     const ageRaw = document.getElementById('age')?.value ?? document.getElementById('ageInput')?.value ?? '';
     const age    = Number(ageRaw);
     const gender = document.getElementById('gender')?.value ?? document.getElementById('genderSelect')?.value;
+    const participantCode = String(document.getElementById('participantCode')?.value || '').trim();
+    const participantCodeValid = !participantCode || /^[\p{L}\p{N}_-]{1,64}$/u.test(participantCode);
+    const participantCodeError = document.getElementById('participantCodeError');
+    if (!participantCodeValid) {
+        if (participantCodeError) {
+            participantCodeError.hidden = false;
+            participantCodeError.textContent = lang === 'ru'
+                ? 'Используйте до 64 букв, цифр, дефисов или подчёркиваний без пробелов.'
+                : 'Use up to 64 letters, numbers, hyphens, or underscores without spaces.';
+        }
+        return;
+    }
+    if (participantCodeError) participantCodeError.hidden = true;
 
     const ageError = document.getElementById('ageError');
     if (isNaN(age) || age <= 0) {
@@ -451,6 +464,7 @@ export function submitForm() {
     state.sessionData.user.hand        = document.getElementById('hand')?.value       || document.getElementById('handSelect')?.value   || '';
     state.sessionData.user.inputDevice = document.getElementById('inputDevice')?.value || document.getElementById('deviceSelect')?.value || '';
     state.sessionData.user.keyboard    = document.getElementById('keyboardType')?.value || document.getElementById('keyboardSelect')?.value || '';
+    state.sessionData.ids.participantAlias = participantCode || null;
 
     nextStep(MVP_STEP.PRECHECK);
     return true;
@@ -513,6 +527,8 @@ export function checkForm() {
     const age    = Number(ageRaw);
     const gender = document.getElementById('gender')?.value ?? document.getElementById('genderSelect')?.value;
     const edu    = document.getElementById('education')?.value ?? document.getElementById('eduSelect')?.value;
+    const participantCode = String(document.getElementById('participantCode')?.value || '').trim();
+    const participantCodeValid = !participantCode || /^[\p{L}\p{N}_-]{1,64}$/u.test(participantCode);
 
     const ageValid  = ageRaw.trim() !== ''
         && Number.isInteger(age)
@@ -520,7 +536,8 @@ export function checkForm() {
         && age <= 99;
     const allFilled = ageValid
         && gender && gender !== ''
-        && edu    && edu    !== '';
+        && edu    && edu    !== ''
+        && participantCodeValid;
 
     const btn = document.getElementById('formBtn') || document.getElementById('btnSubmitForm');
     if (btn) btn.disabled = !allFilled;

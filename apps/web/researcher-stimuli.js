@@ -206,7 +206,9 @@ function requestStimulusUploadDetails(files) {
   const entries = sourceFiles.map(file => ({
     file,
     name: String(file.name || '').replace(/\.[^.]+$/, '') || (CURRENT_LANG === 'en' ? 'Untitled stimulus' : 'Стимул без названия'),
-    previewObjectUrl: (String(file.type || '').startsWith('image/')
+    previewObjectUrl: ((String(file.type || '').startsWith('image/')
+      || String(file.type || '').startsWith('video/')
+      || String(file.type || '').startsWith('audio/'))
       && typeof URL !== 'undefined'
       && typeof URL.createObjectURL === 'function')
       ? URL.createObjectURL(file)
@@ -218,9 +220,13 @@ function requestStimulusUploadDetails(files) {
     const rows = entries.map((entry, index) => `
       <div data-upload-row="${index}" style="display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;padding:10px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel2);">
         <div style="width:72px;height:58px;border-radius:9px;overflow:hidden;background:var(--card-bg);display:flex;align-items:center;justify-content:center;">
-          ${entry.previewObjectUrl
+          ${entry.previewObjectUrl && stimulusTypeFromFile(entry.file) === 'image'
             ? `<img src="${escapeStimulusHtml(entry.previewObjectUrl)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block;">`
-            : `<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="26" height="26" style="color:var(--muted);">${getIconForType(stimulusTypeFromFile(entry.file))}</svg>`}
+            : entry.previewObjectUrl && stimulusTypeFromFile(entry.file) === 'video'
+              ? `<video src="${escapeStimulusHtml(entry.previewObjectUrl)}" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:contain;display:block;"></video>`
+              : entry.previewObjectUrl && stimulusTypeFromFile(entry.file) === 'audio'
+                ? `<audio src="${escapeStimulusHtml(entry.previewObjectUrl)}" controls preload="metadata" style="width:66px;height:32px;"></audio>`
+                : `<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="26" height="26" style="color:var(--muted);">${getIconForType(stimulusTypeFromFile(entry.file))}</svg>`}
         </div>
         <label style="min-width:0;font-size:11px;color:var(--muted);">
           ${CURRENT_LANG === 'en' ? 'Stimulus title' : 'Название стимула'}
@@ -1047,7 +1053,7 @@ function clampAoiCoordinate(value) {
 }
 
 function normalizeAoi(aoi, stimulusId, fallbackOrder = 1) {
-  if (!aoi || (aoi.shape !== 'rectangle' && aoi.shape !== 'polygon')) return null;
+  if (!aoi || !['rectangle', 'ellipse', 'polygon'].includes(aoi.shape)) return null;
   const geometry = globalThis.EmocogAoiGeometry?.normalizeGeometry(aoi.shape, aoi.points);
   if (!geometry?.ok) return null;
   const points = geometry.points;
@@ -1057,9 +1063,11 @@ function normalizeAoi(aoi, stimulusId, fallbackOrder = 1) {
   const orderRaw = parseInt(aoi.order, 10);
   return {
     id: String(aoi.id || `aoi-${Date.now()}`),
-    name: String(aoi.name || (aoi.shape === 'rectangle'
-      ? (CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI')
-      : (CURRENT_LANG === 'en' ? 'Polygon AOI' : 'Полигон AOI'))),
+    name: String(aoi.name || ({
+      rectangle: CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI',
+      ellipse: CURRENT_LANG === 'en' ? 'Ellipse AOI' : 'Овальная AOI',
+      polygon: CURRENT_LANG === 'en' ? 'Polygon AOI' : 'Полигон AOI'
+    }[aoi.shape])),
     shape: aoi.shape,
     points,
     order: Number.isFinite(orderRaw) && orderRaw > 0 ? orderRaw : fallbackOrder,
@@ -1134,6 +1142,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     </div>
     <div style="padding:10px 14px;border-bottom:1px solid var(--stroke);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <button id="aoiRect" class="quick-btn">▭ ${CURRENT_LANG === 'en' ? 'Rectangle' : 'Прямоугольник'}</button>
+      <button id="aoiEllipse" class="quick-btn">⬭ ${CURRENT_LANG === 'en' ? 'Ellipse' : 'Овал'}</button>
       <button id="aoiPoly" class="quick-btn">⬠ ${CURRENT_LANG === 'en' ? 'Polygon' : 'Полигон'}</button>
       <button id="aoiFinishPoly" class="quick-btn" style="display:none;background:rgba(16,185,129,.12);color:var(--good);">✓ ${CURRENT_LANG === 'en' ? 'Finish' : 'Завершить'}</button>
       <button id="aoiCancelDraw" class="quick-btn" style="display:none;">${CURRENT_LANG === 'en' ? 'Cancel drawing' : 'Отменить рисование'}</button>
@@ -1184,7 +1193,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     return { x: clampAoiCoordinate((event.clientX - rect.left) / rect.width), y: clampAoiCoordinate((event.clientY - rect.top) / rect.height) };
   };
   const newId = shape => {
-    const prefix = `aoi-${shape === 'rectangle' ? 'rect' : 'poly'}-`;
+    const prefix = `aoi-${shape === 'rectangle' ? 'rect' : shape === 'ellipse' ? 'ellipse' : 'poly'}-`;
     let index = aois.length + 1;
     while (aois.some(aoi => aoi.id === prefix + index)) index += 1;
     return prefix + index;
@@ -1289,7 +1298,7 @@ async function openAoiEditor(stimulusId, options = {}) {
   function renderList() {
     list.innerHTML = aois.length ? aois.map(aoi => `<div class="aoi-list-row" data-id="${aoiEscape(aoi.id)}" style="display:flex;align-items:stretch;gap:4px;border-top:2px solid transparent;border-bottom:2px solid transparent;transition:border-color .12s ease,opacity .12s ease;">
       <span class="aoi-drag-handle" draggable="true" data-id="${aoiEscape(aoi.id)}" title="${CURRENT_LANG === 'en' ? 'Drag to change order' : 'Перетащите, чтобы изменить порядок'}" aria-label="${CURRENT_LANG === 'en' ? 'Drag to change order' : 'Перетащите, чтобы изменить порядок'}" style="width:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;letter-spacing:-4px;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>
-      <button class="aoi-list-item quick-btn" data-id="${aoiEscape(aoi.id)}" style="min-width:0;flex:1;justify-content:flex-start;text-align:left;${aoi.id === selectedId ? 'border-color:rgba(92,102,189,.45);background:rgba(92,102,189,.07);box-shadow:0 2px 8px rgba(92,102,189,.08);' : ''}"><span style="width:18px;height:18px;border-radius:6px;background:${aoi.isTarget ? 'rgba(16,185,129,.12)' : 'rgba(92,102,189,.10)'};color:${aoi.isTarget ? 'var(--good)' : 'var(--accent)'};border:1px solid ${aoi.isTarget ? 'rgba(16,185,129,.24)' : 'rgba(92,102,189,.20)'};display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">${aoi.order}</span><span style="color:${aoi.isTarget ? 'var(--good)' : 'var(--muted)'};font-size:11px;">${aoi.shape === 'rectangle' ? '▭' : '⬠'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${aoiEscape(aoi.name)}</span></button>
+      <button class="aoi-list-item quick-btn" data-id="${aoiEscape(aoi.id)}" style="min-width:0;flex:1;justify-content:flex-start;text-align:left;${aoi.id === selectedId ? 'border-color:rgba(92,102,189,.45);background:rgba(92,102,189,.07);box-shadow:0 2px 8px rgba(92,102,189,.08);' : ''}"><span style="width:18px;height:18px;border-radius:6px;background:${aoi.isTarget ? 'rgba(16,185,129,.12)' : 'rgba(92,102,189,.10)'};color:${aoi.isTarget ? 'var(--good)' : 'var(--accent)'};border:1px solid ${aoi.isTarget ? 'rgba(16,185,129,.24)' : 'rgba(92,102,189,.20)'};display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">${aoi.order}</span><span style="color:${aoi.isTarget ? 'var(--good)' : 'var(--muted)'};font-size:11px;">${aoi.shape === 'rectangle' ? '▭' : aoi.shape === 'ellipse' ? '◯' : '⬠'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${aoiEscape(aoi.name)}</span></button>
     </div>`).join('') : `<div style="font-size:11px;color:var(--muted);padding:8px 0;">${CURRENT_LANG === 'en' ? 'No AOIs yet' : 'AOI пока нет'}</div>`;
     list.querySelectorAll('.aoi-list-item').forEach(button => button.addEventListener('click', () => { selectedId = button.dataset.id; renderAll(); }));
     list.querySelectorAll('.aoi-drag-handle').forEach(handle => {
@@ -1340,8 +1349,10 @@ async function openAoiEditor(stimulusId, options = {}) {
     const maxX = Math.max(...aoi.points.map(point => point.x)) * 1000;
     const maxY = Math.max(...aoi.points.map(point => point.y)) * 1000;
     let markup = aoi.shape === 'rectangle'
-      ? `<rect data-select="${aoiEscape(aoi.id)}" x="${aoi.points[0].x * 1000}" y="${aoi.points[0].y * 1000}" width="${(aoi.points[1].x - aoi.points[0].x) * 1000}" height="${(aoi.points[1].y - aoi.points[0].y) * 1000}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`
-      : `<polygon data-select="${aoiEscape(aoi.id)}" points="${points}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`;
+      ? `<rect data-select="${aoiEscape(aoi.id)}" x="${minX}" y="${minY}" width="${maxX - minX}" height="${maxY - minY}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`
+      : aoi.shape === 'ellipse'
+        ? `<ellipse data-select="${aoiEscape(aoi.id)}" cx="${(minX + maxX) / 2}" cy="${(minY + maxY) / 2}" rx="${(maxX - minX) / 2}" ry="${(maxY - minY) / 2}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`
+        : `<polygon data-select="${aoiEscape(aoi.id)}" points="${points}" fill="${color}" fill-opacity="${selected ? '.12' : '.075'}" stroke="${color}" stroke-width="${selected ? 4 : 2.5}" style="cursor:move;"/>`;
     const labelX = aoi.points.reduce((sum, point) => sum + point.x, 0) / aoi.points.length * 1000;
     const labelY = aoi.points.reduce((sum, point) => sum + point.y, 0) / aoi.points.length * 1000;
     markup += `<text x="${labelX}" y="${labelY + 7}" text-anchor="middle" font-size="22" font-weight="500" fill="${color}" stroke="#ffffff" stroke-width="4" paint-order="stroke" pointer-events="none">${aoi.order}</text>`;
@@ -1358,13 +1369,16 @@ async function openAoiEditor(stimulusId, options = {}) {
   }
   function renderSvg() {
     let markup = aois.map(shapeMarkup).join('');
-    if (drawMode === 'rectangle' && rectangleStart && rectangleCurrent) {
+    if ((drawMode === 'rectangle' || drawMode === 'ellipse') && rectangleStart && rectangleCurrent) {
       const x = Math.min(rectangleStart.x, rectangleCurrent.x) * 1000;
       const y = Math.min(rectangleStart.y, rectangleCurrent.y) * 1000;
       const width = Math.abs(rectangleCurrent.x - rectangleStart.x) * 1000;
       const height = Math.abs(rectangleCurrent.y - rectangleStart.y) * 1000;
-      markup += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f97316" fill-opacity=".10" stroke="#ffffff" stroke-opacity=".9" stroke-width="8" stroke-dasharray="15 10" pointer-events="none"/>`;
-      markup += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="none" stroke="#f97316" stroke-width="4" stroke-dasharray="15 10" pointer-events="none"/>`;
+      const preview = drawMode === 'ellipse'
+        ? `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${width / 2}" ry="${height / 2}"`
+        : `<rect x="${x}" y="${y}" width="${width}" height="${height}"`;
+      markup += `${preview} fill="#f97316" fill-opacity=".10" stroke="#ffffff" stroke-opacity=".9" stroke-width="8" stroke-dasharray="15 10" pointer-events="none"/>`;
+      markup += `${preview} fill="none" stroke="#f97316" stroke-width="4" stroke-dasharray="15 10" pointer-events="none"/>`;
     }
     if (drawMode === 'polygon' && draftPoints.length) {
       const previewPoints = polygonCursor ? [...draftPoints, polygonCursor] : draftPoints;
@@ -1384,7 +1398,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     polygonCursor = null;
     finishButton.style.display = mode === 'polygon' ? '' : 'none';
     cancelButton.style.display = mode ? '' : 'none';
-    hint.textContent = mode === 'rectangle'
+    hint.textContent = mode === 'rectangle' || mode === 'ellipse'
       ? (CURRENT_LANG === 'en' ? 'Drag across the preview' : 'Протяните мышью по preview')
       : mode === 'polygon'
         ? (CURRENT_LANG === 'en' ? 'Click at least 3 vertices' : 'Поставьте минимум 3 вершины')
@@ -1399,6 +1413,7 @@ async function openAoiEditor(stimulusId, options = {}) {
   }
 
   modal.querySelector('#aoiRect').addEventListener('click', () => setDrawMode('rectangle'));
+  modal.querySelector('#aoiEllipse').addEventListener('click', () => setDrawMode('ellipse'));
   modal.querySelector('#aoiPoly').addEventListener('click', () => setDrawMode('polygon'));
   finishButton.addEventListener('click', finishPolygon);
   cancelButton.addEventListener('click', () => setDrawMode(null));
@@ -1441,7 +1456,7 @@ async function openAoiEditor(stimulusId, options = {}) {
       renderAll();
       return;
     }
-    if (drawMode === 'rectangle') {
+    if (drawMode === 'rectangle' || drawMode === 'ellipse') {
       rectangleStart = pointFromEvent(event);
       rectangleCurrent = rectangleStart;
       svg.setPointerCapture(event.pointerId);
@@ -1484,14 +1499,14 @@ async function openAoiEditor(stimulusId, options = {}) {
           y: clampAoiCoordinate(newMinY + ((point.y - bounds.minY) / sourceHeight) * (newMaxY - newMinY))
         }));
       }
-      if (selectedAoi().shape === 'rectangle') {
+      if (selectedAoi().shape === 'rectangle' || selectedAoi().shape === 'ellipse') {
         const normalized = normalizeAoi(selectedAoi(), stimulus.id);
         if (normalized) selectedAoi().points = normalized.points;
       }
       renderForm(); renderSvg();
       return;
     }
-    if (drawMode === 'rectangle' && rectangleStart) {
+    if ((drawMode === 'rectangle' || drawMode === 'ellipse') && rectangleStart) {
       rectangleCurrent = pointFromEvent(event);
       renderSvg();
       return;
@@ -1503,16 +1518,20 @@ async function openAoiEditor(stimulusId, options = {}) {
   });
   svg.addEventListener('pointerup', event => {
     if (dragging) { dragging = null; saveAll(); renderAll(); return; }
-    if (drawMode !== 'rectangle' || !rectangleStart) return;
+    if ((drawMode !== 'rectangle' && drawMode !== 'ellipse') || !rectangleStart) return;
     const end = rectangleCurrent || pointFromEvent(event);
     if (Math.abs(end.x - rectangleStart.x) < 0.005 || Math.abs(end.y - rectangleStart.y) < 0.005) {
       rectangleStart = null;
       rectangleCurrent = null;
       renderSvg();
-      return toast(CURRENT_LANG === 'en' ? 'Draw a larger rectangle' : 'Нарисуйте прямоугольник большего размера');
+      return toast(CURRENT_LANG === 'en' ? 'Draw a larger shape' : 'Нарисуйте область большего размера');
     }
-    const aoi = normalizeAoi({ id: newId('rectangle'), name: CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI', shape: 'rectangle', points: [rectangleStart, end], order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false, validityInterval: { startMs: 0, endMs: 1000 } }, stimulus.id, aois.length + 1);
-    if (!aoi) return toast(CURRENT_LANG === 'en' ? 'Draw a larger rectangle' : 'Нарисуйте прямоугольник большего размера');
+    const shape = drawMode;
+    const shapeName = shape === 'ellipse'
+      ? (CURRENT_LANG === 'en' ? 'Ellipse AOI' : 'Овальная AOI')
+      : (CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI');
+    const aoi = normalizeAoi({ id: newId(shape), name: shapeName, shape, points: [rectangleStart, end], order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false, validityInterval: { startMs: 0, endMs: 1000 } }, stimulus.id, aois.length + 1);
+    if (!aoi) return toast(CURRENT_LANG === 'en' ? 'Draw a larger shape' : 'Нарисуйте область большего размера');
     aois.push(aoi); selectedId = aoi.id; setDrawMode(null); saveAll(); renderAll();
   });
   svg.addEventListener('pointercancel', () => {

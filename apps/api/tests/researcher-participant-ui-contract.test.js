@@ -159,8 +159,9 @@ describe('participant test hub contract', () => {
     const rectSource = app.slice(rectStart, rectEnd);
     assert.match(rectSource, /getElementById\('cognitiveStimulusArea'\)/);
     assert.doesNotMatch(rectSource, /getElementById\('cogImage'\)/);
-    assert.match(task, /classList\.add\('cognitive-stimulus-presenting'\)/);
-    assert.match(css, /body\.cognitive-stimulus-presenting[\s\S]+#cognitiveStimulusArea/);
+    assert.match(task, /classList\.toggle\('cognitive-stimulus-fullscreen'/);
+    assert.match(css, /body\.cognitive-stimulus-fullscreen[\s\S]+#cognitiveStimulusArea/);
+    assert.doesNotMatch(css, /cognitive-stimulus-presenting/);
     assert.match(html, /id="validationIntro"/);
     assert.match(html, /id="validationResult"/);
     assert.match(tests, /validation_instruction_acknowledged/);
@@ -378,7 +379,7 @@ describe('researcher navigation contract', () => {
     assert.match(ui, /wecog:languagechange/);
     assert.match(runner, /refreshLocalizedInstructionScreen/);
     assert.match(runner, /captureSurveyDraft/);
-    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260915-1/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260919-1/);
   });
 
   it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
@@ -451,6 +452,10 @@ describe('researcher navigation contract', () => {
     assert.match(participant, /trial\?\.fixationMin/);
     assert.match(participant, /trial\?\.iti/);
     assert.match(participant, /requestCognitiveFullscreen/);
+    assert.match(participant, /toPassiveBlockFromV2/);
+    assert.match(participant, /block\?\.blockConfig\?\.randomize === true/);
+    assert.match(participant, /getElementById\('cogVideo'\)/);
+    assert.match(participant, /protocolDurationMs/);
   });
 
   it('keeps calibration, timed rest and audio-test flows recoverable and visible', () => {
@@ -517,17 +522,47 @@ describe('researcher navigation contract', () => {
     const tests = read('participant-web/js/web-page/tests-updated.js');
     const task = read('participant-web/js/web-page/experimental_task-updated.js');
     const runtime = read('participant-web/js/session-runtime/index.js');
+    const ui = read('participant-web/js/web-page/ui-updated.js');
+    const gazeTests = read('participant-web/js/gaze-tracker/gaze-tests/index.js');
+    const gazeAnalysis = read('participant-web/js/gaze-tracker/gaze-tests/common/analysis-loop.js');
+    const vpcRunner = read('participant-web/js/gaze-tracker/gaze-tests/vpc/runner.js');
+    const visuospatialRunner = read('participant-web/js/gaze-tracker/gaze-tests/visuospatial/runner.js');
+    const precheck = read('participant-web/js/web-page/precheck-updated.js');
+    const camera = read('participant-web/js/web-page/camera.js');
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260915-1/);
-    assert.match(app, /tests-updated\.js\?v=20260915-1/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260915-1/);
-    assert.match(task, /tests-updated\.js\?v=20260915-1/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260915-1/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260915-1/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260915-1/);
-    assert.match(runtime, /tests-updated\.js\?v=20260915-1/);
+    assert.match(tests, /ui-updated\.js\?v=20260919-1/);
+    assert.match(app, /tests-updated\.js\?v=20260919-1/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20260919-1/);
+    assert.match(task, /tests-updated\.js\?v=20260919-1/);
+    assert.match(app, /session-runtime\/index\.js\?v=20260919-1/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20260919-1/);
+    assert.match(task, /session-runtime\/index\.js\?v=20260919-1/);
+    assert.match(runtime, /tests-updated\.js\?v=20260919-1/);
+    assert.match(runtime, /runtime-ui\.js\?v=20260919-1/);
+    assert.match(app, /precheck-updated\.js\?v=20260919-1/);
+    assert.match(tests, /precheck-updated\.js\?v=20260919-1/);
+    assert.match(ui, /precheck-updated\.js\?v=20260919-1/);
+    assert.match(tests, /gaze-tests\/index\.js\?v=20260919-1/);
+    assert.match(gazeTests, /analysis-loop\.js\?v=20260919-1/);
+    assert.match(tests, /unified-aggregates-new\.js\?v=20260919-1/);
+    assert.match(ui, /unified-aggregates-new\.js\?v=20260919-1/);
+    for (const source of [
+      app,
+      tests,
+      task,
+      runtime,
+      ui,
+      precheck,
+      camera,
+      gazeTests,
+      gazeAnalysis,
+      vpcRunner,
+      visuospatialRunner,
+    ]) {
+      assert.match(source, /state\.js\?v=20260919-1/);
+    }
     assert.match(app, /protocol-invite-utils\.js\?v=20260915-1/);
     assert.match(tests, /protocol-invite-utils\.js\?v=20260915-1/);
     assert.match(task, /protocol-invite-utils\.js\?v=20260915-1/);
@@ -546,7 +581,9 @@ describe('researcher navigation contract', () => {
     assert.match(analytics, /qcMode: sessionMode \? 'all' : state\.query\.qcMode/);
     assert.match(builder, /function normalizePersistedBuilderBlock/);
     assert.match(builder, /Array\.isArray\(block\.trials\) \? block\.trials/);
-    assert.match(builder, /slides: Array\.isArray\(b\.content\?\.slides\) \? b\.content\.slides : \[\]/);
+    assert.match(builder, /const passiveTrials = Array\.isArray\(b\.content\?\.trials\)/);
+    assert.match(builder, /Array\.isArray\(b\.content\?\.slides\) \? b\.content\.slides : \[\]/);
+    assert.match(builder, /trials: Array\.isArray\(content\.trials\) \? content\.trials : slides/);
   });
 
   it('keeps the participant stimulus registry and decoded-image readiness connected', () => {

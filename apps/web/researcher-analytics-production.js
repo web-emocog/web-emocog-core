@@ -8,6 +8,7 @@
   const QUERY_KEY = 'emocog_analytics_query_draft_v1';
   const RESULT_IMPORT_MAX_BYTES = 128 * 1024 * 1024;
   const INGEST_PAYLOAD_MAX_BYTES = 1750 * 1024;
+  const stimulusMediaCache = new Map();
 
   const TABS = [
     { id: 'session-card', ru: 'Сессия', en: 'Session' },
@@ -43,6 +44,52 @@
     const path = String(value || '').trim();
     if (!path || /^(?:data:|blob:|https?:)/i.test(path)) return path;
     return importApiUrl(path.startsWith('/') ? path : `/${path}`);
+  }
+
+  async function hydrateStimulusMedia(stimulus) {
+    if (!stimulus?.contentUrl) return stimulus;
+    const url = stimulusContentUrl(stimulus.contentUrl);
+    if (!url || /^(?:data:|blob:)/i.test(url)) {
+      stimulus.contentUrl = url;
+      return stimulus;
+    }
+    let request = stimulusMediaCache.get(url);
+    if (!request) {
+      request = global.fetch(url, {
+        headers: typeof global.apiRequestHeaders === 'function' ? global.apiRequestHeaders(false) : {},
+        credentials: 'include'
+      }).then(async response => {
+        if (!response.ok) throw await parseApiError(response, tr('Файл стимула недоступен', 'Stimulus file unavailable'));
+        const blob = await response.blob();
+        return { url: URL.createObjectURL(blob), type: blob.type || null };
+      }).catch(error => {
+        stimulusMediaCache.delete(url);
+        throw error;
+      });
+      stimulusMediaCache.set(url, request);
+    }
+    const media = await request;
+    stimulus.contentUrl = media.url;
+    if (!stimulus.type && media.type) stimulus.type = media.type;
+    return stimulus;
+  }
+
+  async function hydrateVisualResponse(response) {
+    const contexts = Array.isArray(response?.data?.contexts) ? response.data.contexts : [];
+    await Promise.all(contexts.flatMap(context => [context?.stimulus, context?.heatmap?.stimulus]
+      .filter(Boolean).map(hydrateStimulusMedia)));
+    if (response?.data?.stimulus) await hydrateStimulusMedia(response.data.stimulus);
+    return response;
+  }
+
+  function stimulusMediaHtml(stimulus, className = 'analytics-stimulus-media') {
+    const url = stimulusContentUrl(stimulus?.contentUrl);
+    if (!url) return '';
+    const type = String(stimulus?.type || '').toLowerCase();
+    if (type.startsWith('video/')) {
+      return `<video class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" muted controls playsinline preload="metadata" aria-label="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;"></video>`;
+    }
+    return `<img class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" alt="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;">`;
   }
 
   function resultImportHeaders(idempotencyKey) {
@@ -782,17 +829,17 @@
     async sessionAoi(sessionId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewSessionAoi(snapshot);
       const path = `/analytics/v1/sessions/${encodeURIComponent(sessionId)}/aoi?snapshot_id=${encodeURIComponent(snapshot.id)}`;
-      return validateAnalyticsResponse(await global.apiGet(path), 'session_aoi', snapshot.id);
+      return hydrateVisualResponse(validateAnalyticsResponse(await global.apiGet(path), 'session_aoi', snapshot.id));
     },
     async sessionHeatmap(sessionId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewSessionHeatmap(snapshot);
       const path = `/analytics/v1/sessions/${encodeURIComponent(sessionId)}/heatmap?snapshot_id=${encodeURIComponent(snapshot.id)}`;
-      return validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id);
+      return hydrateVisualResponse(validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id));
     },
     async sessionVisuals(sessionId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewSessionVisuals(snapshot);
       const path = `/analytics/v1/sessions/${encodeURIComponent(sessionId)}/visuals?snapshot_id=${encodeURIComponent(snapshot.id)}`;
-      return validateAnalyticsResponse(await global.apiGet(path), 'session_visuals', snapshot.id);
+      return hydrateVisualResponse(validateAnalyticsResponse(await global.apiGet(path), 'session_visuals', snapshot.id));
     },
     async groupSummary(snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewGroupSummary(snapshot);
@@ -803,10 +850,7 @@
       if (global.EmocogAnalyticsPreviewFixture) return previewGroupHeatmap(snapshot);
       const path = `/analytics/v1/groups/heatmap?snapshot_id=${encodeURIComponent(snapshot.id)}`;
       const response = validateAnalyticsResponse(await global.apiGet(path), 'heatmap', snapshot.id);
-      if (response.data?.stimulus?.contentUrl) {
-        response.data.stimulus.contentUrl = stimulusContentUrl(response.data.stimulus.contentUrl);
-      }
-      return response;
+      return hydrateVisualResponse(response);
     },
     async comparison(comparisonId, snapshot) {
       if (global.EmocogAnalyticsPreviewFixture) return previewModelResult(snapshot, comparisonId);
@@ -1817,6 +1861,13 @@
         const height = Math.abs(points[1].y - points[0].y) * 1000;
         return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="7" fill="rgba(92,102,189,.10)" stroke="#5c66bd" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
       }
+      if (aoi.shape === 'ellipse' && points.length >= 2) {
+        const minX = Math.min(points[0].x, points[1].x) * 1000;
+        const minY = Math.min(points[0].y, points[1].y) * 1000;
+        const maxX = Math.max(points[0].x, points[1].x) * 1000;
+        const maxY = Math.max(points[0].y, points[1].y) * 1000;
+        return `<ellipse cx="${(minX + maxX) / 2}" cy="${(minY + maxY) / 2}" rx="${(maxX - minX) / 2}" ry="${(maxY - minY) / 2}" fill="rgba(16,185,129,.10)" stroke="#059669" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+      }
       if (aoi.shape === 'polygon' && points.length >= 3) return `<polygon points="${points.map(point => `${point.x * 1000},${point.y * 1000}`).join(' ')}" fill="rgba(245,158,11,.10)" stroke="#d97706" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
       return '';
     }).join('');
@@ -1848,7 +1899,7 @@
     return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('AOI и тепловая карта','AOI and heatmap')}</div><div style="font-size:9px;color:var(--muted);margin-top:3px;">${escapeHtml(stimulus.name)} · v${escapeHtml(stimulus.version)} · ${escapeHtml(aoiData.blockId)} · ${escapeHtml(aoiData.presentationId)}</div></div><div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''} ${heatmapHasData ? '' : 'disabled'}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''} ${points.length ? '' : 'disabled'}> ${tr('Фиксации','Fixations')}</label></div></div>
       <div style="max-width:920px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">
-        ${stimulus.contentUrl ? `<img src="${escapeHtml(stimulus.contentUrl)}" alt="${escapeHtml(stimulus.name)}" style="display:block;width:100%;height:100%;object-fit:contain;">` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Изображение стимула недоступно','Stimulus image is unavailable')}</div>`}
+        ${stimulus.contentUrl ? stimulusMediaHtml(stimulus) : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Медиафайл стимула недоступен','Stimulus media is unavailable')}</div>`}
         ${state.layers.heatmap && heatmapHasData ? `<canvas class="analytics-heatmap-canvas" role="img" aria-label="${escapeHtml(tr('Heatmap фиксаций одной сессии; числовые значения доступны в AOI-таблице ниже','Session fixation heatmap; numeric values are available in the AOI table below'))}" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.66;"></canvas>` : ''}
         ${state.layers.heatmap && !heatmapHasData ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.78);color:var(--muted);font-size:11px;">${tr('Нет валидных фиксаций для heatmap','No valid fixations for the heatmap')}</div>` : ''}
         ${aoiOverlayHtml(rows, points, state.layers)}
@@ -1872,7 +1923,7 @@
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:9px;"><div><div style="font-size:12px;font-weight:750;color:var(--text);">${escapeHtml(stimulus.name || stimulus.id || tr('Стимул','Stimulus'))}</div><div style="font-size:9px;color:var(--muted);margin-top:3px;">${escapeHtml(context.blockName || context.blockId || '—')} · v${escapeHtml(stimulus.version || '1')} · ${escapeHtml(context.presentationId || tr('показ не найден','presentation unavailable'))}</div></div><span style="font-size:9px;color:${context.status === 'computed' ? 'var(--good)' : 'var(--muted)'};">${context.status === 'computed' ? tr('Данные рассчитаны','Computed') : tr('Нет данных показа','No presentation data')}</span></div>
       <div style="max-width:920px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">
         <div class="analytics-stimulus-fallback" style="position:absolute;inset:0;display:${contentUrl ? 'none' : 'flex'};align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Изображение стимула недоступно','Stimulus image is unavailable')}</div>
-        ${contentUrl ? `<img class="analytics-stimulus-image" src="${escapeHtml(contentUrl)}" alt="${escapeHtml(stimulus.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;">` : ''}
+        ${contentUrl ? stimulusMediaHtml({ ...stimulus, contentUrl }, 'analytics-stimulus-image') : ''}
         ${state.layers.heatmap && heatmapHasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="session-list" data-visual-index="${index}" role="img" aria-label="${escapeHtml(tr('Тепловая карта фиксаций участника','Participant fixation heatmap'))}" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.66;"></canvas>` : ''}
         ${state.layers.heatmap && !heatmapHasData ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.78);color:var(--muted);font-size:11px;">${tr('Нет валидных фиксаций для тепловой карты','No valid fixations for the heatmap')}</div>` : ''}
         ${aoiOverlayHtml(rows, points, state.layers)}
@@ -2070,7 +2121,7 @@
     const stimulus = heatmap.stimulus;
     const hasData = heatmap.nFixations > 0 && heatmap.grid && heatmap.grid.maxValue > 0;
     const ratio = stimulus.intrinsicWidth && stimulus.intrinsicHeight ? `${stimulus.intrinsicWidth}/${stimulus.intrinsicHeight}` : '16/9';
-    return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Групповая heatmap','Group heatmap')} · ${escapeHtml(stimulus.name)}</div><div style="max-width:820px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">${stimulus.contentUrl ? `<img src="${escapeHtml(stimulus.contentUrl)}" alt="${escapeHtml(stimulus.name)}" style="display:block;width:100%;height:100%;object-fit:contain;">` : ''}${hasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="group" role="img" aria-label="${escapeHtml(tr('Групповая heatmap с равным весом участников; параметры и N указаны под изображением','Group heatmap with equal participant weight; parameters and N are listed below'))}" style="position:absolute;inset:0;width:100%;height:100%;opacity:.66;"></canvas>` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.8);color:var(--muted);font-size:10px;">${tr('Недостаточно валидных фиксаций','Insufficient valid fixations')}</div>`}</div><div style="display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} ${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>${tr('Равный вес участников','Equal participant weight')}: ${heatmap.equalParticipantWeight ? tr('да','yes') : tr('нет','no')} · N=${escapeHtml(heatmap.nParticipants)} · ${tr('сессий','sessions')}=${escapeHtml(heatmap.nSessions)} · ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div></section>`;
+    return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Групповая heatmap','Group heatmap')} · ${escapeHtml(stimulus.name)}</div><div style="max-width:820px;margin:0 auto;position:relative;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">${stimulus.contentUrl ? stimulusMediaHtml(stimulus) : ''}${hasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="group" role="img" aria-label="${escapeHtml(tr('Групповая heatmap с равным весом участников; параметры и N указаны под изображением','Group heatmap with equal participant weight; parameters and N are listed below'))}" style="position:absolute;inset:0;width:100%;height:100%;opacity:.66;"></canvas>` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.8);color:var(--muted);font-size:10px;">${tr('Недостаточно валидных фиксаций','Insufficient valid fixations')}</div>`}</div><div style="display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} ${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>${tr('Равный вес участников','Equal participant weight')}: ${heatmap.equalParticipantWeight ? tr('да','yes') : tr('нет','no')} · N=${escapeHtml(heatmap.nParticipants)} · ${tr('сессий','sessions')}=${escapeHtml(heatmap.nSessions)} · ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div></section>`;
   }
 
   function groupDashboardHtml(state) {
@@ -2258,14 +2309,14 @@
   }
 
   function bindHeatmapCanvases(root) {
-    root.querySelectorAll('.analytics-stimulus-image').forEach(image => {
+    root.querySelectorAll('.analytics-stimulus-media').forEach(image => {
       const showFallback = () => {
         image.style.display = 'none';
         const fallback = image.parentElement?.querySelector('.analytics-stimulus-fallback');
         if (fallback) fallback.style.display = 'flex';
       };
       image.addEventListener('error', showFallback, { once: true });
-      if (image.complete && !image.naturalWidth) showFallback();
+      if (image.tagName === 'IMG' && image.complete && !image.naturalWidth) showFallback();
     });
     root.querySelectorAll('.analytics-heatmap-canvas').forEach(canvas => {
       drawHeatmapCanvas(canvas);

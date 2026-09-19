@@ -113,6 +113,16 @@ function imageStimulus(src, stimulusId, style) {
   };
 }
 
+function mediaTypeFromMeta(meta) {
+  const metadata = meta?.metadata && typeof meta.metadata === 'object' ? meta.metadata : {};
+  const mimeType = String(
+    meta?.mime_type || meta?.mimeType || metadata.mime_type || metadata.mimeType || ''
+  ).toLowerCase();
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('image/')) return 'image';
+  return 'image';
+}
+
 /**
  * Resolve a std_* stimulus id to participant-renderable stimulus object.
  * @param {string} stimulusId
@@ -305,8 +315,10 @@ function resolveParticipantStimulus(params) {
     || null;
 
   if (url) {
+    const type = mediaTypeFromMeta(meta);
     return {
       ...imageStimulus(url, stimulusId || undefined, params.imageStyle || {}),
+      type,
       ...(sourceUrl && sourceUrl !== url ? { fallbackSrc: sourceUrl } : {}),
     };
   }
@@ -347,6 +359,7 @@ const standardStimuliApi = {
   resolveStandardStimulus,
   resolveParticipantStimulus,
   resolveUrlFromMeta,
+  mediaTypeFromMeta,
   DEFAULT_FALLBACK_STIMULUS,
 };
 
