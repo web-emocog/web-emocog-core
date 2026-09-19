@@ -82,15 +82,15 @@ function OverviewView(){
   // ── ONBOARDING TRACK (inserted BEFORE the action buttons) ──
   const isEn2 = CURRENT_LANG === 'en';
   const trackSteps = isEn2 ? [
-    { icon: '🧪', label: 'Create experiment', desc: 'Set up protocol, stimuli, and blocks', color: '#5C66BD' },
-    { icon: '👥', label: 'Add participants', desc: 'Invite people to your research', color: '#77A9E8' },
-    { icon: '▶', label: 'Run sessions', desc: 'Collect real-time eye-tracking data', color: '#10B981' },
-    { icon: '📊', label: 'View analytics', desc: 'Explore QC, metrics and group results', color: '#F59E0B' },
+    { icon: '🧪', label: 'Create experiment', desc: 'Set up protocol, stimuli, and blocks', color: '#5C66BD', route: '#/experiments/builder' },
+    { icon: '👥', label: 'Add participants', desc: 'Create an invitation in a published experiment', color: '#77A9E8', route: '#/experiments' },
+    { icon: '▶', label: 'Run sessions', desc: 'Collect real-time eye-tracking data', color: '#10B981', route: '#/sessions' },
+    { icon: '📊', label: 'View analytics', desc: 'Explore QC, metrics and group results', color: '#F59E0B', route: '#/analytics/session-card' },
   ] : [
-    { icon: '🧪', label: 'Создать эксперимент', desc: 'Настройте протокол, стимулы и блоки', color: '#5C66BD' },
-    { icon: '👥', label: 'Добавить участников', desc: 'Пригласите людей в ваше исследование', color: '#77A9E8' },
-    { icon: '▶', label: 'Провести сессии', desc: 'Сбор данных айтрекинга в реальном времени', color: '#10B981' },
-    { icon: '📊', label: 'Смотреть аналитику', desc: 'QC, метрики и групповые результаты', color: '#F59E0B' },
+    { icon: '🧪', label: 'Создать эксперимент', desc: 'Настройте протокол, стимулы и блоки', color: '#5C66BD', route: '#/experiments/builder' },
+    { icon: '👥', label: 'Добавить участников', desc: 'Создайте приглашение в опубликованном эксперименте', color: '#77A9E8', route: '#/experiments' },
+    { icon: '▶', label: 'Провести сессии', desc: 'Сбор данных айтрекинга в реальном времени', color: '#10B981', route: '#/sessions' },
+    { icon: '📊', label: 'Смотреть аналитику', desc: 'QC, метрики и групповые результаты', color: '#F59E0B', route: '#/analytics/session-card' },
   ];
 
   const trackTitle = isEn2 ? 'How it works' : 'Как это работает';
@@ -101,11 +101,11 @@ function OverviewView(){
     <div style="display:flex;align-items:flex-start;gap:0;overflow-x:auto;padding-bottom:8px;">
       ${trackSteps.map((step, i) => `
         <div style="display:flex;align-items:flex-start;gap:0;flex:1;min-width:160px;">
-          <div class="onb-step" style="flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 12px;">
+          <button type="button" class="onb-step" data-route="${step.route}" style="font:inherit;border:0;background:transparent;flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 12px;cursor:pointer;">
             <div style="width:72px;height:72px;border-radius:20px;background:linear-gradient(135deg,${step.color}28,${step.color}14);border:2px solid ${step.color}55;display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:14px;flex-shrink:0;">${step.icon}</div>
             <div style="font-size:14px;font-weight:800;color:var(--text);white-space:pre-line;line-height:1.3;margin-bottom:6px;">${step.label}</div>
             <div style="font-size:12px;color:var(--muted);line-height:1.45;">${step.desc}</div>
-          </div>
+          </button>
           ${i < trackSteps.length - 1 ? `<div style="flex-shrink:0;width:44px;display:flex;align-items:center;justify-content:center;padding-top:20px;"><svg fill="none" stroke="var(--muted2)" stroke-width="2.8" viewBox="0 0 24 24" width="26" height="26" style="opacity:.55;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></div>` : ''}
         </div>
       `).join('')}
@@ -115,6 +115,11 @@ function OverviewView(){
   // Insert onboarding BEFORE the action buttons
   const actionsDiv = root.querySelector('.overview-actions');
   root.insertBefore(trackWrap, actionsDiv);
+  trackWrap.querySelectorAll('.onb-step').forEach(step => {
+    step.addEventListener('click', () => navigate(step.dataset.route));
+    step.addEventListener('mouseenter', () => { step.style.transform = 'translateY(-2px)'; });
+    step.addEventListener('mouseleave', () => { step.style.transform = ''; });
+  });
 
   // ── USER PROJECTS ON OVERVIEW (right side / below) ──
   let userProjects = [];

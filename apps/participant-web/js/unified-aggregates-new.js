@@ -484,6 +484,7 @@ export function buildAggregatesPayload(sessionData, options = {}) {
     const ids = {};
     if (sourceIds.session != null) ids.session = sourceIds.session;
     if (sourceIds.participant != null) ids.participant = sourceIds.participant;
+    if (sourceIds.participantAlias != null) ids.participantAlias = sourceIds.participantAlias;
     if (sourceIds.invitationCode != null) ids.invitationCode = sourceIds.invitationCode;
     const emotion_summary = getEmotionSummary(sessionData);
     const emotionSummaryPayload = buildEmotionSummaryPayload(sessionData, emotion_summary);

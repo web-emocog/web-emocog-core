@@ -977,17 +977,17 @@ p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
     margin-right: auto;
 }
 
-body.cognitive-stimulus-presenting {
+body.cognitive-stimulus-fullscreen {
     padding: 0;
     overflow: hidden;
     background: #e8e8e8;
 }
 
-.cognitive-stimulus-presenting .top-bar {
+.cognitive-stimulus-fullscreen .top-bar {
     display: none;
 }
 
-.cognitive-stimulus-presenting > .container {
+.cognitive-stimulus-fullscreen > .container {
     position: fixed;
     inset: 0;
     z-index: 1500;
@@ -1003,8 +1003,8 @@ body.cognitive-stimulus-presenting {
     box-sizing: border-box;
 }
 
-.cognitive-stimulus-presenting #step6,
-.cognitive-stimulus-presenting #cognitiveContainer {
+.cognitive-stimulus-fullscreen #step6,
+.cognitive-stimulus-fullscreen #cognitiveContainer {
     width: 100%;
     height: 100%;
     min-height: 100%;
@@ -1012,7 +1012,7 @@ body.cognitive-stimulus-presenting {
     padding: 0;
 }
 
-.cognitive-stimulus-presenting #cognitiveStimulusArea {
+.cognitive-stimulus-fullscreen #cognitiveStimulusArea {
     width: 100%;
     height: 100%;
     margin: 0;
@@ -1020,7 +1020,7 @@ body.cognitive-stimulus-presenting {
     background: #e8e8e8;
 }
 
-.cognitive-stimulus-presenting .cog-image {
+.cognitive-stimulus-fullscreen .cog-image {
     width: 100%;
     height: 100%;
     max-width: 100%;

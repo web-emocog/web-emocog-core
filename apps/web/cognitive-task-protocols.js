@@ -35,6 +35,15 @@ function cloneProtocolData(value) {
     return isEn ? (stimulus.infoEn || stimulus.info) : (stimulus.infoRu || stimulus.info);
   }
 
+  function emotionFaceAois() {
+    const interval = { startMs: 0, endMs: 4000 };
+    return [
+      { id:'face', name:'Лицо', shape:'ellipse', points:[{x:0.26,y:0.08},{x:0.74,y:0.94}], order:1, isTarget:true, validityInterval:{...interval} },
+      { id:'eyes', name:'Глаза', shape:'ellipse', points:[{x:0.32,y:0.34},{x:0.68,y:0.56}], order:2, isTarget:false, validityInterval:{...interval} },
+      { id:'mouth', name:'Рот', shape:'ellipse', points:[{x:0.36,y:0.60},{x:0.64,y:0.83}], order:3, isTarget:false, validityInterval:{...interval} }
+    ];
+  }
+
   function standardProtocolStimuli() {
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(ch => standardStimulus(
       'std_cpt_' + ch.toLowerCase(),
@@ -63,7 +72,7 @@ function cloneProtocolData(value) {
         'image',
         'Плейсхолдер эмоционального лица',
         'Emotional face placeholder',
-        { emotion:em }
+        { emotion:em, aoiSchemaVersion:'1.2', aois:emotionFaceAois() }
       ))
     );
     return [
@@ -120,7 +129,7 @@ function cloneProtocolData(value) {
     standardProtocolStimuli().forEach(stim => {
       const existing = stimuliList.find(s => String(s.id) === String(stim.id));
       if (existing) {
-        ['name', 'nameRu', 'nameEn', 'type', 'info', 'infoRu', 'infoEn', 'emotion', 'text'].forEach(function (key) {
+        ['name', 'nameRu', 'nameEn', 'type', 'info', 'infoRu', 'infoEn', 'emotion', 'text', 'aoiSchemaVersion', 'aois'].forEach(function (key) {
           if (stim[key] != null && existing[key] !== stim[key]) {
             existing[key] = stim[key];
             stimuliChanged = true;
@@ -496,7 +505,7 @@ Maintain a comfortable position in front of the camera.`
 Попробуйте остановить его несколько раз.`),
         cognitiveProtocolBlock('PVT - тренировка', 'pvt', { trials:[trial('std_pvt_counter','counter onset','space',10000,5,{ randomItiMin:2000, randomItiMax:6000, feedbackDuration:1000 })], randomize:false, useFixation:false, rtWindow:10000, stimulusDuration:0, showFeedback:true, feedbackCorrect:'{rt} мс' }),
         instructionProtocolBlock('Инструкция: PVT - основной этап', `Сейчас начнется длительный этап. Он займет несколько минут непрерывной работы.
-Смотрите на центр экрана и жмите Пробел в ту же долю секунды, когда появляется красный счетчик.
+Смотрите на центр экрана и нажимайте Пробел сразу же, как появляется красный счётчик.
 Постарайтесь не отвлекаться от экрана до самого конца теста.`),
         cognitiveProtocolBlock('PVT - 5 минут', 'pvt', { trials:[trial('std_pvt_counter','counter onset','space',10000,1,{ randomItiMin:2000, randomItiMax:10000, feedbackDuration:1000 })], randomize:false, useFixation:false, rtWindow:10000, stimulusDuration:0, protocolDurationMs:300000, showFeedback:true, feedbackCorrect:'{rt} мс' })
       ]),
