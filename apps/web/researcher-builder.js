@@ -1830,11 +1830,11 @@ function ExperimentBuilderView(options = {}) {
     };
 
     const taskAcronyms = {
-      simple_rt: trb('RT — время реакции (Reaction Time)', 'RT — Reaction Time'),
-      pvt: trb('PVT — тест психомоторной бдительности', 'PVT — Psychomotor Vigilance Task'),
-      ax_cpt: trb('AX-CPT — непрерывный тест выполнения с последовательностью A–X', 'AX-CPT — A-X Continuous Performance Test'),
-      cpt: trb('CPT — непрерывный тест выполнения', 'CPT — Continuous Performance Test'),
-      nback: trb('N-back — задача на рабочую память', 'N-back — working-memory task')
+      simple_rt: 'RT — Reaction Time',
+      pvt: 'PVT — Psychomotor Vigilance Test',
+      ax_cpt: 'AX-CPT — AX Continuous Performance Test',
+      cpt: 'CPT — Continuous Performance Test',
+      nback: 'N-back — working-memory task'
     };
     function taskTagStyle(tag, index) {
       const value = String(tag || '').toLowerCase();
@@ -1873,7 +1873,7 @@ function ExperimentBuilderView(options = {}) {
             ${tpl.icon}
           </div>
           <div style="flex:1;min-width:0;">
-            <div title="${previewEscape(taskAcronyms[tpl.id] || '')}" style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:${taskAcronyms[tpl.id] ? 'help' : 'default'};">${tpl.label}</div>
+            <div data-no-auto-i18n data-task-acronym="${previewEscape(tpl.id)}" title="${previewEscape(taskAcronyms[tpl.id] || '')}" style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:${taskAcronyms[tpl.id] ? 'help' : 'default'};">${tpl.label}</div>
             <div style="font-size:10px;font-weight:600;color:${tpl.color};letter-spacing:.04em;margin-bottom:6px;">${tpl.sublabel}</div>
             <div style="font-size:11px;color:var(--muted);line-height:1.45;">${tpl.desc}</div>
           </div>
@@ -1900,7 +1900,9 @@ function ExperimentBuilderView(options = {}) {
 
         grid.appendChild(card);
       });
-      setTimeout(() => applyAutoI18n(grid), 0);
+      setTimeout(() => {
+        applyAutoI18n(grid);
+      }, 0);
     }
 
     renderCards();
@@ -3730,7 +3732,7 @@ function ExperimentBuilderView(options = {}) {
             { key:'multimodal', label:trb('Мультимодальная карта','Multimodal map'), help:trb('Синхронизирует события задачи, взгляд, мимику и качество сигнала на одной временной шкале. Используйте для анализа взаимосвязей каналов.','Aligns task events, gaze, facial expression, and signal quality on one timeline. Use it to analyse cross-channel relationships.') },
             { key:'bodyMovement', label:trb('Движение корпуса','Body movement'), help:trb('Добавляет обезличенные показатели позы и движений корпуса. Полезно для контроля артефактов и двигательных исследований.','Adds de-identified posture and body-motion features. Useful for artefact control and movement research.') },
             { key:'gamerMode', label:trb('Расширенный режим для игровых исследований','Extended gamer research mode'), help:trb('Повышает частоту мультимодальных событий для динамических задач; увеличивает объём вычислений и данных.','Raises multimodal event frequency for dynamic tasks; increases computation and data volume.') }
-          ].map(item => `<label title="${previewEscape(item.help)}" style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;cursor:pointer;font-size:12px;color:var(--text);"><input type="checkbox" class="session-feature" data-key="${item.key}" ${sessionFeatures[item.key] ? 'checked' : ''} style="width:auto;margin-top:2px;"><span><strong>${item.label}</strong><small style="display:block;color:var(--muted);line-height:1.4;margin-top:2px;">${item.help}</small></span></label>`).join('')}
+          ].map(item => `<label style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;cursor:pointer;font-size:12px;color:var(--text);"><input type="checkbox" class="session-feature" data-key="${item.key}" ${sessionFeatures[item.key] ? 'checked' : ''} style="width:auto;margin-top:2px;"><span><strong>${item.label}</strong><small style="display:block;color:var(--muted);line-height:1.4;margin-top:2px;">${item.help}</small></span></label>`).join('')}
         </div>
         ${[
           { key:'gazeValid', label:trb('Взгляд валиден','Gaze valid'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с валидным взглядом','Minimum % of frames with valid gaze'), yellowFrom:51, greenFrom:70 },

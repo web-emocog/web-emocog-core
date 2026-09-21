@@ -238,6 +238,103 @@ test.describe('wecog design system', () => {
     await page.locator('.bstep[data-step="1"]').click();
     await expect(page.locator('.bstep[data-step="1"]')).toHaveClass(/bstep-active/);
     await expect(page.locator('#view')).toContainText(/Выбор задачи|Task selection/);
+    await expect(
+      page.locator('#s0grid [title="PVT — Psychomotor Vigilance Test"]')
+    ).toHaveCount(1);
+
+    await page.locator('.bstep[data-step="6"]').click();
+    await expect(page.locator('.session-feature').first().locator('xpath=..'))
+      .not.toHaveAttribute('title', /.+/);
+  });
+
+  test('uploaded stimuli restore from the project API after local cache is cleared', async ({ page }) => {
+    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64');
+    const rows: Record<string, unknown>[] = [{
+      id: 42, project_id: 7, folder_id: null, name: 'existing.png',
+      mime_type: 'image/png', size_bytes: image.length, metadata: {},
+      content_url: '/stimuli/42/content', content_available: true
+    }];
+    let failServerRead = false;
+    await page.addInitScript(() => {
+      localStorage.setItem('emocog_developer_auth', '1');
+      localStorage.setItem('emocog_selected_project_id', '7');
+    });
+    await page.route('http://127.0.0.1:3000/**', async route => {
+      const url = new URL(route.request().url());
+      const headers = {
+        'Access-Control-Allow-Origin': baseUrl,
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Headers': 'Content-Type,X-CSRF-Token',
+        'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS'
+      };
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (url.pathname.endsWith('/auth/me')) return route.fulfill({ status: 200, headers, json: { id: 1, email: 'test@example.org', role: 'researcher' } });
+      if (url.pathname.endsWith('/auth/permissions')) return route.fulfill({ status: 200, headers, json: {} });
+      if (url.pathname.endsWith('/projects')) return route.fulfill({ status: 200, headers, json: [{ id: 7, name: 'Project' }] });
+      if (url.pathname.endsWith('/stimuli/folders')) return route.fulfill({ status: 200, headers, json: [] });
+      if (url.pathname.endsWith('/stimuli') && route.request().method() === 'GET') return route.fulfill({ status: 200, headers, json: rows });
+      if (url.pathname.endsWith('/stimuli/upload')) {
+        const id = failServerRead ? 44 : 43;
+        const row = { id, project_id: 7, folder_id: null, name: 'new.png',
+          mime_type: 'image/png', size_bytes: image.length, metadata: {},
+          content_url: `/stimuli/${id}/content`, content_available: true };
+        rows.push(row);
+        return route.fulfill({ status: 201, headers, json: row });
+      }
+      if (url.pathname.endsWith('/stimuli/44/content')) return route.fulfill({ status: 503, headers, json: { error: 'File unavailable' } });
+      if (/\/stimuli\/\d+\/content$/.test(url.pathname)) return route.fulfill({ status: 200, headers: { ...headers, 'Content-Type': 'image/png' }, body: image });
+      return route.fulfill({ status: 404, headers, json: { error: 'Not mocked' } });
+    });
+    await page.goto(`${baseUrl}/apps/web/researcher.html?analyticsPreview=1#/stimuli`, { waitUntil: 'load' });
+    await expect(page.locator('.stimulus-card[data-id="42"]')).toBeVisible();
+    await page.evaluate(async bytes => {
+      const file = new File([Uint8Array.from(atob(bytes), char => char.charCodeAt(0))], 'new.png', { type: 'image/png' });
+      await (window as any).handleFileUpload([file]);
+    }, image.toString('base64'));
+    await page.evaluate(() => localStorage.removeItem('emocog_stimuli'));
+    await page.reload({ waitUntil: 'load' });
+    await expect(page.locator('.stimulus-card[data-id="42"]')).toBeVisible();
+    await expect(page.locator('.stimulus-card[data-id="43"]')).toBeVisible();
+    failServerRead = true;
+    const unavailable = await page.evaluate(async bytes => {
+      const file = new File([Uint8Array.from(atob(bytes), char => char.charCodeAt(0))], 'broken.png', { type: 'image/png' });
+      try { await (window as any).handleFileUpload([file]); return false; }
+      catch { return true; }
+    }, image.toString('base64'));
+    expect(unavailable).toBe(true);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_stimuli') || '[]')
+      .some((item: any) => String(item.id) === '44'))).toBe(false);
+    const rejected = await page.evaluate(async () => {
+      localStorage.removeItem('emocog_developer_auth');
+      sessionStorage.removeItem('emocog_developer_auth');
+      try {
+        await (window as any).handleFileUpload([new File(['file'], 'offline.png', { type: 'image/png' })]);
+        return false;
+      } catch { return true; }
+    });
+    expect(rejected).toBe(true);
+  });
+
+  test('loads the project library when authentication completes after page scripts', async ({ page }) => {
+    await page.route('http://127.0.0.1:3000/**', async route => {
+      const pathname = new URL(route.request().url()).pathname;
+      const headers = { 'Access-Control-Allow-Origin': baseUrl, 'Access-Control-Allow-Credentials': 'true' };
+      if (pathname.endsWith('/auth/me')) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return route.fulfill({ status: 200, headers, json: { id: 1, email: 'test@example.org', role: 'researcher' } });
+      }
+      if (pathname.endsWith('/auth/permissions')) return route.fulfill({ status: 200, headers, json: {} });
+      if (pathname.endsWith('/projects')) return route.fulfill({ status: 200, headers, json: [{ id: 7, name: 'Project' }] });
+      if (pathname.endsWith('/stimuli/folders')) return route.fulfill({ status: 200, headers, json: [] });
+      if (pathname.endsWith('/stimuli')) return route.fulfill({ status: 200, headers, json: [{
+        id: 42, project_id: 7, name: 'restored.png', mime_type: 'image/png',
+        size_bytes: 100, metadata: {}, content_available: false
+      }] });
+      return route.fulfill({ status: 404, headers, json: { error: 'Not mocked' } });
+    });
+    await page.goto(`${baseUrl}/apps/web/researcher.html#/stimuli`, { waitUntil: 'load' });
+    await expect(page.locator('.stimulus-card[data-id="42"]')).toBeVisible();
+    await expect(page.locator('.stimulus-card[data-id="42"]')).toContainText('restored.png');
   });
 
   test('developer pages share one active shell and preserve module geometry', async ({ page }) => {
