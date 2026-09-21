@@ -1,6 +1,7 @@
 const path = require('path');
 const config = require('../config');
-const { referencedDatabaseStimulusIds } = require('../../shared/protocol-stimuli');
+const { referencedDatabaseStimulusIds, referencedStimulusIds } = require('../../shared/protocol-stimuli');
+const { resolveStandardStimulus } = require('../../shared/standard-stimuli');
 const {
   getStoredContentPath,
   resolveReadableServerOwnedUploadPath,
@@ -10,7 +11,10 @@ const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
 
 async function inspectProtocolStimuli(queryable, projectId, definition, options = {}) {
   const ids = referencedDatabaseStimulusIds(definition);
-  if (!ids.length) return { ok: true, referencedIds: [], unavailable: [] };
+  const unavailable = referencedStimulusIds(definition)
+    .filter(id => !/^[1-9]\d*$/.test(id) && !resolveStandardStimulus(id))
+    .map(id => ({ id, code: 'stimulus_not_saved_on_server', name: null }));
+  if (!ids.length) return { ok: unavailable.length === 0, referencedIds: [], unavailable };
 
   const result = await queryable.query(
     `SELECT id, name, mime_type, metadata
@@ -21,8 +25,6 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
   );
   const rowsById = new Map(result.rows.map(row => [Number(row.id), row]));
   const uploadsRoot = options.uploadsRoot || stimuliUploadsRoot;
-  const unavailable = [];
-
   for (const id of ids) {
     const row = rowsById.get(id);
     if (!row) {

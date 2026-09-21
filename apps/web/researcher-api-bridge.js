@@ -313,6 +313,9 @@
         setSelectedProjectId(projects[0].id, projects[0].name);
       }
       populateProjectSelect(projects);
+      if (typeof global.syncProjectStimuliFromApi === 'function') {
+        await global.syncProjectStimuliFromApi();
+      }
       if (typeof global.syncWelcomeProjects === 'function') {
         global.syncWelcomeProjects(projects);
       }
@@ -324,6 +327,9 @@
       return true;
     } catch (e) {
       console.warn('[researcher-api-bridge] projects sync failed', e);
+      if (hasLiveApi() && typeof global.toast === 'function') {
+        global.toast('Не удалось загрузить библиотеку с сервера. Проверьте соединение и обновите страницу.', 'error');
+      }
       return false;
     }
   }
@@ -598,6 +604,14 @@
     // Keep the legacy injection only for pages that do not load that module.
     if (!global.EmocogAnalyticsProduction) patchRender();
     syncProjectsFromApi();
+    global.addEventListener('wecog:researcherauthenticated', () => {
+      syncProjectsFromApi();
+    });
+    global.addEventListener('wecog:projectchange', () => {
+      if (typeof global.syncProjectStimuliFromApi === 'function') {
+        global.syncProjectStimuliFromApi().catch(error => console.warn('[researcher-api-bridge] stimuli sync failed', error));
+      }
+    });
     if (hasLiveApi() && typeof global.toast === 'function') {
       global.toast('Researcher API connected');
     }
