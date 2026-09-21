@@ -2867,6 +2867,7 @@ body{
             window.location.reload();
             return;
           }
+          window.dispatchEvent(new Event('wecog:researcherauthenticated'));
         } catch (_) {}
       });
     })();
