@@ -859,6 +859,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
 
   it('completes login -> project -> protocol -> invitation -> ingest -> analytics export over HTTP', async () => {
     const suffix = randomUUID().slice(0, 12);
+    const stimulusId = 'std_emo_happy_01';
     const email = `s2-full-flow-${suffix}@example.test`;
     const password = 'FullFlowTest2026!';
     const inserted = await pool.query(
@@ -914,11 +915,11 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
             blocks: [{
               id: 'main',
               title: 'Main',
-              trials: [{ id: 'trial-1', stimulusId: 'cat' }],
+              trials: [{ id: 'trial-1', stimulusId }],
               blockConfig: {
                 aoiSchemaVersion: '1.2',
                 aoiDefinitions: {
-                  cat: [{
+                  [stimulusId]: [{
                     id: 'face',
                     name: 'Face',
                     shape: 'rectangle',
@@ -985,7 +986,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
         {
           qcSummary: { qcScore: 95, validity: 'valid', failReasons: [] },
           cognitiveResults: [{
-            blockId: 'main', trialId: 'trial-1', stimulusId: 'cat',
+            blockId: 'main', trialId: 'trial-1', stimulusId,
             response: 'Space', correct: true, rt: 410, qualityValid: true,
           }],
           gaze_analytics: {
@@ -998,7 +999,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
             },
             presentations: [{
               blockId: 'main', trialId: 'trial-1', presentationId: 'presentation-1',
-              stimulusId: 'cat', stimulusName: 'Cat', stimulusType: 'image',
+              stimulusId, stimulusName: 'Happy face', stimulusType: 'image',
               stimulusVersion: '1', intrinsicWidth: 800, intrinsicHeight: 600,
               grid: { width: 2, height: 2, values: [1, 0, 0, 0] },
               fixationPoints: [{
@@ -1034,7 +1035,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
           projectId: project.id, protocolId: protocol.id, protocolVersion: '1.0.0',
           metricIds: ['aoi.dwell_time_ms', 'task.accuracy_pct', 'viz.heatmap'],
           filters: {
-            blockIds: ['main'], stimulusIds: ['cat'], qcMode: 'all',
+            blockIds: ['main'], stimulusIds: [stimulusId], qcMode: 'all',
             qcChannels: ['task', 'gaze'], includeIncompleteSessions: false,
           },
         }),

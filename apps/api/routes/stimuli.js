@@ -16,6 +16,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const config = require('../config');
+const { referencedDatabaseStimulusIds } = require('../../shared/protocol-stimuli');
 const { withTransaction } = require('../db/transaction');
 const {
   ConversionError,
@@ -765,6 +766,13 @@ router.delete(
       if (!(await ensureProjectAccess(current.rows[0].project_id, req.user))) return res.status(403).json({ error: 'Access denied' });
 
       const stim = current.rows[0];
+      const protocols = await pool.query('SELECT definition FROM protocols WHERE project_id = $1', [stim.project_id]);
+      if (protocols.rows.some(row => referencedDatabaseStimulusIds(row.definition).includes(stimulusId))) {
+        return res.status(409).json({
+          code: 'stimulus_used_by_protocol',
+          error: 'This stimulus is used in a protocol. Remove it from the protocol before deleting the file.'
+        });
+      }
       const storedContentPath = getStoredContentPath(stim.metadata);
       let resolved = null;
       if (storedContentPath) {

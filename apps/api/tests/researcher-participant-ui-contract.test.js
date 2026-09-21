@@ -496,7 +496,9 @@ describe('researcher navigation contract', () => {
     assert.match(stimuli, /requestStimulusUploadDetails/);
     assert.match(stimuli, /Проверьте превью и названия/);
     assert.match(stimuli, /formData\.append\('name', customName\)/);
-    assert.match(stimuli, /_previewObjectUrl: entry\.previewObjectUrl/);
+    assert.match(stimuli, /_previewObjectUrl: ''/);
+    assert.match(stimuli, /await hydrateApiStimulusPreview\(newItem\)/);
+    assert.match(stimuli, /URL\.revokeObjectURL\(entry\.previewObjectUrl\)/);
     assert.match(builder, /type:'audio_reading'/);
     assert.match(builder, /type:'audio_sustained_vowel'/);
     assert.match(builder, /type:'audio_oral_ddk'/);

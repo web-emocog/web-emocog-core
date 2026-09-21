@@ -919,6 +919,7 @@ function renderStimulus(trial) {
         }
         return new Promise(resolve => {
             let settled = false;
+            let readyInProgress = false;
             const settle = value => {
                 if (settled) return;
                 settled = true;
@@ -936,10 +937,16 @@ function renderStimulus(trial) {
                 settle(false);
             };
             const ready = () => {
-                videoEl.style.display = 'block';
+                if (settled || readyInProgress) return;
+                readyInProgress = true;
                 videoEl.currentTime = 0;
-                void videoEl.play().catch(fail);
-                settle(true);
+                videoEl.play().then(() => {
+                    videoEl.style.display = 'block';
+                    settle(true);
+                }).catch(() => {
+                    readyInProgress = false;
+                    fail();
+                });
             };
             const loadTimeout = setTimeout(fail, 15_000);
             videoEl.style.cssText = '';
@@ -2124,16 +2131,48 @@ function runTrial() {
         ex_state.task.fixation.style.display = 'none';
         const stimulusReady = await renderStimulus(trial);
         if (!stimulusReady) {
-            getSessionRuntime()?.reportIssue?.({
-                kind: 'technical',
-                code: 'stimulus_media_load_failed',
-                message: state.currentLang === 'ru'
-                    ? 'Файл стимула не удалось показать участнику.'
-                    : 'The stimulus file could not be shown to the participant.',
-                recoverable: false,
-                invalidatesBlock: true
-            });
-            finishCognitiveTask('error', 'stimulus_media_load_failed');
+            const errorAt = performance.now();
+            const errorView = ex_state.task?.stimulus;
+            if (!errorView) return;
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:18px;';
+            const retry = document.createElement('button');
+            retry.type = 'button';
+            retry.textContent = state.currentLang === 'ru' ? 'Повторить загрузку' : 'Retry loading';
+            const skip = document.createElement('button');
+            skip.type = 'button';
+            skip.textContent = state.currentLang === 'ru' ? 'Пропустить пробу' : 'Skip this trial';
+            const errorText = errorView.textContent;
+            errorView.textContent = '';
+            const message = document.createElement('div');
+            message.textContent = errorText;
+            errorView.append(message, actions);
+            actions.append(retry, skip);
+            errorView.style.flexDirection = 'column';
+            trialPhase = 'media_error';
+            retry.onclick = () => {
+                if (trialPhase !== 'media_error') return;
+                retry.disabled = true;
+                skip.disabled = true;
+                trialPhase = 'media_retry';
+                if (activeBlockDeadlinePerf) activeBlockDeadlinePerf += performance.now() - errorAt;
+                void pendingFixationCallback();
+            };
+            skip.onclick = () => {
+                if (trialPhase !== 'media_error') return;
+                trialPhase = 'media_skipped';
+                getSessionRuntime()?.reportIssue?.({
+                    kind: 'technical', code: 'stimulus_media_load_failed',
+                    message: state.currentLang === 'ru'
+                        ? 'Проба пропущена: файл стимула не загрузился.'
+                        : 'Trial skipped: the stimulus file could not be loaded.',
+                    recoverable: true, invalidatesBlock: true
+                });
+                recordSessionEvent('stimulus_trial_skipped', {
+                    category: 'technical', trialId, stimulusId: trial?.stimulus?.stimulusId || null
+                });
+                handleResponse(null, null, { responseMode, skippedMedia: true });
+            };
             return;
         }
 
@@ -2201,7 +2240,10 @@ function handleResponse(rt, key, decision = {}) {
         runtime,
         activeTrialRuntime?.qualityContext || activeTrialQualityContext
     );
-    const qualityValid = qualityIssues.length === 0;
+    if (decision.skippedMedia && !qualityIssues.some(issue => issue.code === 'stimulus_media_load_failed')) {
+        qualityIssues.push({ code: 'stimulus_media_load_failed', kind: 'technical' });
+    }
+    const qualityValid = qualityIssues.length === 0 && !decision.skippedMedia;
 
     const rtMs = Number.isFinite(rt) ? Math.round(rt) : null;
     emitStimulusOffIfNeeded(rtMs, key ? 'response' : 'timeout');
@@ -2219,7 +2261,7 @@ function handleResponse(rt, key, decision = {}) {
     setSessionPhase('cognitive_instruction', { source: 'stimulus_off' });
     resetStimulusViews();
 
-    const isCorrect = trial.correctResponse === key;
+    const isCorrect = !decision.skippedMedia && trial.correctResponse === key;
 
     state.sessionData.cognitiveResults.push({
         trialId: planItem.trialId,
@@ -2239,6 +2281,7 @@ function handleResponse(rt, key, decision = {}) {
         correct: isCorrect,
         attempt: currentBlockAttempt,
         qualityValid,
+        skippedMedia: decision.skippedMedia === true,
         qualityIssueCodes: qualityIssues.map(issue => issue.code),
         qualityIssues,
         sourceTrialIndex: planItem.sourceIndex,
@@ -2259,7 +2302,7 @@ function handleResponse(rt, key, decision = {}) {
     activeTrialRuntime = null;
     activeTrialQualityContext = null;
 
-    if (config.showFeedback) {
+    if (config.showFeedback && !decision.skippedMedia) {
         const t = translations[state.currentLang] || translations.en;
         ex_state.task.feedback.innerText = isCorrect
             ? `✓ ${t.runtime_feedback_correct}`
