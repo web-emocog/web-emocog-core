@@ -67,6 +67,80 @@ function persistStimuliList() {
   localStorage.setItem('emocog_stimuli', JSON.stringify(serializable));
 }
 
+let stimulusSyncRequest = 0;
+async function syncProjectStimuliFromApi() {
+  if (typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken()) return false;
+  const request = ++stimulusSyncRequest;
+  const projectId = await resolveApiProjectId();
+  const [remoteStimuli, remoteFolders] = await Promise.all([
+    apiGet('/stimuli?project_id=' + encodeURIComponent(projectId)),
+    apiGet('/stimuli/folders?project_id=' + encodeURIComponent(projectId))
+  ]);
+  if (request !== stimulusSyncRequest || String(localStorage.getItem('emocog_selected_project_id')) !== String(projectId)) return false;
+  if (!Array.isArray(remoteStimuli) || !Array.isArray(remoteFolders)) throw new Error('Invalid stimulus library response');
+  const existing = new Map(stimuliList.filter(item => item.apiStimulusId).map(item => [String(item.apiStimulusId), item]));
+  const remote = remoteStimuli.map(row => {
+    const id = String(row.id);
+    const previous = existing.get(id) || {};
+    const mime = String(row.mime_type || '').toLowerCase();
+    const metadata = row.metadata || {};
+    const type = metadata.source_document_name ? 'slides' : mime.startsWith('video/') ? 'video'
+      : mime.startsWith('audio/') ? 'audio' : mime.startsWith('text/') ? 'text' : 'image';
+    const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(id)}/content`;
+    return {
+      ...previous, id, apiStimulusId: row.id, projectId, folderId: row.folder_id,
+      name: row.name, type, mimeType: row.mime_type,
+      info: `${(Number(row.size_bytes || 0) / 1024).toFixed(1)} KB`,
+      apiContentUrl, url: absoluteStimulusApiUrl(apiContentUrl),
+      contentAvailable: row.content_available !== false,
+      sourceDocumentName: metadata.source_document_name || previous.sourceDocumentName,
+      sourcePage: metadata.source_page || previous.sourcePage,
+      createdAt: row.created_at
+    };
+  });
+  const remoteIds = new Set(remote.map(item => String(item.id)));
+  stimuliList = [...stimuliList.filter(item => !item.apiStimulusId && !remoteIds.has(String(item.id))), ...remote];
+  const localFolders = folders.filter(folder => !folder.apiFolderId);
+  folders = [...localFolders, ...remoteFolders.map(row => ({
+    id: folders.find(folder => String(folder.apiFolderId) === String(row.id))?.id || 'folder_' + row.id,
+    apiFolderId: row.id, name: row.name,
+    stimuliIds: [
+      ...(folders.find(folder => String(folder.apiFolderId) === String(row.id))?.stimuliIds || []).filter(id => !/^\d+$/.test(String(id))),
+      ...remote.filter(item => String(item.folderId) === String(row.id)).map(item => item.id)
+    ]
+  }))];
+  persistStimuliList();
+  localStorage.setItem('emocog_folders', JSON.stringify(folders));
+  window.dispatchEvent(new CustomEvent('wecog:stimulisynced', { detail: { projectId } }));
+  return true;
+}
+
+async function setStimulusFolder(stimulusId, folderId) {
+  const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
+  if (!stimulus?.apiStimulusId) return;
+  const row = await apiPatch('/stimuli/' + encodeURIComponent(stimulus.apiStimulusId), { folder_id: folderId });
+  stimulus.folderId = row.folder_id;
+  folders.forEach(folder => {
+    folder.stimuliIds = (folder.stimuliIds || []).filter(id => String(id) !== String(stimulusId));
+  });
+  const destination = folders.find(folder => String(folder.apiFolderId) === String(row.folder_id));
+  if (destination) destination.stimuliIds.push(String(stimulusId));
+  localStorage.setItem('emocog_folders', JSON.stringify(folders));
+}
+
+async function ensureServerFolder(folder) {
+  if (!folder || folder.apiFolderId) return;
+  if (!folder._creationPromise) {
+    folder._creationPromise = (async () => {
+      const projectId = await resolveApiProjectId();
+      const row = await apiPost('/stimuli/folders', { project_id: projectId, name: folder.name });
+      folder.apiFolderId = row.id;
+      localStorage.setItem('emocog_folders', JSON.stringify(folders));
+    })().finally(() => { delete folder._creationPromise; });
+  }
+  await folder._creationPromise;
+}
+
 function convertedStimulusFromApi(row, sourceFile, index, count) {
   const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
   const id = String(row?.id || `converted_${Date.now()}_${index + 1}`);
@@ -79,6 +153,7 @@ function convertedStimulusFromApi(row, sourceFile, index, count) {
     url: absoluteStimulusApiUrl(apiContentUrl),
     apiContentUrl,
     apiStimulusId: row?.id || null,
+    projectId: row?.project_id || null,
     mimeType: row?.mime_type || 'image/jpeg',
     contentAvailable: row?.content_available !== false,
     sourceDocumentName: sourceFile.name,
@@ -176,7 +251,7 @@ async function convertDocumentToStimuli(file, onProgress) {
   const converted = rows.map((row, index) => convertedStimulusFromApi(row, file, index, rows.length));
   for (let index = 0; index < converted.length; index += 1) {
     onProgress?.(index + 1, converted.length);
-    try { await hydrateApiStimulusPreview(converted[index]); } catch (_) { /* API URL remains available for retry. */ }
+    await hydrateApiStimulusPreview(converted[index]);
   }
   return converted;
 }
@@ -445,6 +520,8 @@ function StimuliAOIView() {
         }
         stimuliList.unshift(...converted);
         if (folder) {
+          await ensureServerFolder(folder);
+          await Promise.all(converted.map(stimulus => setStimulusFolder(stimulus.id, folder.apiFolderId || null)));
           folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...converted.map(stimulus => String(stimulus.id))])];
           localStorage.setItem('emocog_folders', JSON.stringify(folders));
         }
@@ -482,11 +559,12 @@ function StimuliAOIView() {
     dropzone.style.pointerEvents = 'none';
     dropzone.style.opacity = '.55';
     try {
+      if (folder) await ensureServerFolder(folder);
       const newIds = (await handleFileUpload(uploadEntries, (current, total) => {
         progress.update(current, total, CURRENT_LANG === 'en'
           ? `Uploading file ${current} of ${total}`
           : `Загрузка файла ${current} из ${total}`);
-      })).map(String);
+      }, folder)).map(String);
       if (folder) {
         folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...newIds])];
         localStorage.setItem('emocog_folders', JSON.stringify(folders));
@@ -594,7 +672,7 @@ function StimuliAOIView() {
         <div class="stimulus-card" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;width:auto;height:176px;justify-content:flex-start;padding:9px;">
           <div style="width:100%;height:118px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;">${stimulusPreviewHtml(s)}</div>
           <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;max-width:100%;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
-          <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
+          <div style="font-size:10px; color:${!s.standard && !s.apiStimulusId ? 'var(--bad)' : 'var(--muted2)'};">${!s.standard && !s.apiStimulusId ? (CURRENT_LANG === 'en' ? 'Browser only: re-upload before publishing' : 'Только в браузере: загрузите заново') : escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
           ${s.apiStimulusId ? `<button class="folder-stim-replace-btn" data-id="${escapeStimulusHtml(s.id)}" style="position:absolute;top:4px;right:48px;width:20px;height:20px;border:1px solid var(--stroke);border-radius:6px;background:var(--card-bg);cursor:pointer;color:${s.contentAvailable === false ? 'var(--bad)' : 'var(--muted)'};padding:2px;display:flex;align-items:center;justify-content:center;" title="${CURRENT_LANG === 'en' ? 'Replace file' : 'Заменить файл'}">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0011.8 2M18.5 9A7 7 0 006.7 7"/></svg>
           </button>` : ''}
@@ -607,9 +685,11 @@ function StimuliAOIView() {
         </div>
       `).join('');
       content.querySelectorAll('.remove-from-folder-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const id = btn.dataset.id;
+          try { await setStimulusFolder(id, null); }
+          catch (error) { toast(error?.message || String(error), 'error'); return; }
           folder.stimuliIds = (folder.stimuliIds || []).filter(x => x !== id);
           localStorage.setItem('emocog_folders', JSON.stringify(folders));
           renderFolderView();
@@ -699,7 +779,15 @@ function StimuliAOIView() {
     const close = () => document.body.removeChild(overlay);
     modal.querySelector('#modalCloseBtn').addEventListener('click', close);
     modal.querySelector('#modalCancelBtn').addEventListener('click', close);
-    modal.querySelector('#modalAddBtn').addEventListener('click', () => {
+    modal.querySelector('#modalAddBtn').addEventListener('click', async () => {
+      try {
+        await ensureServerFolder(folder);
+        await Promise.all(Array.from(selectedIds).map(id => setStimulusFolder(id, folder.apiFolderId || null)));
+      } catch (error) {
+        toast(error?.message || String(error), 'error');
+        await syncProjectStimuliFromApi();
+        return;
+      }
       folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...Array.from(selectedIds)])];
       localStorage.setItem('emocog_folders', JSON.stringify(folders));
       close();
@@ -720,6 +808,18 @@ function StimuliAOIView() {
         .then(() => currentTab === 'folder' ? renderFolderView() : renderStimuliGallery(gallery));
     }
   }, 0);
+
+  const refreshSyncedStimuli = () => {
+    if (!root.isConnected) {
+      window.removeEventListener('wecog:stimulisynced', refreshSyncedStimuli);
+      return;
+    }
+    rebuildTabBar();
+    updateStimuliSubnav();
+    if (currentTab === 'folder') renderFolderView();
+    else renderStimuliGallery(gallery);
+  };
+  window.addEventListener('wecog:stimulisynced', refreshSyncedStimuli);
 
   filterRow.querySelectorAll('.type-pill').forEach(pill => {
     pill.addEventListener('click', () => {
@@ -764,11 +864,14 @@ function StimuliAOIView() {
   return root;
 }
 
-async function handleFileUpload(files, onProgress) {
+async function handleFileUpload(files, onProgress, folder = null) {
   const newIds = [];
   const useApi = typeof apiPost === 'function' && typeof resolveApiProjectId === 'function'
     && typeof hasResearcherApiToken === 'function' && hasResearcherApiToken();
-  const projectId = useApi ? await resolveApiProjectId() : null;
+  if (!useApi) throw new Error(CURRENT_LANG === 'en'
+    ? 'Sign in to the researcher API before uploading. Files are not saved only in this browser.'
+    : 'Войдите в кабинет исследователя: без сервера файлы не сохраняются.');
+  const projectId = await resolveApiProjectId();
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
     const entry = files[fileIndex]?.file ? files[fileIndex] : { file: files[fileIndex], name: files[fileIndex]?.name, previewObjectUrl: '' };
     const file = entry.file;
@@ -781,6 +884,7 @@ async function handleFileUpload(files, onProgress) {
       formData.append('file', file);
       formData.append('project_id', String(projectId));
       formData.append('name', customName);
+      if (folder?.apiFolderId) formData.append('folder_id', String(folder.apiFolderId));
       const row = await apiPost('/stimuli/upload', formData);
       const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(row.id)}/content`;
       newItem = {
@@ -791,23 +895,15 @@ async function handleFileUpload(files, onProgress) {
         url: absoluteStimulusApiUrl(apiContentUrl),
         apiContentUrl,
         apiStimulusId: row.id,
+        projectId,
+        folderId: row.folder_id || null,
         mimeType: row.mime_type || file.type,
         contentAvailable: row.content_available !== false,
         createdAt: row.created_at || new Date().toISOString(),
-        _previewObjectUrl: entry.previewObjectUrl || ''
+        _previewObjectUrl: ''
       };
-      try { await hydrateApiStimulusPreview(newItem); } catch (_) { /* Retry on the next library render. */ }
-    } else {
-      const id = String(Date.now() + Math.random());
-      newItem = {
-        id,
-        name: customName,
-        type,
-        info: `${(file.size / 1024).toFixed(1)} KB`,
-        url: await readStimulusDataUrl(file),
-        _previewObjectUrl: entry.previewObjectUrl || '',
-        createdAt: new Date().toISOString()
-      };
+      await hydrateApiStimulusPreview(newItem);
+      if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl);
     }
     stimuliList.unshift(newItem);
     newIds.push(String(newItem.id));
@@ -842,15 +938,22 @@ function showCreateFolderModal(onCreated) {
   const close = () => document.body.removeChild(overlay);
   modal.querySelector('#modalFolderCancel').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  modal.querySelector('#modalFolderCreate').addEventListener('click', () => {
+  modal.querySelector('#modalFolderCreate').addEventListener('click', async () => {
     const name = input.value.trim();
     if (!name) return;
-    const newFolder = { id: 'folder_' + Date.now(), name, stimuliIds: [] };
-    folders.push(newFolder);
-    localStorage.setItem('emocog_folders', JSON.stringify(folders));
-    toast(t('folderCreated'));
-    close();
-    if (onCreated) onCreated(newFolder);
+    try {
+      if (!hasResearcherApiToken()) throw new Error(CURRENT_LANG === 'en' ? 'Sign in to save a folder.' : 'Войдите в кабинет, чтобы сохранить папку.');
+      const projectId = await resolveApiProjectId();
+      const row = await apiPost('/stimuli/folders', { project_id: projectId, name });
+      const newFolder = { id: 'folder_' + row.id, apiFolderId: row.id, name: row.name, stimuliIds: [] };
+      folders.push(newFolder);
+      localStorage.setItem('emocog_folders', JSON.stringify(folders));
+      toast(t('folderCreated'));
+      close();
+      if (onCreated) onCreated(newFolder);
+    } catch (error) {
+      toast(error?.message || String(error), 'error');
+    }
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') modal.querySelector('#modalFolderCreate').click();
@@ -904,7 +1007,7 @@ function renderStimuliGallery(container) {
       </div>`}
       <div style="width:100%;height:118px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;">${stimulusPreviewHtml(s)}</div>
       <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;">${escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(s) : s.name)}</div>
-      <div style="font-size:10px; color:var(--muted2);">${escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
+      <div style="font-size:10px; color:${!s.standard && !s.apiStimulusId ? 'var(--bad)' : 'var(--muted2)'};">${!s.standard && !s.apiStimulusId ? (CURRENT_LANG === 'en' ? 'Browser only: re-upload before publishing' : 'Только в браузере: загрузите заново') : escapeStimulusHtml(typeof localizedStimulusInfo === 'function' ? localizedStimulusInfo(s) : s.info)}</div>
     </div>
   `).join('');
 
@@ -1001,7 +1104,17 @@ function replaceStimulusContent(id, onReplaced) {
   input.click();
 }
 
-function deleteStimulusFromLibrary(id) {
+async function deleteStimulusFromLibrary(id) {
+  const stimulus = stimuliList.find(item => String(item.id) === String(id));
+  if (stimulus?.apiStimulusId) {
+    try {
+      await apiDelete('/stimuli/' + encodeURIComponent(stimulus.apiStimulusId));
+    } catch (error) {
+      toast(`${CURRENT_LANG === 'en' ? 'Could not delete stimulus.' : 'Не удалось удалить стимул.'} ${error?.message || ''}`.trim(), 'error');
+      return;
+    }
+  }
+  if (stimulus?._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
   stimuliList = stimuliList.filter(s => String(s.id) !== String(id));
 
   folders.forEach(f => {
