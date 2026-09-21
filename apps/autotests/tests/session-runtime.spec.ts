@@ -244,6 +244,46 @@ test.describe('Participant session runtime', () => {
     }))).toMatchObject({ src: expect.stringMatching(/^blob:/), naturalWidth: 1 });
   });
 
+  test('lets a participant retry then skip an unavailable image without ending the task', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      shared.runtime.sessionRuntime.policyShown = true;
+      shared.runtime.invitationStimuliMap = {
+        '42': {
+          id: '42', name: 'Unavailable upload', mime_type: 'image/png',
+          metadata: { url: `${location.origin}/missing-stimulus.png` }
+        }
+      };
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20260919-1', location.href).href;
+      const { loadAndStartCognitiveTask } = await import(moduleUrl);
+      await loadAndStartCognitiveTask({
+        autoFinishSession: false,
+        protocol: {
+          version: 'v2-media-recovery-e2e',
+          blocks: [{
+            id: 'media-recovery', type: 'cognitive_task', taskType: 'emotion_viewing',
+            blockConfig: { useFixation: false, stimulusDuration: 1000 },
+            trials: [
+              { stimulusId: '42', condition: 'unavailable', duration: 1000 },
+              { stimulusId: 'std_emo_happy_01', condition: 'happy', duration: 1000 }
+            ]
+          }]
+        }
+      });
+    });
+    await page.locator('#cogStartBtn').click();
+    await expect(page.getByRole('button', { name: /Повторить загрузку|Retry loading/ })).toBeVisible();
+    await page.getByRole('button', { name: /Повторить загрузку|Retry loading/ }).click();
+    await expect(page.getByRole('button', { name: /Пропустить пробу|Skip this trial/ })).toBeVisible();
+    await page.getByRole('button', { name: /Пропустить пробу|Skip this trial/ }).click();
+    await expect(page.locator('#cogImage')).toBeVisible();
+    const result = await page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.cognitiveResults[0]);
+    expect(result).toMatchObject({ skippedMedia: true, qualityValid: false, correct: false });
+    expect(result.qualityIssueCodes).toContain('stimulus_media_load_failed');
+  });
+
   test('preloads and presents an uploaded video in a passive block', async ({ page }) => {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     const videoBase64 = await page.evaluate(async () => {

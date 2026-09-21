@@ -79,3 +79,18 @@ test('returns an empty successful report for protocols without uploaded media', 
   });
   assert.deepEqual(report, { ok: true, referencedIds: [], unavailable: [] });
 });
+
+test('rejects browser-only stimulus IDs instead of publishing a broken session', async () => {
+  const queryable = { query: async () => assert.fail('browser-only files must not query the database') };
+  const report = await inspectProtocolStimuli(queryable, 1, {
+    blocks: [{ trials: [
+      { stimulusId: '1726700000000.42' }, { stimulusId: 'std_emo_happy_01' },
+      { stimulusId: 'std_nonexistent_upload' },
+    ] }],
+  });
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.unavailable, [
+    { id: '1726700000000.42', code: 'stimulus_not_saved_on_server', name: null },
+    { id: 'std_nonexistent_upload', code: 'stimulus_not_saved_on_server', name: null },
+  ]);
+});
