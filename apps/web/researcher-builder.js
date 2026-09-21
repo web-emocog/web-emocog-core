@@ -1833,7 +1833,8 @@ function ExperimentBuilderView(options = {}) {
       simple_rt: 'RT — Reaction Time',
       pvt: 'PVT — Psychomotor Vigilance Test',
       ax_cpt: 'AX-CPT — AX Continuous Performance Test',
-      cpt: 'CPT — Continuous Performance Test'
+      cpt: 'CPT — Continuous Performance Test',
+      nback: 'N-back — working-memory task'
     };
     function taskTagStyle(tag, index) {
       const value = String(tag || '').toLowerCase();
