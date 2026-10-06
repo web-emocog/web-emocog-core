@@ -1429,6 +1429,21 @@ function runNextBlock() {
         runNextBlock();
         return;
     }
+    // Photodiode sync: срабатывает для всех видимых блоков: rest, audio_test, instruction, cognitive_task, survey
+    // Первый cognitive_task - начало эксперимента (4 моргания).
+    // Остальные видимые блоки - смена задачи (3 моргания).
+    if (window.Photodiode) {
+        const isFirstInstruction =
+            (block.type === 'instruction' || block.type === 'instructions') &&
+            !window.__PD_EXPERIMENT_STARTED__;
+
+        if (isFirstInstruction) {
+            window.__PD_EXPERIMENT_STARTED__ = true;
+            window.Photodiode.signal('experiment');
+        } else {
+            window.Photodiode.signal('task'); 
+        }
+    }
 
     if (block.type === 'rest') {
         setSessionPhase('rest', { source: 'rest_block' });
@@ -2001,6 +2016,10 @@ function trialQualityIssues(runtime, context) {
 }
 
 function startTaskBlock(block, trialPlan = null) {
+    // Photodiode sync: смена этапа внутри задачи - 2 моргания 
+    if (window.Photodiode) {
+        window.Photodiode.signal('stage');
+    }
     ex_state.instruction.container.style.display = 'none';
     ex_state.task.area.style.display = 'flex';
     currentTrialIndex = 0;
@@ -2045,6 +2064,11 @@ function runTrial() {
         });
         finishTaskBlockAttempt(block);
         return;
+    }
+    // Photodiode sync: смена стимула - 1 моргание 
+    // Срабатывает на каждой пробе, включая VPC-картинки и 4-choice RT.
+    if (window.Photodiode) {
+        window.Photodiode.signal('stimulus');
     }
 
     const planItem = trials[currentTrialIndex];

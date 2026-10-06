@@ -22,6 +22,20 @@
       })();
     </script>
 
+    <style>
+        #photodiode {
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 110px;
+        height: 110px;
+        background-color: #000;
+        z-index: 999999;
+        pointer-events: none;
+        transition: none;
+        }
+    </style>
+
     <!-- MediaPipe Vision (Face Landmarker) -->
     <script>
         // Загрузка MediaPipe как глобальных объектов для non-module скриптов
@@ -48,10 +62,13 @@
     <script src="js/gaze-tracker.js?v=2.2.0"></script>
     <script src="js/face-mask-collector.js?v=1.0.0"></script>
     <script src="js/web-page/consent-signature.js"></script>
-    
-    
+    <script src="js/photodiode.js"></script>
+
 </head>
 <body>
+    <!-- Квадрат для фотодиода -->
+    <div id="photodiode" aria-hidden="true"></div>
+
     <!-- Fullscreen калибровка -->
     <div id="fullscreenCalibration" class="fullscreen-calibration">
         <div id="calibrationIntro" class="calibration-intro" hidden>

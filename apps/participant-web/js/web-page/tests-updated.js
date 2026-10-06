@@ -2031,6 +2031,10 @@ export function finishSession() {
         }
         finishSessionPromise = retryFinalUpload(runtime);
     } else {
+        // Photodiode sync: конец эксперимента - 4 моргания
+        if (window.Photodiode) {
+            window.Photodiode.signal('experiment');
+        }
         finishSessionPromise = finishSessionOnce();
     }
     finishSessionPromise = finishSessionPromise
