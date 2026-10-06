@@ -65,6 +65,7 @@ let activeTrialQualityContext = null;
 let acknowledgedTaskBlockIndex = null;
 let cognitiveFullscreenOwned = false;
 let timedProtocolBlockInterval = null;
+let pendingPhotodiodeTaskStart = null;
 const MAX_COGNITIVE_BLOCK_ATTEMPTS = 3;
 
 const LOCALE_FIELD_SUFFIX = Object.freeze({
@@ -1220,6 +1221,9 @@ function emitStimulusOffIfNeeded(rtMs, reason) {
 function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (cognitiveFinished) return;
     cognitiveFinished = true;
+    pendingPhotodiodeTaskStart = null;
+    if (reason === 'completed') void window.Photodiode?.finish();
+    else window.Photodiode?.stop();
     if (timedProtocolBlockInterval) {
         clearInterval(timedProtocolBlockInterval);
         timedProtocolBlockInterval = null;
@@ -1306,6 +1310,7 @@ export async function loadAndStartCognitiveTask(options = {}) {
     };
 
     cognitiveFinished = false;
+    pendingPhotodiodeTaskStart = null;
     acknowledgedTaskBlockIndex = null;
     clearTaskContext();
 
@@ -1476,6 +1481,14 @@ function runNextBlock() {
         currentBlockIndex++;
         runNextBlock();
         return;
+    }
+    if (window.Photodiode?.isEnabled()) {
+        if (window.Photodiode.isActive()) void window.Photodiode.signal('task');
+        else void window.Photodiode.begin();
+        state.sessionData.experimentMeta.photodiode = {
+            version: window.Photodiode.version, temporary: true, enabled: true,
+            timingValidated: false, pulseMs: 100, gapMs: 100
+        };
     }
 
     if (block.type === 'rest') {
@@ -2051,7 +2064,18 @@ function trialQualityIssues(runtime, context) {
     });
 }
 
-function startTaskBlock(block, trialPlan = null) {
+async function startTaskBlock(block, trialPlan = null) {
+    if (window.Photodiode?.isEnabled()) {
+        if (pendingPhotodiodeTaskStart) return;
+        const pending = {};
+        pendingPhotodiodeTaskStart = pending;
+        ex_state.instruction.btn.disabled = true;
+        await window.Photodiode.signal('stage');
+        if (pendingPhotodiodeTaskStart !== pending) return;
+        pendingPhotodiodeTaskStart = null;
+        if (cognitiveFinished || experimentProtocol.blocks[currentBlockIndex] !== block) return;
+        ex_state.instruction.btn.disabled = false;
+    }
     ex_state.instruction.container.style.display = 'none';
     ex_state.task.area.style.display = 'flex';
     currentTrialIndex = 0;
@@ -2097,7 +2121,6 @@ function runTrial() {
         finishTaskBlockAttempt(block);
         return;
     }
-
     const planItem = trials[currentTrialIndex];
     const trial = planItem.trial;
     const config = block.blockConfig || {};
@@ -2262,6 +2285,21 @@ function runTrial() {
             responded = true;
             handleResponse(decision.rtMs, decision.response, decision);
         });
+
+        if (window.Photodiode?.isEnabled()) {
+            const markerContext = { ...state.runtime.taskContext };
+            recordSessionEvent('photodiode_marker_request', {
+                ...markerContext, category: 'technical', kind: 'stimulus',
+                requestedAtMs: performance.now(), timingValidated: false
+            });
+            void window.Photodiode.signal('stimulus').then(marker => {
+                recordSessionEvent('photodiode_marker', {
+                    ...markerContext, category: 'technical', kind: marker.kind, status: marker.status,
+                    pulses: marker.pulses ?? 0, emittedAtMs: marker.emittedAtMs ?? null,
+                    completedAtMs: marker.completedAtMs ?? null, timingValidated: false
+                });
+            });
+        }
 
         pendingStimulusTimeoutCallback = () => {
             if (!responded) {

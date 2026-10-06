@@ -22,6 +22,22 @@
       })();
     </script>
 
+    <style>
+        #photodiode {
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 110px;
+        height: 110px;
+        background-color: #000;
+        z-index: 999999;
+        pointer-events: none;
+        transition: none;
+        }
+        #photodiode[hidden], #photodiodeTemporaryNotice[hidden] { display: none; }
+        #photodiodeTemporaryNotice { margin: 16px 0; padding: 12px; border: 1px dashed var(--border); border-radius: 12px; }
+    </style>
+
     <!-- MediaPipe Vision (Face Landmarker) -->
     <script>
         // Загрузка MediaPipe как глобальных объектов для non-module скриптов
@@ -48,10 +64,13 @@
     <script src="js/gaze-tracker.js?v=2.2.0"></script>
     <script src="js/face-mask-collector.js?v=1.0.0"></script>
     <script src="js/web-page/consent-signature.js"></script>
-    
-    
+    <script src="js/photodiode.js?v=20261007-1"></script>
+
 </head>
 <body>
+    <!-- TEMPORARY: local-only photodiode hardware diagnostic, hidden during calibration. -->
+    <div id="photodiode" aria-hidden="true" data-feature-status="temporary" hidden></div>
+
     <!-- Fullscreen калибровка -->
     <div id="fullscreenCalibration" class="fullscreen-calibration">
         <div id="calibrationIntro" class="calibration-intro" hidden>
@@ -143,6 +162,10 @@
         <div id="step1" class="step active">
             <h1 data-i18n="welcome_title">Добро пожаловать</h1>
             <p class="text-center" data-i18n="welcome_subtitle">Платформа оценки внимания и эмоций</p>
+            <label id="photodiodeTemporaryNotice" class="checkbox-wrapper" hidden>
+                <input type="checkbox" id="photodiodeTemporaryToggle" />
+                <span id="photodiodeTemporaryText"></span>
+            </label>
             
             <div class="warning-container">
                 <strong class="warning-title" data-i18n="warning_title">⚠️ Важно:</strong>

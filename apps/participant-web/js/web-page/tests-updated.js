@@ -2037,6 +2037,7 @@ export function finishSession() {
         }
         finishSessionPromise = retryFinalUpload(runtime);
     } else {
+        void window.Photodiode?.finish();
         finishSessionPromise = finishSessionOnce();
     }
     finishSessionPromise = finishSessionPromise
