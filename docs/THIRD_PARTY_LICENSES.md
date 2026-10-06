@@ -82,6 +82,17 @@ and exact CC/Public Domain license are recorded in
 abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd  atkinson-hyperlegible-next.woff2
 ```
 
+## Media Inspection System Tools
+
+The API image installs Debian FFmpeg/ffprobe for thumbnails, video posters and
+decoding checks. Upstream source/license: https://ffmpeg.org/legal.html.
+The exact package version and FFmpeg build configuration are recorded in
+`/usr/local/share/wecog/runtime-packages.txt` and `ffmpeg-build.txt`. Preserve
+`/usr/share/doc/ffmpeg/copyright`, package sources and release image digest when
+distributing the image. LGPL/GPL terms depend on the package build; these tools
+are separate subprocesses, not a browser/Node-linked library. Local tests used
+Alpine FFmpeg 8.0.1. See root `THIRD_PARTY_LICENSES.md` for the scope of the notice.
+
 ## Update policy
 
 Before updating a runtime or model:

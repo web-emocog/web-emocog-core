@@ -6,6 +6,7 @@ const {
   requireOperation,
 } = require('../middleware/auth');
 const { HttpError } = require('../security/http-error');
+const { loadPinnedStimuli } = require('../stimuli/versions');
 const { validateAnalyticsQuery } = require('./query');
 const {
   collectProtocolOptions,
@@ -91,12 +92,16 @@ function optionalFiniteNumber(value) {
   return value === null || value === undefined || value === '' ? null : finiteNumber(value);
 }
 
-async function loadLibraryStimuli(projectId, stimulusIds) {
+async function loadLibraryStimuli(projectId, stimulusIds, definition) {
   const ids = [...new Set((stimulusIds || [])
     .map(value => String(value == null ? '' : value).replace(/^api:/, ''))
     .filter(value => /^\d+$/.test(value))
     .map(Number))];
   if (!ids.length) return new Map();
+  if (definition?.mediaManifest) {
+    const rows = await loadPinnedStimuli(pool, projectId, definition);
+    return new Map(rows.filter(row => ids.includes(Number(row.id))).map(row => [String(row.id), row]));
+  }
   const result = await pool.query(
     `SELECT id, name, mime_type, metadata
      FROM stimuli
@@ -113,23 +118,26 @@ function enrichStimulusDescriptor(stimulus, catalog) {
   const library = catalog.get(id);
   if (!library) return { ...stimulus, id, contentUrl: null };
   const metadata = library.metadata && typeof library.metadata === 'object' ? library.metadata : {};
+  if (library.version_unavailable) return { ...stimulus, id, contentUrl: null, contentError: 'stimulus_version_unavailable' };
   return {
     ...stimulus,
     id,
     name: library.name || stimulus.name || id,
     type: library.mime_type || stimulus.type || 'image',
-    contentUrl: `/stimuli/${id}/content`,
-    intrinsicWidth: optionalFiniteNumber(
+    version: library.current_version_id || stimulus.version || 'legacy',
+    sha256: library.sha256 || null,
+    contentUrl: `/stimuli/${id}/content${library.current_version_id ? '?version=' + library.current_version_id : ''}`,
+    intrinsicWidth: stimulus.intrinsicWidth ?? optionalFiniteNumber(
       metadata.intrinsic_width ?? metadata.intrinsicWidth ?? metadata.width
-    ) ?? stimulus.intrinsicWidth ?? null,
-    intrinsicHeight: optionalFiniteNumber(
+    ) ?? null,
+    intrinsicHeight: stimulus.intrinsicHeight ?? optionalFiniteNumber(
       metadata.intrinsic_height ?? metadata.intrinsicHeight ?? metadata.height
-    ) ?? stimulus.intrinsicHeight ?? null,
+    ) ?? null,
   };
 }
 
-async function enrichSingleStimulus(projectId, data) {
-  const catalog = await loadLibraryStimuli(projectId, [data?.stimulus?.id]);
+async function enrichSingleStimulus(projectId, data, definition) {
+  const catalog = await loadLibraryStimuli(projectId, [data?.stimulus?.id], definition);
   return { ...data, stimulus: enrichStimulusDescriptor(data?.stimulus, catalog) };
 }
 
@@ -381,7 +389,7 @@ router.get('/filter-options', async (req, res) => {
       return res.status(409).json({ error: 'Protocol version does not match', code: 'analytics_protocol_version_mismatch' });
     }
     const options = collectProtocolOptions(protocol.definition);
-    const catalog = await loadLibraryStimuli(projectId, options.stimuli.map(stimulus => stimulus.id));
+    const catalog = await loadLibraryStimuli(projectId, options.stimuli.map(stimulus => stimulus.id), protocol.definition);
     options.stimuli = options.stimuli.map(stimulus => {
       const library = catalog.get(String(stimulus.id).replace(/^api:/, ''));
       return library
@@ -455,7 +463,8 @@ router.get('/sessions/:sessionRef/aoi', async (req, res) => {
   try {
     const hydrated = await requireSnapshot(req);
     const row = selectedSession(hydrated, req.params.sessionRef);
-    const rows = buildAoiRows(row, hydrated.protocol, hydrated.snapshot.queryEcho);
+    const protocol = { ...hydrated.protocol, definition: row.protocol_definition || hydrated.protocol.definition };
+    const rows = buildAoiRows(row, protocol, hydrated.snapshot.queryEcho);
     const first = rows[0] || null;
     const data = {
       status: rows.length ? 'computed' : 'no_data',
@@ -478,7 +487,7 @@ router.get('/sessions/:sessionRef/aoi', async (req, res) => {
     return res.json(envelope(
       'session_aoi',
       hydrated.snapshot,
-      await enrichSingleStimulus(hydrated.protocol.project_id, data)
+      await enrichSingleStimulus(hydrated.protocol.project_id, data, row.protocol_definition || hydrated.protocol.definition)
     ));
   } catch (error) {
     return responseError(res, error);
@@ -493,7 +502,7 @@ router.get('/sessions/:sessionRef/heatmap', async (req, res) => {
     return res.json(envelope(
       'heatmap',
       hydrated.snapshot,
-      await enrichSingleStimulus(hydrated.protocol.project_id, data)
+      await enrichSingleStimulus(hydrated.protocol.project_id, data, row.protocol_definition || hydrated.protocol.definition)
     ));
   } catch (error) {
     return responseError(res, error);
@@ -506,12 +515,13 @@ router.get('/sessions/:sessionRef/visuals', async (req, res) => {
     const row = selectedSession(hydrated, req.params.sessionRef);
     const contexts = buildSessionVisuals(
       row,
-      hydrated.protocol,
+      { ...hydrated.protocol, definition: row.protocol_definition || hydrated.protocol.definition },
       hydrated.snapshot.queryEcho
     );
     const catalog = await loadLibraryStimuli(
       hydrated.protocol.project_id,
-      contexts.map(context => context.stimulus?.id)
+      contexts.map(context => context.stimulus?.id),
+      row.protocol_definition || hydrated.protocol.definition
     );
     const enriched = contexts.map(context => {
       const stimulus = enrichStimulusDescriptor(context.stimulus, catalog);
@@ -555,10 +565,20 @@ router.get('/groups/heatmap', async (req, res) => {
   try {
     const hydrated = await requireSnapshot(req);
     const data = buildGroupHeatmap(hydrated.sessionRows, hydrated.snapshot.queryEcho);
+    const definitions = hydrated.sessionRows.map(row => row.protocol_definition || hydrated.protocol.definition);
+    const id = String(data.stimulus?.id || '').replace(/^api:/, '');
+    const versions = new Set(definitions.map(definition => definition?.mediaManifest?.[id]?.versionId || 'legacy'));
+    if (versions.size > 1) {
+      return res.json(envelope('heatmap', hydrated.snapshot, {
+        ...data, status: 'no_data', reason: 'stimulus_versions_mixed',
+        stimulus: data.stimulus ? { ...data.stimulus, contentUrl: null } : null,
+        grid: { width: 0, height: 0, values: [], maxValue: 0 }, fixationPoints: [],
+      }));
+    }
     return res.json(envelope(
       'heatmap',
       hydrated.snapshot,
-      await enrichSingleStimulus(hydrated.protocol.project_id, data)
+      await enrichSingleStimulus(hydrated.protocol.project_id, data, definitions[0] || hydrated.protocol.definition)
     ));
   } catch (error) {
     return responseError(res, error);

@@ -220,6 +220,23 @@ function AdminView(){
   return root;
 }
 
+// Keep only request status, never passwords, across language/route rerenders.
+const researcherPasswordChangeState = { saving: false, statusKey: '', failed: false };
+
+function syncResearcherPasswordForm(root = document){
+  const form = root.querySelector('#researcherPasswordForm');
+  if(!form) return;
+  const request = researcherPasswordChangeState;
+  form.querySelectorAll('input, button[type="submit"]').forEach(input => { input.disabled = request.saving; });
+  if(request.saving) form.setAttribute('aria-busy', 'true');
+  else form.removeAttribute('aria-busy');
+  const status = form.querySelector('#researcherPasswordStatus');
+  status.hidden = !request.statusKey;
+  status.textContent = request.statusKey ? t(request.statusKey) : '';
+  status.dataset.state = request.saving ? 'pending' : (request.failed ? 'error' : 'success');
+  status.style.color = request.saving ? 'var(--muted)' : (request.failed ? 'var(--bad)' : 'var(--good)');
+}
+
 function SettingsView(){
   document.getElementById('pageTitle').textContent=t('settingsTitle');
   setChips([]);
@@ -229,13 +246,101 @@ function SettingsView(){
     <div class="card" style="grid-column:span 12; border-radius:22px;">
       <h3>${t('settingsTitle')}</h3>
       <p style="margin-top:6px;">${t('settingsSub')}</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
-        <input type="password" name="wecog-current-password" autocomplete="current-password" class="select" style="max-width:260px;background:#fff;" placeholder="${t('currentPassword')}" />
-        <input type="password" name="wecog-new-password" autocomplete="new-password" class="select" style="max-width:300px;background:#fff;" placeholder="${t('newPassword')}" />
-        <button class="quick-btn" style="font-weight:700;">${t('changePassword')}</button>
-      </div>
+      <form id="researcherPasswordForm" style="margin-top:14px;" novalidate>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;">
+          <label for="researcherCurrentPassword" style="display:flex;flex-direction:column;gap:6px;flex:1 1 220px;min-width:0;">
+            ${t('currentPassword')}
+            <input id="researcherCurrentPassword" type="password" name="wecog-current-password" autocomplete="current-password" class="select" required maxlength="72" />
+          </label>
+          <label for="researcherNewPassword" style="display:flex;flex-direction:column;gap:6px;flex:1 1 220px;min-width:0;">
+            ${t('newPassword')}
+            <input id="researcherNewPassword" type="password" name="wecog-new-password" autocomplete="new-password" class="select" required minlength="12" maxlength="72" aria-describedby="researcherPasswordPolicy" />
+          </label>
+          <label for="researcherConfirmPassword" style="display:flex;flex-direction:column;gap:6px;flex:1 1 220px;min-width:0;">
+            ${t('confirmPassword')}
+            <input id="researcherConfirmPassword" type="password" name="wecog-confirm-password" autocomplete="new-password" class="select" required maxlength="72" />
+          </label>
+        </div>
+        <p id="researcherPasswordPolicy" style="margin-top:10px;font-size:12px;">${t('passwordPolicy')}</p>
+        <button type="submit" id="researcherChangePasswordBtn" class="quick-btn" style="font-weight:700;margin-top:14px;">${t('changePassword')}</button>
+        <p id="researcherPasswordStatus" role="status" aria-live="polite" style="margin-top:12px;" hidden></p>
+      </form>
     </div>
   `;
+  const form = root.querySelector('#researcherPasswordForm');
+  const currentInput = root.querySelector('#researcherCurrentPassword');
+  const newInput = root.querySelector('#researcherNewPassword');
+  const confirmInput = root.querySelector('#researcherConfirmPassword');
+  function showPasswordStatus(key, failed){
+    researcherPasswordChangeState.statusKey = key;
+    researcherPasswordChangeState.failed = failed;
+    syncResearcherPasswordForm();
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if(researcherPasswordChangeState.saving) return;
+    const currentPassword = currentInput.value;
+    const newPassword = newInput.value;
+    if(!currentPassword || !newPassword || !confirmInput.value){
+      showPasswordStatus('passwordFieldsRequired', true);
+      return;
+    }
+    if(Array.from(newPassword).length < 12 || new TextEncoder().encode(newPassword).length > 72){
+      showPasswordStatus('passwordPolicyError', true);
+      return;
+    }
+    if(newPassword !== confirmInput.value){
+      showPasswordStatus('passwordMismatch', true);
+      return;
+    }
+    if(currentPassword === newPassword){
+      showPasswordStatus('passwordUnchanged', true);
+      return;
+    }
+    researcherPasswordChangeState.saving = true;
+    showPasswordStatus('passwordSaving', false);
+    try{
+      const updated = await apiPatch('/auth/me/password', { currentPassword, newPassword });
+      if(updated?.ok !== true || updated.auth_transport !== 'cookie'
+          || typeof updated.csrf_token !== 'string' || !updated.csrf_token){
+        showPasswordStatus('passwordUnconfirmed', true);
+        return;
+      }
+      // The response refreshes the HttpOnly cookie and rotates its CSRF token.
+      // Keep the new token even if navigation removed this form while saving.
+      try{
+        sessionStorage.setItem('emocog_csrf_token', updated.csrf_token);
+      }catch(_){
+        showPasswordStatus('passwordChangedSignIn', false);
+        return;
+      }
+      showPasswordStatus('passwordChanged', false);
+    }catch(error){
+      const errorKeys = {
+        current_password_invalid: 'passwordCurrentInvalid',
+        password_validation_failed: 'passwordPolicyError',
+        password_unchanged: 'passwordUnchanged',
+        password_change_conflict: 'passwordConflict',
+        csrf_token_invalid: 'passwordSessionExpired'
+      };
+      showPasswordStatus(errorKeys[error.code] || (error.status === 401
+        ? 'passwordSessionExpired' : (error.status === 429 ? 'passwordRateLimited' : 'passwordUnconfirmed')), true);
+    }finally{
+      currentInput.value = '';
+      newInput.value = '';
+      confirmInput.value = '';
+      researcherPasswordChangeState.saving = false;
+      syncResearcherPasswordForm();
+    }
+  });
+  form.addEventListener('input', () => {
+    if(!researcherPasswordChangeState.saving){
+      researcherPasswordChangeState.statusKey = '';
+      syncResearcherPasswordForm();
+    }
+  });
+  syncResearcherPasswordForm(root);
   return root;
 }
 

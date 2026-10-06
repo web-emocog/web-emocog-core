@@ -172,8 +172,10 @@ async function loadCandidateSessions(queryable, projectId, protocolId) {
             s.started_at, s.stopped_at, s.updated_at,
             q.qc_score, q.validity AS qc_validity, q.fail_reasons,
             q.payload AS qc_payload, q.updated_at AS qc_updated_at,
-            f.payload AS features_payload, f.updated_at AS features_updated_at
+            f.payload AS features_payload, f.updated_at AS features_updated_at,
+            i.protocol_definition
      FROM sessions s
+     LEFT JOIN invitations i ON i.id = s.invitation_id
      LEFT JOIN session_qc_summary q ON q.session_id = s.id
      LEFT JOIN session_features f ON f.session_id = s.id
      WHERE s.project_id = $1 AND s.protocol_id = $2
@@ -198,13 +200,15 @@ function datasetFingerprint(protocol, rows) {
       updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
       featuresUpdatedAt: row.features_updated_at ? new Date(row.features_updated_at).toISOString() : null,
       qcUpdatedAt: row.qc_updated_at ? new Date(row.qc_updated_at).toISOString() : null,
+      mediaManifest: row.protocol_definition?.mediaManifest || null,
     })),
   });
 }
 
 function snapshotVersions(protocol, query) {
   const options = collectProtocolOptions(protocol.definition);
-  const stimulusVersions = options.stimuli.map(stimulus => `${stimulus.id}@1`).sort();
+  const stimulusVersions = options.stimuli.map(stimulus =>
+    `${stimulus.id}@${protocol.definition?.mediaManifest?.[stimulus.id]?.versionId || 'legacy'}`).sort();
   return {
     protocol: query.protocolVersion,
     stimulus: stimulusVersions.join(',') || 'not_configured',

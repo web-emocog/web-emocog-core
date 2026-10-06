@@ -1,7 +1,7 @@
-import { state } from '../../../web-page/state.js?v=20260919-1';
+import { state } from '../../../web-page/state.js?v=20261006-3';
 import { extractEyeSignalSample } from '../../../web-page/eye-signal.js';
 import { ANALYSIS_LOOP } from '../constants.js';
-import { isContinuousSessionAnalysisRunning } from '../../../session-runtime/index.js?v=20260919-1';
+import { isContinuousSessionAnalysisRunning } from '../../../session-runtime/index.js?v=20261006-3';
 
 function getVideoTime(videoElement) {
     if (!videoElement || videoElement.readyState < 2) return -1;

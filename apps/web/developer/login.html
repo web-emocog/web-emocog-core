@@ -210,7 +210,7 @@
       document.getElementById('form').addEventListener('submit', function (e) {
         e.preventDefault();
         var login = (document.getElementById('login').value || '').trim().toLowerCase();
-        var password = (document.getElementById('password').value || '').trim();
+        var password = document.getElementById('password').value || '';
         var errEl = document.getElementById('error');
         errEl.classList.remove('visible');
         errEl.style.color = '';

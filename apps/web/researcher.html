@@ -2831,7 +2831,7 @@ body{
     })();
   </script>
   <script src="api-base.js?v=20260819-1"></script>
-  <script src="account-storage.js?v=20260829-1"></script>
+  <script src="account-storage.js?v=20261006-3"></script>
   <script>
     if (window.WecogAccountStorage) window.WecogAccountStorage.activateCachedUser();
   </script>
@@ -2867,7 +2867,14 @@ body{
             window.location.reload();
             return;
           }
-          window.dispatchEvent(new Event('wecog:researcherauthenticated'));
+          var notifyAuthenticated = function () {
+            window.dispatchEvent(new Event('wecog:researcherauthenticated'));
+          };
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', notifyAuthenticated, { once: true });
+          } else {
+            notifyAuthenticated();
+          }
         } catch (_) {}
       });
     })();
@@ -2886,6 +2893,7 @@ body{
  
   <script src="cognitive-task-protocols.js?v=20260919-1"></script>
   <script src="../shared/rt-registry.js"></script>
+  <script src="../shared/keyboard-responses.js?v=20261003-1"></script>
 
   <!-- ===== WELCOME SCREEN ===== -->
   <div id="welcomeScreen">
@@ -3175,7 +3183,7 @@ body{
 
   <div class="toast" id="toast"></div>
   
-  <script src="researcher-i18n.js?v=20260819-1"></script>
+  <script src="researcher-i18n.js?v=20261005-1"></script>
   <script src="researcher-experiments.js?v=20260919-1"></script>
   <script src="researcher-analytics.js?v=20260820-2"></script>
   <script src="researcher-analytics-config.js?v=20260806-1"></script>
@@ -3189,16 +3197,16 @@ body{
       }
     })();
   </script>
-  <script src="researcher-analytics-production.js?v=20260919-1"></script>
-  <script src="researcher-admin-settings.js?v=20260909-1"></script>
+  <script src="researcher-analytics-production.js?v=20261006-3"></script>
+  <script src="researcher-admin-settings.js?v=20261006-2"></script>
   <script src="aoi-geometry.js?v=20260919-1"></script>
   <script src="aoi-protocol.js?v=20260807-1"></script>
   <script src="../shared/survey-contract.js?v=20260828-2"></script>
-  <script src="../shared/standard-stimuli.js?v=20260919-1"></script>
-  <script src="researcher-builder.js?v=20260919-1"></script>
-  <script src="researcher-stimuli.js?v=20260919-1"></script>
-  <script src="researcher-core.js?v=20260913-1"></script>
-  <script src="researcher-api-bridge.js?v=20260913-1"></script>
+  <script src="../shared/standard-stimuli.js?v=20261003-1"></script>
+  <script src="researcher-builder.js?v=20261006-3"></script>
+  <script src="researcher-stimuli.js?v=20261004-1"></script>
+  <script src="researcher-core.js?v=20261005-1"></script>
+  <script src="researcher-api-bridge.js?v=20261003-1"></script>
   <script src="researcher-navigation.js?v=20260909-1"></script>
 </body>
 </html>

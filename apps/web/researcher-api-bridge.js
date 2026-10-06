@@ -273,11 +273,12 @@
     const previous = getSelectedProjectId();
     try {
       if (id != null) localStorage.setItem(PROJECT_ID_KEY, String(id));
+      else localStorage.removeItem(PROJECT_ID_KEY);
       if (name && global.state) global.state.project = name;
     } catch (_) {}
-    if (id != null && String(previous || '') !== String(id)) {
+    if (String(previous || '') !== String(id || '')) {
       global.dispatchEvent(new CustomEvent('wecog:projectchange', {
-        detail: { projectId: String(id), projectName: name || '' }
+        detail: { projectId: id == null ? null : String(id), projectName: name || '' }
       }));
     }
   }
@@ -309,8 +310,8 @@
     if (!hasLiveApi()) return false;
     try {
       const projects = await fetchProjects();
-      if (projects.length && !getSelectedProjectId()) {
-        setSelectedProjectId(projects[0].id, projects[0].name);
+      if (!projects.some(project => String(project.id) === String(getSelectedProjectId()))) {
+        setSelectedProjectId(projects[0]?.id || null, projects[0]?.name || '');
       }
       populateProjectSelect(projects);
       if (typeof global.syncProjectStimuliFromApi === 'function') {
@@ -326,6 +327,7 @@
       }
       return true;
     } catch (e) {
+      global.invalidateProjectStimuli?.();
       console.warn('[researcher-api-bridge] projects sync failed', e);
       if (hasLiveApi() && typeof global.toast === 'function') {
         global.toast('Не удалось загрузить библиотеку с сервера. Проверьте соединение и обновите страницу.', 'error');

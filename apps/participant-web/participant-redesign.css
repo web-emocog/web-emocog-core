@@ -131,6 +131,8 @@ body {
   box-shadow: 0 24px 70px rgba(16, 33, 27, .09);
 }
 .step { animation: participantStepIn .32s ease both; }
+/* Measurement coordinates must not move with the page entrance animation. */
+#step6 { animation: none; transform: none; }
 @keyframes participantStepIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

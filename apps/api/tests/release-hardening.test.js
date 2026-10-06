@@ -214,9 +214,9 @@ test -n "\${directory}"
     assert.ok(rollbackStart >= 0 && rollbackEnd > rollbackStart);
     assert.match(rollback, /if ! start_release "\$\{target\}"; then/);
     assert.match(rollback, /dump_release_diagnostics "\$\{target\}"/);
-    assert.match(rollback, /start_release "\$\{current\}" \|\| true/);
+    assert.match(rollback, /if ! start_release "\$\{current\}"; then/);
     assert.ok(
-      rollback.indexOf('start_release "${current}" || true')
+      rollback.indexOf('if ! start_release "${current}"; then')
         < rollback.indexOf('printf \'%s\\n\' "${target}" >"${CURRENT_TAG_FILE}"'),
     );
   });

@@ -79,6 +79,15 @@ protocol/project и автоматически перевыпускается к
 Cookie-authenticated изменяющие запросы требуют `X-CSRF-Token`; browser login
 не сохраняет staff JWT в `localStorage`.
 
+Самостоятельная смена пароля: `PATCH /auth/me/password` с `currentPassword`
+и `newPassword`. Сервер проверяет текущий пароль и атомарно обновляет hash
+вместе с `token_version`; при конкурентном изменении возвращает `409`
+(`password_change_conflict`), а не перезаписывает более новый пароль. Cookie
+caller получает обновлённую HttpOnly cookie и `csrf_token`, который frontend
+обязан заменить перед следующей записью. Старые cookie и bearer JWT становятся
+невалидными; bearer client после успешной смены входит заново. Поля паролей
+передаются без `trim()` и не отражаются в ошибках validation этого endpoint.
+
 ## Эндпоинты
 
 | Метод | Путь | Описание | Auth |
@@ -86,6 +95,7 @@ Cookie-authenticated изменяющие запросы требуют `X-CSRF-
 | POST | /auth/register | Регистрация | — |
 | POST | /auth/login | Логин: `HttpOnly` cookie для browser или JWT для API-клиента | — |
 | GET | /auth/me | Текущий пользователь; восстанавливает CSRF для cookie-сессии | Cookie / JWT |
+| PATCH | /auth/me/password | Самостоятельная смена пароля с проверкой текущего | Cookie + CSRF / JWT |
 | GET | /auth/users | Список аккаунтов (для RBAC-менеджмента) | JWT + роль |
 | POST | /auth/users | Создание аккаунта с ролью | JWT + роль |
 | PATCH | /auth/users/:id | Обновление роли/display_name/password | JWT + роль |

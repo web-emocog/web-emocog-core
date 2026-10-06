@@ -163,7 +163,7 @@
         setStatus(createStatus, '');
         var payload = {
           email: (document.getElementById('email').value || '').trim().toLowerCase(),
-          password: (document.getElementById('password').value || '').trim(),
+          password: document.getElementById('password').value || '',
           role: document.getElementById('role').value,
           display_name: (document.getElementById('displayName').value || '').trim() || null,
           organization_ids: parseOrgIds(document.getElementById('orgs').value),

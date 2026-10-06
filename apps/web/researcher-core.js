@@ -30,10 +30,12 @@ function authHeaders(){ const h = {}; const csrf=sessionStorage.getItem('emocog_
 function apiHeaders(){ return {'Content-Type':'application/json'}; }
 async function apiFailError(r){
   let detail = r.statusText || '';
+  let code = null;
   try{
     const ct = r.headers.get('content-type') || '';
     if(ct.includes('application/json')){
       const j = await r.json();
+      if(typeof j?.code === 'string') code = j.code;
       if(j && j.error) detail = [j.error, j.message].filter(Boolean).join(' — ');
       else if(j && j.message) detail = j.message;
       else if(j && Array.isArray(j.errors) && j.errors.length){
@@ -41,7 +43,10 @@ async function apiFailError(r){
       }
     }
   }catch(_){}
-  return new Error(r.status + (detail ? ' — ' + detail : ''));
+  const error = new Error(r.status + (detail ? ' — ' + detail : ''));
+  error.status = r.status;
+  error.code = code;
+  return error;
 }
 function apiRequestHeaders(json){ const h=json?apiHeaders():authHeaders(); const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
 async function apiGet(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, {headers: apiRequestHeaders(true),credentials:'include'}); if(!r.ok) throw await apiFailError(r); return r.json(); }
@@ -124,12 +129,20 @@ function deriveSelectedMetricsFromBlocks(blocks) {
   });
   return metrics;
 }
+function setResearcherProjectSelection(projectId) {
+  var previous = localStorage.getItem('emocog_selected_project_id');
+  var next = projectId == null ? null : String(projectId);
+  if (next == null) localStorage.removeItem('emocog_selected_project_id');
+  else localStorage.setItem('emocog_selected_project_id', next);
+  if (previous !== next) window.dispatchEvent(new CustomEvent('wecog:projectchange', { detail: { projectId: next } }));
+}
+
 async function resolveApiProjectId() {
   var fromStorage = parseInt(localStorage.getItem('emocog_selected_project_id'), 10);
   if (Number.isFinite(fromStorage) && fromStorage > 0) return fromStorage;
   var projects = await apiGet('/projects');
   if (Array.isArray(projects) && projects[0] && projects[0].id) {
-    localStorage.setItem('emocog_selected_project_id', String(projects[0].id));
+    setResearcherProjectSelection(projects[0].id);
     return parseInt(projects[0].id, 10);
   }
   throw new Error('В API нет проектов. Создайте проект или войдите как исследователь.');
@@ -162,7 +175,7 @@ async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
     invitationCode: options.invitationCode || apiState.invitationCode || null,
     publishVerifiedAt: null
   });
-  localStorage.setItem('emocog_selected_project_id', String(saved.project_id || projectId));
+  setResearcherProjectSelection(saved.project_id || projectId);
   return saved;
 }
 async function createInvitationForProtocol(protocolId, options) {
@@ -228,6 +241,11 @@ function applyAdminNavAccess(){
   nav.style.display = state.adminPanelEnabled ? '' : 'none';
 }
 
+function applyProjectDeleteAccess() {
+  const allowed = state.authPermissions?.operations?.includes('project.delete') === true;
+  document.querySelectorAll('.ws-proj-remove').forEach(button => { button.hidden = !allowed; });
+}
+
 async function bootstrapAdminAccess(){
   try{
     const [me, permissions] = await Promise.all([
@@ -241,6 +259,7 @@ async function bootstrapAdminAccess(){
     state.adminPanelEnabled = false;
   }
   applyAdminNavAccess();
+  applyProjectDeleteAccess();
 }
 
 async function logoutResearcher() {
@@ -826,6 +845,7 @@ bootstrapAdminAccess();
         removeProject(item && item.dataset.id, item && item.dataset.name);
       });
     });
+    applyProjectDeleteAccess();
   }
 
   window.syncWelcomeProjects = function(projects) {
@@ -927,6 +947,7 @@ bootstrapAdminAccess();
 
   async function removeProject(projectId, projectName) {
     if (!projectId) return;
+    if (state.authPermissions?.operations?.includes('project.delete') !== true) return;
     const texts = WS_TEXTS[wsLang];
     if (!window.confirm(texts.removeConfirm.replace('{name}', projectName || projectId))) return;
     try {
@@ -934,7 +955,7 @@ bootstrapAdminAccess();
       await apiDelete('/projects/' + encodeURIComponent(projectId));
       if (String(selectedProjectId) === String(projectId)) {
         selectedProjectId = null;
-        localStorage.removeItem('emocog_selected_project_id');
+        setResearcherProjectSelection(null);
         localStorage.removeItem('emocog_selected_workspace_project_id');
       }
       if (window.EmocogResearcherBridge) {
@@ -965,7 +986,7 @@ bootstrapAdminAccess();
       if (editingProjectId) {
         await apiPatch('/projects/' + encodeURIComponent(editingProjectId), { name: name });
         selectedProjectId = String(editingProjectId);
-        localStorage.setItem('emocog_selected_project_id', selectedProjectId);
+        setResearcherProjectSelection(selectedProjectId);
         if (window.EmocogResearcherBridge) {
           await window.EmocogResearcherBridge.syncProjectsFromApi();
         } else {
@@ -991,7 +1012,7 @@ bootstrapAdminAccess();
         slug: 'project-' + Date.now().toString(36),
       });
       selectedProjectId = String(created.id);
-      localStorage.setItem('emocog_selected_project_id', selectedProjectId);
+      setResearcherProjectSelection(selectedProjectId);
       if (window.EmocogResearcherBridge) {
         await window.EmocogResearcherBridge.syncProjectsFromApi();
       } else {
@@ -1031,7 +1052,7 @@ bootstrapAdminAccess();
       const proj = list.find(p => p.id === selectedProjectId);
       if (proj) {
         localStorage.setItem('emocog_selected_workspace_project_id', String(proj.id));
-        localStorage.setItem('emocog_selected_project_id', String(proj.id));
+        setResearcherProjectSelection(proj.id);
         syncProjectToLeftPanel(proj.name, proj.id);
         if (typeof navigate === 'function') navigate('#/overview');
         // Re-render overview to reflect project

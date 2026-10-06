@@ -4,30 +4,30 @@ import {
     recordSessionEvent,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20260919-1';
-import { translations } from '../../translations.js?v=20260919-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20260919-1';
-import { stopPreCheck } from './precheck-updated.js?v=20260919-1';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20260919-1';
+} from './state.js?v=20261006-3';
+import { translations } from '../../translations.js?v=20261006-3';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261006-3';
+import { stopPreCheck } from './precheck-updated.js?v=20261006-3';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261006-3';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261006-3';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
 } from './protocol-invite-utils.js?v=20260915-1';
-import { buildHeatmaps } from './heatmap.js';
+import { buildHeatmaps } from './heatmap.js?v=20261006-3';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20260919-1';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261006-3';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260919-1';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261006-3';
 import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
 import {
     getContentViewport,
@@ -44,12 +44,12 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260919-1';
+} from '../session-runtime/index.js?v=20261006-3';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
     showCalibrationHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20260909-1';
+} from '../gaze-tracker/head-pose-guide.js?v=20261006-3';
 
 function participantMessage(key, replacements = {}) {
     const pack = translations[state.currentLang] || translations.en;
@@ -202,7 +202,13 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
                 status: error?.httpStatus || null,
                 payload: error?.payload || null
             });
-            setUploadStatus(participantMessage('runtime_upload_failure'), 'error');
+            const rejected = Number.isFinite(error?.httpStatus)
+                && error.httpStatus >= 400 && error.httpStatus < 500
+                && ![408, 425, 429].includes(error.httpStatus);
+            setUploadStatus(participantMessage(rejected
+                ? 'runtime_upload_rejected' : 'runtime_upload_failure', {
+                status: error?.httpStatus
+            }), 'error');
         }
     });
 }

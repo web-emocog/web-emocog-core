@@ -2,6 +2,9 @@ const path = require('path');
 const config = require('../config');
 const { referencedDatabaseStimulusIds, referencedStimulusIds } = require('../../shared/protocol-stimuli');
 const { resolveStandardStimulus } = require('../../shared/standard-stimuli');
+const { loadPinnedStimuli, hashFile, ensureStimulusVersion } = require('./versions');
+const { mayReadStimulus } = require('./access');
+const { ensurePlayableVersion } = require('./media-preview');
 const {
   getStoredContentPath,
   resolveReadableServerOwnedUploadPath,
@@ -16,8 +19,8 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
     .map(id => ({ id, code: 'stimulus_not_saved_on_server', name: null }));
   if (!ids.length) return { ok: unavailable.length === 0, referencedIds: [], unavailable };
 
-  const result = await queryable.query(
-    `SELECT id, name, mime_type, metadata
+  const result = definition?.mediaManifest ? { rows: await loadPinnedStimuli(queryable, projectId, definition) } : await queryable.query(
+    `SELECT id, name, mime_type, metadata, created_by, visibility
      FROM stimuli
      WHERE project_id = $1 AND id = ANY($2::int[])
      ORDER BY id`,
@@ -27,7 +30,7 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
   const uploadsRoot = options.uploadsRoot || stimuliUploadsRoot;
   for (const id of ids) {
     const row = rowsById.get(id);
-    if (!row) {
+    if (!row || (options.user && !mayReadStimulus(row, options.user))) {
       unavailable.push({ id, code: 'stimulus_record_missing', name: null });
       continue;
     }
@@ -37,6 +40,15 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
     );
     if (!resolved.ok) {
       unavailable.push({ id, code: resolved.code, name: row.name || null });
+    } else if (row.sha256 && await hashFile(resolved.absolutePath) !== row.sha256) {
+      unavailable.push({ id, code: 'stimulus_checksum_mismatch', name: row.name || null });
+    } else if (options.verifyDecoding) {
+      try {
+        const version = row.pinned_version || await ensureStimulusVersion(queryable, row, { uploadsRoot });
+        await ensurePlayableVersion(queryable, version, uploadsRoot);
+      } catch (error) {
+        unavailable.push({ id, code: error.code || 'media_decode_failed', name: row.name || null });
+      }
     }
   }
 

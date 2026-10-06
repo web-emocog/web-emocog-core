@@ -8,7 +8,7 @@
     <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
 
     <link rel="stylesheet" href="style.css?v=20260919-1">
-    <link rel="stylesheet" href="participant-redesign.css?v=20260820-3">
+    <link rel="stylesheet" href="participant-redesign.css?v=20261004-1">
     <script>
       (function () {
         var params = new URLSearchParams(window.location.search || '');
@@ -43,7 +43,7 @@
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
     <script src="js/face-segmenter.js?v=1.2.2"></script>
     <!-- QC Metrics Module -->
-    <script src="js/qc-metrics.js?v=3.5.0"></script>
+    <script src="js/qc-metrics.js?v=3.5.1"></script>
     <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
     <script src="js/gaze-tracker.js?v=2.2.0"></script>
     <script src="js/face-mask-collector.js?v=1.0.0"></script>
@@ -72,7 +72,7 @@
         </div>
         <div id="validationResult" class="calibration-intro" hidden>
             <div class="calibration-intro-card" role="dialog" aria-modal="true" aria-labelledby="validationResultTitle">
-                <div class="calibration-intro-kicker">Проверка точности</div>
+                <div class="calibration-intro-kicker" data-i18n="validation_intro_kicker">Проверка точности</div>
                 <h2 id="validationResultTitle">Проверка завершена</h2>
                 <p id="validationResultMetrics" class="calibration-result-metrics"></p>
                 <p id="validationResultAdvice" class="calibration-result-advice"></p>
@@ -542,10 +542,10 @@
       }
     </script>
     <script src="../shared/protocol-stimuli.js?v=20260915-1"></script>
-    <script src="../shared/standard-stimuli.js?v=20260919-1"></script>
+    <script src="../shared/standard-stimuli.js?v=20261006-3"></script>
     <script src="../web/cognitive-task-protocols.js?v=20260919-1"></script>
     <script src="../shared/survey-contract.js?v=20260828-2"></script>
-    <script type="module" src="js/web-page/app-updated.js?v=20260919-1"></script>
+    <script type="module" src="js/web-page/app-updated.js?v=20261006-3"></script>
     <script>
       (function () {
         const ru = document.getElementById('langRu');

@@ -59,6 +59,7 @@ function normalizePersistedBuilderBlock(block) {
 }
 
 function ExperimentBuilderView(options = {}) {
+  if (typeof activateStimulusLibraryScope === 'function') activateStimulusLibraryScope();
   const startStep = options.startStep !== undefined ? options.startStep : 0;
   const experimentId = options.experimentId || null;
 
@@ -233,6 +234,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   let editingExp = null;
+  const metadataDraftKey = 'emocog_protocol_metadata_draft_v1:' + encodeURIComponent(experimentId || 'new');
   let protocolVersion = '1.0';
   let protocolMeta = {
     title: '',
@@ -306,6 +308,25 @@ function ExperimentBuilderView(options = {}) {
     protocolMeta = JSON.parse(localStorage.getItem('emocog_protocol_meta_draft') || 'null') || protocolMeta;
     protocolVersion = '1.0';
     highestStep = currentStep;
+  }
+  if (experimentId) {
+    try {
+      const draft = JSON.parse(localStorage.getItem(metadataDraftKey) || 'null');
+      if (draft && draft.sourceUpdatedAt === (editingExp?.updatedAt || null)) {
+        protocolMeta = { ...protocolMeta, ...draft.metadata };
+        if (Number.isInteger(draft.step) && draft.step >= 0 && draft.step <= 8) currentStep = draft.step;
+      }
+    } catch (_) { /* A malformed local draft must not prevent editing. */ }
+  }
+
+  function persistMetadataDraft() {
+    if (experimentId) {
+      localStorage.setItem(metadataDraftKey, JSON.stringify({
+        sourceUpdatedAt: editingExp?.updatedAt || null, metadata: protocolMeta, step: currentStep
+      }));
+    } else {
+      localStorage.setItem('emocog_protocol_meta_draft', JSON.stringify(protocolMeta));
+    }
   }
 
   document.getElementById('pageTitle').textContent = (CURRENT_LANG === 'en' ? I18N.en : I18N.ru).protocolBuilder;
@@ -522,6 +543,7 @@ function ExperimentBuilderView(options = {}) {
           <input class="proto-field" data-field="title" value="${previewEscape(localizedInstructionValue(c, 'title'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст', 'Text')}</label>
           <textarea class="proto-field" data-field="text" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${previewEscape(localizedInstructionValue(c, 'text'))}</textarea>
+          <div style="font-size:10px;color:var(--muted);line-height:1.45;">${trb('В авторской инструкции используйте {response}: способ ответа подставится из таблицы проб следующей задачи.', 'Use {response} in custom instructions: the response method comes from the next task’s trial table.')}</div>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Кнопка', 'Button')}</label>
           <input class="proto-field" data-field="buttonText" value="${previewEscape(localizedInstructionValue(c, 'buttonText', 'Далее'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
         </div>`;
@@ -957,6 +979,14 @@ function ExperimentBuilderView(options = {}) {
   const canvasCol = document.createElement('div');
   canvasCol.style.cssText = 'flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden;';
   root.appendChild(canvasCol);
+  const refreshLibrary = () => {
+    if (!root.isConnected) {
+      window.removeEventListener('wecog:stimulisynced', refreshLibrary);
+      return;
+    }
+    if ([3, 4, 5].includes(currentStep)) renderCanvas();
+  };
+  window.addEventListener('wecog:stimulisynced', refreshLibrary);
 
   function renderStepper() {
     if (currentStep > highestStep) highestStep = currentStep;
@@ -1011,7 +1041,7 @@ function ExperimentBuilderView(options = {}) {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.65);backdrop-filter:blur(5px);z-index:9999;display:flex;align-items:center;justify-content:center;';
 
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:20px 24px 18px;width:1180px;max-width:98vw;height:min(92vh,900px);display:flex;flex-direction:column;gap:12px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
+    modal.style.cssText = 'box-sizing:border-box;background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:20px 24px 18px;width:1180px;max-width:98vw;height:min(92vh,900px);overflow:hidden;display:flex;flex-direction:column;gap:12px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
 
     const stimuliOptions = stimuliList.map(s => `<option value="${previewEscape(s.id)}">${previewEscape(s.name)}</option>`).join('');
     const standardFolderId = typeof getStandardFolderId === 'function' ? getStandardFolderId() : 'folder_standard';
@@ -1038,6 +1068,7 @@ function ExperimentBuilderView(options = {}) {
         </button>
       </div>
 
+      <div data-trial-editor-scroll style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
         <div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;">
           <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;">${trb('Измерения', 'Measurements')}</div>
@@ -1153,7 +1184,7 @@ function ExperimentBuilderView(options = {}) {
         <button id="autoGenUndoBtn" class="quick-btn" style="display:none;font-size:12px;">${trb('Отменить генерацию', 'Undo generation')}</button>
       </div>
 
-      <div id="trialsContainer" style="flex:1;min-height:300px;overflow:auto;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.45);">
+      <div id="trialsContainer" style="flex:1 0 220px;min-height:220px;overflow:auto;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.45);">
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
           <thead>
             <tr style="background:rgba(92,102,189,.08);border-bottom:1px solid var(--stroke);">
@@ -1173,6 +1204,7 @@ function ExperimentBuilderView(options = {}) {
           </thead>
           <tbody id="trialsTbody"></tbody>
         </table>
+      </div>
       </div>
 
       <div style="display:flex;gap:12px;justify-content:flex-end;align-items:center;flex-shrink:0;padding-top:12px;border-top:1px solid var(--stroke);">
@@ -1292,6 +1324,10 @@ function ExperimentBuilderView(options = {}) {
               <option value="mouse_click">${trb('Клик мышью', 'Mouse click')}</option>
               <option value="mouse_intent">${trb('Движение мыши', 'Pointer intent')}</option>
               <option value="space">${trb('Пробел', 'Space')}</option>
+              <option value="KeyZ">Я / Z</option>
+              <option value="KeyX">Ч / X</option>
+              <option value="Comma">Б / ,</option>
+              <option value="Period">Ю / .</option>
               <option value="arrow_up">${trb('Вверх', 'Up')}</option>
               <option value="arrow_down">${trb('Вниз', 'Down')}</option>
               <option value="arrow_right">${trb('Вправо', 'Right')}</option>
@@ -1319,7 +1355,10 @@ function ExperimentBuilderView(options = {}) {
         }
         const actionEl = row.querySelector('.t-action');
         actionEl.disabled = !currentTrials[idx].stimulusId;
-        actionEl.value = currentTrials[idx].action || currentTrials[idx].correctResponse || '';
+        const savedAction = currentTrials[idx].action || currentTrials[idx].correctResponse || '';
+        const physicalKey = window.WecogKeyboardResponses.normalize(savedAction);
+        const legacyOption = { Space: 'space', ArrowUp: 'arrow_up', ArrowDown: 'arrow_down', ArrowLeft: 'arrow_left', ArrowRight: 'arrow_right' }[physicalKey];
+        actionEl.value = legacyOption || physicalKey || savedAction;
       });
 
       highlightInvalidRows();
@@ -1542,6 +1581,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function renderCanvas() {
+    persistMetadataDraft();
     if (currentStep === 0) renderMetadataStep();
     else if (currentStep === 1) renderStep0();
     else if (currentStep === 2) renderStep1();
@@ -1552,12 +1592,17 @@ function ExperimentBuilderView(options = {}) {
     setTimeout(() => applyAutoI18n(), 0);
   }
 
-  function getProtocolMetaFromForm() {
+  function getProtocolMetaFromForm(trim = true) {
+    const value = id => {
+      const text = canvasCol.querySelector(id)?.value || '';
+      return trim ? text.trim() : text;
+    };
     return {
-      title: (canvasCol.querySelector('#metaTitle')?.value || '').trim(),
-      protocolId: (canvasCol.querySelector('#metaProtocolId')?.value || '').trim(),
-      estimatedDuration: (canvasCol.querySelector('#metaDuration')?.value || '').trim(),
-      description: (canvasCol.querySelector('#metaDescription')?.value || '').trim()
+      ...protocolMeta,
+      title: value('#metaTitle'),
+      protocolId: value('#metaProtocolId'),
+      estimatedDuration: value('#metaDuration'),
+      description: value('#metaDescription')
     };
   }
 
@@ -1607,6 +1652,12 @@ function ExperimentBuilderView(options = {}) {
         </div>
       </div>
     `;
+    canvasCol.querySelectorAll('#metaTitle, #metaProtocolId, #metaDuration, #metaDescription').forEach(input => {
+      input.addEventListener('input', () => {
+        protocolMeta = getProtocolMetaFromForm(false);
+        persistMetadataDraft();
+      });
+    });
     canvasCol.querySelector('#metaNextBtn').addEventListener('click', () => {
       protocolMeta = getProtocolMetaFromForm();
       const missing = validateProtocolMeta(protocolMeta);
@@ -1616,7 +1667,7 @@ function ExperimentBuilderView(options = {}) {
         err.textContent = autoTranslateString(trb('Заполните обязательные поля: ','Fill in required fields: ') + missing.join(', '), CURRENT_LANG);
         return;
       }
-      localStorage.setItem('emocog_protocol_meta_draft', JSON.stringify(protocolMeta));
+      persistMetadataDraft();
       currentStep = 1;
       renderStepper();
       renderCanvas();
@@ -3144,6 +3195,8 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function previewActionLabel(action) {
+    const keyLabel = window.WecogKeyboardResponses.label(action);
+    if (keyLabel) return keyLabel;
     return ({
       mouse_click:'Клик мышью',
       space:'Пробел',
@@ -3520,15 +3573,9 @@ function ExperimentBuilderView(options = {}) {
     const responseMatches = (screen, event) => {
       const action = screen.trial?.action || screen.trial?.correctResponse || '';
       if (!action) return false;
-      const key = event.key.toLowerCase();
-      if (action === 'space') return key === ' ';
-      if (action === 'arrow_up') return key === 'arrowup';
-      if (action === 'arrow_down') return key === 'arrowdown';
-      if (action === 'arrow_left') return key === 'arrowleft';
-      if (action === 'arrow_right') return key === 'arrowright';
-      return false;
+      return window.WecogKeyboardResponses.fromEvent(event) === window.WecogKeyboardResponses.normalize(action);
     };
-    const isSupportedPreviewKey = (event) => [' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(event.key.toLowerCase());
+    const isSupportedPreviewKey = (event) => !!window.WecogKeyboardResponses.fromEvent(event);
 
     function handleKeydown(event) {
       if (closed || feedbackActive) return;
@@ -4139,6 +4186,7 @@ function ExperimentBuilderView(options = {}) {
     const idx = experiments.findIndex(e => e.id === id);
     if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+    localStorage.removeItem(metadataDraftKey);
     clearExperimentBuilderDraft();
 
     toast(trb('Черновик успешно сохранён!','Draft saved successfully!'));
@@ -4464,6 +4512,7 @@ function ExperimentBuilderView(options = {}) {
     const idx = experiments.findIndex(e => e.id === id);
     if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
+    localStorage.removeItem(metadataDraftKey);
     localStorage.setItem('emocog_active_experiment_id', id);
 
     let toastMain = trb(

@@ -32,6 +32,11 @@ export const EVENT_CATEGORIES = Object.freeze({
 
 let fallbackEventSequence = 0;
 
+// Older participant exports used "session" for lifecycle events.
+export function normalizeSessionEventCategory(category) {
+    return category === 'session' ? EVENT_CATEGORIES.LIFECYCLE : category;
+}
+
 function createEventId(timestamp) {
     if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
         return globalThis.crypto.randomUUID();
@@ -62,7 +67,7 @@ export function createSessionEvent(input) {
         eventId: input?.eventId || createEventId(timestamp),
         sessionId: input?.sessionId || null,
         type,
-        category: input?.category || inferEventCategory(type),
+        category: normalizeSessionEventCategory(input?.category) || inferEventCategory(type),
         severity: input?.severity || 'info',
         phase: input?.phase || null,
         timestamp,

@@ -24,9 +24,12 @@
     'emocog_selected_session_db_id',
     'emocog_selected_workspace_project_id',
     'emocog_stimuli',
+    'emocog_stimulus_quarantine_v1',
     'emocog_ws_projects'
   ]);
   var KEY_PREFIXES = [
+    'emocog_protocol_metadata_draft_v1:',
+    'emocog_stimulus_library_v1:',
     'emocog_analytics_config_',
     'emocog_analytics_plan_',
     'emocog_builder_api_',
@@ -192,6 +195,7 @@
       if (!isWorkspaceKey(originalKey)) return;
       if (
         originalKey.indexOf('emocog_builder_api_') === 0
+        || originalKey.indexOf('emocog_stimulus_library_v1:') === 0
         || originalKey === 'emocog_selected_project_id'
         || originalKey === 'emocog_selected_workspace_project_id'
         || originalKey === 'emocog_selected_protocol_id'

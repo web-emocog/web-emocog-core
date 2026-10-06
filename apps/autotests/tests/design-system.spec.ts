@@ -301,9 +301,10 @@ test.describe('wecog design system', () => {
       try { await (window as any).handleFileUpload([file]); return false; }
       catch { return true; }
     }, image.toString('base64'));
-    expect(unavailable).toBe(true);
+    // The upload was committed. A preview/network failure must not discard that record.
+    expect(unavailable).toBe(false);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_stimuli') || '[]')
-      .some((item: any) => String(item.id) === '44'))).toBe(false);
+      .some((item: any) => String(item.id) === '44' && item.contentAvailable !== false))).toBe(true);
     const rejected = await page.evaluate(async () => {
       localStorage.removeItem('emocog_developer_auth');
       sessionStorage.removeItem('emocog_developer_auth');

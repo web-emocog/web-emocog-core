@@ -6,27 +6,29 @@ import {
     setTaskContext,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20260919-1';
-import { finishSession } from './tests-updated.js?v=20260919-1';
+} from './state.js?v=20261006-3';
+import { finishSession } from './tests-updated.js?v=20261006-3';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20260919-1';
+import { translations } from '../../translations.js?v=20261006-3';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20260919-1';
+} from '../session-runtime/index.js?v=20261006-3';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
 } from '../session-runtime/trial-quality.mjs';
 import {
     RtResponseCollector,
-    normalizeResponseMode
-} from '../rt-input/response-policy.mjs';
+    normalizeResponseMode,
+    normalizeKeyboardResponse,
+    keyboardResponseLabel
+} from '../rt-input/response-policy.mjs?v=20261006-3';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -95,85 +97,115 @@ function localizedProtocolValue(source, field, fallback = '') {
 }
 
 const STANDARD_TASK_RULES = Object.freeze({
-    ru: {
-        simple_rt: 'Когда появится стимул, как можно быстрее нажмите Пробел.',
-        go_nogo: 'Зелёный круг: нажмите Пробел. Красный круг: ничего не нажимайте.',
-        stroop: 'Отвечайте по ЦВЕТУ ШРИФТА, а не по значению слова. Красный — стрелка влево; синий — стрелка вниз; зелёный — стрелка вправо.',
-        flanker: 'Смотрите только на центральную стрелку. Она указывает влево — нажмите стрелку влево; вправо — стрелку вправо. Боковые стрелки игнорируйте.',
-        nback_2: 'Нажмите Пробел, только если текущая фигура совпадает с фигурой два шага назад. При несовпадении ничего не нажимайте.',
-        pvt: 'Когда появится красный счётчик, как можно быстрее нажмите Пробел. До его появления ничего не нажимайте.',
-        ax_cpt: 'Нажмите Пробел только на X, если непосредственно перед ним была A. Во всех остальных случаях ничего не нажимайте.',
-        task_switching: 'Синий фон: оцените число — влево для чётного, вправо для нечётного. Жёлтый фон: оцените букву — влево для гласной, вправо для согласной.',
-        emotion_viewing: 'Спокойно смотрите на каждое изображение до его смены.'
+    "ru": {
+        "simple_rt": "Когда появится стимул, как можно быстрее {response}.",
+        "go_nogo": "Зелёный круг: {response}. Красный круг: ничего не нажимайте.",
+        "stroop": "Отвечайте по ЦВЕТУ ШРИФТА, а не по значению слова.",
+        "flanker": "Смотрите только на центральную стрелку. Отвечайте по её направлению; боковые стрелки игнорируйте.",
+        "nback_2": "{response}, только если текущая фигура совпадает с фигурой два шага назад. При несовпадении ничего не нажимайте.",
+        "pvt": "Когда появится красный счётчик, как можно быстрее {response}. До его появления ничего не нажимайте.",
+        "ax_cpt": "{response} только на X, если непосредственно перед ним была A. Во всех остальных случаях ничего не нажимайте.",
+        "task_switching": "Синий фон: оцените чётность числа. Жёлтый фон: определите, является ли буква гласной или согласной.",
+        "emotion_viewing": "Спокойно смотрите на каждое изображение до его смены."
     },
-    en: {
-        simple_rt: 'When the stimulus appears, press Space as quickly as possible.',
-        go_nogo: 'Green circle: press Space. Red circle: do not press anything.',
-        stroop: 'Respond to the INK COLOUR, not the word. Red: Left Arrow; blue: Down Arrow; green: Right Arrow.',
-        flanker: 'Look only at the centre arrow. If it points left, press Left Arrow; if it points right, press Right Arrow. Ignore the surrounding arrows.',
-        nback_2: 'Press Space only when the current shape matches the shape shown two steps earlier. Otherwise do not respond.',
-        pvt: 'When the red counter appears, press Space as quickly as possible. Do not respond before it appears.',
-        ax_cpt: 'Press Space only for X when it was immediately preceded by A. Do not respond in any other case.',
-        task_switching: 'Blue background: classify the number — Left for even, Right for odd. Yellow background: classify the letter — Left for a vowel, Right for a consonant.',
-        emotion_viewing: 'Look naturally at each image until it changes.'
+    "en": {
+        "simple_rt": "When the stimulus appears, {response} as quickly as possible.",
+        "go_nogo": "Green circle: {response}. Red circle: do not press anything.",
+        "stroop": "Respond to the INK COLOUR, not the word.",
+        "flanker": "Look only at the centre arrow. Respond to its direction; ignore the surrounding arrows.",
+        "nback_2": "{response} only when the current shape matches the shape shown two steps earlier. Otherwise do not respond.",
+        "pvt": "When the red counter appears, {response} as quickly as possible. Do not respond before it appears.",
+        "ax_cpt": "{response} only for X when it was immediately preceded by A. Do not respond in any other case.",
+        "task_switching": "Blue background: classify the number as even or odd. Yellow background: classify the letter as a vowel or consonant.",
+        "emotion_viewing": "Look naturally at each image until it changes."
     },
-    es: {
-        simple_rt: 'Cuando aparezca el cuadrado negro, pulse Espacio lo antes posible.',
-        go_nogo: 'Círculo verde: pulse Espacio. Círculo rojo: no pulse nada.',
-        stroop: 'Responda al COLOR DE LA TINTA, no a la palabra. Rojo: Flecha izquierda; azul: Flecha abajo; verde: Flecha derecha.',
-        flanker: 'Mire solo la flecha central. Si apunta a la izquierda, pulse Flecha izquierda; si apunta a la derecha, pulse Flecha derecha.',
-        nback_2: 'Pulse Espacio solo si la figura actual coincide con la mostrada dos posiciones antes. Si no coincide, no responda.',
-        pvt: 'Cuando aparezca el contador rojo, pulse Espacio lo antes posible. No responda antes.',
-        ax_cpt: 'Pulse Espacio solo para X cuando esté precedida inmediatamente por A. En los demás casos no responda.',
-        task_switching: 'Fondo azul: número — izquierda si es par, derecha si es impar. Fondo amarillo: letra — izquierda si es vocal, derecha si es consonante.',
-        emotion_viewing: 'Mire cada imagen con naturalidad hasta que cambie.'
+    "es": {
+        "simple_rt": "Cuando aparezca el estímulo, {response} lo antes posible.",
+        "go_nogo": "Círculo verde: {response}. Círculo rojo: no responda.",
+        "stroop": "Responda al COLOR DE LA TINTA, no a la palabra.",
+        "flanker": "Mire solo la flecha central y responda según su dirección. Ignore las flechas laterales.",
+        "nback_2": "{response} solo si la figura actual coincide con la mostrada dos posiciones antes. Si no coincide, no responda.",
+        "pvt": "Cuando aparezca el contador rojo, {response} lo antes posible. No responda antes.",
+        "ax_cpt": "{response} solo para X cuando esté precedida inmediatamente por A. En los demás casos no responda.",
+        "task_switching": "Fondo azul: clasifique el número como par o impar. Fondo amarillo: clasifique la letra como vocal o consonante.",
+        "emotion_viewing": "Mire cada imagen con naturalidad hasta que cambie."
     },
-    fr: {
-        simple_rt: 'Lorsque le carré noir apparaît, appuyez sur Espace le plus vite possible.',
-        go_nogo: 'Cercle vert : appuyez sur Espace. Cercle rouge : ne répondez pas.',
-        stroop: 'Répondez à la COULEUR DE L’ENCRE, pas au mot. Rouge : flèche gauche ; bleu : flèche bas ; vert : flèche droite.',
-        flanker: 'Regardez uniquement la flèche centrale. Gauche : flèche gauche ; droite : flèche droite. Ignorez les flèches latérales.',
-        nback_2: 'Appuyez sur Espace seulement si la forme correspond à celle vue deux positions plus tôt. Sinon, ne répondez pas.',
-        pvt: 'Lorsque le compteur rouge apparaît, appuyez sur Espace le plus vite possible. Ne répondez pas avant.',
-        ax_cpt: 'Appuyez sur Espace uniquement pour X immédiatement précédé de A. Sinon, ne répondez pas.',
-        task_switching: 'Fond bleu : nombre — gauche s’il est pair, droite s’il est impair. Fond jaune : lettre — gauche pour une voyelle, droite pour une consonne.',
-        emotion_viewing: 'Regardez naturellement chaque image jusqu’à son changement.'
+    "fr": {
+        "simple_rt": "Lorsque le stimulus apparaît, {response} le plus vite possible.",
+        "go_nogo": "Cercle vert : {response}. Cercle rouge : ne répondez pas.",
+        "stroop": "Répondez à la COULEUR DE L’ENCRE, pas au mot.",
+        "flanker": "Regardez uniquement la flèche centrale et répondez selon sa direction. Ignorez les flèches latérales.",
+        "nback_2": "{response} seulement si la forme correspond à celle vue deux positions plus tôt. Sinon, ne répondez pas.",
+        "pvt": "Lorsque le compteur rouge apparaît, {response} le plus vite possible. Ne répondez pas avant.",
+        "ax_cpt": "{response} uniquement pour X immédiatement précédé de A. Sinon, ne répondez pas.",
+        "task_switching": "Fond bleu : nombre pair ou impair. Fond jaune : voyelle ou consonne.",
+        "emotion_viewing": "Regardez naturellement chaque image jusqu’à son changement."
     },
-    zh: {
-        simple_rt: '黑色方块出现时，请尽快按空格键。', go_nogo: '绿色圆形：按空格键。红色圆形：不要按键。',
-        stroop: '只根据字体颜色作答。红色：左方向键；蓝色：下方向键；绿色：右方向键。', flanker: '只看中央箭头。向左按左方向键，向右按右方向键；忽略两侧箭头。',
-        nback_2: '仅当当前图形与前两个位置的图形相同时按空格键，否则不要作答。', pvt: '红色计数器出现时请尽快按空格键；出现前不要按键。',
-        ax_cpt: '只有当 X 紧跟在 A 之后时才按空格键，其他情况不要作答。', task_switching: '蓝色背景：偶数按左、奇数按右。黄色背景：元音按左、辅音按右。', emotion_viewing: '自然观看每张图像，直到图像切换。'
+    "zh": {
+        "simple_rt": "刺激出现时，请尽快{response}。",
+        "go_nogo": "绿色圆形：{response}。红色圆形：不要作答。",
+        "stroop": "只根据字体颜色作答，不要根据词义作答。",
+        "flanker": "只看中央箭头并根据其方向作答；忽略两侧箭头。",
+        "nback_2": "仅当当前图形与前两个位置的图形相同时，{response}；否则不要作答。",
+        "pvt": "红色计数器出现时，请尽快{response}；出现前不要作答。",
+        "ax_cpt": "只有当 X 紧跟在 A 之后时，{response}；其他情况不要作答。",
+        "task_switching": "蓝色背景：判断数字的奇偶。黄色背景：判断字母是元音还是辅音。",
+        "emotion_viewing": "自然观看每张图像，直到图像切换。"
     },
-    hi: {
-        simple_rt: 'काला वर्ग दिखाई देते ही जितनी जल्दी हो सके स्पेस दबाएँ।', go_nogo: 'हरा वृत्त: स्पेस दबाएँ। लाल वृत्त: कुछ न दबाएँ।',
-        stroop: 'शब्द नहीं, स्याही के रंग पर उत्तर दें। लाल: बायाँ तीर; नीला: नीचे तीर; हरा: दायाँ तीर।', flanker: 'केवल बीच का तीर देखें। बायाँ हो तो बायाँ तीर, दायाँ हो तो दायाँ तीर दबाएँ।',
-        nback_2: 'वर्तमान आकृति दो स्थान पहले वाली आकृति से मिले तभी स्पेस दबाएँ।', pvt: 'लाल काउंटर दिखाई देते ही स्पेस दबाएँ; पहले उत्तर न दें।',
-        ax_cpt: 'स्पेस केवल उस X पर दबाएँ जिसके ठीक पहले A था।', task_switching: 'नीली पृष्ठभूमि: सम के लिए बायाँ, विषम के लिए दायाँ। पीली: स्वर के लिए बायाँ, व्यंजन के लिए दायाँ।', emotion_viewing: 'हर चित्र को बदलने तक स्वाभाविक रूप से देखें।'
+    "hi": {
+        "simple_rt": "उद्दीपन दिखाई देते ही जितनी जल्दी हो सके {response}।",
+        "go_nogo": "हरा वृत्त: {response}। लाल वृत्त: उत्तर न दें।",
+        "stroop": "शब्द नहीं, स्याही के रंग पर उत्तर दें।",
+        "flanker": "केवल बीच के तीर की दिशा पर उत्तर दें; बाकी तीरों को अनदेखा करें।",
+        "nback_2": "वर्तमान आकृति दो स्थान पहले वाली आकृति से मिले तभी {response}। अन्यथा उत्तर न दें।",
+        "pvt": "लाल काउंटर दिखाई देते ही {response}। उससे पहले उत्तर न दें।",
+        "ax_cpt": "X के ठीक पहले A हो तभी {response}। अन्यथा उत्तर न दें।",
+        "task_switching": "नीला: संख्या सम या विषम है। पीला: अक्षर स्वर या व्यंजन है।",
+        "emotion_viewing": "हर चित्र को बदलने तक स्वाभाविक रूप से देखें।"
     },
-    ar: {
-        simple_rt: 'عند ظهور المربع الأسود اضغط مفتاح المسافة بأسرع ما يمكن.', go_nogo: 'الدائرة الخضراء: اضغط المسافة. الحمراء: لا تضغط شيئًا.',
-        stroop: 'استجب للون الحبر. أحمر: السهم الأيسر؛ أزرق: السهم لأسفل؛ أخضر: السهم الأيمن.', flanker: 'انظر إلى السهم الأوسط فقط واضغط السهم الموافق لاتجاهه.',
-        nback_2: 'اضغط المسافة فقط إذا طابق الشكل الحالي الشكل الذي ظهر قبل خطوتين.', pvt: 'عند ظهور العداد الأحمر اضغط المسافة بأسرع ما يمكن.',
-        ax_cpt: 'اضغط المسافة فقط عند ظهور X إذا سبقه A مباشرة.', task_switching: 'الخلفية الزرقاء: يسار للزوجي ويمين للفردي. الصفراء: يسار لحرف العلة ويمين للحرف الساكن.', emotion_viewing: 'انظر بصورة طبيعية إلى كل صورة حتى تتغير.'
+    "ar": {
+        "simple_rt": "عند ظهور المثير، {response} بأسرع ما يمكن.",
+        "go_nogo": "الدائرة الخضراء: {response}. الدائرة الحمراء: لا تستجب.",
+        "stroop": "استجب للون الحبر، وليس لمعنى الكلمة.",
+        "flanker": "انظر إلى السهم الأوسط فقط واستجب لاتجاهه. تجاهل الأسهم المحيطة.",
+        "nback_2": "إذا طابق الشكل الحالي الشكل الذي ظهر قبل خطوتين، {response}. وإلا فلا تستجب.",
+        "pvt": "عند ظهور العداد الأحمر، {response} بأسرع ما يمكن. لا تستجب قبله.",
+        "ax_cpt": "عند ظهور X إذا سبقه A مباشرة، {response}. وإلا فلا تستجب.",
+        "task_switching": "الخلفية الزرقاء: عدد زوجي أو فردي. الصفراء: حرف علة أو حرف ساكن.",
+        "emotion_viewing": "انظر بصورة طبيعية إلى كل صورة حتى تتغير."
     },
-    bn: {
-        simple_rt: 'কালো বর্গ দেখা মাত্র স্পেস চাপুন।', go_nogo: 'সবুজ বৃত্ত: স্পেস চাপুন। লাল বৃত্ত: কিছু চাপবেন না।',
-        stroop: 'কালির রং অনুযায়ী উত্তর দিন। লাল: বাঁ তীর; নীল: নিচের তীর; সবুজ: ডান তীর।', flanker: 'শুধু মাঝের তীর দেখুন এবং তার দিকের তীর চাপুন।',
-        nback_2: 'বর্তমান আকৃতি দুই ধাপ আগেরটির সঙ্গে মিললেই স্পেস চাপুন।', pvt: 'লাল কাউন্টার দেখা মাত্র স্পেস চাপুন।',
-        ax_cpt: 'X-এর ঠিক আগে A থাকলেই স্পেস চাপুন।', task_switching: 'নীল: জোড় হলে বাঁ, বিজোড় হলে ডান। হলুদ: স্বর হলে বাঁ, ব্যঞ্জন হলে ডান।', emotion_viewing: 'প্রতিটি ছবি বদলানো পর্যন্ত দেখুন।'
+    "bn": {
+        "simple_rt": "উদ্দীপনা দেখা মাত্র যত দ্রুত সম্ভব {response}।",
+        "go_nogo": "সবুজ বৃত্ত: {response}। লাল বৃত্ত: উত্তর দেবেন না।",
+        "stroop": "শব্দের অর্থ নয়, কালির রং অনুযায়ী উত্তর দিন।",
+        "flanker": "শুধু মাঝের তীরের দিক অনুযায়ী উত্তর দিন; পাশের তীরগুলো উপেক্ষা করুন।",
+        "nback_2": "বর্তমান আকৃতি দুই ধাপ আগেরটির সঙ্গে মিললেই {response}। না মিললে উত্তর দেবেন না।",
+        "pvt": "লাল কাউন্টার দেখা মাত্র {response}। আগে উত্তর দেবেন না।",
+        "ax_cpt": "X-এর ঠিক আগে A থাকলেই {response}। অন্য ক্ষেত্রে উত্তর দেবেন না।",
+        "task_switching": "নীল: সংখ্যাটি জোড় না বিজোড়। হলুদ: অক্ষরটি স্বর না ব্যঞ্জন।",
+        "emotion_viewing": "প্রতিটি ছবি বদলানো পর্যন্ত দেখুন।"
     },
-    pt: {
-        simple_rt: 'Quando aparecer o quadrado preto, prima Espaço rapidamente.', go_nogo: 'Círculo verde: prima Espaço. Vermelho: não prima nada.',
-        stroop: 'Responda à cor da tinta. Vermelho: esquerda; azul: baixo; verde: direita.', flanker: 'Observe apenas a seta central e prima a seta correspondente à direção.',
-        nback_2: 'Prima Espaço apenas se a figura corresponder à apresentada duas posições antes.', pvt: 'Quando o contador vermelho aparecer, prima Espaço rapidamente.',
-        ax_cpt: 'Prima Espaço apenas para X imediatamente precedido por A.', task_switching: 'Fundo azul: esquerda para par, direita para ímpar. Amarelo: esquerda para vogal, direita para consoante.', emotion_viewing: 'Observe cada imagem até ela mudar.'
+    "pt": {
+        "simple_rt": "Quando aparecer o estímulo, {response} o mais rapidamente possível.",
+        "go_nogo": "Círculo verde: {response}. Vermelho: não responda.",
+        "stroop": "Responda à cor da tinta, não à palavra.",
+        "flanker": "Observe apenas a seta central e responda à sua direção. Ignore as setas laterais.",
+        "nback_2": "{response} apenas se a forma atual coincidir com a de duas posições antes. Caso contrário, não responda.",
+        "pvt": "Quando aparecer o contador vermelho, {response} rapidamente. Não responda antes.",
+        "ax_cpt": "{response} apenas para X imediatamente precedido de A. Nos outros casos não responda.",
+        "task_switching": "Fundo azul: número par ou ímpar. Fundo amarelo: vogal ou consoante.",
+        "emotion_viewing": "Observe cada imagem naturalmente até mudar."
     },
-    ur: {
-        simple_rt: 'سیاہ مربع ظاہر ہوتے ہی اسپیس دبائیں۔', go_nogo: 'سبز دائرہ: اسپیس دبائیں۔ سرخ دائرہ: کچھ نہ دبائیں۔',
-        stroop: 'سیاہی کے رنگ کے مطابق جواب دیں۔ سرخ: بایاں؛ نیلا: نیچے؛ سبز: دایاں تیر۔', flanker: 'صرف درمیان والا تیر دیکھیں اور اسی سمت کا تیر دبائیں۔',
-        nback_2: 'موجودہ شکل دو جگہ پہلے والی شکل سے ملے تو اسپیس دبائیں۔', pvt: 'سرخ کاؤنٹر ظاہر ہوتے ہی اسپیس دبائیں۔',
-        ax_cpt: 'اسپیس صرف اس X پر دبائیں جس سے فوراً پہلے A آیا ہو۔', task_switching: 'نیلا: جفت کے لیے بایاں، طاق کے لیے دایاں۔ پیلا: حرف علت کے لیے بایاں، حرف صحیح کے لیے دایاں۔', emotion_viewing: 'ہر تصویر کو تبدیل ہونے تک دیکھیں۔'
+    "ur": {
+        "simple_rt": "محرک ظاہر ہوتے ہی جتنی جلدی ممکن ہو {response}۔",
+        "go_nogo": "سبز دائرہ: {response}۔ سرخ دائرہ: جواب نہ دیں۔",
+        "stroop": "لفظ کے معنی نہیں، سیاہی کے رنگ کے مطابق جواب دیں۔",
+        "flanker": "صرف درمیان کے تیر کی سمت کے مطابق جواب دیں؛ اطراف کے تیر نظر انداز کریں۔",
+        "nback_2": "موجودہ شکل دو مراحل پہلے کی شکل سے ملے تب ہی {response}۔ ورنہ جواب نہ دیں۔",
+        "pvt": "سرخ کاؤنٹر ظاہر ہوتے ہی {response}۔ پہلے جواب نہ دیں۔",
+        "ax_cpt": "X سے فوراً پہلے A ہو تب ہی {response}۔ ورنہ جواب نہ دیں۔",
+        "task_switching": "نیلا پس منظر: جفت یا طاق عدد۔ پیلا: حرف علت یا صحیح حرف۔",
+        "emotion_viewing": "ہر تصویر بدلنے تک فطری طور پر دیکھیں۔"
     }
 });
 
@@ -213,11 +245,15 @@ function standardInstructionTaskKey(content, nextBlock = null) {
         task_switching: 'task_switching', switching: 'task_switching',
         emotion_viewing: 'emotion_viewing', passive_viewing: 'emotion_viewing'
     };
-    if (taskAliases[rawTaskType]) return taskAliases[rawTaskType];
-
     const title = String(
         content?.titleRu || content?.titleEn || content?.title || ''
     ).toLowerCase();
+    const authoredText = content?.text || Object.values(LOCALE_FIELD_SUFFIX)
+        .some(suffix => content?.[`text${suffix}`]);
+    const standardTitle = /simple rt|простая реакция|go\s*\/\s*no-go|stroop|струп|flanker|фланкер|2[- ]back|pvt|ax[- ]cpt|task switching|переключение задач|просмотр эмоций|emotion viewing/.test(title);
+    if (taskAliases[rawTaskType] && (!authoredText || standardTitle || content?.standardInstruction === true)) {
+        return taskAliases[rawTaskType];
+    }
     if (title.includes('simple rt') || title.includes('простая реакция')) return 'simple_rt';
     if (title.includes('go / no-go') || title.includes('go/no-go')) return 'go_nogo';
     if (title.includes('stroop') || title.includes('струп')) return 'stroop';
@@ -254,6 +290,8 @@ function standardInstructionTitle(content, nextBlock, taskKey, t) {
 }
 
 function responseActionText(action, t) {
+    const keyLabel = keyboardResponseLabel(action);
+    if (keyLabel) return keyLabel;
     const normalized = String(action || '').trim().toLowerCase();
     if (normalized === 'space') return t.runtime_response_space;
     if (normalized === 'arrowleft' || normalized === 'arrow_left') return t.runtime_response_left;
@@ -271,30 +309,52 @@ function responseGuidanceForBlock(block) {
     if (!block || block.type !== 'cognitive_task') return '';
     const t = translations[state.currentLang] || translations.en;
     const trials = Array.isArray(block.trials) ? block.trials : [];
-    const modes = new Set(trials.map(trial => normalizeResponseMode(block.blockConfig || {}, trial)));
-    const actions = [...new Set(trials
-        .map(trial => responseActionText(trial?.correctResponse, t))
-        .filter(Boolean))];
+    const actions = [...new Set(trials.filter(trial => trial?.correctResponse)
+        .map(trial => responseForTrial(block, trial, t)).filter(Boolean))];
     const hasNoResponseTrials = trials.some(trial => trial?.correctResponse == null || trial.correctResponse === '');
-
-    let method;
-    if (modes.size === 1 && modes.has('none')) method = t.runtime_response_none;
-    else if (modes.has('pointer_intent')) method = t.runtime_response_pointer;
-    else if (modes.has('click')) method = t.runtime_response_click;
-    else if (actions.length) method = actions.join(' / ');
-    else method = t.runtime_response_none;
-
+    const method = actions.length ? actions.join(' / ') : t.runtime_response_none;
     return `${t.runtime_response_method}: ${method}.${hasNoResponseTrials && actions.length ? ` ${t.runtime_response_withhold}` : ''}`;
 }
 
-function localizedStandardInstruction(content, nextBlock) {
+function responseForTrial(block, trial, t) {
+    const mode = normalizeResponseMode(block?.blockConfig || {}, trial);
+    if (mode === 'none' || !trial?.correctResponse) return t.runtime_response_none;
+    if (mode === 'click') return t.runtime_response_click;
+    if (mode === 'pointer_intent') return t.runtime_response_pointer;
+    const key = keyboardResponseLabel(trial.correctResponse);
+    return key ? t.runtime_response_keypress.replace('{keys}', key) : responseActionText(trial.correctResponse, t);
+}
+
+function responsePhraseForBlock(block) {
+    const t = translations[state.currentLang] || translations.en;
+    const trials = Array.isArray(block?.trials) ? block.trials : [];
+    const phrases = [...new Set(trials.filter(trial => trial?.correctResponse)
+        .map(trial => responseForTrial(block, trial, t)).filter(Boolean))];
+    return phrases.length ? phrases.join(' / ') : t.runtime_response_none;
+}
+
+function localizedStandardInstruction(content, nextBlock, includeGuidance = true) {
     const taskKey = standardInstructionTaskKey(content, nextBlock);
     if (!taskKey) return null;
     const t = translations[state.currentLang] || translations.en;
-    const rule = STANDARD_TASK_RULES[state.currentLang]?.[taskKey]
+    let rule = STANDARD_TASK_RULES[state.currentLang]?.[taskKey]
         || STANDARD_TASK_RULES.en[taskKey]
         || t.runtime_standard_instruction_body;
-    const guidance = responseGuidanceForBlock(nextBlock);
+    const response = responsePhraseForBlock(nextBlock);
+    rule = rule.replaceAll('{response}', response);
+    const responsiveTrials = (nextBlock?.trials || []).filter(trial => trial.correctResponse);
+    if (!responsiveTrials.length || responsiveTrials.every(trial => normalizeResponseMode(nextBlock.blockConfig || {}, trial) === 'none')) {
+        rule = taskKey === 'emotion_viewing' ? rule : t.runtime_response_none;
+    }
+    // Choice-task mappings come from the actual trials, never the template's old arrow keys.
+    if (['stroop', 'flanker', 'task_switching'].includes(taskKey)) {
+        const mapping = new Set((nextBlock?.trials || []).map(trial => {
+            const condition = String(trial.condition || '').trim();
+            return condition ? `${condition}: ${responseForTrial(nextBlock, trial, t)}.` : null;
+        }).filter(Boolean));
+        if (mapping.size) rule += '\n' + [...mapping].join('\n');
+    }
+    const guidance = includeGuidance ? responseGuidanceForBlock(nextBlock) : '';
     return guidance ? `${rule}\n\n${guidance}` : rule;
 }
 
@@ -536,6 +596,8 @@ function isResearcherV2Protocol(definition) {
 
 function mapActionToCorrectResponse(action) {
     if (!action) return null;
+    const keyboardResponse = normalizeKeyboardResponse(action);
+    if (keyboardResponse) return keyboardResponse;
     const a = String(action).toLowerCase();
     if (a === 'space') return 'Space';
     if (a === 'mouse_click') return 'Click';
@@ -553,21 +615,6 @@ function conditionToIsGo(condition) {
     if (c.includes('nogo') || c.includes('no-go') || c === 'nogo') return false;
     if (c.includes('go') || c === 'target') return true;
     return null;
-}
-
-function keyFromKeyboardEvent(e) {
-    if (!e || !e.code) return null;
-    if (e.code === 'Space') return 'Space';
-    if (e.code.startsWith('Arrow')) return e.code;
-    return null;
-}
-
-function isAcceptedTaskKey(e, trial) {
-    const key = keyFromKeyboardEvent(e);
-    if (!key) return false;
-    const expected = trial?.correctResponse;
-    if (expected == null) return true;
-    return key === expected;
 }
 
 function normalizeV2Trials(trials) {
@@ -816,6 +863,7 @@ function getTaskPayload(extra = {}) {
         trialId: ctx.trialId ?? null,
         stimulusId: ctx.stimulusId ?? null,
         stimulusType: ctx.stimulusType ?? null,
+        stimulusVersion: ctx.stimulusVersion ?? null,
         expectedResponse: ctx.expectedResponse ?? null,
         ...extra
     };
@@ -1620,7 +1668,8 @@ function showInstructions(block) {
     ex_state.instruction.container.style.display = 'block';
 
     const t = translations[state.currentLang] || translations.en;
-    const nextBlock = experimentProtocol?.blocks?.[currentBlockIndex + 1];
+    const followingBlocks = experimentProtocol?.blocks?.slice(currentBlockIndex + 1) || [];
+    const nextBlock = followingBlocks.find(candidate => !['instruction', 'instructions', 'fixation'].includes(candidate.type));
     const standardTaskKey = standardInstructionTaskKey(block.content, nextBlock);
     ex_state.instruction.title.innerText = standardTaskKey
         ? standardInstructionTitle(block.content, nextBlock, standardTaskKey, t)
@@ -1629,7 +1678,8 @@ function showInstructions(block) {
     ex_state.instruction.text.style.textAlign = 'center';
     ex_state.instruction.text.style.whiteSpace = 'pre-wrap';
     const localizedText = localizedStandardInstruction(block.content, nextBlock)
-        || localizedProtocolValue(block.content, 'text', t.runtime_standard_instruction_body);
+        || localizedProtocolValue(block.content, 'text', t.runtime_standard_instruction_body)
+            .replaceAll('{response}', responsePhraseForBlock(nextBlock));
     const customGuidance = !standardTaskKey ? responseGuidanceForBlock(nextBlock) : '';
     ex_state.instruction.text.innerText = customGuidance
         ? `${localizedText}\n\n${customGuidance}`
@@ -1950,10 +2000,11 @@ function showTaskBlockInstruction(block) {
     const baseInstruction = localizedProtocolValue(block?.content, 'text')
         || localizedProtocolValue(block, 'instructions')
         || localizedProtocolValue(block?.blockConfig, 'instructions')
+        || localizedStandardInstruction(null, block, false)
         || t.runtime_standard_instruction_body;
     const responseGuidance = responseGuidanceForBlock(block);
     ex_state.instruction.text.innerText = responseGuidance
-        ? `${baseInstruction}\n\n${responseGuidance}`
+        ? `${baseInstruction.replaceAll('{response}', responsePhraseForBlock(block))}\n\n${responseGuidance}`
         : baseInstruction;
     ex_state.instruction.btn.innerText = t.runtime_instruction_action;
 
@@ -2098,6 +2149,7 @@ function runTrial() {
         stimulusId: trial?.stimulus?.stimulusId ?? trialId,
         stimulusName: trial?.stimulus?.stimulusName ?? null,
         stimulusType,
+        stimulusVersion: trial?.stimulus?.stimulusVersion || '1',
         expectedResponse: trial?.correctResponse ?? null
     });
 

@@ -5,10 +5,10 @@ import {
     recordSessionEvent,
     setTaskContext,
     clearTaskContext
-} from './state.js';
+} from './state.js?v=20261006-3';
 console.warn('[DEPRECATED] js/web-page/experimental_task.js — use experimental_task-updated.js');
 
-import { finishSession } from './tests.js';
+import { finishSession } from './tests.js?v=20261006-3';
 import { extractEyeSignalSample } from './eye-signal.js';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
