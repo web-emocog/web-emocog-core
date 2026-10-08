@@ -1,3 +1,8 @@
+function escapeBuilderHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function normalizePersistedBuilderBlock(block) {
   if (!block || typeof block !== 'object') return block;
   const content = block.content && typeof block.content === 'object' ? block.content : {};
@@ -3049,14 +3054,14 @@ function ExperimentBuilderView(options = {}) {
     <div style="display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;">
       ${builderStepHeader(stepIdx)}
       <div style="flex:1;display:flex;align-items:center;justify-content:center;border:2px dashed var(--stroke);border-radius:14px;background:rgba(255,255,255,.2);color:var(--muted);text-align:center;flex-direction:column;gap:10px;">
-        <div style="font-size:14px;font-weight:600;color:var(--text);">${s}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);">${escapeBuilderHtml(s)}</div>
         <div style="font-size:12px;max-width:260px;">${trb('Этот шаг находится в разработке.','This step is in development.')}</div>
       </div>
 
       ${isLast ? `
         <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
           <label for="experimentNameInput" style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">Имя эксперимента</label>
-          <input type="text" id="experimentNameInput" placeholder="Например: Тест памяти на лица" style="padding:10px 14px; border-radius:10px; border:1px solid var(--stroke); background:var(--card-bg); font-size:14px; font-weight:600; color:var(--text); outline:none; width:100%; max-width:400px;" value="${editingExp ? editingExp.title : ''}">
+          <input type="text" id="experimentNameInput" placeholder="Например: Тест памяти на лица" style="padding:10px 14px; border-radius:10px; border:1px solid var(--stroke); background:var(--card-bg); font-size:14px; font-weight:600; color:var(--text); outline:none; width:100%; max-width:400px;" value="${escapeBuilderHtml(editingExp ? editingExp.title : '')}">
         </div>
       ` : ''}
 

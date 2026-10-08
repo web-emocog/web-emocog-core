@@ -130,7 +130,7 @@ function authenticateStaffToken(token) {
   }
 }
 
-function safeTokenMatch(left, right) {
+function verifyCsrfToken(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -176,9 +176,10 @@ async function requireAuth(req, res, next) {
         code: 'staff_account_changed',
       });
     }
+    req.user = principal;
     if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const csrf = req.get('X-CSRF-Token');
-      if (!safeTokenMatch(principal.csrf, csrf)) {
+      if (!verifyCsrfToken(req.user.csrf, csrf)) {
         return res.status(403).json({
           error: 'Forbidden',
           message: 'Missing or invalid CSRF token',
@@ -186,7 +187,6 @@ async function requireAuth(req, res, next) {
         });
       }
     }
-    req.user = principal;
     req.authTransport = cookieToken ? 'cookie' : 'bearer';
     return next();
   } catch (error) {

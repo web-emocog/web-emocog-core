@@ -143,6 +143,8 @@ jobs:
         run: npm run migrate:verify
       - name: PostgreSQL concurrency and negative security tests
         working-directory: apps/api
+        env:
+          AUTH_RATE_LIMIT_PER_MINUTE: '1000'
         run: npm run test:postgres
       - name: Start canonical API
         working-directory: apps/api

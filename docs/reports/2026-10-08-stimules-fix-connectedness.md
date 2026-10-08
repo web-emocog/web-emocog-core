@@ -24,6 +24,17 @@ reset, password reset or historical-session backfill is performed.
 - Updated existing `js-yaml` test dependency to patched 4.3.2. API dependencies
   include main's security updates; dependency installation reported no known
   vulnerabilities. License/source/integrity are documented.
+- CI exposed Docker context exclusions of the required backup helper and
+  contract schemas. Narrow `.dockerignore` exceptions restore those files while
+  retaining environment/upload exclusions. The larger PostgreSQL suite also
+  exceeded the default authentication quota; only that CI test step now uses
+  `AUTH_RATE_LIMIT_PER_MINUTE=1000`. Runtime/production rate limits are unchanged.
+- CodeQL findings were addressed without disabling security checks: persisted
+  legacy titles/IDs/versions and step labels are HTML-escaped; the existing
+  constant-time CSRF guard explicitly validates the verified request principal.
+  The local live-suite helper no longer automatically posts credentials read
+  from a fixture file: it requires matching explicit synthetic credentials and
+  rejects production use and HTTP redirects. Regression tests cover these paths.
 
 ## Connectedness
 
@@ -51,7 +62,7 @@ primary scientific/product sources and required real-device acceptance.
 
 ## Verification
 
-- API/unit/contract suite: 338 passed, zero failed or skipped.
+- API/unit/contract suite: 343 passed, zero failed or skipped.
 - PostgreSQL integration: 23 passed, zero failed or skipped, only in the separate
   `emocog_recovery_tests` database. Tests include private files/versions, tenant
   boundaries, password/session revocation and denial of connectedness to a
@@ -71,6 +82,8 @@ primary scientific/product sources and required real-device acceptance.
   GitHub release gates provide the complete final-commit browser run.
 - TypeScript typecheck, JavaScript syntax, static release audit, Python RT smoke
   and `git diff --check` passed.
+- Production API and web images build and their isolated container smoke tests
+  pass, including protected static-path checks.
 - The supplied older session JSON was read-only checked: event alignment builds
   and validates; no user result was imported or altered.
 - Restarted loopback API reports ready/database OK. Researcher and new assets
