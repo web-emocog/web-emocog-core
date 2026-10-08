@@ -1,5 +1,6 @@
 import { getEmotionSummary } from './emotion-stub-new.js';
-import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261006-3';
+import '../../shared/rt-alignment.js';
+import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261008-2';
 
 /**
  * Формирование payload агрегатов для отправки на сервер (Фаза 0.1).
@@ -528,6 +529,7 @@ export function buildAggregatesPayload(sessionData, options = {}) {
         cognitiveResults: Array.isArray(sessionData.cognitiveResults) ? [...sessionData.cognitiveResults] : [],
         gazeValidation: compactGazeValidation(sessionData.gazeValidation),
         gaze_analytics,
+        rt_alignment: globalThis.EmocogRtAlignment.build(sessionData),
         events: forIngest
             ? trimEventsForIngest(sessionData.events)
             : (Array.isArray(sessionData.events) ? [...sessionData.events] : []),

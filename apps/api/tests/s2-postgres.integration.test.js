@@ -1804,6 +1804,13 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       true,
       {
         qcSummary: { qcScore: 92, validity: 'valid', failReasons: [] },
+        rt_alignment: require('../../shared/rt-alignment').build({
+          events: [
+            { type: 'stimulus_on', blockId: 'main', trialId: 'trial-1', stimulusId: 'std_emo_neutral_01', timestamp: 1000, response_mode: 'keyboard' },
+            { type: 'response', blockId: 'main', trialId: 'trial-1', timestamp: 1410, responded: true, rtMs: 410 },
+            { type: 'trial_end', blockId: 'main', trialId: 'trial-1', timestamp: 1410, qualityValid: true, correct: true }
+          ], eyeTracking: [{ t: 1200, valid: true, correctedX: 0.2, correctedY: 0.3 }]
+        }),
         cognitiveResults: [{
           blockId: 'main', trialId: 'trial-1', stimulusId: 'std_emo_neutral_01',
           response: 'Space', correct: true, rt: 410, qualityValid: true,
@@ -1908,6 +1915,32 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     const snapshot = await snapshotResponse.json();
     assert.match(snapshot.id, /^[0-9a-f-]{36}$/i);
     assert.equal(snapshot.includedSessionIds.length, 1);
+
+    const connectednessSummary = await fetch(
+      `${baseUrl}/analytics/v1/sessions/${snapshot.includedSessionIds[0]}/summary?snapshot_id=${snapshot.id}`,
+      { headers: { authorization } }
+    );
+    assert.equal(connectednessSummary.status, 200);
+    const connectednessData = (await connectednessSummary.json()).data.connectedness;
+    assert.equal(connectednessData.source, 'stored_event_windows');
+    assert.equal(connectednessData.trials[0].rtMs, 410);
+    assert.equal(connectednessData.trials[0].windows.response.channels.gaze.value, 1);
+    const outsider = await pool.query(
+      `INSERT INTO users (email, password_hash, role) VALUES ($1, $2, 'researcher') RETURNING id, email, role, token_version`,
+      [`s2-analytics-outsider-${randomUUID()}@example.test`, await bcrypt.hash('outsider-test-password', 4)]
+    );
+    createdUserIds.push(outsider.rows[0].id);
+    await pool.query(`INSERT INTO user_organizations (user_id, organization_id, role) VALUES ($1, $2, 'member')`, [outsider.rows[0].id, organizationId]);
+    const outsiderSummary = await fetch(
+      `${baseUrl}/analytics/v1/sessions/${snapshot.includedSessionIds[0]}/summary?snapshot_id=${snapshot.id}`,
+      { headers: { authorization: `Bearer ${issueStaffToken(outsider.rows[0])}` } }
+    );
+    assert.equal(outsiderSummary.status, 404);
+    const notIncluded = await fetch(
+      `${baseUrl}/analytics/v1/sessions/99999999/summary?snapshot_id=${snapshot.id}`,
+      { headers: { authorization } }
+    );
+    assert.equal(notIncluded.status, 404);
 
     const groupSummary = await fetch(
       `${baseUrl}/analytics/v1/groups/summary?snapshot_id=${snapshot.id}`,

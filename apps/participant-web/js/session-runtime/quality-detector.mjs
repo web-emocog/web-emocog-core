@@ -1,5 +1,5 @@
 import { ERROR_KINDS } from './contracts.mjs';
-import { hasRegionalFaceOcclusion } from '../qc-metrics/frame-analysis.js?v=20261006-3';
+import { hasRegionalFaceOcclusion } from '../qc-metrics/frame-analysis.js?v=20261008-2';
 
 const QUALITY_RULES = Object.freeze({
     face_missing: {

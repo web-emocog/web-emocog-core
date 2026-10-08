@@ -3,6 +3,7 @@ const sessionFeature = require('../../../packages/shared/contracts/session-featu
 const sessionEvent = require('../../../packages/shared/contracts/session-event.v1.schema.json');
 const sessionLifecycle = require('../../../packages/shared/contracts/session-lifecycle.v1.schema.json');
 const ingestResponse = require('../../../packages/shared/contracts/ingest-session-feature-response.v1.schema.json');
+const rtAlignment = require('../../../packages/shared/contracts/rt-alignment.v1.schema.json');
 
 const router = express.Router();
 const schemas = {
@@ -10,12 +11,14 @@ const schemas = {
   [sessionEvent.$id]: sessionEvent,
   [sessionLifecycle.$id]: sessionLifecycle,
   [ingestResponse.$id]: ingestResponse,
+  [rtAlignment.$id]: rtAlignment,
 };
 const aliases = {
   'session-feature.v1': sessionFeature.$id,
   'session-event.v1': sessionEvent.$id,
   'session-lifecycle.v1': sessionLifecycle.$id,
   'ingest-session-feature-response.v1': ingestResponse.$id,
+  'rt-alignment.v1': rtAlignment.$id,
 };
 
 router.get('/', (req, res) => {

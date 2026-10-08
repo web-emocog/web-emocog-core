@@ -7,6 +7,7 @@ const {
 } = require('../middleware/auth');
 const { HttpError } = require('../security/http-error');
 const { loadPinnedStimuli } = require('../stimuli/versions');
+const { buildConnectedness } = require('./connectedness');
 const { validateAnalyticsQuery } = require('./query');
 const {
   collectProtocolOptions,
@@ -440,6 +441,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
       },
       quality: sessionQualityDetails(row),
       audio: sessionAudioDetails(row, hydrated.protocol?.definition),
+      connectedness: buildConnectedness(row, hydrated.snapshot.queryEcho),
       qcChannels: hydrated.snapshot.queryEcho.filters.qcChannels.map(channel => channelQc(row, channel)),
       metrics: buildSessionMetrics(row, hydrated.snapshot.queryEcho),
       exclusions: (Array.isArray(row.features_payload?.cognitiveResults)

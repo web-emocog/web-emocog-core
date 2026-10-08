@@ -67,8 +67,23 @@ for (const boundary of ['project', 'account', 'origin']) {
       }
       await expect.poll(() => pending).toBe(true);
       switched = true;
+      if (boundary === 'account') {
+        await page.evaluate(() => {
+          localStorage.setItem('emocog_workspace_owner_v1', '2');
+          try { (window as any).WecogStaffSession.assertCurrent(); } catch (_) {}
+        });
+        await expect(page.locator('#staffSessionChanged')).toBeVisible();
+        release();
+        if (!mutation.startsWith('conversion')) await page.evaluate(() => (window as any).__oldMutation);
+        await expect(page.locator('.stimulus-card[data-id="42"]')).not.toBeVisible();
+        expect(await page.evaluate(() => {
+          try { localStorage.getItem('emocog_stimuli'); return 'allowed'; }
+          catch (error: any) { return error.code; }
+        })).toBe('staff_account_changed');
+        expect(await page.evaluate(() => stimuliList.some(item => ['43', '52'].includes(String(item.id))))).toBe(false);
+        return;
+      }
       await page.evaluate(boundary => {
-        if (boundary === 'account') localStorage.setItem('emocog_workspace_owner_v1', '2');
         if (boundary === 'origin') {
           (window as any).EmocogApiBase = { resolve: () => 'http://127.0.0.1:3001' };
           (window as any).API_BASE = 'http://127.0.0.1:3001';

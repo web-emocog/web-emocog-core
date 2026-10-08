@@ -137,7 +137,7 @@ for (const [code, en, ru] of [['KeyZ', 'z', 'я'], ['KeyX', 'x', 'ч'], ['Comma'
       await page.evaluate(async ({ action }) => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261006-3', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261008-2', location.href).href);
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
           version: 'v2-keyboard-regression', blocks: [{ id: 'key-task', type: 'cognitive_task', taskType: 'simple_rt',
             blockConfig: { useFixation: false, stimulusDuration: 5000, responseMode: 'keypress' },
@@ -167,7 +167,7 @@ for (const [action, key] of [['Space', 'Space'], ['arrow_left', 'ArrowLeft'], ['
     await page.evaluate(async action => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
-      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261006-3', location.href).href);
+      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261008-2', location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
         version: '1.0.0', blocks: [{ id: 'key-edge', type: 'cognitive_task', taskType: 'simple_rt',
           blockConfig: { useFixation: false, stimulusDuration: 5000, responseMode: 'keypress' },

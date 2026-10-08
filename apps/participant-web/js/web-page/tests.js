@@ -5,15 +5,15 @@ import {
     setSessionPhase,
     recordSessionEvent,
     clearTaskContext
-} from './state.js?v=20261006-3';
+} from './state.js?v=20261008-2';
 import { translations } from '../../translations.js';
-import { updateFinalStepWithQC, nextStep } from './ui.js?v=20261006-3';
-import { stopPreCheck } from './precheck.js?v=20261006-3';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261006-3';
-import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261006-3';
-import { buildHeatmaps } from './heatmap.js?v=20261006-3';
+import { updateFinalStepWithQC, nextStep } from './ui.js?v=20261008-2';
+import { stopPreCheck } from './precheck.js?v=20261008-2';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261008-2';
+import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261008-2';
+import { buildHeatmaps } from './heatmap.js?v=20261008-2';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
-import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261006-3';
+import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261008-2';
 import { extractEyeSignalSample } from './eye-signal.js';
 
 

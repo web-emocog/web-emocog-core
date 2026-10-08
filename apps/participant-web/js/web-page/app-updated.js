@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261006-3';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261008-2';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261006-3';
+} from './ui-updated.js?v=20261008-2';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20261006-3';
+} from './precheck-updated.js?v=20261008-2';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20261006-3';
+} from './tests-updated.js?v=20261008-2';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,13 +34,13 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261006-3';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261008-2';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
-import { mediaContentRect } from './stimulus-geometry.mjs?v=20261006-3';
+import { mediaContentRect } from './stimulus-geometry.mjs?v=20261008-2';
 import {
     captureAudioConsent,
     configureAudioConsentUI

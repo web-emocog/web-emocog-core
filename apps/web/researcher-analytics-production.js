@@ -1026,6 +1026,7 @@
     },
     listeners: new Set(),
     requestId: 0,
+    applyRequestId: 0,
     summaryRequestId: 0,
     visualRequestId: 0,
     groupRequestId: 0,
@@ -1049,6 +1050,8 @@
     },
 
     changed() {
+      ++this.applyRequestId;
+      if (this.state.snapshotStatus === 'creating') this.state.snapshotStatus = 'idle';
       this.state.dirty = true;
       this.state.snapshotError = null;
       this.persist();
@@ -1330,6 +1333,16 @@
         this.emit();
         return;
       }
+      const applyRequestId = ++this.applyRequestId;
+      const submittedQuery = buildAnalyticsQuery(this.state);
+      const queryFingerprint = JSON.stringify(submittedQuery);
+      const currentApply = () => applyRequestId === this.applyRequestId && queryFingerprint === JSON.stringify(buildAnalyticsQuery(this.state));
+      ++this.summaryRequestId;
+      ++this.visualRequestId;
+      ++this.groupRequestId;
+      ++this.groupHeatmapRequestId;
+      ++this.comparisonRequestId;
+      this.state.dirty = true;
       this.state.snapshotStatus = 'creating';
       this.state.snapshotError = null;
       this.state.summaryStatus = 'idle';
@@ -1351,7 +1364,8 @@
       this.state.comparisonError = null;
       this.emit();
       try {
-        const response = await api.createSnapshot(buildAnalyticsQuery(this.state));
+        const response = await api.createSnapshot(submittedQuery);
+        if (!currentApply()) return;
         this.state.snapshot = response && response.data && !response.id ? response.data : response;
         this.state.snapshotStatus = 'ready';
         this.state.dirty = false;
@@ -1361,6 +1375,7 @@
         else if (this.state.groupLevel === 'level-2') await this.loadComparison();
         else await Promise.all([this.loadGroupSummary(), this.loadGroupHeatmap()]);
       } catch (error) {
+        if (!currentApply()) return;
         this.state.snapshotStatus = 'error';
         this.state.snapshotError = error;
         this.emit();
@@ -2411,7 +2426,7 @@
           const title = state.emptyKind === 'projects' ? tr('Нет доступных проектов','No projects available') : tr('По выбранным фильтрам нет сессий','No sessions match the filters');
           const description = state.emptyKind === 'projects' ? tr('Создайте проект или попросите предоставить к нему доступ.','Create a project or request access to one.') : tr('Это состояние «нет данных», а не нулевой результат. Измените протокол или QC-фильтр.','This is a no-data state, not a zero result. Change the protocol or QC filter.');
           body.insertAdjacentHTML('beforeend', stateCard('empty', title, description));
-        } else if ((activeTab === 'session-card' || activeTab === 'group-comparison' || activeTab === 'data-quality') && (!state.snapshot || state.dirty)) {
+        } else if (!state.snapshot || state.dirty) {
           body.insertAdjacentHTML('beforeend', stateCard('empty', tr('Примените фильтры','Apply the filters'), tr('Дашборд появится после того, как backend зафиксирует единую выборку. Это защищает карточки, графики и будущий export от расхождения.','The dashboard appears after the backend fixes one selection. This keeps cards, charts, and future exports aligned.')));
         } else if (activeTab === 'session-card') {
           body.insertAdjacentHTML('beforeend', sessionShellHtml(state));
@@ -2420,7 +2435,15 @@
         } else if (activeTab === 'data-quality') {
           body.insertAdjacentHTML('beforeend', dataQualityShellHtml(state));
         } else {
-          body.insertAdjacentHTML('beforeend', roadmapShellHtml(activeTab));
+          if (state.summaryStatus === 'loading' || state.summaryStatus === 'idle') {
+            body.insertAdjacentHTML('beforeend', stateCard('loading', tr('Загружаем связанность','Loading connectedness'), tr('Получаем реальные RT-пробы для snapshot.','Fetching real RT trials for the snapshot.')));
+          } else if (state.summaryStatus === 'error') {
+            body.insertAdjacentHTML('beforeend', stateCard('error', tr('Не удалось загрузить связанность','Could not load connectedness'), tr('Старые результаты скрыты. Повторите применение выборки.','Stale results are hidden. Apply the selection again.')));
+          } else {
+            const connectednessHost = global.document.createElement('div');
+            body.appendChild(connectednessHost);
+            global.EmocogConnectedness.render(connectednessHost, state.summaryResponse, isEnglish());
+          }
         }
       }
       bindBodyEvents();

@@ -6,19 +6,19 @@ import {
     setTaskContext,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20261006-3';
-import { finishSession } from './tests-updated.js?v=20261006-3';
+} from './state.js?v=20261008-2';
+import { finishSession } from './tests-updated.js?v=20261008-2';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20261006-3';
+import { translations } from '../../translations.js?v=20261008-2';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261006-3';
+} from '../session-runtime/index.js?v=20261008-2';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -28,7 +28,7 @@ import {
     normalizeResponseMode,
     normalizeKeyboardResponse,
     keyboardResponseLabel
-} from '../rt-input/response-policy.mjs?v=20261006-3';
+} from '../rt-input/response-policy.mjs?v=20261008-2';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -871,7 +871,11 @@ function getTaskPayload(extra = {}) {
 }
 
 function emitTaskEvent(type, payload = {}) {
-    return recordSessionEvent(type, getTaskPayload(payload));
+    return recordSessionEvent(type, getTaskPayload({
+        monotonicMs: performance.timeOrigin + performance.now(),
+        attempt: currentBlockAttempt,
+        ...payload
+    }));
 }
 
 function handleQcPauseState(overlayVisible) {

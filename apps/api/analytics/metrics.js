@@ -1,4 +1,5 @@
 const { METRIC_CATALOG } = require('./query');
+const { buildConnectedness } = require('./connectedness');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
 
 const CATALOG_BY_ID = new Map((METRIC_CATALOG.metrics || []).map(metric => [metric.id, metric]));
@@ -925,6 +926,7 @@ function buildExportBundle(hydrated, content = 'both') {
     sessionId: Number(row.id),
     participantId: row.participant_id || null,
     metrics: buildSessionMetrics(row, query),
+    connectedness: buildConnectedness(row, query),
     aoiRows: buildAoiRows(row, protocol, query).map(item => ({ aoi: item.aoi, metrics: item.metrics })),
   }));
   const group = query.mode === 'group'

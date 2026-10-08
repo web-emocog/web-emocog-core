@@ -1,4 +1,4 @@
-import { state } from './state.js?v=20261006-3';
+import { state } from './state.js?v=20261008-2';
 
 export function measureRenderFPS() {
     return new Promise(resolve => {

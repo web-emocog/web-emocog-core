@@ -370,6 +370,13 @@ teardown, browser tests и запрет отправки сырой записи
 
 ## 9. API, данные и контракты
 
+Researcher connectedness использует реальные `rt_alignment.v1` windows одной
+сессии, snapshot/hash и явную missingness; не смешивает monotonic и wall clocks,
+не заменяет оконные данные средними за сессию и не выдаёт frames за независимых
+участников. Spearman допустим только как описательный коэффициент одного блока
+и условия, без p-value/групповых выводов. Методика и ограничения:
+`docs/research/rt-connectedness-methods.md`. Сырое видео не сохраняется.
+
 API: Node.js 18+, Express 4, PostgreSQL, прямой параметризованный SQL без ORM.
 Каноническая точка входа: `apps/api/server.js`.
 

@@ -167,7 +167,9 @@ for (const [status, code, message] of [
     await page.locator('#researcherChangePasswordBtn').click();
     await expect(page.locator('#researcherPasswordStatus')).toHaveAttribute('data-state', 'error');
     await expect(page.locator('#researcherPasswordStatus')).toContainText(message);
-    expect(requests).toHaveLength(1);
+    // Only a middleware CSRF rejection can retry once for the same identity.
+    expect(requests).toHaveLength(code === 'csrf_token_invalid' ? 2 : 1);
+    if (requests.length === 2) expect(requests[1].body).toEqual(requests[0].body);
     expect(await page.evaluate(() => sessionStorage.getItem('emocog_csrf_token'))).toBe('initial-csrf');
     await expect(page.locator('#researcherNewPassword')).toHaveValue('');
   });

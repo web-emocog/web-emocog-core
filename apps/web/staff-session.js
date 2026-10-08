@@ -35,7 +35,12 @@
           panel.append(title, message, button);
           dialog.append(panel);
           Array.from(document.body.children).forEach(function (child) {
-            if (child.tagName !== 'SCRIPT') { child.inert = true; child.hidden = true; }
+            if (child.tagName !== 'SCRIPT') {
+              child.inert = true;
+              child.hidden = true;
+              child.setAttribute('aria-hidden', 'true');
+              child.style.setProperty('display', 'none', 'important');
+            }
           });
           document.body.append(dialog);
           document.documentElement.style.visibility = '';

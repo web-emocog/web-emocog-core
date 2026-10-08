@@ -1,6 +1,6 @@
-import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261006-3';
+import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261008-2';
 import { translations } from '../../translations.js';
-import { measureCameraFPS } from './camera.js?v=20261006-3';
+import { measureCameraFPS } from './camera.js?v=20261008-2';
 
 export async function startPreCheck() {
     console.log('Запуск pre-check камеры...');

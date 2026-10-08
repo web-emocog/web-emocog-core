@@ -93,6 +93,16 @@ distributing the image. LGPL/GPL terms depend on the package build; these tools
 are separate subprocesses, not a browser/Node-linked library. Local tests used
 Alpine FFmpeg 8.0.1. See root `THIRD_PARTY_LICENSES.md` for the scope of the notice.
 
+## Test tooling: js-yaml
+
+The existing Node test helper dependency is updated from 4.3.1 to 4.3.2 to fix
+the reported high-severity merge-key CPU exhaustion issue. Source:
+https://github.com/nodeca/js-yaml ; license: MIT. npm registry integrity for 4.3.2:
+`sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==`.
+The lockfile fixes the installed version; no upstream code is vendored. Registry
+license/source/integrity and zero-vulnerability npm audit were verified on
+2026-10-08. This is test tooling, not a new physiological model.
+
 ## Update policy
 
 Before updating a runtime or model:

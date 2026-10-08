@@ -1,4 +1,4 @@
-import '../../../shared/keyboard-responses.js?v=20261006-3';
+import '../../../shared/keyboard-responses.js?v=20261008-2';
 
 export const normalizeKeyboardResponse = globalThis.WecogKeyboardResponses.normalize;
 export const keyboardResponseLabel = globalThis.WecogKeyboardResponses.label;

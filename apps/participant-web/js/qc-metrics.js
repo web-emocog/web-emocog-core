@@ -633,7 +633,7 @@ if (typeof window !== 'undefined') {
     // Фоновая загрузка модульной версии.
     window.QCMetricsReady = (async () => {
         try {
-            const mod = await import('./qc-metrics/index.js?v=20261006-3');
+            const mod = await import('./qc-metrics/index.js?v=20261008-2');
             const Cls = mod && (mod.QCMetrics || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export QCMetrics class');
