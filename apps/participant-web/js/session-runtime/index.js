@@ -1,13 +1,13 @@
-import { state, recordSessionEvent } from '../web-page/state.js?v=20260919-1';
+import { state, recordSessionEvent } from '../web-page/state.js?v=20261008-2';
 import {
     ERROR_KINDS,
     EVENT_CATEGORIES,
     SESSION_STATES
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
-import { SessionCheckpointStore } from './checkpoint-store.mjs';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20260919-1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20260909-1';
+import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261008-2';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261008-2';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs';
 import { SessionAudioCollector } from '../audio/session-audio.js?v=20260915-1';
@@ -93,6 +93,11 @@ class ParticipantSessionRuntime {
         } catch (error) {
             console.warn('[SessionRuntime] checkpoint restore failed:', error);
         }
+        // Opening a new invitation must not attach the previous tab's session
+        // tuple or results to it. Keep that old checkpoint for explicit recovery.
+        if (restored && !matchesCheckpointInvitation(restored.sessionData, window.location.search)) {
+            restored = null;
+        }
 
         if (restored?.sessionData && restored?.machineSnapshot?.state !== SESSION_STATES.COMPLETED) {
             const resumeInterruptedFinish = restored.machineSnapshot.state === SESSION_STATES.FINISHING;
@@ -168,7 +173,7 @@ class ParticipantSessionRuntime {
 
     _scheduleFinalUploadRetry() {
         setTimeout(() => {
-            import('../web-page/tests-updated.js?v=20260919-1')
+            import('../web-page/tests-updated.js?v=20261008-2')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         }, 0);

@@ -20,6 +20,7 @@ const TOP_LEVEL_FIELDS = new Set([
   'cognitiveResults',
   'gazeValidation',
   'gaze_analytics',
+  'rt_alignment',
   'events',
   'lifecycle',
   'startTime',
@@ -587,6 +588,9 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   validateLifecycle(payload.lifecycle, errors);
   validateEvents(payload.events, limits, errors);
   validateResearchExtensions(payload, errors);
+  if (payload.rt_alignment !== undefined) {
+    errors.push(...require('../analytics/connectedness').validateAlignment(payload.rt_alignment));
+  }
 
   walkPayload(
     payload,

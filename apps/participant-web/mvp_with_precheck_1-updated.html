@@ -8,7 +8,7 @@
     <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
 
     <link rel="stylesheet" href="style.css?v=20260919-1">
-    <link rel="stylesheet" href="participant-redesign.css?v=20260820-3">
+    <link rel="stylesheet" href="participant-redesign.css?v=20261008-1">
     <script>
       (function () {
         var params = new URLSearchParams(window.location.search || '');
@@ -21,6 +21,22 @@
         window.location.replace(u.pathname + u.search);
       })();
     </script>
+
+    <style>
+        #photodiode {
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 110px;
+        height: 110px;
+        background-color: #000;
+        z-index: 999999;
+        pointer-events: none;
+        transition: none;
+        }
+        #photodiode[hidden], #photodiodeTemporaryNotice[hidden] { display: none; }
+        #photodiodeTemporaryNotice { margin: 16px 0; padding: 12px; border: 1px dashed var(--border); border-radius: 12px; }
+    </style>
 
     <!-- MediaPipe Vision (Face Landmarker) -->
     <script>
@@ -43,15 +59,18 @@
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
     <script src="js/face-segmenter.js?v=1.2.2"></script>
     <!-- QC Metrics Module -->
-    <script src="js/qc-metrics.js?v=3.5.0"></script>
+    <script src="js/qc-metrics.js?v=3.5.1"></script>
     <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
     <script src="js/gaze-tracker.js?v=2.2.0"></script>
     <script src="js/face-mask-collector.js?v=1.0.0"></script>
     <script src="js/web-page/consent-signature.js"></script>
-    
-    
+    <script src="js/photodiode.js?v=20261007-1"></script>
+
 </head>
 <body>
+    <!-- TEMPORARY: local-only photodiode hardware diagnostic, hidden during calibration. -->
+    <div id="photodiode" aria-hidden="true" data-feature-status="temporary" hidden></div>
+
     <!-- Fullscreen калибровка -->
     <div id="fullscreenCalibration" class="fullscreen-calibration">
         <div id="calibrationIntro" class="calibration-intro" hidden>
@@ -72,7 +91,7 @@
         </div>
         <div id="validationResult" class="calibration-intro" hidden>
             <div class="calibration-intro-card" role="dialog" aria-modal="true" aria-labelledby="validationResultTitle">
-                <div class="calibration-intro-kicker">Проверка точности</div>
+                <div class="calibration-intro-kicker" data-i18n="validation_intro_kicker">Проверка точности</div>
                 <h2 id="validationResultTitle">Проверка завершена</h2>
                 <p id="validationResultMetrics" class="calibration-result-metrics"></p>
                 <p id="validationResultAdvice" class="calibration-result-advice"></p>
@@ -143,6 +162,10 @@
         <div id="step1" class="step active">
             <h1 data-i18n="welcome_title">Добро пожаловать</h1>
             <p class="text-center" data-i18n="welcome_subtitle">Платформа оценки внимания и эмоций</p>
+            <label id="photodiodeTemporaryNotice" class="checkbox-wrapper" hidden>
+                <input type="checkbox" id="photodiodeTemporaryToggle" />
+                <span id="photodiodeTemporaryText"></span>
+            </label>
             
             <div class="warning-container">
                 <strong class="warning-title" data-i18n="warning_title">⚠️ Важно:</strong>
@@ -542,10 +565,10 @@
       }
     </script>
     <script src="../shared/protocol-stimuli.js?v=20260915-1"></script>
-    <script src="../shared/standard-stimuli.js?v=20260919-1"></script>
+    <script src="../shared/standard-stimuli.js?v=20261008-2"></script>
     <script src="../web/cognitive-task-protocols.js?v=20260919-1"></script>
     <script src="../shared/survey-contract.js?v=20260828-2"></script>
-    <script type="module" src="js/web-page/app-updated.js?v=20260919-1"></script>
+    <script type="module" src="js/web-page/app-updated.js?v=20261008-2"></script>
     <script>
       (function () {
         const ru = document.getElementById('langRu');

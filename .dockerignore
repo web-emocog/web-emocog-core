@@ -16,11 +16,15 @@ Audio_detection/**
 !Audio_detection/browser/
 !Audio_detection/browser/*.mjs
 db
-deploy
+deploy/**
+!deploy/production/
+!deploy/production/backup-support.py
 docs
 ml
 packages/**
 !packages/shared/
+!packages/shared/contracts/
+!packages/shared/contracts/**
 !packages/shared/multimodal/
 !packages/shared/multimodal/**/*.mjs
 scripts

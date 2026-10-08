@@ -431,6 +431,15 @@ describe('per-trial quality repeats', () => {
 });
 
 describe('session checkpoint', () => {
+  it('does not restore another invitation when a new URL code is opened', async () => {
+    const { matchesCheckpointInvitation } = await importRuntimeModule('checkpoint-store.mjs');
+    const data = { ids: { invitationCode: 'old-invitation' } };
+    assert.equal(matchesCheckpointInvitation(data, '?code=new-invitation'), false);
+    assert.equal(matchesCheckpointInvitation(data, '?code=old-invitation'), true);
+    assert.equal(matchesCheckpointInvitation(data, ''), true);
+    assert.equal(matchesCheckpointInvitation({}, '?code=new-invitation'), false);
+  });
+
   it('persists and restores a checkpoint without IndexedDB', async () => {
     const { SessionCheckpointStore } = await importRuntimeModule('checkpoint-store.mjs');
     const storage = new Map();

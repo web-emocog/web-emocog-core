@@ -206,24 +206,10 @@ class QCMetricsInline {
         const f = { faceVisible: false, faceOk: false, poseOk: false, illuminationOk: false, eyesOpen: false, occlusionDetected: false };
         if (!pr) return f;
         
-        // === Occlusion detection (ИСПРАВЛЕНО - менее агрессивная логика) ===
-        // Окклюзия только если FaceSegmenter ЯВНО детектирует руку или серьёзную проблему
-        let isOccluded = false;
-        if (sr && sr.faceVisibility) {
-            // Проверяем только явную детекцию руки
-            if (sr.faceVisibility.handDetected === true) {
-                isOccluded = true;
-            }
-            // Или если есть критические issues (но НЕ low_skin_visibility - это часто ложное)
-            const issues = sr.issues || sr.faceVisibility?.issues || [];
-            if (Array.isArray(issues)) {
-                const criticalIssues = issues.filter(i => 
-                    i === 'hand_on_face' || 
-                    i.includes('hand_occluded')
-                );
-                if (criticalIssues.length > 0) isOccluded = true;
-            }
-        }
+        // Keep the fallback identical to frame-analysis.hasRegionalFaceOcclusion.
+        const issues = sr?.faceVisibility
+            ? [sr.issues, sr.faceVisibility.issues].filter(Array.isArray).flat() : [];
+        const isOccluded = issues.some(i => typeof i === 'string' && i.includes('hand_occluded'));
         f.occlusionDetected = isOccluded;
         
         // === Face detection ===
@@ -342,6 +328,7 @@ class QCMetricsInline {
         return {
             durationMs: Date.now() - this._startTime,
             totalFrames: this._counters.totalFrames,
+            faceVisibilityMethod: 'regional_hand_evidence.v2',
             qcScore,
             faceVisiblePct: r(pcts.faceVisiblePct),
             faceOkPct: r(pcts.faceOkPct),
@@ -646,7 +633,7 @@ if (typeof window !== 'undefined') {
     // Фоновая загрузка модульной версии.
     window.QCMetricsReady = (async () => {
         try {
-            const mod = await import('./qc-metrics/index.js');
+            const mod = await import('./qc-metrics/index.js?v=20261008-2');
             const Cls = mod && (mod.QCMetrics || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export QCMetrics class');

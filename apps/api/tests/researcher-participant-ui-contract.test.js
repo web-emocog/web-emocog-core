@@ -148,7 +148,7 @@ describe('participant test hub contract', () => {
     assert.doesNotMatch(bypass, /if \(!token\) return false/);
   });
 
-  it('uses the full stimulus stage for AOI coordinates and explains gaze validation', async () => {
+  it('uses displayed media content for AOI coordinates, retaining the stage for non-media tasks', async () => {
     const app = read('participant-web/js/web-page/app-updated.js');
     const task = read('participant-web/js/web-page/experimental_task-updated.js');
     const tests = read('participant-web/js/web-page/tests-updated.js');
@@ -158,9 +158,12 @@ describe('participant test hub contract', () => {
     const rectEnd = app.indexOf('window.setLanguage', rectStart);
     const rectSource = app.slice(rectStart, rectEnd);
     assert.match(rectSource, /getElementById\('cognitiveStimulusArea'\)/);
-    assert.doesNotMatch(rectSource, /getElementById\('cogImage'\)/);
+    assert.match(rectSource, /\['cogVideo', 'cogImage'\]/);
+    assert.match(rectSource, /mediaContentRect\(media, viewport\)/);
     assert.match(task, /classList\.toggle\('cognitive-stimulus-fullscreen'/);
     assert.match(css, /body\.cognitive-stimulus-fullscreen[\s\S]+#cognitiveStimulusArea/);
+    assert.match(read('participant-web/participant-redesign.css'), /#step6\s*\{\s*animation:\s*none;\s*transform:\s*none;/);
+    assert.match(html, /participant-redesign\.css\?v=20261008-1/);
     assert.doesNotMatch(css, /cognitive-stimulus-presenting/);
     assert.match(html, /id="validationIntro"/);
     assert.match(html, /id="validationResult"/);
@@ -379,7 +382,7 @@ describe('researcher navigation contract', () => {
     assert.match(ui, /wecog:languagechange/);
     assert.match(runner, /refreshLocalizedInstructionScreen/);
     assert.match(runner, /captureSurveyDraft/);
-    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20260919-1/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20261008-2/);
   });
 
   it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
@@ -430,7 +433,8 @@ describe('researcher navigation contract', () => {
     assert.doesNotMatch(source, /apiPatch\('\/protocols\/' \+ matching\.id/);
     assert.doesNotMatch(source, /apiGet\('\/protocols\?project_id=' \+ encodeURIComponent/);
     assert.match(source, /removeItem\(builderApiStateKey\('draft'\)\)/);
-    assert.match(source, /\/invitations\?protocol_id=/);
+    assert.match(source, /var inv = await createInvitationForProtocol\(savedProtocol\.id\)/);
+    assert.doesNotMatch(source, /publishOpts\.forceProtocolId/);
     assert.match(routes, /protocol_id_conflict/);
     assert.match(migration, /protocols_project_protocol_id_unique/);
     assert.match(migration, /lower\(btrim\(definition->>'protocolId'\)\)/);
@@ -478,14 +482,13 @@ describe('researcher navigation contract', () => {
 
   it('supports researcher project management and folder-level stimulus rename', () => {
     const core = read('web/researcher-core.js');
-    const permissions = read('api/security/permissions.js');
     const projects = read('api/routes/projects.js');
     const stimuli = read('web/researcher-stimuli.js');
     assert.match(core, /openModal\('rename'/);
     assert.match(core, /apiPatch\('\/projects\/'/);
     assert.match(core, /apiDelete\('\/projects\/'/);
-    assert.match(permissions, /OPERATIONS\.PROJECT_DELETE/);
-    assert.match(projects, /requireRole\('admin', 'PI', 'researcher'\)/);
+    assert.equal(require('../security/permissions').canRolePerform('researcher', 'project.delete'), false);
+    assert.match(projects, /router\.delete\([\s\S]*requireRole\('admin', 'PI'\)/);
     assert.match(stimuli, /folder-stim-edit-btn/);
     assert.match(stimuli, /renameStimulusInLibrary\(button\.dataset\.id, null, renderFolderView\)/);
   });
@@ -497,7 +500,8 @@ describe('researcher navigation contract', () => {
     assert.match(stimuli, /Проверьте превью и названия/);
     assert.match(stimuli, /formData\.append\('name', customName\)/);
     assert.match(stimuli, /_previewObjectUrl: ''/);
-    assert.match(stimuli, /await hydrateApiStimulusPreview\(newItem\)/);
+    assert.match(stimuli, /await hydrateStimulusThumbnail\(newItem\)/);
+    assert.match(stimuli, /apiPreviewUrl: row\.preview_url/);
     assert.match(stimuli, /URL\.revokeObjectURL\(entry\.previewObjectUrl\)/);
     assert.match(builder, /type:'audio_reading'/);
     assert.match(builder, /type:'audio_sustained_vowel'/);
@@ -526,6 +530,10 @@ describe('researcher navigation contract', () => {
     const runtime = read('participant-web/js/session-runtime/index.js');
     const ui = read('participant-web/js/web-page/ui-updated.js');
     const gazeTests = read('participant-web/js/gaze-tracker/gaze-tests/index.js');
+    assert.match(runtime, /runtime-ui\.js\?v=20261008-2/);
+    for (const file of ['web-page/precheck-updated.js', 'web-page/tests-updated.js', 'session-runtime/frame-pipeline.js', 'session-runtime/runtime-ui.js']) {
+      assert.match(read('participant-web/js/' + file), /head-pose-guide\.js\?v=20261008-2/);
+    }
     const gazeAnalysis = read('participant-web/js/gaze-tracker/gaze-tests/common/analysis-loop.js');
     const vpcRunner = read('participant-web/js/gaze-tracker/gaze-tests/vpc/runner.js');
     const visuospatialRunner = read('participant-web/js/gaze-tracker/gaze-tests/visuospatial/runner.js');
@@ -534,22 +542,22 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20260919-1/);
-    assert.match(app, /tests-updated\.js\?v=20260919-1/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20260919-1/);
-    assert.match(task, /tests-updated\.js\?v=20260919-1/);
-    assert.match(app, /session-runtime\/index\.js\?v=20260919-1/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20260919-1/);
-    assert.match(task, /session-runtime\/index\.js\?v=20260919-1/);
-    assert.match(runtime, /tests-updated\.js\?v=20260919-1/);
-    assert.match(runtime, /runtime-ui\.js\?v=20260919-1/);
-    assert.match(app, /precheck-updated\.js\?v=20260919-1/);
-    assert.match(tests, /precheck-updated\.js\?v=20260919-1/);
-    assert.match(ui, /precheck-updated\.js\?v=20260919-1/);
-    assert.match(tests, /gaze-tests\/index\.js\?v=20260919-1/);
-    assert.match(gazeTests, /analysis-loop\.js\?v=20260919-1/);
-    assert.match(tests, /unified-aggregates-new\.js\?v=20260919-1/);
-    assert.match(ui, /unified-aggregates-new\.js\?v=20260919-1/);
+    assert.match(tests, /ui-updated\.js\?v=20261008-2/);
+    assert.match(app, /tests-updated\.js\?v=20261008-2/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20261008-2/);
+    assert.match(task, /tests-updated\.js\?v=20261008-2/);
+    assert.match(app, /session-runtime\/index\.js\?v=20261008-2/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20261008-2/);
+    assert.match(task, /session-runtime\/index\.js\?v=20261008-2/);
+    assert.match(runtime, /tests-updated\.js\?v=20261008-2/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261008-2/);
+    assert.match(app, /precheck-updated\.js\?v=20261008-2/);
+    assert.match(tests, /precheck-updated\.js\?v=20261008-2/);
+    assert.match(ui, /precheck-updated\.js\?v=20261008-2/);
+    assert.match(tests, /gaze-tests\/index\.js\?v=20261008-2/);
+    assert.match(gazeTests, /analysis-loop\.js\?v=20261008-2/);
+    assert.match(tests, /unified-aggregates-new\.js\?v=20261008-2/);
+    assert.match(ui, /unified-aggregates-new\.js\?v=20261008-2/);
     for (const source of [
       app,
       tests,
@@ -563,7 +571,7 @@ describe('researcher navigation contract', () => {
       vpcRunner,
       visuospatialRunner,
     ]) {
-      assert.match(source, /state\.js\?v=20260919-1/);
+      assert.match(source, /state\.js\?v=20261008-2/);
     }
     assert.match(app, /protocol-invite-utils\.js\?v=20260915-1/);
     assert.match(tests, /protocol-invite-utils\.js\?v=20260915-1/);

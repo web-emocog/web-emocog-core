@@ -2,7 +2,7 @@
 console.warn('[DEPRECATED] js/web-page/app.js — official entrypoint: mvp_with_precheck_1-updated.html + app-updated.js');
 
 // 1. Импорты всех модулей
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs } from './state.js';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs } from './state.js?v=20261008-2';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData 
-} from './ui.js';
+} from './ui.js?v=20261008-2';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck.js';
+} from './precheck.js?v=20261008-2';
 
 import { 
     startCalibration, 
     finishSession 
-} from './tests.js';
+} from './tests.js?v=20261008-2';
 
 // Функции доступные для HTML
 window.setLanguage = setLanguage;

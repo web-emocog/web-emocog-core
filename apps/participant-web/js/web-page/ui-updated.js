@@ -4,11 +4,11 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
-import { state, recordSessionEvent } from './state.js?v=20260919-1';
-import { translations } from '../../translations.js?v=20260919-1';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20260919-1';
-import { measureRenderFPS } from './camera.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20260919-1';
+import { state, recordSessionEvent } from './state.js?v=20261008-2';
+import { translations } from '../../translations.js?v=20261008-2';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261008-2';
+import { measureRenderFPS } from './camera.js?v=20261008-2';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261008-2';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
 import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
@@ -72,7 +72,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20260919-1');
+        const mod = await import('./tests-updated.js?v=20261008-2');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;
@@ -167,13 +167,18 @@ export function setLanguage(lang) {
 
     if (previousLang !== nextLang) {
         recordSessionEvent('interface_language_changed', {
-            category: 'session',
+            category: 'lifecycle',
             from: previousLang || null,
             to: nextLang
         });
         window.dispatchEvent(new CustomEvent('wecog:languagechange', {
             detail: { from: previousLang || null, lang: nextLang }
         }));
+    }
+    if (state.sessionData.lifecycle?.status === 'completed') {
+        updateFinalStepWithQC(state.sessionData.qcSummary, {
+            serverValidity: state.sessionData.upload?.qcValidity
+        });
     }
 }
 

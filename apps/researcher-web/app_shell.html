@@ -2322,6 +2322,10 @@ body{
   
   <script>
 // Utility functions
+function escapeLegacyResearcherHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 const $=s=>document.querySelector(s);
 const state={
   org:'Acme Labs',
@@ -3713,19 +3717,19 @@ function ExperimentsListView() {
     content.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px; max-width:1200px; margin:0 auto;">
         ${experiments.map(exp => `
-          <div class="card exp-card" data-id="${exp.id}" style="padding:20px;cursor:pointer;transition:transform 0.1s;">
+          <div class="card exp-card" data-id="${escapeLegacyResearcherHtml(exp.id)}" style="padding:20px;cursor:pointer;transition:transform 0.1s;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
-              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${exp.title || 'Без названия'}</div>
+              <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;">${escapeLegacyResearcherHtml(exp.title || 'Без названия')}</div>
               <span style="font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;background:${exp.status==='active'?'rgba(16,185,129,.15)':'rgba(92,102,189,.1)'};color:${exp.status==='active'?'var(--good)':'var(--muted)'};">
-                ${exp.status === 'active' ? t('active') : t('draft')}
+                ${escapeLegacyResearcherHtml(exp.status === 'active' ? t('active') : t('draft'))}
               </span>
             </div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
               ${(exp.blocks||[]).length} блоков · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString()}
             </div>
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;">
-              <button class="quick-btn edit-exp-btn" data-id="${exp.id}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
-              <button class="quick-btn del-exp-btn" data-id="${exp.id}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+              <button class="quick-btn edit-exp-btn" data-id="${escapeLegacyResearcherHtml(exp.id)}" style="flex:1;justify-content:center;font-size:12px;">${escapeLegacyResearcherHtml(t('editExperiment'))}</button>
+              <button class="quick-btn del-exp-btn" data-id="${escapeLegacyResearcherHtml(exp.id)}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
             </div>
           </div>
         `).join('')}
@@ -8872,7 +8876,7 @@ function ExperimentBuilderView(options = {}) {
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0;">
             <div style="font-size:14px;font-weight:700;color:var(--text);">Таймлайн протокола</div>
             <div style="display:flex;gap:8px;align-items:center;">
-              <span style="font-size:10px;padding:2px 9px;border-radius:20px;background:rgba(92,102,189,.1);border:1px solid rgba(92,102,189,.2);color:var(--accent);" id="versionBadge">v${protocolVersion}</span>
+              <span style="font-size:10px;padding:2px 9px;border-radius:20px;background:rgba(92,102,189,.1);border:1px solid rgba(92,102,189,.2);color:var(--accent);" id="versionBadge">v${escapeLegacyResearcherHtml(protocolVersion)}</span>
               <button class="quick-btn" id="sandboxBtn" style="font-size:11px;padding:4px 10px;">▶ Sandbox</button>
             </div>
           </div>
@@ -9236,17 +9240,17 @@ function ExperimentBuilderView(options = {}) {
     canvasCol.innerHTML = `
     <div style="display:flex;flex-direction:column;height:100%;padding:18px;gap:14px;">
       <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-        <div style="font-size:18px;font-weight:800;color:var(--text);">${s}</div>
+        <div style="font-size:18px;font-weight:800;color:var(--text);">${escapeLegacyResearcherHtml(s)}</div>
       </div>
       <div style="flex:1;display:flex;align-items:center;justify-content:center;border:2px dashed var(--stroke);border-radius:14px;background:rgba(255,255,255,.2);color:var(--muted);text-align:center;flex-direction:column;gap:10px;">
-        <div style="font-size:14px;font-weight:600;color:var(--text);">${s}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);">${escapeLegacyResearcherHtml(s)}</div>
         <div style="font-size:12px;max-width:260px;">Этот шаг находится в разработке.</div>
       </div>
       
       ${isLast ? `
         <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
           <label for="experimentNameInput" style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">Имя эксперимента</label>
-          <input type="text" id="experimentNameInput" placeholder="Например: Тест памяти на лица" style="padding:10px 14px; border-radius:10px; border:1px solid var(--stroke); background:var(--card-bg); font-size:14px; font-weight:600; color:var(--text); outline:none; width:100%; max-width:400px;" value="${editingExp ? editingExp.title : ''}">
+          <input type="text" id="experimentNameInput" placeholder="Например: Тест памяти на лица" style="padding:10px 14px; border-radius:10px; border:1px solid var(--stroke); background:var(--card-bg); font-size:14px; font-weight:600; color:var(--text); outline:none; width:100%; max-width:400px;" value="${escapeLegacyResearcherHtml(editingExp ? editingExp.title : '')}">
         </div>
       ` : ''}
 

@@ -17,7 +17,7 @@ describe('production backup set and observability', () => {
       encoding: 'utf8', timeout: 60_000,
     });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stderr, /Ran 12 tests/);
+    assert.match(result.stderr, /Ran 14 tests/);
   });
 
   for (const scenario of ['empty', 'files', 'dump-failure', 'archive-failure', 'upload-failure', 'manifest-failure', 'early-failure']) {
@@ -52,8 +52,9 @@ date() { printf '20260904T120000123456789Z\\n'; }
 sha256sum() { shasum -a 256 "$1"; }
 compose_for() {
   if [[ $SCENARIO == dump-failure ]]; then return 7; fi
-  if [[ $* == *pg_restore* ]]; then return 0; fi
   printf 'database fixture' > "$WECOG_BACKUP_DIR/wecog-20260904T120000123456789Z-aaaaaaaaaaaa.dump"
+  printf '{"formatVersion":1,"files":[]}' > "$WECOG_BACKUP_DIR/wecog-20260904T120000123456789Z-aaaaaaaaaaaa.media.json"
+  python3 "$BACKUP_HELPER" create-uploads "$WECOG_UPLOADS_DIR" "$WECOG_BACKUP_DIR/wecog-20260904T120000123456789Z-aaaaaaaaaaaa.uploads.tar.gz"
 }
 upload_object() {
   local source=$1 key=$2
@@ -74,7 +75,7 @@ backup_database aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa daily
           assert.equal(state.in_progress, 0);
           const order = fs.readFileSync(path.join(temporary, 'upload-order'), 'utf8').trim().split('\n');
           assert.match(order.at(-1), /\.manifest\.json$/);
-          assert.equal(order.length, scenario === 'empty' ? 3 : 5);
+          assert.equal(order.length, scenario === 'empty' ? 4 : 6);
           const manifest = JSON.parse(fs.readFileSync(path.join(temporary, 'objects', path.basename(order.at(-1)))));
           assert.equal(manifest.uploads.empty, scenario === 'empty');
           assert.deepEqual(fs.readdirSync(path.join(temporary, 'backups')), []);

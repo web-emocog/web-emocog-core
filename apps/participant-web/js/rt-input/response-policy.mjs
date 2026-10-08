@@ -1,3 +1,8 @@
+import '../../../shared/keyboard-responses.js?v=20261008-2';
+
+export const normalizeKeyboardResponse = globalThis.WecogKeyboardResponses.normalize;
+export const keyboardResponseLabel = globalThis.WecogKeyboardResponses.label;
+
 export const RESPONSE_MODES = Object.freeze({
     KEYPRESS: 'keypress',
     CLICK: 'click',
@@ -59,10 +64,8 @@ export function normalizeResponseMode(config = {}, trial = {}) {
 export function responseValueForMode(mode, keyboardEvent = null) {
     if (mode === RESPONSE_MODES.CLICK) return 'Click';
     if (mode === RESPONSE_MODES.POINTER_INTENT) return 'PointerIntent';
-    if (mode !== RESPONSE_MODES.KEYPRESS || !keyboardEvent?.code) return null;
-    if (keyboardEvent.code === 'Space') return 'Space';
-    if (String(keyboardEvent.code).startsWith('Arrow')) return keyboardEvent.code;
-    return null;
+    if (mode !== RESPONSE_MODES.KEYPRESS) return null;
+    return globalThis.WecogKeyboardResponses.fromEvent(keyboardEvent);
 }
 
 export class RtResponseCollector {

@@ -18,7 +18,7 @@ const {
   findInvitationByCode,
   reserveInvitationRun,
 } = require('../ingest/invitation-repository');
-const { withTransaction, lockSessionKey } = require('../db/transaction');
+const { lockSessionKey } = require('../db/transaction');
 const {
   resolveReadableServerOwnedUploadPath,
   getStoredContentPath,
@@ -33,6 +33,9 @@ const {
   referencedDatabaseStimulusIds,
 } = require('../../shared/protocol-stimuli');
 const { inspectProtocolStimuli } = require('../stimuli/protocol-availability');
+const { withMediaWrite, pinProtocolMedia, loadPinnedStimuli } = require('../stimuli/versions');
+const { HttpError } = require('../security/http-error');
+const { publicStimulusMetadata, publicProtocolDefinition } = require('../stimuli/public-projection');
 
 const router = express.Router();
 const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
@@ -52,15 +55,6 @@ async function resolveInvitationByCode(code, queryable = pool) {
 }
 
 const referencedStimulusIds = referencedDatabaseStimulusIds;
-
-function publicStimulusMetadata(metadata) {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
-  const result = {};
-  for (const key of ['text', 'label', 'emotion', 'alt']) {
-    if (typeof metadata[key] === 'string') result[key] = metadata[key].slice(0, 512);
-  }
-  return result;
-}
 
 async function resolveActiveParticipantInvitation(req, res) {
   const errors = validationResult(req);
@@ -143,7 +137,7 @@ router.get(
         max_runs: inv.max_runs,
         used_runs: inv.used_runs,
         expires_at: inv.expires_at,
-        definition: normalizeMandatoryParticipantShell(inv.protocol_definition),
+        definition: publicProtocolDefinition(normalizeMandatoryParticipantShell(inv.protocol_definition)),
         source: {
           type: 'invitation_code',
           value: inv.code,
@@ -165,20 +159,16 @@ router.get(
       if (!invitation) return;
       const referencedIds = referencedStimulusIds(invitation.protocol_definition);
       if (!referencedIds.length) return res.json([]);
-      const result = await pool.query(
-        `SELECT id, project_id, name, mime_type, size_bytes, metadata
-         FROM stimuli
-         WHERE project_id = $1 AND id = ANY($2::int[])
-         ORDER BY id`,
-        [invitation.project_id, referencedIds]
-      );
-      return res.json(result.rows.map(row => {
+      const rows = await loadPinnedStimuli(pool, invitation.project_id, invitation.protocol_definition);
+      return res.json(rows.map(row => {
         const metadata = publicStimulusMetadata(row.metadata);
         return {
           id: row.id,
           name: row.name,
           mime_type: row.mime_type,
           size_bytes: row.size_bytes,
+          version: row.current_version_id || null,
+          sha256: row.sha256 || null,
           metadata,
           content_url: getStoredContentPath(row.metadata)
             ? `/invitations/by-code/${encodeURIComponent(invitation.code)}/stimuli/${row.id}/content`
@@ -206,13 +196,8 @@ router.get(
       if (!referencedStimulusIds(invitation.protocol_definition).includes(stimulusId)) {
         return res.status(404).json({ error: 'Stimulus not found' });
       }
-      const result = await pool.query(
-        `SELECT id, name, mime_type, metadata
-         FROM stimuli
-         WHERE id = $1 AND project_id = $2`,
-        [stimulusId, invitation.project_id]
-      );
-      const stimulus = result.rows[0];
+      const rows = await loadPinnedStimuli(pool, invitation.project_id, invitation.protocol_definition);
+      const stimulus = rows.find(row => Number(row.id) === stimulusId);
       if (!stimulus) return res.status(404).json({ error: 'Stimulus not found' });
       const resolved = await resolveReadableServerOwnedUploadPath(
         stimuliUploadsRoot,
@@ -227,6 +212,8 @@ router.get(
       }
       const mimeType = String(stimulus.mime_type || '').toLowerCase();
       res.setHeader('Content-Type', mimeType || 'application/octet-stream');
+      res.setHeader('Cache-Control', 'private, no-store');
+      if (stimulus.sha256) res.setHeader('ETag', `"sha256-${stimulus.sha256}"`);
       res.setHeader(
         'Content-Disposition',
         contentDisposition(INLINE_MEDIA_TYPES.has(mimeType) ? 'inline' : 'attachment', stimulus.name)
@@ -257,7 +244,8 @@ router.post(
       }
       const code = req.params.code.trim();
       const sessionId = String(req.body.session_id);
-      const admission = await withTransaction(pool, async client => {
+      // Media locks precede invitation/session locks, matching replacement/backfill.
+      const admission = await withMediaWrite(pool, async client => {
         await lockSessionKey(client, sessionId);
         const invitation = await findInvitationByCode(client, code, { forUpdate: true });
         if (!invitation) {
@@ -293,6 +281,17 @@ router.post(
           error.status = 409;
           error.code = 'session_invitation_mismatch';
           throw error;
+        }
+
+        const report = await inspectProtocolStimuli(client, invitation.project_id,
+          invitation.protocol_definition, { verifyDecoding: true });
+        if (!report.ok) throw new HttpError(409, 'Invitation media is unavailable; contact the researcher',
+          'invitation_stimulus_unavailable');
+        if (!invitation.protocol_definition?.mediaManifest) {
+          const pinned = await pinProtocolMedia(client, invitation.project_id, invitation.protocol_definition);
+          await client.query('UPDATE invitations SET protocol_definition = $1::jsonb WHERE id = $2',
+            [JSON.stringify(pinned), invitation.id]);
+          invitation.protocol_definition = pinned;
         }
 
         let created = false;
@@ -418,7 +417,8 @@ router.post(
       const stimulusReport = await inspectProtocolStimuli(
         pool,
         protocol.rows[0].project_id,
-        protocol.rows[0].definition
+        protocol.rows[0].definition,
+        { user: req.user }
       );
       if (!stimulusReport.ok) {
         const labels = stimulusReport.unavailable
@@ -438,14 +438,23 @@ router.post(
         code = generateCode();
         exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
       }
-      const r = await pool.query(
-        `INSERT INTO invitations (protocol_id, code, max_runs, expires_at)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, protocol_id, code, max_runs, used_runs, expires_at, created_at`,
-        [protocol_id, code, max_runs || null, expires_at || null]
-      );
+      const r = await withMediaWrite(pool, async client => {
+        const row = (await client.query('SELECT * FROM protocols WHERE id = $1 FOR UPDATE', [protocol_id])).rows[0];
+        if (!row || !(await hasProtocolMembership(client, protocol_id, req.user))) throw new HttpError(403, 'Access denied', 'protocol_access_denied');
+        const pinned = row.definition.mediaManifest ? row.definition
+          : await pinProtocolMedia(client, row.project_id, row.definition, req.user);
+        const report = await inspectProtocolStimuli(client, row.project_id, pinned,
+          { user: req.user, verifyDecoding: true });
+        if (!report.ok) throw new HttpError(422, 'Protocol media is unavailable', 'protocol_stimulus_unavailable');
+        if (!row.definition.mediaManifest) await client.query('UPDATE protocols SET definition = $1::jsonb WHERE id = $2', [JSON.stringify(pinned), row.id]);
+        return client.query(          `INSERT INTO invitations (protocol_id, code, max_runs, expires_at, protocol_definition)
+           VALUES ($1, $2, $3, $4, $5::jsonb)
+           RETURNING id, protocol_id, code, max_runs, used_runs, expires_at, created_at`,
+          [protocol_id, code, max_runs || null, expires_at || null, JSON.stringify(pinned)]);
+      });
       res.status(201).json(r.rows[0]);
     } catch (err) {
+      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       if (err.code === '23503') return res.status(400).json({ error: 'Protocol not found' });
       if (err.code === '23505') return res.status(409).json({ error: 'Invitation code already exists' });
       console.error(err);

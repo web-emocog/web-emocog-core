@@ -212,6 +212,7 @@ export function clearTaskContext() {
         presentationId: null,
         stimulusId: null,
         stimulusName: null,
+        stimulusVersion: null,
         stimulusType: null,
         expectedResponse: null
     };

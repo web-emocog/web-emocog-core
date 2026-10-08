@@ -101,6 +101,30 @@
     return { ok: errors.length === 0, errors };
   }
 
+  function standardAoisForStimulus(stimulusId) {
+    const id = String(stimulusId || '');
+    const region = (aoiId, shape, points, isTarget = true) => ({
+      id: aoiId, name: aoiId, shape, points, order: 1, isTarget,
+      validityInterval: { startMs: 0, endMs: Number.MAX_SAFE_INTEGER }
+    });
+    const box = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
+    if (/^std_emo_(neutral|happy|anger|sad|fear|surprise|disgust)_\d{2}$/.test(id)) {
+      return [
+        region('face', 'ellipse', [{ x: .26, y: .08 }, { x: .74, y: .94 }]),
+        { ...region('eyes', 'ellipse', [{ x: .32, y: .34 }, { x: .68, y: .56 }], false), order: 2 },
+        { ...region('mouth', 'ellipse', [{ x: .36, y: .60 }, { x: .64, y: .83 }], false), order: 3 }
+      ];
+    }
+    if (/^std_(go_green_circle|nogo_red_circle|nback_circle)$/.test(id)) return [region('target', 'ellipse', box)];
+    if (id === 'std_nback_triangle') return [region('target', 'polygon', [{ x: .5, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }])];
+    if (id === 'std_nback_diamond') return [region('target', 'polygon', [{ x: .5, y: 0 }, { x: 1, y: .5 }, { x: .5, y: 1 }, { x: 0, y: .5 }])];
+    if (/^std_flanker_(right|left)_(cong|incong)$/.test(id)) return [region('target', 'rectangle', [{ x: .4, y: 0 }, { x: .6, y: 1 }])];
+    if (/^std_(simple_black_square|nback_square|pvt_counter|cpt_[a-z]|switch_(4g|7a|2e|9k|6o|3m|8i|5t)|stroop_(red_red|blue_blue|green_green|red_blue|blue_green|green_red))$/.test(id)) {
+      return [region('target', 'rectangle', box)];
+    }
+    return [];
+  }
+
   function buildAoiDefinitions(stimuli, stimulusIds) {
     const byId = new Map((Array.isArray(stimuli) ? stimuli : [])
       .filter(plainObject)
@@ -110,8 +134,11 @@
       .filter(value => value != null && String(value).trim())
       .map(String))).forEach(stimulusId => {
       const stimulus = byId.get(stimulusId);
-      if (!stimulus || !Array.isArray(stimulus.aois) || !stimulus.aois.length) return;
-      const normalized = stimulus.aois.map(normalizedAoi);
+      if (!stimulus) return;
+      const aois = Array.isArray(stimulus.aois) ? stimulus.aois
+        : stimulus.standard === true ? standardAoisForStimulus(stimulusId) : [];
+      if (!aois.length) return;
+      const normalized = aois.map(normalizedAoi);
       if (normalized.some(result => !result.ok)) return;
       definitions[stimulusId] = normalized.map(result => result.value);
     });
@@ -120,6 +147,7 @@
 
   return {
     AOI_SCHEMA_VERSION,
+    standardAoisForStimulus,
     buildAoiDefinitions,
     validateAoiDefinitions,
     validateProtocolAois,

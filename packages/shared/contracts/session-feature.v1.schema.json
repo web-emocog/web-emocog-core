@@ -128,6 +128,7 @@
       "required": ["schemaVersion", "coordinateSpace", "summary", "presentations"],
       "additionalProperties": false
     },
+    "rt_alignment": { "$ref": "./rt-alignment.v1.schema.json" },
     "events": {
       "type": "array",
       "items": { "$ref": "./session-event.v1.schema.json" },

@@ -319,6 +319,7 @@ function resolveParticipantStimulus(params) {
     return {
       ...imageStimulus(url, stimulusId || undefined, params.imageStyle || {}),
       type,
+      stimulusVersion: meta?.version || metadata.version || '1',
       ...(sourceUrl && sourceUrl !== url ? { fallbackSrc: sourceUrl } : {}),
     };
   }

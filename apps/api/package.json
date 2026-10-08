@@ -12,6 +12,7 @@
     "migrate:create": "node-pg-migrate create",
     "migrate:verify": "bash scripts/verify-migrations.sh",
     "backup:db": "bash scripts/backup-db.sh",
+    "backup:media": "node scripts/backup-media-set.js",
     "restore:db": "bash scripts/restore-db.sh",
     "backup:verify": "bash scripts/verify-backup-restore.sh",
     "load:ingest": "node scripts/load-ingest.js",

@@ -55,7 +55,6 @@ const ROLE_OPERATIONS = Object.freeze({
     OPERATIONS.PROJECT_READ,
     OPERATIONS.PROJECT_CREATE,
     OPERATIONS.PROJECT_UPDATE,
-    OPERATIONS.PROJECT_DELETE,
     OPERATIONS.PROTOCOL_READ,
     OPERATIONS.PROTOCOL_WRITE,
     OPERATIONS.PROTOCOL_PUBLISH,
@@ -131,7 +130,7 @@ function authenticateStaffToken(token) {
   }
 }
 
-function safeTokenMatch(left, right) {
+function verifyCsrfToken(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -169,18 +168,26 @@ async function requireAuth(req, res, next) {
         message: 'Invalid, expired, or revoked token',
       });
     }
-    if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-      const csrf = req.get('X-CSRF-Token');
-      if (!safeTokenMatch(principal.csrf, csrf)) {
-        return res.status(403).json({
-          error: 'Forbidden',
-          message: 'Missing or invalid CSRF token',
-          code: 'csrf_token_invalid',
-        });
-      }
+    const expectedStaffId = req.get('X-Staff-User-ID');
+    if (expectedStaffId != null && String(principal.sub) !== expectedStaffId) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Staff account changed; reload the protected page',
+        code: 'staff_account_changed',
+      });
     }
     req.user = principal;
     req.authTransport = cookieToken ? 'cookie' : 'bearer';
+    // Authentication above is mandatory on both paths; only cookie mutations need CSRF.
+    if (!cookieToken || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    const csrf = req.get('X-CSRF-Token');
+    if (!verifyCsrfToken(req.user.csrf, csrf)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Missing or invalid CSRF token',
+        code: 'csrf_token_invalid',
+      });
+    }
     return next();
   } catch (error) {
     return next(error);

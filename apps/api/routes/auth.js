@@ -311,12 +311,16 @@ router.patch(
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      if (!errors.isEmpty()) return res.status(400).json({
+        error: 'Invalid password request', code: 'password_validation_failed',
+      });
 
       const currentPassword = String(req.body.currentPassword || '');
       const newPassword = String(req.body.newPassword || '');
       if (currentPassword === newPassword) {
-        return res.status(400).json({ error: 'New password must be different from current password' });
+        return res.status(400).json({
+          error: 'New password must be different from current password', code: 'password_unchanged',
+        });
       }
 
       const userRes = await pool.query('SELECT id, email, password_hash FROM users WHERE id = $1', [req.user.sub]);
@@ -324,28 +328,30 @@ router.patch(
       if (!user) return res.status(404).json({ error: 'User not found' });
 
       const ok = await bcrypt.compare(currentPassword, user.password_hash);
-      if (!ok) return res.status(400).json({ error: 'Current password is invalid' });
+      if (!ok) return res.status(400).json({ error: 'Current password is invalid', code: 'current_password_invalid' });
 
       const passwordHash = await bcrypt.hash(newPassword, 10);
-      await pool.query(
+      // Compare-and-swap prevents a stale request from overwriting a password
+      // changed by a concurrent reset or a second self-service request.
+      const refreshed = await pool.query(
         `UPDATE users
          SET password_hash = $1,
              token_version = token_version + 1,
              updated_at = current_timestamp
-         WHERE id = $2`,
-        [passwordHash, user.id]
+         WHERE id = $2 AND password_hash = $3 AND token_version = $4
+         RETURNING id, email, role, display_name, token_version`,
+        [passwordHash, user.id, user.password_hash, req.user.ver]
       );
-      const refreshed = await pool.query(
-        'SELECT id, email, role, display_name, token_version FROM users WHERE id = $1',
-        [user.id]
-      );
+      if (!refreshed.rows[0]) return res.status(409).json({
+        error: 'Account changed; sign in again before changing the password', code: 'password_change_conflict',
+      });
       const auth = req.authTransport === 'cookie'
         ? buildAuthResponse(req, res, refreshed.rows[0])
         : {};
       res.json({ ok: true, message: 'Password updated', ...auth });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Failed to update password' });
+      console.error('[Auth password change]', { code: err.code || 'password_change_failed' });
+      res.status(500).json({ error: 'Failed to update password', code: 'password_change_failed' });
     }
   }
 );

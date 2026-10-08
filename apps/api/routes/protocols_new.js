@@ -22,6 +22,10 @@ const {
   rejectUnavailableProtocolStimuli,
 } = require('../stimuli/protocol-availability');
 
+const { withMediaWrite, pinProtocolMedia } = require('../stimuli/versions');
+const { HttpError } = require('../security/http-error');
+const { publicProtocol } = require('../stimuli/public-projection');
+
 const router = express.Router();
 router.use(requireAuth);
 
@@ -103,7 +107,7 @@ router.get(
       }
       sql += ' ORDER BY pr.updated_at DESC';
       const r = await pool.query(sql, params);
-      res.json(r.rows);
+      res.json(r.rows.map(publicProtocol));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Server error' });
@@ -126,19 +130,24 @@ router.post(
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const { project_id, name } = req.body;
       const definition = normalizeMandatoryParticipantShell(req.body.definition);
+      delete definition.mediaManifest;
       if (rejectInvalidAois(res, definition)) return;
       if (rejectInvalidSurveys(res, definition)) return;
       const projectAllowed = await hasProjectMembership(pool, project_id, req.user);
       if (!projectAllowed) return res.status(403).json({ error: 'Not member of project' });
-      const stimulusReport = await inspectProtocolStimuli(pool, project_id, definition);
+      const stimulusReport = await inspectProtocolStimuli(pool, project_id, definition, { user: req.user });
       if (rejectUnavailableProtocolStimuli(res, stimulusReport)) return;
-      const r = await pool.query(
+      const r = await withMediaWrite(pool, async client => {
+        const pinned = await pinProtocolMedia(client, project_id, definition, req.user);
+        return client.query(
         `INSERT INTO protocols (project_id, name, definition) VALUES ($1, $2, $3)
          RETURNING id, project_id, name, definition, created_at, updated_at`,
-        [project_id, name, JSON.stringify(definition)]
+        [project_id, name, JSON.stringify(pinned)]
       );
-      res.status(201).json(r.rows[0]);
+      });
+      res.status(201).json(publicProtocol(r.rows[0]));
     } catch (err) {
+      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       if (err.code === '23503') return res.status(400).json({ error: 'Project not found' });
       if (err.code === '23505') return rejectProtocolConflict(res, err);
       console.error(err);
@@ -187,7 +196,7 @@ router.get(
           [req.params.id, req.user.sub]
         );
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-      res.json(r.rows[0]);
+      res.json(publicProtocol(r.rows[0]));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Server error' });
@@ -195,82 +204,36 @@ router.get(
   }
 );
 
-router.patch(
-  '/:id',
-  requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
-  requireOperation(OPERATIONS.PROTOCOL_WRITE),
-  [
-    param('id').isInt(),
-    body('name').optional().trim().notEmpty().isLength({ max: 255 }),
-    body('definition').optional().isObject(),
-  ],
+router.patch('/:id', requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
+  requireOperation(OPERATIONS.PROTOCOL_WRITE), [param('id').isInt({ min: 1 }),
+    body('name').optional().trim().notEmpty().isLength({ max: 255 }), body('definition').optional().isObject()],
   async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-      const normalizedDefinition = req.body.definition === undefined
-        ? undefined
-        : normalizeMandatoryParticipantShell(req.body.definition);
-      if (normalizedDefinition !== undefined && rejectInvalidAois(res, normalizedDefinition)) return;
-      if (normalizedDefinition !== undefined && rejectInvalidSurveys(res, normalizedDefinition)) return;
-      if (normalizedDefinition !== undefined) {
-        const current = await pool.query('SELECT project_id FROM protocols WHERE id = $1', [req.params.id]);
-        if (!current.rows[0]) return res.status(404).json({ error: 'Not found' });
-        const projectAllowed = await hasProjectMembership(pool, current.rows[0].project_id, req.user);
-        if (!projectAllowed) return res.status(404).json({ error: 'Not found' });
-        const stimulusReport = await inspectProtocolStimuli(
-          pool,
-          current.rows[0].project_id,
-          normalizedDefinition
-        );
-        if (rejectUnavailableProtocolStimuli(res, stimulusReport)) return;
-      }
-      const updates = [];
-      const values = [];
-      let i = 1;
-      if (req.body.name !== undefined) {
-        updates.push(`name = $${i++}`);
-        values.push(req.body.name);
-      }
-      if (req.body.definition !== undefined) {
-        updates.push(`definition = $${i++}`);
-        values.push(JSON.stringify(normalizedDefinition));
-      }
-      if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
-      let r;
-      if (hasGlobalProtocolAccess(req.user)) {
-        values.push(req.params.id);
-        r = await pool.query(
-          `UPDATE protocols
-           SET ${updates.join(', ')}, updated_at = current_timestamp
-           WHERE id = $${i}
-           RETURNING id, project_id, name, definition, updated_at`,
-          values
-        );
-      } else {
-        values.push(req.user.sub);
-        values.push(req.params.id);
-        r = await pool.query(
-          `UPDATE protocols pr SET ${updates.join(', ')}, updated_at = current_timestamp
-           FROM projects p, user_organizations uo
-           WHERE pr.project_id = p.id AND p.organization_id = uo.organization_id AND uo.user_id = $${i} AND pr.id = $${i + 1}
-             AND EXISTS (
-               SELECT 1 FROM user_projects up
-               WHERE up.project_id = p.id AND up.user_id = uo.user_id
-             )
-           RETURNING pr.id, pr.project_id, pr.name, pr.definition, pr.updated_at`,
-          values
-        );
-      }
-      if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-      res.json(r.rows[0]);
-    } catch (err) {
-      if (err.code === '23505') return rejectProtocolConflict(res, err);
-      console.error(err);
-      res.status(500).json({ error: 'Update failed' });
+      if (req.body.name === undefined && req.body.definition === undefined) return res.status(400).json({ error: 'No fields to update' });
+      const definition = req.body.definition === undefined ? undefined : normalizeMandatoryParticipantShell(req.body.definition);
+      if (definition) delete definition.mediaManifest;
+      if (definition && (rejectInvalidAois(res, definition) || rejectInvalidSurveys(res, definition))) return;
+      const row = await withMediaWrite(pool, async client => {
+        const current = (await client.query('SELECT * FROM protocols WHERE id = $1 FOR UPDATE', [req.params.id])).rows[0];
+        if (!current || !(await hasProjectMembership(client, current.project_id, req.user))) throw new HttpError(404, 'Not found', 'protocol_not_found');
+        if (definition) {
+          const report = await inspectProtocolStimuli(client, current.project_id, definition, { user: req.user });
+          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
+        }
+        const pinned = definition ? await pinProtocolMedia(client, current.project_id, definition, req.user) : current.definition;
+        return (await client.query(`UPDATE protocols SET name = $1, definition = $2::jsonb, updated_at = current_timestamp
+           WHERE id = $3 RETURNING id, project_id, name, definition, updated_at`,
+          [req.body.name === undefined ? current.name : req.body.name, JSON.stringify(pinned), current.id])).rows[0];
+      });
+      return res.json(publicProtocol(row));
+    } catch (error) {
+      if (error instanceof HttpError) return res.status(error.status).json({ error: error.message, code: error.code });
+      if (error.code === '23505') return rejectProtocolConflict(res, error);
+      return res.status(500).json({ error: 'Update failed' });
     }
-  }
-);
+  });
 
 router.delete(
   '/:id',

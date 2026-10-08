@@ -3,7 +3,7 @@ async function findInvitationByCode(queryable, code, options = {}) {
   const result = await queryable.query(
     `SELECT i.id, i.protocol_id, i.code, i.max_runs, i.used_runs, i.expires_at,
             pr.name AS protocol_name, pr.project_id,
-            pr.definition AS protocol_definition
+            COALESCE(i.protocol_definition, pr.definition) AS protocol_definition
      FROM invitations i
      INNER JOIN protocols pr ON pr.id = i.protocol_id
      WHERE i.code = $1${lockClause}`,

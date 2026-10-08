@@ -120,6 +120,13 @@ module.exports = {
       process.env.UPLOADS_ROOT || path.join(__dirname, '..', 'uploads')
     ),
     maxUploadBytes: positiveInt(process.env.MAX_UPLOAD_BYTES, 50 * 1024 * 1024),
+    preview: {
+      ffmpegBin: process.env.FFMPEG_BIN || 'ffmpeg',
+      ffprobeBin: process.env.FFPROBE_BIN || 'ffprobe',
+      maxDimension: positiveInt(process.env.MEDIA_PREVIEW_DIMENSION, 480, 960),
+      timeoutMs: positiveInt(process.env.MEDIA_PREVIEW_TIMEOUT_MS, 10_000, 30_000),
+      maxConcurrent: positiveInt(process.env.MEDIA_PREVIEW_CONCURRENCY, 2, 4),
+    },
     conversion: {
       maxDocumentBytes: positiveInt(process.env.MAX_DOCUMENT_BYTES, 50 * 1024 * 1024),
       maxPages: positiveInt(process.env.MAX_DOCUMENT_PAGES, 100, 500),
