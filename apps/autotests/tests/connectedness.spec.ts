@@ -63,6 +63,33 @@ test('snapshot race cannot show results from an earlier selection', async ({ pag
   expect(state.dirty).toBe(true);
 });
 
+test('unspecified conditions remain distinct from all trials and legitimate placeholder-like names', async ({ page }) => {
+  await page.evaluate(async () => {
+    const production = (window as any).EmocogAnalyticsProduction;
+    const load = production.api.sessionSummary;
+    production.api.sessionSummary = async (...args: any[]) => {
+      const result = await load(...args);
+      result.data.connectedness.trials[0].condition = null;
+      result.data.connectedness.trials[1].condition = '';
+      result.data.connectedness.trials[2].condition = '__missing__';
+      return result;
+    };
+    await production.store.loadSessionSummary();
+  });
+  const condition = page.locator('#connectednessCondition');
+  await expect(condition.locator('option')).toHaveCount(4);
+  await condition.selectOption({ label: 'Не указано' });
+  await expect(page.locator('#connectednessResults tbody tr')).toHaveCount(2);
+  await page.locator('#connectednessBlock').selectOption('rt');
+  await expect(page.locator('#connectednessResults')).toContainText('не вычислено');
+  await condition.selectOption('__missing__');
+  await expect(page.locator('#connectednessResults tbody tr')).toHaveCount(1);
+  await condition.selectOption('');
+  await expect(page.locator('#connectednessResults tbody tr')).toHaveCount(5);
+  await page.locator('#connectednessModule summary').click();
+  await expect(page.locator('#connectednessModule details')).toContainText('ограничение отображения');
+});
+
 test('English labels and API failure state do not expose stale results or stack traces', async ({ page }) => {
   await page.locator('#langEn').click();
   await expect(page.getByRole('heading', { name: 'RT and synchronized signals' })).toBeVisible();

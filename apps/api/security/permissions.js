@@ -177,17 +177,17 @@ async function requireAuth(req, res, next) {
       });
     }
     req.user = principal;
-    if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-      const csrf = req.get('X-CSRF-Token');
-      if (!verifyCsrfToken(req.user.csrf, csrf)) {
-        return res.status(403).json({
-          error: 'Forbidden',
-          message: 'Missing or invalid CSRF token',
-          code: 'csrf_token_invalid',
-        });
-      }
-    }
     req.authTransport = cookieToken ? 'cookie' : 'bearer';
+    // Authentication above is mandatory on both paths; only cookie mutations need CSRF.
+    if (!cookieToken || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    const csrf = req.get('X-CSRF-Token');
+    if (!verifyCsrfToken(req.user.csrf, csrf)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Missing or invalid CSRF token',
+        code: 'csrf_token_invalid',
+      });
+    }
     return next();
   } catch (error) {
     return next(error);

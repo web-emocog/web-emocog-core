@@ -35,6 +35,13 @@ reset, password reset or historical-session backfill is performed.
   The local live-suite helper no longer automatically posts credentials read
   from a fixture file: it requires matching explicit synthetic credentials and
   rejects production use and HTTP redirects. Regression tests cover these paths.
+- Verified authentication precedes the explicit safe-method/bearer early return;
+  all cookie mutations still require constant-time CSRF validation. The unused
+  legacy event router now has its own limiter if loaded independently and remains
+  unmounted by the canonical API.
+- Unspecified block/condition filters no longer collide with "all" or legitimate
+  placeholder-like names. The three-pair coefficient display threshold is labeled
+  as an interface policy, not a mathematical minimum or sample-adequacy rule.
 
 ## Connectedness
 
@@ -77,6 +84,8 @@ primary scientific/product sources and required real-device acceptance.
   mutations and two-tab account/publication/AOI regressions.
 - Final WebKit recheck: 102 passed, zero failed, including participant runtime,
   media, keyboard layouts, builder/design and the new account-lock assertions.
+- The final missing-condition/method-label changes also pass all four
+  Connectedness checks in Chromium, Firefox and WebKit.
 - Participant runtime, keyboard layouts, uploaded media/geometry, builder and
   design regression checks were also rerun across Chromium, Firefox and WebKit.
   GitHub release gates provide the complete final-commit browser run.

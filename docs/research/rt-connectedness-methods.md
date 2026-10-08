@@ -24,8 +24,10 @@ diagnostic score, a causal model, or a replacement for lab hardware validation.
   pairs. Incorrect, incomplete, no-response and QC-rejected attempts remain in
   the table/export for audit. Accepted retries remain separate observations.
 - Spearman rho is an optional descriptive statistic for one selected block and
-  condition, using average ranks for ties. At least three varying pairs are
-  mathematically required; this is not a power/sample-adequacy threshold.
+  condition, using average ranks for ties. The interface requires at least three
+  varying pairs as a display policy, not a mathematical minimum or a
+  power/sample-adequacy threshold. Unspecified blocks/conditions can be audited
+  separately, but do not receive a coefficient for an invented condition.
   No p-value, confidence interval, significance star, or network is produced.
 
 ## Synchronization and missingness

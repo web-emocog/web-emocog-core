@@ -43,7 +43,11 @@
       return;
     }
     const names = { gaze: tr('Доля валидных gaze-сэмплов','Valid gaze sample fraction'), body: tr('Скорость движения корпуса (proxy)','Body movement velocity (proxy)'), valence: tr('Валентность (proxy)','Valence (proxy)'), arousal: tr('Возбуждение (proxy)','Arousal (proxy)'), bpm: tr('BPM: скользящая оценка','BPM: rolling estimate') };
-    const options = values => [...new Set(values)].map(value => `<option value="${escape(value)}">${escape(value ?? tr('Не указано','Unspecified'))}</option>`).join('');
+    const knownValues = new Set(report.trials.flatMap(trial => [trial.blockId, trial.condition]).map(value => String(value ?? '')));
+    let missingSelection = '__missing__';
+    while (knownValues.has(missingSelection)) missingSelection += '_';
+    const selectionValue = value => value == null || value === '' ? missingSelection : String(value);
+    const options = values => [...new Set(values.map(selectionValue))].map(value => `<option value="${escape(value)}">${escape(value === missingSelection ? tr('Не указано','Unspecified') : value)}</option>`).join('');
     host.innerHTML = `<section class="card" id="connectednessModule" style="padding:18px;min-width:0">
       <h2>${tr('RT и синхронизированные сигналы','RT and synchronized signals')}</h2>
       <p>${tr('Одна точка = одна проба, а не кадр. Описательный анализ одной сессии, без причинных выводов и p-value.','One point = one trial, not one frame. Descriptive analysis of one session; no causal conclusions or p-values.')}</p>
@@ -57,7 +61,7 @@
       </div>
       <div id="connectednessResults" aria-live="polite"></div>
       <div style="display:flex;gap:10px;margin-top:15px"><button type="button" class="quick-btn" id="connectednessJson">JSON</button><button type="button" class="quick-btn" id="connectednessCsv">CSV</button></div>
-      <details style="margin-top:16px"><summary>${tr('Методика и ограничения','Methods and limitations')}</summary><p>${tr('Окна обрезаются у соседних проб. Пропуски не интерполируются, задержки камеры и дисплея не компенсируются без аппаратной проверки. Доля gaze относится к сохранённым сэмплам, а не ко всему времени. Мимика не является измерением эмоций; BPM вычисляется скользящим окном и не отражает мгновенный ответ.','Windows stop at neighboring trials. Gaps are not interpolated; camera/display delays are not corrected without hardware validation. Gaze fractions describe retained samples, not full time coverage. Facial expression is not an emotion measurement; rolling BPM is not an instantaneous response.')}</p><p>${tr('ρ Spearman показывается только для одного блока и условия и минимум трёх пар как описательная величина. Это математический минимум, не достаточность выборки. Для групп нужны заранее заданные mixed-effects/rmcorr модели с учётом участников, повторов и условий.','Spearman ρ is shown only for one block and condition and at least three pairs as a descriptive value. This mathematical minimum does not establish sample adequacy. Group inference requires prespecified mixed-effects/rmcorr models accounting for participants, repeats and conditions.')}</p><p><a href="https://doi.org/10.3389/fpsyg.2017.00456" target="_blank" rel="noopener noreferrer">Bakdash &amp; Marusich, 2017</a> · <a href="https://www.tobii.com/resource-center/webinars/introduction-to-tobii-pro-lab" target="_blank" rel="noopener noreferrer">Tobii TOI</a> · <a href="https://imotions.com/products/imotions-lab/" target="_blank" rel="noopener noreferrer">iMotions</a></p></details>
+      <details style="margin-top:16px"><summary>${tr('Методика и ограничения','Methods and limitations')}</summary><p>${tr('Окна обрезаются у соседних проб. Пропуски не интерполируются, задержки камеры и дисплея не компенсируются без аппаратной проверки. Доля gaze относится к сохранённым сэмплам, а не ко всему времени. Мимика не является измерением эмоций; BPM вычисляется скользящим окном и не отражает мгновенный ответ.','Windows stop at neighboring trials. Gaps are not interpolated; camera/display delays are not corrected without hardware validation. Gaze fractions describe retained samples, not full time coverage. Facial expression is not an emotion measurement; rolling BPM is not an instantaneous response.')}</p><p>${tr('ρ Spearman показывается только для одного указанного блока и условия и минимум трёх пар как описательная величина. Три пары — ограничение отображения, а не математический минимум или достаточность выборки. Для групп нужны заранее заданные mixed-effects/rmcorr модели с учётом участников, повторов и условий.','Spearman ρ is shown only for one specified block and condition and at least three pairs as a descriptive value. Three pairs is a display policy, not a mathematical minimum or evidence of sample adequacy. Group inference requires prespecified mixed-effects/rmcorr models accounting for participants, repeats and conditions.')}</p><p><a href="https://doi.org/10.3389/fpsyg.2017.00456" target="_blank" rel="noopener noreferrer">Bakdash &amp; Marusich, 2017</a> · <a href="https://www.tobii.com/resource-center/webinars/introduction-to-tobii-pro-lab" target="_blank" rel="noopener noreferrer">Tobii TOI</a> · <a href="https://imotions.com/products/imotions-lab/" target="_blank" rel="noopener noreferrer">iMotions</a></p></details>
       <p style="font-size:11px;overflow-wrap:anywhere">snapshot ${escape(response.snapshot.id)} · ${escape(response.snapshot.datasetHash)} · ${escape(report.algorithmVersion)} · ${escape(report.clock)} ${report.truncated ? tr('· сохранены первые 200 проб','· first 200 trials retained') : ''}</p>
     </section>`;
     const select = id => host.querySelector('#' + id);
@@ -65,9 +69,9 @@
     function update() {
       const block = select('connectednessBlock').value, condition = select('connectednessCondition').value;
       const window = select('connectednessWindow').value, channel = select('connectednessChannel').value;
-      current = report.trials.filter(trial => (!block || trial.blockId === block) && (!condition || trial.condition === condition));
+      current = report.trials.filter(trial => (!block || selectionValue(trial.blockId) === block) && (!condition || selectionValue(trial.condition) === condition));
       const pairs = pairsFor(current, window, channel);
-      const rho = block && condition ? spearman(pairs) : null;
+      const rho = block && condition && block !== missingSelection && condition !== missingSelection ? spearman(pairs) : null;
       const value = metric => finite(metric?.value) ? metric.value.toFixed(3) : tr('Нет данных','No data');
       const maxX = Math.max(1, ...pairs.map(pair => pair.x)), ys = pairs.map(pair => pair.y), minY = Math.min(0, ...ys), maxY = Math.max(1, ...ys);
       const duration = Math.max(1, ...current.map(trial => trial.endMs ?? trial.onsetMs));
@@ -79,7 +83,11 @@
     for (const id of ['connectednessBlock','connectednessCondition','connectednessWindow','connectednessChannel']) select(id).addEventListener('change', update);
     for (const format of ['Json','Csv']) select('connectedness' + format).addEventListener('click', () => {
       const bundle = { contractVersion: '1.0', kind: 'rt_connectedness_export', snapshot: response.snapshot,
-        view: { blockId: select('connectednessBlock').value, condition: select('connectednessCondition').value, window: select('connectednessWindow').value, channel: select('connectednessChannel').value }, report: { ...report, trials: current } };
+        view: { blockId: select('connectednessBlock').value === missingSelection ? null : select('connectednessBlock').value,
+          condition: select('connectednessCondition').value === missingSelection ? null : select('connectednessCondition').value,
+          unspecifiedBlockSelected: select('connectednessBlock').value === missingSelection,
+          unspecifiedConditionSelected: select('connectednessCondition').value === missingSelection,
+          window: select('connectednessWindow').value, channel: select('connectednessChannel').value }, report: { ...report, trials: current } };
       const blob = new Blob([format === 'Json' ? JSON.stringify(bundle, null, 2) : csv(bundle)], { type: format === 'Json' ? 'application/json' : 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'rt-connectedness.' + format.toLowerCase(); link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
