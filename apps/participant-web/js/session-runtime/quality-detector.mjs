@@ -1,4 +1,5 @@
 import { ERROR_KINDS } from './contracts.mjs';
+import { hasRegionalFaceOcclusion } from '../qc-metrics/frame-analysis.js?v=20261008-2';
 
 const QUALITY_RULES = Object.freeze({
     face_missing: {
@@ -37,18 +38,6 @@ function hasBadPose(frame) {
         || ['tilted', 'unstable', 'off_center', 'error'].includes(status);
 }
 
-function hasOcclusion(segmenterResult) {
-    const visibility = segmenterResult?.faceVisibility;
-    if (!visibility) return false;
-    const issues = segmenterResult?.issues || visibility.issues || [];
-    // Global body-skin classification is not specific enough to prove that a
-    // hand covers the face. Require a regional hand-occlusion signal; the
-    // temporal hold below then removes isolated segmentation noise.
-    return Array.isArray(issues) && issues.some(
-        issue => String(issue).includes('hand_occluded')
-    );
-}
-
 function hasAnalysisError(frame) {
     return frame?.error === true
         || (typeof frame?.error === 'string' && frame.error.length > 0)
@@ -70,7 +59,7 @@ export class SessionQualityDetector {
             face_missing: frame?.face?.detected === false,
             low_light: hasBadIllumination(frame),
             head_pose: hasBadPose(frame),
-            face_occluded: hasOcclusion(segmenterResult),
+            face_occluded: hasRegionalFaceOcclusion(segmenterResult),
             low_fps: Number.isFinite(cameraFps) && cameraFps > 0 && cameraFps < 12
         };
     }

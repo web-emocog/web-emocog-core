@@ -55,6 +55,12 @@
       throw e;
     }
     var payload = await response.json();
+    if (global.WecogStaffSession) {
+      if (!global.WecogStaffSession.getAccountId() && global.WecogAccountStorage) {
+        global.WecogAccountStorage.activate(payload?.user?.id ?? payload?.id);
+      }
+      global.WecogStaffSession.bind(payload?.user?.id ?? payload?.id);
+    }
     if (payload && payload.csrf_token) {
       try {
         sessionStorage.setItem('emocog_csrf_token', payload.csrf_token);
@@ -109,6 +115,7 @@
       user = await fetchCurrentUser();
       persistAuthFlag();
     } catch (err) {
+      if (err.code === 'staff_account_changed') return { ok: false, accountChanged: true };
       clearAuth();
       revealPageAfterAuth();
       redirectToLogin(loginPath);

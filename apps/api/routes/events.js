@@ -2,11 +2,13 @@
  * Приём батчей событий (Фаза 2.4). POST /events/batch.
  */
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const config = require('../config');
 const { withTransaction } = require('../db/transaction');
 const { insertEventPayloadsInChunks } = require('../db/bulk-insert');
+const { buildRouteRateLimitOptions } = require('../security/http-security');
 const {
   requireAuth,
   requireRole,
@@ -16,6 +18,8 @@ const {
 } = require('../middleware/auth');
 
 const router = express.Router();
+// The legacy router remains unmounted, but is bounded if used independently.
+router.use(rateLimit(buildRouteRateLimitOptions(config.http.rateLimits)));
 
 router.post(
   '/batch',

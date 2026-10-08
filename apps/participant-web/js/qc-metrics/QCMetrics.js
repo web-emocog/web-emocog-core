@@ -11,9 +11,9 @@
 import { createThresholds, VIDEO_ELEMENT_IDS } from './constants.js';
 import { VideoFpsMonitor } from './fps-monitor.js';
 import { createGazeState, addGazePoint, accumulateGazeTime } from './gaze-tracking.js';
-import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js';
+import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261008-2';
 import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
-import { getCurrentMetrics, getSummary } from './metrics-calculator.js';
+import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261008-2';
 
 class QCMetrics {
     constructor(options = {}) {

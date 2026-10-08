@@ -2,11 +2,14 @@
  * Maps participant session events + cognitiveResults to rt_mvp JSONL-shaped events.
  */
 const { mapWebTaskToAnalyzer } = require('../../shared/rt-registry');
+const keyboardResponses = require('../../shared/keyboard-responses');
 
 function normalizeButtonId(key) {
   if (key == null) return '';
   const k = String(key).trim();
   if (!k) return '';
+  const physicalKey = keyboardResponses.normalize(k);
+  if (['KeyZ', 'KeyX', 'Comma', 'Period'].includes(physicalKey)) return physicalKey.toLowerCase();
   if (k === 'Space' || k.toLowerCase() === 'space') return 'space';
   // Align with rt_component Tk KEYMAP: Left->left, Right->right (choice/flanker)
   if (k === 'ArrowLeft' || k === 'arrow_left') return 'left';

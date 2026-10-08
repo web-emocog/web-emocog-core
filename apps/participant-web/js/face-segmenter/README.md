@@ -210,10 +210,9 @@ async function analyzeLoop() {
     // Передаём оба результата в QCMetrics
     qcMetrics.processFrame(precheckResult, segmenterResult);
     
-    // QCMetrics использует handDetected для определения окклюзии
-    if (segmenterResult.faceVisibility.handDetected) {
-        showWarning('Уберите руку от лица');
-    }
+    // QCMetrics использует региональные *_hand_occluded, не глобальный handDetected.
+    // В canonical runtime предупреждения показывает SessionQualityDetector
+    // после sustained gate; не создавайте второй анализирующий цикл.
 }
 ```
 
@@ -230,8 +229,10 @@ async function analyzeLoop() {
 
 3. **Детекция руки:**
    - Если `bodySkin ratio >= globalHandThreshold (0.08)` → `handDetected = true`
-   - Это означает, что 8%+ области лица занято кожей тела (рукой)
+   - Это глобальная гипотеза сегментации, а не доказательство перекрытия рукой.
+   - Canonical runtime и итоговый QC используют только региональные
+     `*_hand_occluded`. Методика summary: `regional_hand_evidence.v2`;
+     глобальный `handDetected`/`hand_on_face` не бракует лицо автоматически.
 
 4. **Проверка видимости кожи:**
    - Если `faceSkin ratio < minTotalFaceSkin (0.55)` → `low_skin_visibility`
-

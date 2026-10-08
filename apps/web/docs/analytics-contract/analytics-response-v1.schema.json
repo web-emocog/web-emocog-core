@@ -297,10 +297,1123 @@
       },
       "additionalProperties": false
     },
+    "connectedness": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "algorithmVersion",
+        "clock",
+        "baselineMs",
+        "postMs",
+        "trialCountTotal",
+        "truncated",
+        "rawVideoStored",
+        "trials",
+        "sessionId",
+        "source",
+        "policy"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "rt_alignment.v1"
+        },
+        "algorithmVersion": {
+          "type": "string",
+          "const": "event-windows-1.0.0"
+        },
+        "clock": {
+          "type": "string",
+          "enum": [
+            "monotonic_epoch_ms",
+            "wall_epoch_ms"
+          ]
+        },
+        "baselineMs": {
+          "type": "integer",
+          "const": 1000
+        },
+        "postMs": {
+          "type": "integer",
+          "const": 1000
+        },
+        "trialCountTotal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "rawVideoStored": {
+          "type": "boolean",
+          "const": false
+        },
+        "trials": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "trialId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "blockId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "stimulusId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "condition": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "onsetMs": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "responseMs": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "endMs": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "rtMs": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "correct": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "qualityValid": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "responded",
+                  "no_response",
+                  "incomplete"
+                ]
+              },
+              "windows": {
+                "type": "object",
+                "properties": {
+                  "baseline": {
+                    "type": "object",
+                    "properties": {
+                      "startMs": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": -1000
+                      },
+                      "endMs": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "channels": {
+                        "type": "object",
+                        "properties": {
+                          "gaze": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "body": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "valence": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "arousal": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "bpm": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "gaze",
+                          "body",
+                          "valence",
+                          "arousal",
+                          "bpm"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "startMs",
+                      "endMs",
+                      "channels"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "response": {
+                    "type": "object",
+                    "properties": {
+                      "startMs": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": -1000
+                      },
+                      "endMs": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "channels": {
+                        "type": "object",
+                        "properties": {
+                          "gaze": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "body": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "valence": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "arousal": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "bpm": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "gaze",
+                          "body",
+                          "valence",
+                          "arousal",
+                          "bpm"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "startMs",
+                      "endMs",
+                      "channels"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "post": {
+                    "type": "object",
+                    "properties": {
+                      "startMs": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": -1000
+                      },
+                      "endMs": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "channels": {
+                        "type": "object",
+                        "properties": {
+                          "gaze": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "body": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "valence": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "arousal": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "bpm": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "n": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "nValid": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 5000000
+                              },
+                              "validFraction": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "maxGapMs": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "observed",
+                                  "no_data"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "n",
+                              "nValid",
+                              "validFraction",
+                              "maxGapMs",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "gaze",
+                          "body",
+                          "valence",
+                          "arousal",
+                          "bpm"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "startMs",
+                      "endMs",
+                      "channels"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "baseline",
+                  "response",
+                  "post"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "trialId",
+              "blockId",
+              "stimulusId",
+              "condition",
+              "attempt",
+              "onsetMs",
+              "responseMs",
+              "endMs",
+              "rtMs",
+              "correct",
+              "qualityValid",
+              "status",
+              "windows"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "sessionId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "stored_event_windows",
+            "legacy_events_only"
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "required": [
+            "observational",
+            "inference",
+            "videoAvailable",
+            "sampleWeighting",
+            "emotionIsProxy",
+            "bpmIsRollingEstimate",
+            "note"
+          ],
+          "properties": {
+            "observational": {
+              "const": true
+            },
+            "inference": {
+              "const": "not_computed"
+            },
+            "videoAvailable": {
+              "const": false
+            },
+            "sampleWeighting": {
+              "const": "one_observation_per_trial"
+            },
+            "emotionIsProxy": {
+              "const": true
+            },
+            "bpmIsRollingEstimate": {
+              "const": true
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "sessionSummary": {
       "type": "object",
       "required": ["session", "qcChannels", "metrics", "exclusions"],
       "properties": {
+        "connectedness": { "$ref": "#/$defs/connectedness" },
+        "quality": { "type": "object" },
+        "audio": { "type": "object" },
         "session": { "$ref": "#/$defs/sessionMeta" },
         "qcChannels": {
           "type": "array",

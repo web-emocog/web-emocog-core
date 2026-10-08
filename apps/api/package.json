@@ -12,6 +12,7 @@
     "migrate:create": "node-pg-migrate create",
     "migrate:verify": "bash scripts/verify-migrations.sh",
     "backup:db": "bash scripts/backup-db.sh",
+    "backup:media": "node scripts/backup-media-set.js",
     "restore:db": "bash scripts/restore-db.sh",
     "backup:verify": "bash scripts/verify-backup-restore.sh",
     "load:ingest": "node scripts/load-ingest.js",
@@ -33,12 +34,13 @@
     "express-rate-limit": "^8.7.0",
     "express-validator": "^7.0.1",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.1.1",
+    "multer": "^2.4.0",
     "node-pg-migrate": "^6.2.2",
     "pg": "^8.11.3"
   },
   "overrides": {
-    "qs": "6.16.0"
+    "qs": "6.16.0",
+    "proxy-addr": "2.0.8"
   },
   "private": true
 }

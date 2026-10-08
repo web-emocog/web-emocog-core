@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,29 @@ class BackupSupportTest(unittest.TestCase):
         (self.uploads / "empty").mkdir()
         self.assertEqual(backup.create_uploads(self.uploads, self.archive), 0)
         self.assertFalse(self.archive.exists())
+
+    def test_media_inventory_checks_contents_and_requires_every_database_reference(self):
+        (self.uploads / "stimuli").mkdir()
+        (self.uploads / "stimuli" / "version.png").write_bytes(b"original")
+        backup.create_uploads(self.uploads, self.archive)
+        inventory = self.root / "media.json"
+        entry = {"file": "stimuli/version.png", "bytes": 8, "sha256": hashlib.sha256(b"original").hexdigest()}
+        inventory.write_text(json.dumps({"formatVersion": 1, "files": [entry]}))
+        self.assertEqual(backup.verify_media(self.archive, inventory), 1)
+        for bad in [dict(entry, sha256="0" * 64), dict(entry, bytes=9), dict(entry, file="stimuli/missing.png")]:
+            inventory.write_text(json.dumps({"formatVersion": 1, "files": [bad]}))
+            with self.assertRaises(ValueError):
+                backup.verify_media(self.archive, inventory)
+
+    def test_v2_manifest_binds_the_media_inventory_to_the_same_backup_set(self):
+        timestamp, tag = "20261002T120000Z", "a" * 40
+        prefix = self.root / f"wecog-{timestamp}-{tag[:12]}"
+        Path(f"{prefix}.dump").write_bytes(b"database")
+        Path(f"{prefix}.media.json").write_text('{"formatVersion":1,"files":[]}')
+        backup.write_manifest(self.root, timestamp, tag, "daily", 0)
+        result = json.loads(Path(f"{prefix}.manifest.json").read_text())
+        self.assertEqual(result["format_version"], 2)
+        self.assertEqual(result["media_inventory"], backup.file_description(Path(f"{prefix}.media.json")))
 
     def test_restore_preserves_bytes_and_does_not_overwrite_live_directory(self):
         (self.uploads / "documents").mkdir()

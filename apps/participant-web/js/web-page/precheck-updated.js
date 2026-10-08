@@ -1,13 +1,14 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
-import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20260919-1';
-import { translations } from '../../translations.js?v=20260919-1';
-import { measureCameraFPS } from './camera.js';
+import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261008-2';
+import { translations } from '../../translations.js?v=20261008-2';
+import { measureCameraFPS } from './camera.js?v=20261008-2';
+import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
     captureHeadPoseReference,
     resetHeadPoseReference,
     setHeadPoseGuideMode,
     updateHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20260909-1';
+} from '../gaze-tracker/head-pose-guide.js?v=20261008-2';
 
 function dbg(scope, event, data) {
     try {
@@ -311,32 +312,6 @@ function getPrecheckFailReason(hasFailed) {
     if (s.pose === 'failed') return 'pose_out';
     if (s.visibility === 'failed') return 'visibility';
     return 'unknown';
-}
-
-function getDistanceStatus(precheckData) {
-    const face = precheckData && precheckData.face;
-    const bbox = face && face.bbox;
-    if (!face || !face.detected || !bbox) {
-        return { available: false, failed: true, status: 'no_face', estimateCm: null };
-    }
-    const faceHeightRatio = Number(bbox.height || 0);
-    if (!Number.isFinite(faceHeightRatio) || faceHeightRatio <= 0) {
-        return { available: false, failed: true, status: 'unknown', estimateCm: null };
-    }
-
-    // Нормализованная высота bbox лица (0..1): старая формула 52/h давала нижнюю границу ~52 «см»
-    // при любом h≤1 — порог «слишком близко» почти не срабатывал, а «слишком далеко» — постоянно
-    // при нормальной дистанции ноутбука. Используем диапазон по доле кадра.
-    const MIN_H = 0.17;
-    const MAX_H = 0.52;
-    if (faceHeightRatio < MIN_H) {
-        return { available: true, failed: true, status: 'too_far', estimateCm: null };
-    }
-    if (faceHeightRatio > MAX_H) {
-        return { available: true, failed: true, status: 'too_close', estimateCm: null };
-    }
-    const estimateCm = Math.round(52 / faceHeightRatio);
-    return { available: true, failed: false, status: 'ok', estimateCm };
 }
 
 export function checkAllIndicators() {
@@ -795,10 +770,14 @@ export function updatePoseIndicator(data) {
             indicatorClass = 'failed';
             break;
         case 'stable':
-        default:
             progressValue = 100;
             statusText = tt('status_stable');
             indicatorClass = 'passed';
+            break;
+        default:
+            progressValue = 0;
+            statusText = tt('status_checking');
+            indicatorClass = 'pending';
     }
     if (typeof statusText === 'undefined') {
         const keyByStatus = {
@@ -815,7 +794,7 @@ export function updatePoseIndicator(data) {
     progressBar.style.width = progressValue + '%';
     statusEl.textContent = statusText;
     indicator.className = `indicator ${indicatorClass}`;
-    state.indicatorsStatus.pose = indicatorClass;
+    state.indicatorsStatus.pose = precheckPoseStatus(data);
 }
 
 export function updateVisibilityIndicator(data) {

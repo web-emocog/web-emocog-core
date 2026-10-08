@@ -38,15 +38,26 @@ describe('researcher account workspace isolation', () => {
     accountStorage.activate('researcher-a');
     storage.setItem('emocog_my_experiments', JSON.stringify([{ id: 'a' }]));
     storage.setItem('emocog_stimuli', JSON.stringify([{ id: 'stimulus-a' }]));
+    const libraryKey = 'emocog_stimulus_library_v1:account-a-project-7';
+    const metadataKey = 'emocog_protocol_metadata_draft_v1:study-a';
+    storage.setItem(libraryKey, 'project-a-library');
+    storage.setItem(metadataKey, 'account-a-metadata');
+    storage.setItem('emocog_stimulus_quarantine_v1', 'legacy-a');
 
     accountStorage.activate('researcher-b');
     assert.equal(storage.getItem('emocog_my_experiments'), null);
     assert.equal(storage.getItem('emocog_stimuli'), null);
+    assert.equal(storage.getItem(libraryKey), null);
+    assert.equal(storage.getItem(metadataKey), null);
+    assert.equal(storage.getItem('emocog_stimulus_quarantine_v1'), null);
     storage.setItem('emocog_my_experiments', JSON.stringify([{ id: 'b' }]));
 
     accountStorage.activate('researcher-a');
     assert.deepEqual(JSON.parse(storage.getItem('emocog_my_experiments')), [{ id: 'a' }]);
     assert.deepEqual(JSON.parse(storage.getItem('emocog_stimuli')), [{ id: 'stimulus-a' }]);
+    assert.equal(storage.getItem(libraryKey), 'project-a-library');
+    assert.equal(storage.getItem(metadataKey), 'account-a-metadata');
+    assert.equal(storage.getItem('emocog_stimulus_quarantine_v1'), 'legacy-a');
   });
 
   it('recovers an archived local protocol only as an unpublished draft', () => {
@@ -68,5 +79,19 @@ describe('researcher account workspace isolation', () => {
     assert.equal(protocol.invitationCode, undefined);
     assert.equal(protocol.participantLink, undefined);
     assert.equal(accountStorage.hasRecoverableArchive(), false);
+  });
+
+  it('keeps researcher language per account alongside the workspace', () => {
+    const storage = memoryStorage();
+    const accounts = createAccountStorage(storage);
+    accounts.activate('1');
+    storage.setItem('wecog_researcher_language', 'ru');
+    accounts.activate('2');
+    assert.equal(storage.getItem('wecog_researcher_language'), null);
+    storage.setItem('wecog_researcher_language', 'en');
+    accounts.activate('1');
+    assert.equal(storage.getItem('wecog_researcher_language'), 'ru');
+    accounts.activate('2');
+    assert.equal(storage.getItem('wecog_researcher_language'), 'en');
   });
 });

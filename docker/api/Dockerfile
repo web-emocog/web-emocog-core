@@ -19,11 +19,16 @@ RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
       ca-certificates \
       fonts-dejavu-core \
+      ffmpeg \
       libreoffice-impress \
       poppler-utils \
       postgresql-client \
       python3 \
       tini && \
+    install --directory /usr/local/share/wecog && \
+    dpkg-query --show --showformat='${Package} ${Version}\n' \
+      ffmpeg postgresql-client python3 > /usr/local/share/wecog/runtime-packages.txt && \
+    ffmpeg -version > /usr/local/share/wecog/ffmpeg-build.txt && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid 10001 wecog && \
     useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin wecog && \
@@ -39,6 +44,7 @@ WORKDIR /app/apps/api
 COPY --from=dependencies --chown=10001:10001 /app/apps/api/node_modules ./node_modules
 COPY --chown=10001:10001 apps/api ./
 COPY --chown=10001:10001 apps/shared /app/apps/shared
+COPY --chown=10001:10001 deploy/production/backup-support.py /app/deploy/production/backup-support.py
 COPY --chown=10001:10001 \
     apps/web/aoi-geometry.js \
     apps/web/aoi-protocol.js \

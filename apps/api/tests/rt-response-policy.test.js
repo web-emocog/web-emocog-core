@@ -6,7 +6,50 @@ test('RT response policy', async t => {
     RESPONSE_MODES,
     RtResponseCollector,
     normalizeResponseMode,
+    normalizeKeyboardResponse,
+    responseValueForMode,
   } = await import('../../participant-web/js/rt-input/response-policy.mjs');
+
+  await t.test('normalizes Russian/English responses to physical keys and preserves legacy keys', () => {
+    for (const [code, en, ru] of [['KeyZ', 'z', '\u044f'], ['KeyX', 'x', '\u0447'], ['Comma', ',', '\u0431'], ['Period', '.', '\u044e']]) {
+      for (const key of [en, ru, ru.toUpperCase()]) {
+        assert.equal(normalizeKeyboardResponse(key), code);
+        assert.equal(responseValueForMode('keypress', { code, key }), code);
+      }
+    }
+    assert.equal(responseValueForMode('keypress', { code: 'Space' }), 'Space');
+    assert.equal(responseValueForMode('keypress', { code: 'ArrowLeft' }), 'ArrowLeft');
+    assert.equal(responseValueForMode('keypress', { code: 'KeyA', key: 'z' }), null);
+    for (const flag of ['repeat', 'ctrlKey', 'altKey', 'metaKey', 'isComposing']) {
+      assert.equal(responseValueForMode('keypress', { code: 'KeyZ', [flag]: true }), null);
+    }
+    assert.equal(responseValueForMode('none', { code: 'KeyZ' }), null);
+  });
+
+  await t.test('records exactly one canonical response and ignores a held key', () => {
+    let now = 100;
+    const decisions = [];
+    const collector = new RtResponseCollector({ mode: 'keypress', now: () => now,
+      target: { addEventListener() {}, removeEventListener() {} } });
+    collector.arm(result => decisions.push(result));
+    collector._onKeydown({ code: 'KeyZ', key: '\u044f', repeat: true });
+    assert.equal(decisions.length, 0);
+    now = 250;
+    collector._onKeydown({ code: 'Comma', key: '\u0431' });
+    collector._onKeydown({ code: 'Period', key: '\u044e' });
+    assert.equal(decisions.length, 1);
+    assert.equal(decisions[0].response, 'Comma');
+    assert.equal(decisions[0].rtMs, 150);
+  });
+
+  await t.test('preserves equivalent responses through the server RT event adapter', () => {
+    const { eventsToRtJsonl } = require('../rt/event_adapter');
+    for (const [code, alias] of [['KeyZ', '\u044f'], ['KeyX', 'x'], ['Comma', '\u0431'], ['Period', '.']]) {
+      const { events } = eventsToRtJsonl([], [{ trialId: 'trial_1', expectedResponse: alias, response: code, rt: 320 }], { taskType: 'choice' });
+      assert.equal(events[0].expected_response, code.toLowerCase());
+      assert.equal(events[1].button_id, code.toLowerCase());
+    }
+  });
 
   await t.test('keeps legacy key/click behavior and requires explicit pointer intent', () => {
     assert.equal(normalizeResponseMode({}, { correctResponse: 'Space' }), RESPONSE_MODES.KEYPRESS);

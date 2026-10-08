@@ -158,8 +158,9 @@ function finalizeStimulusEntry(meta, acc, qualityWeight, width, height) {
         meanConfidence: meanFinite(acc.stimulusPoints.map(point => point.confidence)),
         algorithm: {
             id: 'idt-fixation-heatmap',
-            version: '1.0.0',
-            parameters: { dispersionNorm: 0.04, minDurationMs: 100, maxGapMs: 100 }
+            version: meta.coordinateMappingVersion ? '1.1.0' : '1.0.0',
+            parameters: { dispersionNorm: 0.04, minDurationMs: 100, maxGapMs: 100,
+                ...(meta.coordinateMappingVersion ? { coordinateMappingVersion: meta.coordinateMappingVersion } : {}) }
         }
     };
 }
@@ -287,9 +288,10 @@ export function buildHeatmaps(samples, options = {}) {
                         stimulusName: sample?.stimulusName ?? null,
                         stimulusType,
                         expectedResponse,
-                        stimulusVersion: '1',
+                        stimulusVersion: sample?.stimulusVersion || '1',
                         intrinsicWidth: sample?.stimulusRect?.intrinsicWidth ?? null,
                         intrinsicHeight: sample?.stimulusRect?.intrinsicHeight ?? null,
+                        coordinateMappingVersion: sample?.stimulusRect?.coordinateMappingVersion ?? null,
                         presentationStartMs: Number.isFinite(sample?.tRelMs) ? sample.tRelMs : t,
                         presentationId: `${String(blockId)}:${attemptKey}:${String(trialId ?? 'trial')}:${String(stimulusId)}`
                     },

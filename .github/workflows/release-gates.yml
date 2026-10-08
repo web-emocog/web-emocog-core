@@ -129,8 +129,8 @@ jobs:
           cache-dependency-path: |
             apps/api/package-lock.json
             apps/autotests/package-lock.json
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL and media tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client ffmpeg
       - name: Install API dependencies
         working-directory: apps/api
         run: npm ci
@@ -143,6 +143,8 @@ jobs:
         run: npm run migrate:verify
       - name: PostgreSQL concurrency and negative security tests
         working-directory: apps/api
+        env:
+          AUTH_RATE_LIMIT_PER_MINUTE: '1000'
         run: npm run test:postgres
       - name: Start canonical API
         working-directory: apps/api

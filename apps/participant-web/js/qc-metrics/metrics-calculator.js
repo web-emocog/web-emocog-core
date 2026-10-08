@@ -113,6 +113,7 @@ export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, th
     return {
         durationMs,
         totalFrames: counters.totalFrames,
+        faceVisibilityMethod: 'regional_hand_evidence.v2',
         qcScore,
 
         faceVisiblePct: round1(percentages.faceVisiblePct),
