@@ -42,6 +42,10 @@ reset, password reset or historical-session backfill is performed.
 - Unspecified block/condition filters no longer collide with "all" or legitimate
   placeholder-like names. The three-pair coefficient display threshold is labeled
   as an interface policy, not a mathematical minimum or sample-adequacy rule.
+- Canonical and legacy API CSV exports now share a safe serializer: untrusted
+  formula/control-prefixed strings are neutralized, including leading whitespace,
+  while genuine negative numeric observations remain numeric. Direct serializer
+  and route-wiring regressions cover both paths.
 
 ## Connectedness
 
@@ -69,7 +73,7 @@ primary scientific/product sources and required real-device acceptance.
 
 ## Verification
 
-- API/unit/contract suite: 343 passed, zero failed or skipped.
+- API/unit/contract suite: 346 passed, zero failed or skipped.
 - PostgreSQL integration: 23 passed, zero failed or skipped, only in the separate
   `emocog_recovery_tests` database. Tests include private files/versions, tenant
   boundaries, password/session revocation and denial of connectedness to a
@@ -86,6 +90,8 @@ primary scientific/product sources and required real-device acceptance.
   media, keyboard layouts, builder/design and the new account-lock assertions.
 - The final missing-condition/method-label changes also pass all four
   Connectedness checks in Chromium, Firefox and WebKit.
+- Additional live password checks pass at desktop/mobile widths in Chromium,
+  Firefox and WebKit against synthetic accounts and the separate test database.
 - Participant runtime, keyboard layouts, uploaded media/geometry, builder and
   design regression checks were also rerun across Chromium, Firefox and WebKit.
   GitHub release gates provide the complete final-commit browser run.

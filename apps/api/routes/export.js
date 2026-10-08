@@ -7,6 +7,7 @@ const { pool } = require('../db');
 const { requireAuth, requireRole, requireOperation, OPERATIONS, isPlatformAdmin } = require('../middleware/auth');
 const { rowToProxyMetricsResponse } = require('../proxy_metrics/contract');
 const { normalizeSurveyResponses } = require('../export/survey-responses');
+const { escapeCsv } = require('../security/csv');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -21,13 +22,6 @@ function scopedJoinAndWhere(userParamIdx, user) {
     INNER JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id AND uo_scope.user_id = $${userParamIdx}
     INNER JOIN user_projects up_scope ON up_scope.project_id = p_scope.id AND up_scope.user_id = uo_scope.user_id
   `;
-}
-
-function escapeCsv(val) {
-  if (val == null) return '';
-  const s = String(val);
-  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-  return s;
 }
 
 function normalizeBlocks(payload) {

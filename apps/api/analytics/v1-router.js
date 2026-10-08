@@ -6,6 +6,7 @@ const {
   requireOperation,
 } = require('../middleware/auth');
 const { HttpError } = require('../security/http-error');
+const { protectSpreadsheetCell, escapeCsv } = require('../security/csv');
 const { loadPinnedStimuli } = require('../stimuli/versions');
 const { buildConnectedness } = require('./connectedness');
 const { validateAnalyticsQuery } = require('./query');
@@ -623,17 +624,6 @@ router.get('/comparisons/:comparisonId', async (req, res) => {
     return responseError(res, error);
   }
 });
-
-function protectSpreadsheetCell(value) {
-  if (value == null) return '';
-  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-}
-
-function escapeCsv(value) {
-  const text = protectSpreadsheetCell(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
 
 function exportCsv(bundle) {
   const header = [
