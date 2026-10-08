@@ -20,7 +20,9 @@ function cloneProtocolData(value) {
   }
 
   function standardStimulus(id, nameRu, nameEn, type, infoRu, infoEn, extra = {}) {
-    return { id, name:nameRu, nameRu, nameEn, type, info:infoRu, infoRu, infoEn, ...extra };
+    const aois = globalThis.EmocogAoiProtocol?.standardAoisForStimulus?.(id) || [];
+    return { id, name:nameRu, nameRu, nameEn, type, info:infoRu, infoRu, infoEn,
+      ...(aois.length ? { aoiSchemaVersion: '1.2', aois } : {}), ...extra };
   }
 
   function localizedStimulusName(stimulus) {
@@ -129,7 +131,10 @@ function cloneProtocolData(value) {
     standardProtocolStimuli().forEach(stim => {
       const existing = stimuliList.find(s => String(s.id) === String(stim.id));
       if (existing) {
+        if (existing.standard !== true) { existing.standard = true; stimuliChanged = true; }
         ['name', 'nameRu', 'nameEn', 'type', 'info', 'infoRu', 'infoEn', 'emotion', 'text', 'aoiSchemaVersion', 'aois'].forEach(function (key) {
+          // An explicit custom (or empty) AOI list must survive catalog refresh.
+          if (key === 'aois' && Array.isArray(existing.aois)) return;
           if (stim[key] != null && existing[key] !== stim[key]) {
             existing[key] = stim[key];
             stimuliChanged = true;

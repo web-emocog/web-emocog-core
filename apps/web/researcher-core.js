@@ -190,35 +190,12 @@ async function createInvitationForProtocol(protocolId, options) {
 async function publishBuilderProtocolAndInvitation(exportJson, experimentKey, protocolSlug) {
   var slug = String(protocolSlug || exportJson.protocolId || '').trim();
   if (!slug) throw new Error('Укажите Protocol ID');
-  var apiState = loadBuilderApiState(experimentKey);
   var isNewProtocol = String(experimentKey || '') === 'draft';
   var publishOpts = isNewProtocol ? { forceCreate: true } : {};
-  var existingInvitation = null;
-  var existingCode = isNewProtocol ? null : apiState.invitationCode;
-  if (existingCode) {
-    try {
-      existingInvitation = await apiGet(
-        '/invitations/by-code/' + encodeURIComponent(existingCode)
-      );
-      if (existingInvitation && existingInvitation.protocol_id) {
-        publishOpts.forceProtocolId = parseInt(existingInvitation.protocol_id, 10);
-      }
-    } catch (_) { /* сохранённое приглашение больше недоступно — создадим новое */ }
-  }
   var savedProtocol = await persistBuilderProtocolToApi(exportJson, experimentKey, publishOpts);
-  var inv = existingInvitation && Number(existingInvitation.protocol_id) === Number(savedProtocol.id)
-    ? existingInvitation
-    : null;
-  if (!inv) {
-    var invitations = await apiGet('/invitations?protocol_id=' + encodeURIComponent(String(savedProtocol.id)));
-    var now = Date.now();
-    inv = Array.isArray(invitations) ? invitations.find(function (candidate) {
-      var withinExpiry = !candidate.expires_at || Date.parse(candidate.expires_at) > now;
-      var withinRuns = candidate.max_runs == null || Number(candidate.runs_used || 0) < Number(candidate.max_runs);
-      return withinExpiry && withinRuns;
-    }) : null;
-  }
-  if (!inv) inv = await createInvitationForProtocol(savedProtocol.id);
+  // Invitations pin immutable protocol/media snapshots. Reusing a code after
+  // editing a protocol would launch the previous experiment, not this publish.
+  var inv = await createInvitationForProtocol(savedProtocol.id);
   saveBuilderApiState(experimentKey, {
     apiProtocolId: savedProtocol.id,
     invitationCode: inv.code,

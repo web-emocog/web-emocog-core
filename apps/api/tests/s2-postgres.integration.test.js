@@ -1678,6 +1678,22 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(currentUser.email, email);
     assert.equal(currentUser.csrf_token, auth.csrf_token);
 
+    const wrongAccount = await fetch(`${baseUrl}/auth/me`, {
+      headers: { cookie, 'X-Staff-User-ID': String(auth.user.id + 1) },
+    });
+    assert.equal(wrongAccount.status, 409);
+    assert.equal((await wrongAccount.json()).code, 'staff_account_changed');
+    const sameAccount = await fetch(`${baseUrl}/auth/me`, {
+      headers: { cookie, 'X-Staff-User-ID': String(auth.user.id) },
+    });
+    assert.equal(sameAccount.status, 200);
+    const wrongAccountWrite = await fetch(`${baseUrl}/protocols`, {
+      method: 'POST', headers: { cookie, 'X-Staff-User-ID': String(auth.user.id + 1),
+        'X-CSRF-Token': auth.csrf_token, 'Content-Type': 'application/json' }, body: '{}',
+    });
+    assert.equal(wrongAccountWrite.status, 409);
+    assert.equal((await wrongAccountWrite.json()).code, 'staff_account_changed');
+
     const protocolBody = {
       project_id: projectId,
       name: `Cookie protocol ${randomUUID()}`,

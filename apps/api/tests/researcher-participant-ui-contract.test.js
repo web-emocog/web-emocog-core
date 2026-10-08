@@ -163,7 +163,7 @@ describe('participant test hub contract', () => {
     assert.match(task, /classList\.toggle\('cognitive-stimulus-fullscreen'/);
     assert.match(css, /body\.cognitive-stimulus-fullscreen[\s\S]+#cognitiveStimulusArea/);
     assert.match(read('participant-web/participant-redesign.css'), /#step6\s*\{\s*animation:\s*none;\s*transform:\s*none;/);
-    assert.match(html, /participant-redesign\.css\?v=20261004-1/);
+    assert.match(html, /participant-redesign\.css\?v=20261008-1/);
     assert.doesNotMatch(css, /cognitive-stimulus-presenting/);
     assert.match(html, /id="validationIntro"/);
     assert.match(html, /id="validationResult"/);
@@ -433,7 +433,8 @@ describe('researcher navigation contract', () => {
     assert.doesNotMatch(source, /apiPatch\('\/protocols\/' \+ matching\.id/);
     assert.doesNotMatch(source, /apiGet\('\/protocols\?project_id=' \+ encodeURIComponent/);
     assert.match(source, /removeItem\(builderApiStateKey\('draft'\)\)/);
-    assert.match(source, /\/invitations\?protocol_id=/);
+    assert.match(source, /var inv = await createInvitationForProtocol\(savedProtocol\.id\)/);
+    assert.doesNotMatch(source, /publishOpts\.forceProtocolId/);
     assert.match(routes, /protocol_id_conflict/);
     assert.match(migration, /protocols_project_protocol_id_unique/);
     assert.match(migration, /lower\(btrim\(definition->>'protocolId'\)\)/);

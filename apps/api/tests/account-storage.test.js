@@ -80,4 +80,18 @@ describe('researcher account workspace isolation', () => {
     assert.equal(protocol.participantLink, undefined);
     assert.equal(accountStorage.hasRecoverableArchive(), false);
   });
+
+  it('keeps researcher language per account alongside the workspace', () => {
+    const storage = memoryStorage();
+    const accounts = createAccountStorage(storage);
+    accounts.activate('1');
+    storage.setItem('wecog_researcher_language', 'ru');
+    accounts.activate('2');
+    assert.equal(storage.getItem('wecog_researcher_language'), null);
+    storage.setItem('wecog_researcher_language', 'en');
+    accounts.activate('1');
+    assert.equal(storage.getItem('wecog_researcher_language'), 'ru');
+    accounts.activate('2');
+    assert.equal(storage.getItem('wecog_researcher_language'), 'en');
+  });
 });

@@ -12,6 +12,7 @@
   var ACCOUNT_PREFIX = 'emocog_account_workspace_v1:';
   var ARCHIVE_PREFIX = 'emocog_workspace_archive_v1:';
   var EXACT_KEYS = new Set([
+    'wecog_researcher_language',
     'emocog_active_experiment_id',
     'emocog_experiments_tab',
     'emocog_folders',

@@ -5,7 +5,7 @@ import {
     SESSION_STATES
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
-import { SessionCheckpointStore } from './checkpoint-store.mjs';
+import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs';
 import { SessionRuntimeUI } from './runtime-ui.js?v=20261006-3';
 import { SessionFramePipeline } from './frame-pipeline.js?v=20261006-3';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
@@ -92,6 +92,11 @@ class ParticipantSessionRuntime {
             restored = await this.checkpoints.load();
         } catch (error) {
             console.warn('[SessionRuntime] checkpoint restore failed:', error);
+        }
+        // Opening a new invitation must not attach the previous tab's session
+        // tuple or results to it. Keep that old checkpoint for explicit recovery.
+        if (restored && !matchesCheckpointInvitation(restored.sessionData, window.location.search)) {
+            restored = null;
         }
 
         if (restored?.sessionData && restored?.machineSnapshot?.state !== SESSION_STATES.COMPLETED) {

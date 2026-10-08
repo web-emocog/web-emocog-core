@@ -8,6 +8,11 @@ const CHUNKED_ARRAY_KEYS = Object.freeze(['eyeTracking', 'eyeSignals']);
 const OMIT_KEYS = /^(email|e-mail|phone|phoneNumber|ip|ipAddress|userAgent|authorization|accessToken|refreshToken|ingestToken|cookie|fullName|displayName)$/i;
 const EMAIL_VALUE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export function matchesCheckpointInvitation(sessionData, search = '') {
+    const requestedCode = new URLSearchParams(search).get('code')?.trim();
+    return !requestedCode || sessionData?.ids?.invitationCode === requestedCode;
+}
+
 function sanitizeCheckpointValue(value, seen = new WeakSet()) {
     if (value === null || value === undefined) return value;
     if (typeof value === 'string') {

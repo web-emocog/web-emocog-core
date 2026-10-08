@@ -4,6 +4,23 @@ const geometry = require('../../web/aoi-geometry');
 const protocolAoi = require('../../web/aoi-protocol');
 const { fixationInsideAoi } = require('../analytics/metrics');
 
+test('standard AOIs are restored only for recognized builtins without overriding explicit markup', () => {
+  const result = protocolAoi.buildAoiDefinitions([
+    { id: 'std_simple_black_square', standard: true },
+    { id: 'std_emo_happy_01', standard: true },
+    { id: 'custom-photo', standard: false },
+    { id: 'std_nback_circle', standard: true, aois: [] },
+    { id: 'std_unknown', standard: true }
+  ], ['std_simple_black_square', 'std_emo_happy_01', 'custom-photo', 'std_nback_circle', 'std_unknown']);
+  assert.deepEqual(Object.keys(result), ['std_simple_black_square', 'std_emo_happy_01']);
+  assert.equal(result.std_emo_happy_01.length, 3);
+  assert.equal(result.std_simple_black_square[0].isTarget, true);
+  assert.equal(protocolAoi.validateAoiDefinitions(result, '1.2').ok, true);
+  for (const id of ['std_nback_circle', 'std_nback_triangle', 'std_nback_diamond', 'std_flanker_left_incong']) {
+    assert.equal(protocolAoi.validateAoiDefinitions({ [id]: protocolAoi.standardAoisForStimulus(id) }, '1.2').ok, true);
+  }
+});
+
 test('AOI normalized geometry', async t => {
   await t.test('normalizes a rectangle independently of viewport resolution', () => {
     const result = geometry.normalizeGeometry('rectangle', [

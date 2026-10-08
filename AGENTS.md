@@ -1,6 +1,6 @@
 # AGENTS.md: инструкция для ИИ-агентов проекта EmoCog
 
-Актуальность описания: 2026-10-07.
+Актуальность описания: 2026-10-08.
 
 Этот файл задаёт правила работы ИИ-агента во всём репозитории
 `web-emocog-core`. Он является инженерной инструкцией, а не заявлением о
@@ -432,6 +432,17 @@ FFmpeg/ffprobe работают отдельными ограниченными 
 Browser staff должен использовать `HttpOnly`, `Secure` в production,
 `SameSite=Lax` cookie и CSRF header. Bearer JWT предназначен для внешнего API
 client. Канонический permission module: `apps/api/security/permissions.js`.
+
+Researcher tab фиксирует staff identity через `staff-session.js`. При смене
+cookie-аккаунта в другой вкладке старый UI блокируется; workspace reads/writes
+и ответы in-flight запросов не переходят к новому владельцу. `X-Staff-User-ID`
+проверяется сервером до CSRF и tenant operations, но не выдаёт доступ сам по себе.
+CSRF можно обновить и повторить запрос только при явном `csrf_token_invalid`
+и совпадении staff identity. Для одновременных аккаунтов нужны отдельные
+browser profiles/contexts. Язык researcher сохраняется в account workspace.
+Каждая публикация создаёт новое invitation с immutable protocol/media snapshot;
+старые коды не перепривязываются к отредактированному протоколу. Checkpoint
+другого invitation не восстанавливается при открытии нового кода из URL.
 
 Self-service `PATCH /auth/me/password` проверяет текущий пароль и атомарно
 сопоставляет сохранённый hash и `token_version` перед обновлением. Смена

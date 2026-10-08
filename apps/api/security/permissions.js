@@ -168,6 +168,14 @@ async function requireAuth(req, res, next) {
         message: 'Invalid, expired, or revoked token',
       });
     }
+    const expectedStaffId = req.get('X-Staff-User-ID');
+    if (expectedStaffId != null && String(principal.sub) !== expectedStaffId) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Staff account changed; reload the protected page',
+        code: 'staff_account_changed',
+      });
+    }
     if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const csrf = req.get('X-CSRF-Token');
       if (!safeTokenMatch(principal.csrf, csrf)) {
