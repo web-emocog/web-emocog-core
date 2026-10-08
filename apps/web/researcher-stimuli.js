@@ -368,6 +368,80 @@ async function ensureServerFolder(folder) {
   requireCurrentStimulusOperation(operation);
 }
 
+let stimulusSyncRequest = 0;
+async function syncProjectStimuliFromApi() {
+  if (typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken()) return false;
+  const request = ++stimulusSyncRequest;
+  const projectId = await resolveApiProjectId();
+  const [remoteStimuli, remoteFolders] = await Promise.all([
+    apiGet('/stimuli?project_id=' + encodeURIComponent(projectId)),
+    apiGet('/stimuli/folders?project_id=' + encodeURIComponent(projectId))
+  ]);
+  if (request !== stimulusSyncRequest || String(localStorage.getItem('emocog_selected_project_id')) !== String(projectId)) return false;
+  if (!Array.isArray(remoteStimuli) || !Array.isArray(remoteFolders)) throw new Error('Invalid stimulus library response');
+  const existing = new Map(stimuliList.filter(item => item.apiStimulusId).map(item => [String(item.apiStimulusId), item]));
+  const remote = remoteStimuli.map(row => {
+    const id = String(row.id);
+    const previous = existing.get(id) || {};
+    const mime = String(row.mime_type || '').toLowerCase();
+    const metadata = row.metadata || {};
+    const type = metadata.source_document_name ? 'slides' : mime.startsWith('video/') ? 'video'
+      : mime.startsWith('audio/') ? 'audio' : mime.startsWith('text/') ? 'text' : 'image';
+    const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(id)}/content`;
+    return {
+      ...previous, id, apiStimulusId: row.id, projectId, folderId: row.folder_id,
+      name: row.name, type, mimeType: row.mime_type,
+      info: `${(Number(row.size_bytes || 0) / 1024).toFixed(1)} KB`,
+      apiContentUrl, url: absoluteStimulusApiUrl(apiContentUrl),
+      contentAvailable: row.content_available !== false,
+      sourceDocumentName: metadata.source_document_name || previous.sourceDocumentName,
+      sourcePage: metadata.source_page || previous.sourcePage,
+      createdAt: row.created_at
+    };
+  });
+  const remoteIds = new Set(remote.map(item => String(item.id)));
+  stimuliList = [...stimuliList.filter(item => !item.apiStimulusId && !remoteIds.has(String(item.id))), ...remote];
+  const localFolders = folders.filter(folder => !folder.apiFolderId);
+  folders = [...localFolders, ...remoteFolders.map(row => ({
+    id: folders.find(folder => String(folder.apiFolderId) === String(row.id))?.id || 'folder_' + row.id,
+    apiFolderId: row.id, name: row.name,
+    stimuliIds: [
+      ...(folders.find(folder => String(folder.apiFolderId) === String(row.id))?.stimuliIds || []).filter(id => !/^\d+$/.test(String(id))),
+      ...remote.filter(item => String(item.folderId) === String(row.id)).map(item => item.id)
+    ]
+  }))];
+  persistStimuliList();
+  localStorage.setItem('emocog_folders', JSON.stringify(folders));
+  window.dispatchEvent(new CustomEvent('wecog:stimulisynced', { detail: { projectId } }));
+  return true;
+}
+
+async function setStimulusFolder(stimulusId, folderId) {
+  const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
+  if (!stimulus?.apiStimulusId) return;
+  const row = await apiPatch('/stimuli/' + encodeURIComponent(stimulus.apiStimulusId), { folder_id: folderId });
+  stimulus.folderId = row.folder_id;
+  folders.forEach(folder => {
+    folder.stimuliIds = (folder.stimuliIds || []).filter(id => String(id) !== String(stimulusId));
+  });
+  const destination = folders.find(folder => String(folder.apiFolderId) === String(row.folder_id));
+  if (destination) destination.stimuliIds.push(String(stimulusId));
+  localStorage.setItem('emocog_folders', JSON.stringify(folders));
+}
+
+async function ensureServerFolder(folder) {
+  if (!folder || folder.apiFolderId) return;
+  if (!folder._creationPromise) {
+    folder._creationPromise = (async () => {
+      const projectId = await resolveApiProjectId();
+      const row = await apiPost('/stimuli/folders', { project_id: projectId, name: folder.name });
+      folder.apiFolderId = row.id;
+      localStorage.setItem('emocog_folders', JSON.stringify(folders));
+    })().finally(() => { delete folder._creationPromise; });
+  }
+  await folder._creationPromise;
+}
+
 function convertedStimulusFromApi(row, sourceFile, index, count) {
   const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
   const id = String(row?.id || `converted_${Date.now()}_${index + 1}`);
