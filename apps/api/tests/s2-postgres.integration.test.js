@@ -1212,6 +1212,50 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(usage.rows[0].session_count, 5);
   });
 
+  it('persists researcher photodiode settings and pins them to each published invitation', async () => {
+    const user = await passwordResearcher('PhotodiodeFixtureOnly2026!');
+    const headers = { authorization: `Bearer ${issueStaffToken(user)}`, 'content-type': 'application/json' };
+    const definition = {
+      version: 'v2.0_universal', settings: { featureFlags: { photodiode: true } },
+      blocks: [{ id: 'rt', type: 'cognitive_task', taskType: 'simple_rt',
+        trials: [{ stimulusId: 'std_simple_black_square', action: 'я', duration: 1000 }] }],
+    };
+    const created = await fetch(`${baseUrl}/protocols`, { method: 'POST', headers,
+      body: JSON.stringify({ project_id: projectId, name: `Photodiode ${randomUUID()}`, definition }) });
+    assert.equal(created.status, 201, await created.clone().text());
+    const protocol = await created.json();
+    assert.equal(protocol.definition.settings.featureFlags.photodiode, true);
+    assert.equal((await pool.query('SELECT definition FROM protocols WHERE id=$1', [protocol.id]))
+      .rows[0].definition.settings.featureFlags.photodiode, true);
+    const publish = async () => {
+      const response = await fetch(`${baseUrl}/invitations`, { method: 'POST', headers,
+        body: JSON.stringify({ protocol_id: protocol.id }) });
+      assert.equal(response.status, 201, await response.clone().text());
+      return response.json();
+    };
+    const enabledInvite = await publish();
+    const updated = await fetch(`${baseUrl}/protocols/${protocol.id}`, { method: 'PATCH', headers,
+      body: JSON.stringify({ definition: { ...definition, settings: { featureFlags: { photodiode: false } } } }) });
+    assert.equal(updated.status, 200, await updated.clone().text());
+    const disabledInvite = await publish();
+    for (const [invitation, enabled] of [[enabledInvite, true], [disabledInvite, false]]) {
+      const response = await fetch(`${baseUrl}/invitations/by-code/${invitation.code}`);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).definition.settings.featureFlags.photodiode, enabled);
+      assert.equal((await pool.query('SELECT protocol_definition FROM invitations WHERE id=$1', [invitation.id]))
+        .rows[0].protocol_definition.settings.featureFlags.photodiode, enabled);
+    }
+    const outsider = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES($1,$2,'researcher') RETURNING *",
+      [`photodiode-outsider-${randomUUID()}@example.test`, user.password_hash])).rows[0];
+    createdUserIds.push(outsider.id);
+    const unauthorized = await fetch(`${baseUrl}/protocols/${protocol.id}`, { method: 'PATCH',
+      headers: { authorization: `Bearer ${issueStaffToken(outsider)}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ definition }) });
+    assert.ok([403, 404].includes(unauthorized.status));
+    assert.equal((await pool.query('SELECT definition FROM protocols WHERE id=$1', [protocol.id]))
+      .rows[0].definition.settings.featureFlags.photodiode, false);
+  });
+
   it('completes login -> project -> protocol -> invitation -> ingest -> analytics export over HTTP', async () => {
     const suffix = randomUUID().slice(0, 12);
     const stimulusId = 'std_emo_happy_01';

@@ -3750,6 +3750,24 @@ function ExperimentBuilderView(options = {}) {
     canvasCol.querySelector('#previewStepNextBtn').addEventListener('click', () => { currentStep++; renderStepper(); renderCanvas(); });
   }
 
+  function getBuilderSessionFeatures() {
+    const imported = parsedExperimentData?.json?.settings?.featureFlags
+      || editingExp?.sessionFeatureFlags
+      || editingExp?.definition?.settings?.featureFlags
+      || {};
+    const cached = JSON.parse(localStorage.getItem(
+      'emocog_session_features_' + (experimentId || 'draft')
+    ) || 'null');
+    const flags = { ...imported, ...cached };
+    return {
+      audio: flags.audio === true,
+      multimodal: flags.multimodal !== false,
+      bodyMovement: flags.bodyMovement !== false,
+      gamerMode: flags.gamerMode === true,
+      photodiode: flags.photodiode === true
+    };
+  }
+
   function renderQCStep() {
     // Load saved QC thresholds or defaults
     const qcKey = 'emocog_qc_thresholds_' + (experimentId || 'draft');
@@ -3760,15 +3778,7 @@ function ExperimentBuilderView(options = {}) {
       lighting: { enabled: true, threshold: 60, hardStop: false },
     };
     const featuresKey = 'emocog_session_features_' + (experimentId || 'draft');
-    const importedFeatureFlags = parsedExperimentData?.json?.settings?.featureFlags
-      || editingExp?.sessionFeatureFlags
-      || {};
-    const sessionFeatures = JSON.parse(localStorage.getItem(featuresKey) || 'null') || {
-      audio: importedFeatureFlags.audio === true,
-      multimodal: importedFeatureFlags.multimodal !== false,
-      bodyMovement: importedFeatureFlags.bodyMovement !== false,
-      gamerMode: importedFeatureFlags.gamerMode === true
-    };
+    const sessionFeatures = getBuilderSessionFeatures();
 
     canvasCol.innerHTML = '';
     const wrap = document.createElement('div');
@@ -3785,6 +3795,13 @@ function ExperimentBuilderView(options = {}) {
             { key:'bodyMovement', label:trb('Движение корпуса','Body movement'), help:trb('Добавляет обезличенные показатели позы и движений корпуса. Полезно для контроля артефактов и двигательных исследований.','Adds de-identified posture and body-motion features. Useful for artefact control and movement research.') },
             { key:'gamerMode', label:trb('Расширенный режим для игровых исследований','Extended gamer research mode'), help:trb('Повышает частоту мультимодальных событий для динамических задач; увеличивает объём вычислений и данных.','Raises multimodal event frequency for dynamic tasks; increases computation and data volume.') }
           ].map(item => `<label style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;cursor:pointer;font-size:12px;color:var(--text);"><input type="checkbox" class="session-feature" data-key="${item.key}" ${sessionFeatures[item.key] ? 'checked' : ''} style="width:auto;margin-top:2px;"><span><strong>${item.label}</strong><small style="display:block;color:var(--muted);line-height:1.4;margin-top:2px;">${item.help}</small></span></label>`).join('')}
+        </div>
+        <div style="padding:14px 16px;background:var(--card-bg);border:1px dashed var(--stroke);border-radius:12px;" data-feature-status="temporary">
+          <div style="font-size:13px;font-weight:700;color:var(--text);">${trb('Проверка оборудования','Hardware diagnostics')}</div>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;cursor:pointer;font-size:12px;color:var(--text);">
+            <input type="checkbox" id="protocolPhotodiodeToggle" class="session-feature" data-key="photodiode" ${sessionFeatures.photodiode ? 'checked' : ''} aria-describedby="protocolPhotodiodeHelp" style="width:auto;margin-top:2px;">
+            <span style="min-width:0;overflow-wrap:anywhere;"><strong>${trb('Квадрат для фотодетектора (временная функция)','Photodiode square (temporary feature)')}</strong><small id="protocolPhotodiodeHelp" style="display:block;color:var(--muted);line-height:1.4;margin-top:2px;">${trb('Включается только в этом протоколе, в том числе на сайте. Скрыт при подготовке и калибровке. Точность импульсов не валидирована; яркий квадрат может влиять на взгляд участника.','Enabled only for this protocol, including on the website. Hidden during preparation and calibration. Pulse timing has not been validated; the bright square may affect participant gaze.')}</small></span>
+          </label>
         </div>
         ${[
           { key:'gazeValid', label:trb('Взгляд валиден','Gaze valid'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с валидным взглядом','Minimum % of frames with valid gaze'), yellowFrom:51, greenFrom:70 },
@@ -3836,6 +3853,7 @@ function ExperimentBuilderView(options = {}) {
       if (!sessionFeatures.multimodal) sessionFeatures.gamerMode = false;
       localStorage.setItem(featuresKey, JSON.stringify(sessionFeatures));
     }
+    wrap.querySelectorAll('.session-feature').forEach(cb => cb.addEventListener('change', saveQC));
     wrap.querySelectorAll('#qcBack2').forEach(b => b.addEventListener('click', () => { saveQC(); currentStep--; renderStepper(); renderCanvas(); }));
     wrap.querySelector('#qcNext').addEventListener('click', () => { saveQC(); currentStep++; renderStepper(); renderCanvas(); });
   }
@@ -4161,14 +4179,7 @@ function ExperimentBuilderView(options = {}) {
     }
     const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
     const analyticsPlan = getBuilderAnalyticsPlan();
-    const sessionFeatureFlags = JSON.parse(
-      localStorage.getItem('emocog_session_features_' + (experimentId || 'draft')) || 'null'
-    ) || editingExp?.sessionFeatureFlags || {
-      audio: false,
-      multimodal: true,
-      bodyMovement: true,
-      gamerMode: false
-    };
+    const sessionFeatureFlags = getBuilderSessionFeatures();
     if (userBlocks.some(block => block.type === 'audio_test')) sessionFeatureFlags.audio = true;
 
     const entry = {
@@ -4326,15 +4337,7 @@ function ExperimentBuilderView(options = {}) {
       ? getExperimentAnalyticsConfig(builderKey)
       : null;
     const analyticsPlan = getBuilderAnalyticsPlan();
-    const sourceFeatureFlags = srcData.settings?.featureFlags || {};
-    const sessionFeatureFlags = JSON.parse(
-      localStorage.getItem('emocog_session_features_' + builderKey) || 'null'
-    ) || {
-      audio: sourceFeatureFlags.audio === true,
-      multimodal: sourceFeatureFlags.multimodal !== false,
-      bodyMovement: sourceFeatureFlags.bodyMovement !== false,
-      gamerMode: sourceFeatureFlags.gamerMode === true
-    };
+    const sessionFeatureFlags = getBuilderSessionFeatures();
     if (userBlocks.some(block => block.type === 'audio_test')) sessionFeatureFlags.audio = true;
     if (!sessionFeatureFlags.multimodal) sessionFeatureFlags.gamerMode = false;
 
