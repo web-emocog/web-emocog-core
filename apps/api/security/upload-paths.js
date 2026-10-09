@@ -47,6 +47,14 @@ async function resolveReadableServerOwnedUploadPath(root, relativePath) {
     if (!realFile.startsWith(`${realRoot}${path.sep}`)) {
       return { ok: false, code: 'content_path_symlink_escape' };
     }
+    let component = realRoot;
+    for (const segment of resolved.relativePath.split(path.sep)) {
+      component = path.join(component, segment);
+      const info = await fs.promises.lstat(component);
+      if (info.isSymbolicLink() || (info.isFile() && info.nlink !== 1)) {
+        return { ok: false, code: 'content_path_link_forbidden' };
+      }
+    }
     const stat = await fs.promises.stat(realFile);
     if (!stat.isFile()) {
       return { ok: false, code: 'content_path_not_file' };

@@ -96,16 +96,24 @@ body {
   font-weight: 680;
 }
 #participantLanguageSelect {
+  -webkit-appearance: none;
+  appearance: none;
   min-width: 150px;
   min-height: 44px;
-  padding: 0 38px 0 13px;
+  height: 44px;
+  padding-inline: 13px 38px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--card-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m2 4 4 4 4-4' fill='none' stroke='%2310211b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 12px;
   color: var(--text-main);
   font: 680 15px/1 "Atkinson Hyperlegible Next", sans-serif;
   cursor: pointer;
 }
+[dir="rtl"] #participantLanguageSelect { background-position: left 14px center; }
 .legacy-language-controls { display: none !important; }
 .sr-only {
   position: absolute !important;
@@ -131,6 +139,8 @@ body {
   box-shadow: 0 24px 70px rgba(16, 33, 27, .09);
 }
 .step { animation: participantStepIn .32s ease both; }
+/* Measurement coordinates must not move with the page entrance animation. */
+#step6 { animation: none; transform: none; }
 @keyframes participantStepIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

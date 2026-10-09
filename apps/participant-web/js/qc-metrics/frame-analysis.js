@@ -35,6 +35,15 @@ export function createInstrumentCounters() {
  * @param {Object} segmenterResult - результат FaceSegmenter (опционально)
  * @returns {Object} флаги кадра
  */
+export function hasRegionalFaceOcclusion(segmenterResult) {
+    if (!segmenterResult?.faceVisibility) return false;
+    const issues = [segmenterResult.issues, segmenterResult.faceVisibility.issues]
+        .filter(Array.isArray).flat();
+    // A global body-skin mask can include neck/skin or glasses; it is not proof
+    // of a hand covering a facial region.
+    return issues.some(issue => typeof issue === 'string' && issue.includes('hand_occluded'));
+}
+
 export function computeFrameFlags(precheckResult, segmenterResult = null) {
     const flags = {
         faceVisible: false,
@@ -47,24 +56,7 @@ export function computeFrameFlags(precheckResult, segmenterResult = null) {
     
     if (!precheckResult) return flags;
     
-    // === Occlusion detection (ИСПРАВЛЕНО - менее агрессивная логика) ===
-    // Окклюзия только если FaceSegmenter ЯВНО детектирует руку или серьёзную проблему
-    let isOccluded = false;
-    if (segmenterResult && segmenterResult.faceVisibility) {
-        // Проверяем только явную детекцию руки
-        if (segmenterResult.faceVisibility.handDetected === true) {
-            isOccluded = true;
-        }
-        // Или если есть критические issues (но НЕ low_skin_visibility - это часто ложное)
-        const issues = segmenterResult.issues || segmenterResult.faceVisibility?.issues || [];
-        if (Array.isArray(issues)) {
-            const criticalIssues = issues.filter(i => 
-                i === 'hand_on_face' || 
-                i.includes('hand_occluded')
-            );
-            if (criticalIssues.length > 0) isOccluded = true;
-        }
-    }
+    const isOccluded = hasRegionalFaceOcclusion(segmenterResult);
     
     flags.occlusionDetected = isOccluded;
     

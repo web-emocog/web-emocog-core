@@ -1,6 +1,6 @@
 # AGENTS.md: инструкция для ИИ-агентов проекта EmoCog
 
-Актуальность описания: 2026-08-16.
+Актуальность описания: 2026-10-08.
 
 Этот файл задаёт правила работы ИИ-агента во всём репозитории
 `web-emocog-core`. Он является инженерной инструкцией, а не заявлением о
@@ -91,6 +91,7 @@ QC и предоставляет аналитику и экспорт.
 | Лицензии assets и моделей | `docs/THIRD_PARTY_LICENSES.md` |
 | Analytics contract | `apps/web/docs/analytics-contract/README.md` |
 | API и env | `apps/api/README.md`, `apps/api/.env.example` |
+| Версии, доступ и backup стимулов | `docs/stimulus-library-and-responses.md` |
 
 `docs/architecture.md` сейчас слишком краток и частично описывает планируемые
 директории. Не использовать его в одиночку для архитектурных решений.
@@ -218,6 +219,13 @@ instruction -> finishing -> completed
 - восстановленная активная попытка считается прерванной и требует повтора;
 - финальный экран показывать только после teardown camera/module handles;
 - итоговый blink count и остальные summaries строить до очистки accumulators.
+- категории событий должны соответствовать `session_event.v1`; известный
+  legacy-алиас `session` преобразуется в `lifecycle` на клиенте при построении
+  события/ingest payload и ручном импорте, без расширения серверной схемы;
+- live QC, итоговый QC и inline fallback должны использовать одинаковые
+  региональные признаки перекрытия лица. Глобальная skin/hand mask не является
+  доказательством перекрытия лица. Не смешивать `faceVisible` и `faceOk`,
+  версионировать изменение методики и не пересчитывать старые записи без данных.
 
 ## 8. Signal modules
 
@@ -298,6 +306,11 @@ missingness. UI участника не должен подсказывать «
 
 На precheck показывается видео. Далее контур головы отображается только на
 инструкциях, паузах и locks; активный stimulus нельзя закрывать guide-элементом.
+Цвет precheck-контура определяется текущим pose status и теми же границами
+дистанции, что и gate (`js/precheck-status.mjs`), а не сравнением с условным
+размером лица. Overlay повторяет mirrored `object-fit: cover` видео. После
+precheck guide сравнивает голову с персонально сохранённой reference pose;
+это отдельный режим, не новая модель gaze или изменение QC-порогов.
 Body movement использует torso/shoulder/hip landmarks и является отдельным
 поведенческим каналом. Head pose не заменяет gaze и не должен автоматически
 браковать естественное краткое движение.
@@ -314,6 +327,22 @@ micro-tremor должна включать amplitude threshold, dwell/debounce, 
 
 Обязательная валидация: клавиатура, мышь, touchpad, browser/OS, display refresh,
 click-versus-pointer latency, false positives и omissions.
+Шаблонные инструкции используют фактические `responseMode`, `correctResponse`
+и condition mappings из проб, без фиксированных Space/arrow mappings.
+Авторский текст может использовать `{response}` для автоматической подстановки
+способа ответа; обычный авторский текст не должен автоматически переводиться
+или заменяться стандартной инструкцией только из-за следующего task type.
+
+`js/photodiode.js` - временный локальный аппаратный diagnostic, не production
+функция. Включается только на loopback через checkbox начального экрана или
+`?photodiode=1`, по умолчанию выключен. Квадрат скрыт при precheck/calibration.
+Коды 4/3/2/1 означают начало/конец эксперимента, блок, этап, stimulus. Импульсы
+100 ms с промежутком 100 ms программные и не имеют аппаратной валидации.
+Stimulus marker нельзя выдавать до готовности media/фиксации или откладывать
+в очередь: при занятости сохраняется явный `busy`. Ожидание stage допускается
+только до начала измерительной пробы, не внутри RT. Метаданные сохраняют
+`temporary: true` и `timingValidated: false`. Не использовать этот канал как
+доказательство точности RT без независимого измерения фотодетектором.
 
 ### 8.7 VPC и visuospatial
 
@@ -340,6 +369,13 @@ Test: моторный канал, feedback и scoring отличаются. Д�
 teardown, browser tests и запрет отправки сырой записи по умолчанию.
 
 ## 9. API, данные и контракты
+
+Researcher connectedness использует реальные `rt_alignment.v1` windows одной
+сессии, snapshot/hash и явную missingness; не смешивает monotonic и wall clocks,
+не заменяет оконные данные средними за сессию и не выдаёт frames за независимых
+участников. Spearman допустим только как описательный коэффициент одного блока
+и условия, без p-value/групповых выводов. Методика и ограничения:
+`docs/research/rt-connectedness-methods.md`. Сырое видео не сохраняется.
 
 API: Node.js 18+, Express 4, PostgreSQL, прямой параметризованный SQL без ORM.
 Каноническая точка входа: `apps/api/server.js`.
@@ -385,6 +421,17 @@ Contract change procedure:
 production schema вручную. Любая миграция обязана иметь проверяемый `up` и
 безопасный `down`, описание backfill, lock/timeout impact и rollout/rollback.
 
+Стимулы: новые файлы/папки личные по умолчанию; старые записи остаются общими
+в проекте. Creator задаётся сервером; membership не даёт доступ к чужому личному
+файлу. Только creator/platform-admin меняет sharing. Приглашение фиксирует protocol
+definition и точные UUID/SHA-256 файлов; доступ к опубликованной версии для project
+analytics не раскрывает личные неопубликованные замены. Изменения файлов, pinning
+и preview backfill выполняются через `withMediaWrite`: это обязательная граница
+согласованного DB/uploads backup. Не удалять старые версии при замене. Migration 17
+запрещает `down` после появления версий; нужен согласованный pre-upgrade backup.
+FFmpeg/ffprobe работают отдельными ограниченными процессами; версии image
+фиксируются в runtime inventory, лицензии описаны в `docs/THIRD_PARTY_LICENSES.md`.
+
 ## 10. Безопасность и приватность
 
 ### 10.1 Auth и authorization
@@ -392,6 +439,27 @@ production schema вручную. Любая миграция обязана и�
 Browser staff должен использовать `HttpOnly`, `Secure` в production,
 `SameSite=Lax` cookie и CSRF header. Bearer JWT предназначен для внешнего API
 client. Канонический permission module: `apps/api/security/permissions.js`.
+
+Researcher tab фиксирует staff identity через `staff-session.js`. При смене
+cookie-аккаунта в другой вкладке старый UI блокируется; workspace reads/writes
+и ответы in-flight запросов не переходят к новому владельцу. `X-Staff-User-ID`
+проверяется сервером до CSRF и tenant operations, но не выдаёт доступ сам по себе.
+CSRF можно обновить и повторить запрос только при явном `csrf_token_invalid`
+и совпадении staff identity. Для одновременных аккаунтов нужны отдельные
+browser profiles/contexts. Язык researcher сохраняется в account workspace.
+Каждая публикация создаёт новое invitation с immutable protocol/media snapshot;
+старые коды не перепривязываются к отредактированному протоколу. Checkpoint
+другого invitation не восстанавливается при открытии нового кода из URL.
+
+Self-service `PATCH /auth/me/password` проверяет текущий пароль и атомарно
+сопоставляет сохранённый hash и `token_version` перед обновлением. Смена
+отзывает старые сеансы; browser caller получает новую cookie и CSRF token.
+Frontend сообщает об успехе только после подтверждения API и сохраняет новый
+CSRF. Пароли не обрезаются/не нормализуются, не сохраняются в browser storage
+и не возвращаются в validation errors. Минимум - 12 символов, максимум -
+72 UTF-8 байта; ограничения согласованы между формой и API.
+Смена языка/SPA-маршрута не снимает in-flight guard и не теряет ответ API.
+Между перерисовками хранится только статус запроса, не пароль.
 
 В legacy frontend ещё существуют чтения `emocog_api_token` из `localStorage` и
 developer compatibility paths. Не добавлять новые записи токена в

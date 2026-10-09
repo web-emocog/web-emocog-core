@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20260919-1';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261008-2';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20260919-1';
+} from './ui-updated.js?v=20261008-2';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20260919-1';
+} from './precheck-updated.js?v=20261008-2';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20260919-1';
+} from './tests-updated.js?v=20261008-2';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,12 +34,13 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20260919-1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261008-2';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
+import { mediaContentRect } from './stimulus-geometry.mjs?v=20261008-2';
 import {
     captureAudioConsent,
     configureAudioConsentUI
@@ -157,13 +158,18 @@ async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
 let _gazeDebugSampleN = 0;
 let _eyeTrackingShapeLogged = false;
 
-function currentStimulusContentRect() {
+export function currentStimulusContentRect() {
     if (state.runtime.currentPhase !== 'cognitive_stimulus') return null;
+    const viewport = getContentViewport();
+    for (const id of ['cogVideo', 'cogImage']) {
+        const media = document.getElementById(id);
+        if (media && getComputedStyle(media).display !== 'none') return mediaContentRect(media, viewport);
+    }
+    if (['image', 'slides', 'video'].includes(getCurrentTaskContext().stimulusType)) return null;
     const stage = document.getElementById('cognitiveStimulusArea');
     if (!stage || getComputedStyle(stage).display === 'none') return null;
     const rect = stage.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) return null;
-    const viewport = getContentViewport();
     return {
         left: rect.left - viewport.offsetLeft,
         top: rect.top - viewport.offsetTop,
@@ -257,6 +263,7 @@ export function handleGazeUpdate(gazeData) {
                 presentationId: taskContext.presentationId ?? null,
                 stimulusId: taskContext.stimulusId ?? null,
                 stimulusName: taskContext.stimulusName ?? null,
+                stimulusVersion: taskContext.stimulusVersion ?? null,
                 stimulusType: taskContext.stimulusType ?? null,
                 stimulusRect,
                 screenWidth: viewport.width,
@@ -325,6 +332,7 @@ export function handleGazeUpdate(gazeData) {
             presentationId: taskContext.presentationId ?? null,
             stimulusId: taskContext.stimulusId ?? null,
             stimulusName: taskContext.stimulusName ?? null,
+            stimulusVersion: taskContext.stimulusVersion ?? null,
             stimulusType: taskContext.stimulusType ?? null,
             stimulusRect,
             expectedResponse: taskContext.expectedResponse ?? null,
@@ -494,6 +502,8 @@ async function loadInvitationProtocolByCode(code) {
                                 id,
                                 name: row?.name || id,
                                 mime_type: row?.mime_type || null,
+                                version: row?.version || null,
+                                sha256: row?.sha256 || null,
                                 metadata: {
                                     ...(row?.metadata || {}),
                                     ...(displayUrl ? { url: displayUrl } : {}),

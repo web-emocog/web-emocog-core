@@ -392,6 +392,8 @@ describe('S1 typed transport boundary', () => {
   it('does not mount the legacy arbitrary event batch route', () => {
     const appSource = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
     assert.doesNotMatch(appSource, /app\.use\(['"]\/events/);
+    const legacy = fs.readFileSync(path.resolve(__dirname, '../routes/events.js'), 'utf8');
+    assert.match(legacy, /router\.use\(rateLimit\(buildRouteRateLimitOptions\(config\.http\.rateLimits\)\)\)/);
     assert.match(appSource, /app\.use\(['"]\/ingest/);
     assert.match(
       appSource,

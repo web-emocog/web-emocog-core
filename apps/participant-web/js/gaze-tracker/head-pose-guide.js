@@ -1,3 +1,5 @@
+import { precheckContourStatus } from '../precheck-status.mjs';
+
 const IDEAL_REFERENCE = Object.freeze({
     centerX: 0.5,
     centerY: 0.5,
@@ -14,6 +16,7 @@ const POSE_KEYS = ['centerX', 'centerY', 'width', 'height', 'yaw', 'pitch', 'rol
 let referencePose = null;
 let lastPose = null;
 let guideMode = 'hidden';
+let precheckStatus = 'pending';
 
 function finite(value, fallback = 0) {
     return Number.isFinite(value) ? Number(value) : fallback;
@@ -137,19 +140,31 @@ function drawPrecheckOverlay(canvas, current) {
     const prepared = prepareCanvas(canvas);
     if (!prepared) return;
     const { ctx, width, height } = prepared;
-    const reference = referencePose || IDEAL_REFERENCE;
-    drawContour(ctx, reference, width, height, {
-        color: 'rgba(74, 222, 128, 0.72)',
-        lineWidth: 2,
-        dashed: true
-    });
+    canvas.dataset.precheckStatus = precheckStatus;
+    const video = document.getElementById('precheckVideo');
+    const videoWidth = video?.videoWidth || width;
+    const videoHeight = video?.videoHeight || height;
+    const scale = Math.max(width / videoWidth, height / videoHeight);
+    const renderedWidth = videoWidth * scale;
+    const renderedHeight = videoHeight * scale;
+    ctx.save();
+    // Match the mirrored video's object-fit: cover, including the cropped edges.
+    ctx.translate((width - renderedWidth) / 2, (height - renderedHeight) / 2);
+    if (referencePose) {
+        drawContour(ctx, referencePose, renderedWidth, renderedHeight, {
+            color: 'rgba(74, 222, 128, 0.72)',
+            lineWidth: 2,
+            dashed: true
+        });
+    }
     if (current) {
-        drawContour(ctx, current, width, height, {
-            color: statusColor(current, reference),
+        drawContour(ctx, current, renderedWidth, renderedHeight, {
+            color: precheckStatus === 'passed' ? '#22d3ee' : (precheckStatus === 'failed' ? '#ef4444' : '#f59e0b'),
             lineWidth: 3,
             dashed: false
         });
     }
+    ctx.restore();
 }
 
 function clearPrecheckOverlay() {
@@ -192,6 +207,7 @@ function renderCurrentMode() {
 }
 
 export function updateHeadPoseGuide(frame) {
+    precheckStatus = precheckContourStatus(frame);
     const normalized = normalizeFrame(frame);
     lastPose = normalized ? smoothPose(normalized) : null;
     renderCurrentMode();
@@ -211,6 +227,7 @@ export function resetHeadPoseReference() {
     referencePose = null;
     lastPose = null;
     guideMode = 'hidden';
+    precheckStatus = 'pending';
     clearPrecheckOverlay();
     document.getElementById('calibrationHeadPoseGuide')?.classList.remove('active');
 }
@@ -235,6 +252,7 @@ export function setCalibrationGuideTarget(xPercent, yPercent) {
 export function getHeadPoseGuideSnapshot() {
     return {
         mode: guideMode,
+        precheckStatus,
         reference: referencePose ? { ...referencePose } : null,
         current: lastPose ? { ...lastPose } : null,
         deviation: deviation(lastPose, referencePose || IDEAL_REFERENCE)

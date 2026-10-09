@@ -69,6 +69,7 @@ describe('S3-01 release hardening', () => {
     assert.doesNotMatch(workflow, /npm start > \/tmp\/wecog-api\.log 2>&1 &/);
     assert.match(workflow, /kill -TERM "\$\(cat \/tmp\/wecog-api\.pid\)"/);
     assert.match(workflow, /grep -q 'api_shutdown_completed' \/tmp\/wecog-api\.log/);
+    assert.match(workflow, /name: PostgreSQL concurrency and negative security tests\s+working-directory: apps\/api\s+env:\s+AUTH_RATE_LIMIT_PER_MINUTE: '1000'\s+run: npm run test:postgres/);
   });
 
   it('does not turn a cancelled superseded release run into a failed gate', () => {
@@ -143,16 +144,24 @@ test -n "\${directory}"
   it('packages every server-side repository dependency in the production API image', () => {
     const repositoryRoot = path.resolve(apiRoot, '../..');
     const dockerfile = fs.readFileSync(path.join(repositoryRoot, 'docker/api/Dockerfile'), 'utf8');
+    const ignored = fs.readFileSync(path.join(repositoryRoot, '.dockerignore'), 'utf8');
 
     for (const dependency of [
       'apps/web/aoi-geometry.js',
       'apps/web/aoi-protocol.js',
       'apps/web/docs/analytics-contract/metric-catalog-v1.json',
+      'deploy/production/backup-support.py',
       'packages/shared/contracts',
     ]) {
       assert.match(dockerfile, new RegExp(dependency.replaceAll('/', '\\/')));
     }
     assert.doesNotMatch(dockerfile, /COPY[^\n]*apps\/web\s+\/app\/apps\/web/);
+    assert.match(ignored, /^!deploy\/production\/$/m);
+    assert.match(ignored, /^!deploy\/production\/backup-support\.py$/m);
+    assert.match(ignored, /^!packages\/shared\/contracts\/$/m);
+    assert.match(ignored, /^!packages\/shared\/contracts\/\*\*$/m);
+    assert.match(ignored, /^\*\*\/\.env$/m);
+    assert.match(ignored, /^apps\/api\/uploads\/\*$/m);
   });
 
   it('starts the built API image before deployment side effects', () => {
@@ -214,9 +223,9 @@ test -n "\${directory}"
     assert.ok(rollbackStart >= 0 && rollbackEnd > rollbackStart);
     assert.match(rollback, /if ! start_release "\$\{target\}"; then/);
     assert.match(rollback, /dump_release_diagnostics "\$\{target\}"/);
-    assert.match(rollback, /start_release "\$\{current\}" \|\| true/);
+    assert.match(rollback, /if ! start_release "\$\{current\}"; then/);
     assert.ok(
-      rollback.indexOf('start_release "${current}" || true')
+      rollback.indexOf('if ! start_release "${current}"; then')
         < rollback.indexOf('printf \'%s\\n\' "${target}" >"${CURRENT_TAG_FILE}"'),
     );
   });

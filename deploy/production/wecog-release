@@ -205,7 +205,7 @@ prune_local_backups() {
     -type f \
     \( -name 'wecog-*.dump' -o -name 'wecog-*.dump.sha256' \
        -o -name 'wecog-*.uploads.tar.gz' -o -name 'wecog-*.uploads.tar.gz.sha256' \
-       -o -name 'wecog-*.manifest.json' \) \
+       -o -name 'wecog-*.manifest.json' -o -name 'wecog-*.media.json' \) \
     -mmin "+${LOCAL_BACKUP_RETENTION_MINUTES}" \
     -delete
 }
@@ -231,34 +231,17 @@ backup_database() {
   manifest_filename="wecog-${timestamp}-${short_tag}.manifest.json"
   object_prefix="postgresql/${reason}/${timestamp}-${short_tag}"
 
-  log "Creating a PostgreSQL custom-format dump."
-  compose_for "${tag}" run --rm --no-deps \
+  log "Creating a coordinated database snapshot and verified media archive."
+  uploads_count=$(compose_for "${tag}" run --rm --no-deps \
     --volume "${WECOG_BACKUP_DIR}:/backup" \
-    api sh -eu -c \
-      'umask 077; pg_dump --dbname="$DATABASE_URL" --format=custom --no-owner --no-privileges --file="/backup/$1"' \
-      sh "${filename}"
-
-  compose_for "${tag}" run --rm --no-deps \
-    --volume "${WECOG_BACKUP_DIR}:/backup:ro" \
-    api pg_restore --list "/backup/${filename}" >/dev/null
+    api node scripts/backup-media-set.js "/backup/wecog-${timestamp}-${short_tag}")
+  [[ ${uploads_count} =~ ^[0-9]+$ ]] || return 1
   (
     cd -- "${WECOG_BACKUP_DIR}"
     sha256sum "${filename}" >"${checksum}"
+    if (( uploads_count > 0 )); then sha256sum "${uploads_filename}" >"${uploads_checksum}"; fi
   )
   chmod 0600 "${WECOG_BACKUP_DIR}/${filename}" "${WECOG_BACKUP_DIR}/${checksum}"
-
-  log "Creating and verifying the uploads archive (empty directories need no archive)."
-  uploads_count=$(python3 "${BACKUP_HELPER}" create-uploads \
-    "${WECOG_UPLOADS_DIR}" "${WECOG_BACKUP_DIR}/${uploads_filename}")
-  [[ ${uploads_count} =~ ^[0-9]+$ ]] || return 1
-  if (( uploads_count > 0 )); then
-    python3 "${BACKUP_HELPER}" verify-uploads "${WECOG_BACKUP_DIR}/${uploads_filename}" >/dev/null
-    (
-      cd -- "${WECOG_BACKUP_DIR}"
-      sha256sum "${uploads_filename}" >"${uploads_checksum}"
-    )
-    chmod 0600 "${WECOG_BACKUP_DIR}/${uploads_checksum}"
-  fi
   python3 "${BACKUP_HELPER}" manifest "${WECOG_BACKUP_DIR}" \
     "${timestamp}" "${tag}" "${reason}" "${uploads_count}"
 
@@ -269,13 +252,15 @@ backup_database() {
     upload_object "${WECOG_BACKUP_DIR}/${uploads_filename}" "${object_prefix}/${uploads_filename}"
     upload_object "${WECOG_BACKUP_DIR}/${uploads_checksum}" "${object_prefix}/${uploads_checksum}"
   fi
+  upload_object "${WECOG_BACKUP_DIR}/wecog-${timestamp}-${short_tag}.media.json" "${object_prefix}/wecog-${timestamp}-${short_tag}.media.json"
   # This completion marker is published LAST. A prefix without it is incomplete.
   upload_object "${WECOG_BACKUP_DIR}/${manifest_filename}" "${object_prefix}/${manifest_filename}"
   python3 "${BACKUP_HELPER}" metrics "${BACKUP_METRICS_DIR}" "${reason}" success "${uploads_count}"
   trap - EXIT
   rm -f -- "${WECOG_BACKUP_DIR}/${filename}" "${WECOG_BACKUP_DIR}/${checksum}"
   rm -f -- "${WECOG_BACKUP_DIR}/${uploads_filename}" \
-    "${WECOG_BACKUP_DIR}/${uploads_checksum}" "${WECOG_BACKUP_DIR}/${manifest_filename}"
+    "${WECOG_BACKUP_DIR}/${uploads_checksum}" "${WECOG_BACKUP_DIR}/${manifest_filename}" \
+    "${WECOG_BACKUP_DIR}/wecog-${timestamp}-${short_tag}.media.json"
   log "Database backup uploaded: ${object_prefix}/${filename}"
   log "Backup set completed; uploads files: ${uploads_count}."
 }
@@ -297,8 +282,13 @@ wait_for_health() {
 
 start_release() {
   local tag=$1
-  write_release_env "${tag}"
-  compose_for "${tag}" up --detach --remove-orphans --wait --wait-timeout 180
+  # Missing checker in an old image is deliberately a refusal, not a fallback.
+  if ! compose_for "${tag}" run --rm --no-deps api node scripts/check-release-compatibility.js; then
+    log "Release ${tag} cannot safely serve the current database."
+    return 1
+  fi
+  write_release_env "${tag}" || return 1
+  compose_for "${tag}" up --detach --remove-orphans --wait --wait-timeout 180 || return 1
   wait_for_health
 }
 
@@ -360,6 +350,8 @@ deploy_release() {
     require_tag "${old_tag}"
   fi
 
+  # Old writers must not serve a database after its privacy contract has changed.
+  if [[ -n ${old_tag} ]]; then compose_for "${old_tag}" stop api web; fi
   log "Applying forward-only database migrations for ${tag}."
   compose_for "${tag}" run --rm --no-deps api npm run migrate:up
 
@@ -368,8 +360,11 @@ deploy_release() {
     log "Health check failed for ${tag}."
     dump_release_diagnostics "${tag}"
     if [[ -n ${old_tag} ]]; then
-      log "Restoring application containers for ${old_tag}; database migrations are not reversed."
-      start_release "${old_tag}" || true
+      log "Checking whether ${old_tag} can safely serve the migrated database."
+      if ! start_release "${old_tag}"; then
+        compose_for "${tag}" stop api web || true
+        log "Fallback refused. Remain in maintenance mode; restore the coordinated database/files backup to downgrade."
+      fi
     else
       compose_for "${tag}" down || true
     fi
@@ -413,7 +408,10 @@ rollback_release() {
     dump_release_diagnostics "${target}"
     if [[ -n ${current} && ${current} != "${target}" ]]; then
       log "Restoring application containers for ${current}; database migrations are not reversed."
-      start_release "${current}" || true
+      if ! start_release "${current}"; then
+        compose_for "${target}" stop api web || true
+        log "Recovery refused. Keep maintenance mode until a compatible release or coordinated restore is available."
+      fi
     fi
     exit 1
   fi

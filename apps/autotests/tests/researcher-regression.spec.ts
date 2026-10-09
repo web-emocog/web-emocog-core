@@ -9,48 +9,53 @@ type AuthPayload = {
   user: Record<string, unknown>;
 };
 
-let cachedAuth: AuthPayload | null = null;
-let cachedCookies: Awaited<ReturnType<import('@playwright/test').BrowserContext['cookies']>> = [];
+const authCache = new Map<string, { auth: AuthPayload; cookies: Awaited<ReturnType<import('@playwright/test').BrowserContext['cookies']>> }>();
 
 test.describe('Researcher regressions', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !RUN_RESEARCHER_CONTRACT,
       'Set RUN_RESEARCHER_CONTRACT=1 and run the local API fixture'
     );
-    if (!cachedAuth) {
+    const admin = testInfo.title === 'offers three readable themes and fully localizes admin and standard stimuli';
+    const email = admin ? process.env.EMOCOG_ADMIN_EMAIL : process.env.EMOCOG_RESEARCHER_EMAIL;
+    const password = admin ? process.env.EMOCOG_ADMIN_PASSWORD : process.env.EMOCOG_RESEARCHER_PASSWORD;
+    const key = admin ? 'admin' : 'researcher';
+    if (!authCache.has(key)) {
       const response = await page.context().request.post('http://127.0.0.1:3000/auth/login', {
         headers: { 'X-Auth-Transport': 'cookie' },
         data: {
-          email: process.env.EMOCOG_RESEARCHER_EMAIL || 'local.researcher@wecog.test',
-          password: process.env.EMOCOG_RESEARCHER_PASSWORD || 'Researcher2026!',
+          email: email || 'local.researcher@wecog.test',
+          password: password || 'Researcher2026!',
         },
       });
       expect(response.ok(), `login failed with HTTP ${response.status()}`).toBe(true);
-      cachedAuth = await response.json() as AuthPayload;
-      cachedCookies = await page.context().cookies('http://127.0.0.1:3000');
+      authCache.set(key, { auth: await response.json() as AuthPayload, cookies: await page.context().cookies('http://127.0.0.1:3000') });
     } else {
-      await page.context().addCookies(cachedCookies);
+      await page.context().addCookies(authCache.get(key)!.cookies);
     }
-    await page.addInitScript(({ csrf_token, user }) => {
+    await page.addInitScript(({ auth: { csrf_token, user }, projectId }) => {
       localStorage.setItem('emocog_developer_auth', '1');
       localStorage.setItem('emocog_api_user', JSON.stringify(user));
+      localStorage.setItem('emocog_workspace_owner_v1', String(user.id));
+      if (projectId) localStorage.setItem('emocog_selected_project_id', projectId);
       localStorage.setItem('emocog_api_base', 'http://127.0.0.1:3000');
       if (csrf_token) sessionStorage.setItem('emocog_csrf_token', csrf_token);
-    }, cachedAuth);
+    }, { auth: authCache.get(key)!.auth, projectId: process.env.EMOCOG_RESEARCHER_PROJECT_ID });
   });
 
-  test('saves a protocol from the final builder step and confirms the result', async ({ page }) => {
+  test('saves a protocol from the final builder step and confirms the result', async ({ page }, testInfo) => {
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('download', download => download.cancel());
-    await page.addInitScript(() => {
+    const protocolId = `e2e-protocol-${testInfo.project.name}-${Date.now()}`;
+    await page.addInitScript(({ title, protocolId }) => {
       localStorage.setItem('emocog_protocol_step_draft', '8');
       localStorage.setItem(
         'emocog_protocol_meta_draft',
         JSON.stringify({
-          title: 'E2E protocol',
-          protocolId: 'e2e-protocol',
+          title,
+          protocolId,
           estimatedDuration: '2 минуты',
           description: 'Regression test',
           participantShell: {
@@ -76,7 +81,7 @@ test.describe('Researcher regressions', () => {
           },
         ])
       );
-    });
+    }, { title: `E2E protocol ${protocolId}`, protocolId });
 
     await page.goto(`${RESEARCHER_URL}#/experiments/builder`, {
       waitUntil: 'load',
@@ -88,34 +93,34 @@ test.describe('Researcher regressions', () => {
     await saveButton.click();
 
     await expect
-      .poll(async () => page.evaluate(() => {
+      .poll(async () => page.evaluate(protocolId => {
         const saved = JSON.parse(
           localStorage.getItem('emocog_my_experiments') || '[]'
         );
         return saved.some((entry: { protocolId?: string }) =>
-          entry.protocolId === 'e2e-protocol'
+          entry.protocolId === protocolId
         );
-      }))
+      }, protocolId))
       .toBe(true);
-    await expect(page.locator('.toast, [role="status"]')).toContainText(
-      /Сохранено|Saved|опубликован|published/i
-    );
-    await expect.poll(async () => page.evaluate(() => {
+    await expect.poll(async () => page.evaluate(protocolId => {
       const saved = JSON.parse(localStorage.getItem('emocog_my_experiments') || '[]');
-      return saved.find((entry: { protocolId?: string }) => entry.protocolId === 'e2e-protocol')?.invitationCode || '';
-    })).not.toBe('');
-    const invitationCode = await page.evaluate(() => {
+      return saved.find((entry: { protocolId?: string }) => entry.protocolId === protocolId)?.invitationCode || '';
+    }, protocolId)).not.toBe('');
+    await expect(page.locator('#protocolSaveStatus')).toContainText(/опубликован|published/i);
+    await expect(page.locator('#participantLinkInput')).not.toHaveValue('');
+    await expect(page.locator('#copyParticipantLinkBtn')).toBeEnabled();
+    const invitationCode = await page.evaluate(protocolId => {
       const saved = JSON.parse(localStorage.getItem('emocog_my_experiments') || '[]');
-      return saved.find((entry: { protocolId?: string }) => entry.protocolId === 'e2e-protocol')?.invitationCode;
-    });
+      return saved.find((entry: { protocolId?: string }) => entry.protocolId === protocolId)?.invitationCode;
+    }, protocolId);
     const invitation = await page.request.get(
       `http://127.0.0.1:3000/invitations/by-code/${encodeURIComponent(invitationCode)}`
     );
     expect(invitation.ok()).toBe(true);
-    const participantLink = await page.evaluate(() => {
+    const participantLink = await page.evaluate(protocolId => {
       const saved = JSON.parse(localStorage.getItem('emocog_my_experiments') || '[]');
-      return saved.find((entry: { protocolId?: string }) => entry.protocolId === 'e2e-protocol')?.participantLink;
-    });
+      return saved.find((entry: { protocolId?: string }) => entry.protocolId === protocolId)?.participantLink;
+    }, protocolId);
     expect(participantLink).toContain(`/apps/participant-web/run_new.html?code=${invitationCode}`);
     expect(pageErrors).toEqual([]);
   });
@@ -376,12 +381,12 @@ test.describe('Researcher regressions', () => {
     await expect(page.locator('#nav-analytics-parent')).toBeVisible();
     await expect(page.locator('#nav-settings')).toBeVisible();
     await expect(page.locator('#nav-billing')).toBeHidden();
-    await expect(page.locator('#breadcrumbs')).toHaveAttribute('aria-label', 'Хлебные крошки');
+    await expect(page.locator('#breadcrumbs')).toHaveCount(0);
     await expect(page.locator('a.brand')).toHaveAttribute('aria-label', 'wecog, главная');
     await expect(page.locator('#btnFocus')).toHaveAttribute('title', 'Режим фокуса');
 
     await page.locator('#langEn').click();
-    await expect(page.locator('#breadcrumbs')).toHaveAttribute('aria-label', 'Breadcrumbs');
+    await expect(page.locator('#breadcrumbs')).toHaveCount(0);
     await expect(page.locator('a.brand')).toHaveAttribute('aria-label', 'wecog, overview');
     await expect(page.locator('#btnFocus')).toHaveAttribute('title', 'Focus mode');
 

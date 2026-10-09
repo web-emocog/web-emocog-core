@@ -51,6 +51,47 @@ export interface SessionLifecycleV1 {
   >;
 }
 
+export interface RtAlignmentMetricV1 {
+  value: number | null;
+  n: number;
+  nValid: number;
+  validFraction: number | null;
+  maxGapMs: number | null;
+  status: 'observed' | 'no_data';
+}
+
+export interface RtAlignmentWindowV1 {
+  startMs: number | null;
+  endMs: number | null;
+  channels: Record<'gaze' | 'body' | 'valence' | 'arousal' | 'bpm', RtAlignmentMetricV1>;
+}
+
+export interface RtAlignmentV1 {
+  schemaVersion: 'rt_alignment.v1';
+  algorithmVersion: 'event-windows-1.0.0';
+  clock: 'monotonic_epoch_ms' | 'wall_epoch_ms';
+  baselineMs: 1000;
+  postMs: 1000;
+  trialCountTotal: number;
+  truncated: boolean;
+  rawVideoStored: false;
+  trials: Array<{
+    trialId: string | null;
+    blockId: string | null;
+    stimulusId: string | null;
+    condition: string | null;
+    attempt: number;
+    onsetMs: number | null;
+    responseMs: number | null;
+    endMs: number | null;
+    rtMs: number | null;
+    correct: boolean | null;
+    qualityValid: boolean;
+    status: 'responded' | 'no_response' | 'incomplete';
+    windows: Record<'baseline' | 'response' | 'post', RtAlignmentWindowV1>;
+  }>;
+}
+
 export interface SessionFeatureV1 {
   schemaVersion: 'session_feature.v1';
   ids: {
@@ -79,6 +120,7 @@ export interface SessionFeatureV1 {
   cognitiveResults?: Array<Record<string, unknown>>;
   gazeValidation?: Record<string, unknown> | null;
   gaze_analytics?: Record<string, unknown> | null;
+  rt_alignment?: RtAlignmentV1;
   startTime?: number | string | null;
   testHub?: Record<string, unknown> | null;
   gazeTests?: Record<string, unknown> | null;

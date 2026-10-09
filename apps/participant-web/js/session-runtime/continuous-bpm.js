@@ -156,6 +156,7 @@ export class ContinuousBpmCollector {
             }
             const sample = {
                 t: Date.now(),
+                monotonicMs: performance.timeOrigin + performance.now(),
                 bpm: publication.bpm,
                 published: publication.accepted,
                 publicationReason: publication.reason,

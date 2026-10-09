@@ -82,6 +82,27 @@ and exact CC/Public Domain license are recorded in
 abde1ad5cf78b9ac575ef90d991f2e9101eb0b3b6668bde9a00e2e1e27d99afd  atkinson-hyperlegible-next.woff2
 ```
 
+## Media Inspection System Tools
+
+The API image installs Debian FFmpeg/ffprobe for thumbnails, video posters and
+decoding checks. Upstream source/license: https://ffmpeg.org/legal.html.
+The exact package version and FFmpeg build configuration are recorded in
+`/usr/local/share/wecog/runtime-packages.txt` and `ffmpeg-build.txt`. Preserve
+`/usr/share/doc/ffmpeg/copyright`, package sources and release image digest when
+distributing the image. LGPL/GPL terms depend on the package build; these tools
+are separate subprocesses, not a browser/Node-linked library. Local tests used
+Alpine FFmpeg 8.0.1. See root `THIRD_PARTY_LICENSES.md` for the scope of the notice.
+
+## Test tooling: js-yaml
+
+The existing Node test helper dependency is updated from 4.3.1 to 4.3.2 to fix
+the reported high-severity merge-key CPU exhaustion issue. Source:
+https://github.com/nodeca/js-yaml ; license: MIT. npm registry integrity for 4.3.2:
+`sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==`.
+The lockfile fixes the installed version; no upstream code is vendored. Registry
+license/source/integrity and zero-vulnerability npm audit were verified on
+2026-10-08. This is test tooling, not a new physiological model.
+
 ## Update policy
 
 Before updating a runtime or model:

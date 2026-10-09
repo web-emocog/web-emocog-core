@@ -2,19 +2,36 @@
 
 **Project:** web-emocog-core (EmoCog — Cognitive Research Web Platform)
 **Main License:** Apache License 2.0
-**Last Updated:** 2026-08-26
+**Last Updated:** 2026-10-03
 
 ---
 
 ## Overview
 
-This document contains the licenses of all third-party software components used in the web-emocog-core project. Each third-party component's license has been verified to be compatible with the Apache License 2.0.
+This document records third-party components. The application license does not
+replace individual asset, model or system-tool licenses. See also
+`docs/THIRD_PARTY_LICENSES.md` and the notices shipped with the API image.
 
 **Compatibility Summary:**
-- ✅ All dependencies are compatible with Apache 2.0
-- ✅ No copyleft/GPL components
-- ✅ No AGPL components
-- ✅ Permissive licensing throughout
+- Node and vendored components retain their individual notices below.
+- System tools can include copyleft software; there is no blanket no-GPL claim.
+- Binary/image redistribution requires the corresponding notices and sources.
+
+## FFmpeg And FFprobe System Tools
+
+Source and license: https://ffmpeg.org/legal.html and https://ffmpeg.org/download.html.
+Upstream FFmpeg is LGPL-2.1-or-later; builds enabling optional GPL parts use GPL
+terms. The Debian API image package may enable GPL codecs. The tools run as
+separate bounded subprocesses for decoding and thumbnails, not as a linked Node
+library. They are not downloaded by participant browsers.
+
+The image records exact installed package versions in
+`/usr/local/share/wecog/runtime-packages.txt` and the FFmpeg version/configuration
+in `/usr/local/share/wecog/ffmpeg-build.txt`; Debian's package notices remain at
+`/usr/share/doc/ffmpeg/copyright`. Archive these with the immutable release image
+digest and corresponding package source before distributing that image.
+Local media tests used FFmpeg 8.0.1 from Alpine; that is not evidence that the
+production Debian image has the same version or has been built/deployed.
 
 ---
 

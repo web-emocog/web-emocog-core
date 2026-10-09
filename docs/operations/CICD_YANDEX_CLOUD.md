@@ -351,7 +351,9 @@ The first command is read-only and shows the next run. The second shows the last
 
 Application rollback is available under GitHub Actions as `Roll back production application`. Leaving `image_tag` empty selects the recorded previous release. Supplying a value requires the full 40-character commit SHA.
 
-The rollback controller changes the recorded `current` and `previous` tags only after the target release passes its local API and web health checks. If the target fails, it emits bounded container diagnostics and attempts to restore the release that was active before the rollback. The GitHub workflow then remains failed so the incident is visible even when service restoration succeeds.
+The rollback controller changes the recorded `current` and `previous` tags only after the target release passes database compatibility and local API/web health checks. Every start (including automatic fallback and recovery after failed rollback) first runs the target image's `scripts/check-release-compatibility.js`. A missing checker, unavailable migration history or database migration absent from the target image refuses the start. Do not bypass this gate for images predating private/versioned stimuli: those APIs expose personal files on the upgraded database.
+
+Forward deployment stops the old API/web writers before migration. If no compatible recovery image exists, keep maintenance mode and perform a reviewed coordinated database/files restore; never launch an incompatible old API or automatically run migrations down. A failed deployment or rollback remains failed even if safe service restoration succeeds. The recorded tag is only the last healthy release, not proof of a currently running service after a maintenance-mode failure.
 
 ### Controlled application rollback drill
 
@@ -391,12 +393,14 @@ status before taking any further action.
 
 An application rollback changes container images only. It deliberately does not run `node-pg-migrate down`. All production migrations must follow the expand/contract rule:
 
-1. add new nullable columns/tables/indexes without breaking the old application;
+1. add new nullable columns/tables/indexes without breaking compatible applications;
 2. deploy code that can use both old and new shapes;
 3. backfill asynchronously if needed;
 4. remove obsolete schema only in a later, separately reviewed release.
 
 If data itself must be restored, stop and perform a manual recovery from the validated Object Storage dump. Restoring a database is destructive and must never be an automatic reaction to an HTTP health failure.
+
+Schema compatibility alone is not security compatibility. The private/versioned stimulus migration changes authorization semantics even though old SQL still works. Code-only downgrade to a pre-contract API is prohibited. Migration 17 also refuses `down` when immutable versions, personal items/folders or divergent invitation snapshots exist. Test a downgrade only on an empty disposable database; use the coordinated pre-migration backup for real recovery.
 
 ## Production observability
 
@@ -529,9 +533,13 @@ Each completed set contains:
 
 - `wecog-….dump` and `.dump.sha256`;
 - `wecog-….uploads.tar.gz` and its `.sha256`, only when regular files exist;
+- `wecog-….media.json`, the referenced-original/version/preview inventory;
 - `wecog-….manifest.json`, uploaded **last**, with release, reason, file count,
   sizes and SHA-256 hashes. Empty uploads are explicit: `empty: true`, count `0`,
   archive `null`. A missing uploads directory is an error, not an empty backup.
+
+Manifest format 2 also binds the inventory's hash and size. Format 1 sets do not
+have a SQL-to-file inventory and cannot supply equivalent reconciliation evidence.
 
 A new-format prefix without the manifest is **incomplete**. Do not use it as a
 complete DB+files restore point. Older, database-only backups remain usable for
@@ -549,12 +557,20 @@ helper. Successful local artifacts are removed; interrupted artifacts retain the
 existing two-day cleanup policy. Full daily copies multiply retained storage by
 the number of restore points, so review capacity before large imports.
 
-**Consistency limitation:** PostgreSQL's dump and the filesystem archive are
-not a shared transactional snapshot. Detected file changes fail the archive, but
-this does not prove cross-resource consistency (for example, deletion between
-the DB dump and the file inventory). Use a quiet window with upload/deletion
-writes paused for coordinated recovery evidence. Never automatically restore the
-live DB or overwrite live uploads after a health-check failure.
+**Consistency boundary:** the API backup script holds the exclusive media lock,
+exports a read-only PostgreSQL snapshot, dumps that exact snapshot, and verifies
+all SQL-referenced originals, historical revisions and ready previews against the
+archive. API media writes and publication wait on the shared lock. Missing or
+corrupt referenced media fail the set; extra unreferenced regular files are not
+silently treated as SQL records. Read-only API access remains available.
+
+Old API instances, manual filesystem changes and external jobs do not participate
+in this lock. During the first upgrade, pause such writers and make a verified
+pre-upgrade backup before migration 17. Install the controller/helper together
+with an API image containing `scripts/backup-media-set.js` and its Python helper;
+do not install the new controller against an old image. Full backup length is a
+media-write pause; monitor duration and storage growth. Never automatically restore
+the live DB or overwrite live uploads after a health-check failure.
 
 ### Metrics and alert setup
 
@@ -625,7 +641,7 @@ Unix times are gauge values, not Prometheus sample timestamps.
    timestamp in Monium, then configure/test the alerts above. Until a pre-deploy
    backup has run with the new controller, its initialized result is zero; enable
    the pre-deploy failure series only after that first successful run.
-6. Download the dump/checksum and, for a nonempty set, archive/checksum from the
+6. Download the manifest, inventory and dump/checksum and, for a nonempty set, archive/checksum from the
    same manifest. Check both using `sha256sum --check` on the VM (`shasum -a 256
    --check` on macOS). Restore the DB only into a dedicated test DB as in the
    existing drill. For files, use the installed helper on the VM:
@@ -634,13 +650,19 @@ Unix times are gauge values, not Prometheus sample timestamps.
    sudo python3 /opt/wecog/backup-support.py verify-uploads \
      /ABSOLUTE/PATH/TO/DOWNLOADED.uploads.tar.gz \
      --restore-to-new-directory /var/backups/wecog-uploads-restore-UNIQUE
+   sudo python3 /opt/wecog/backup-support.py verify-media \
+     /ABSOLUTE/PATH/TO/DOWNLOADED.uploads.tar.gz \
+     /ABSOLUTE/PATH/TO/DOWNLOADED.media.json
    ```
 
    Replace both placeholders with explicit paths. The destination **must not
    exist**; live uploads cannot be overwritten. The helper validates all members
    and gzip integrity before creating it, accepts only regular relative files,
    and prints a file count, never filenames. Compare the count and sample file
-   hashes with the chosen set. Restored files are root-owned and protected; moving
+   hashes with the chosen set. Verify the inventory's SHA-256/size against the
+   manifest, then reconcile ALL restored SQL references with actual restored
+   files using `collectMediaInventory`, not only a sample. A format-2 empty set
+   must have an empty referenced-media inventory. Restored files are root-owned and protected; moving
    them into production, changing ownership to UID 10001, or deleting the drill
    directory requires a separate operator decision. For an empty set, no file
    archive exists; test this path using local fixtures, not fake production data.

@@ -150,6 +150,40 @@ def file_description(file_path):
     return {"file": file_path.name, "sha256": digest.hexdigest(), "bytes": file_path.stat().st_size}
 
 
+def verify_media(archive_path, inventory_path):
+    if Path(inventory_path).stat().st_size > 32 * 1024 ** 2:
+        raise ValueError("Media inventory exceeds limits")
+    manifest = json.loads(Path(inventory_path).read_text(encoding="utf-8"))
+    if manifest.get("formatVersion") != 1 or not isinstance(manifest.get("files"), list):
+        raise ValueError("Invalid media inventory")
+    expected = {}
+    for entry in manifest["files"]:
+        if (not isinstance(entry, dict) or not isinstance(entry.get("file"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256", "")))
+                or type(entry.get("bytes")) is not int or entry["bytes"] < 0
+                or entry["file"] in expected):
+            raise ValueError("Invalid media inventory entry")
+        expected[entry["file"]] = entry
+    if len(expected) > MAX_FILES:
+        raise ValueError("Media inventory exceeds limits")
+    found = set()
+    with tarfile.open(archive_path, "r:gz") as archive:
+        for member in checked_members(archive):
+            entry = expected.get(member.name)
+            if entry is None:
+                continue
+            digest = hashlib.sha256()
+            with archive.extractfile(member) as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if member.size != entry["bytes"] or digest.hexdigest() != entry["sha256"]:
+                raise ValueError("Archived media differs from the database snapshot")
+            found.add(member.name)
+    if found != set(expected):
+        raise ValueError("Database references are absent from the uploads archive")
+    return len(found)
+
+
 def write_manifest(directory, timestamp, tag, reason, count):
     if not re.fullmatch(r"[0-9]{8}T[0-9]{6}(?:[0-9]{9})?Z", timestamp) or not re.fullmatch(r"[0-9a-f]{40}", tag):
         raise ValueError("Invalid backup identity")
@@ -162,6 +196,10 @@ def write_manifest(directory, timestamp, tag, reason, count):
         "uploads": {"file_count": count, "empty": count == 0, "archive": (
             file_description(Path(f"{prefix}.uploads.tar.gz")) if count else None)},
     }
+    media_inventory = Path(f"{prefix}.media.json")
+    if media_inventory.exists():
+        manifest["format_version"] = 2
+        manifest["media_inventory"] = file_description(media_inventory)
     with open(f"{prefix}.manifest.json", "x", encoding="utf-8") as output:
         json.dump(manifest, output, indent=2)
         output.write("\n")
@@ -222,6 +260,9 @@ def main():
     verify = sub.add_parser("verify-uploads")
     verify.add_argument("archive")
     verify.add_argument("--restore-to-new-directory")
+    media = sub.add_parser("verify-media")
+    media.add_argument("archive")
+    media.add_argument("inventory")
     manifest = sub.add_parser("manifest")
     for key in ("directory", "timestamp", "tag", "reason"):
         manifest.add_argument(key)
@@ -237,6 +278,8 @@ def main():
         print(create_uploads(args.source, args.output))
     elif args.command == "verify-uploads":
         print(verify_uploads(args.archive, args.restore_to_new_directory))
+    elif args.command == "verify-media":
+        print(verify_media(args.archive, args.inventory))
     elif args.command == "manifest":
         write_manifest(args.directory, args.timestamp, args.tag, args.reason, args.count)
     else:

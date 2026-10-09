@@ -31,6 +31,18 @@
 
 Каталог содержит 30 записей, но это не означает 30 карточек на экране. В него входят визуализация heatmap, пользовательские outcomes, дополнительные export-показатели и обязательный технический QC-контекст. Конструктор по умолчанию показывает четыре компактных пакета, а не весь каталог.
 
+## RT Connectedness Extension (2026-10-08)
+
+Session summaries optionally include `data.connectedness`, with the bounded
+`rt_alignment.v1` windows, session ID, source and a descriptive-only policy.
+Generic JSON selection exports include this report per session; the Connectedness
+tab also exports snapshot-bound long-format CSV/JSON. Existing metrics retain
+their IDs. This extension does not add group inference or raw video replay.
+The ingest schema is `packages/shared/contracts/rt-alignment.v1.schema.json`;
+the API exposes it at `/contracts/rt-alignment.v1.schema.json`.
+See `docs/research/rt-connectedness-methods.md` for timing, missingness and
+scientific acceptance requirements. Legacy sessions remain event-only.
+
 ## Главные правила контракта
 
 ### 1. Metric ID стабилен

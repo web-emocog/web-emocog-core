@@ -146,6 +146,47 @@ test('session dashboard hides backend failure details but logs them technically'
   expect(technicalLogs.some(line => line.includes('Session is not included in the snapshot'))).toBeTruthy();
 });
 
+test('uploaded heatmap media is authenticated and one unavailable file does not discard other contexts', async ({ page }) => {
+  await page.locator('#analyticsApplyFilters').click();
+  await expect(page.locator('.analytics-heatmap-canvas')).toBeVisible();
+  const template = await page.evaluate(async () => {
+    const production = (window as any).EmocogAnalyticsProduction;
+    const snapshot = production.store.state.snapshot;
+    const response = await production.api.sessionVisuals(105, snapshot);
+    const first = response.data.contexts[0];
+    first.stimulus.contentUrl = '/stimuli/42/content';
+    if (first.heatmap?.stimulus) first.heatmap.stimulus.contentUrl = '/stimuli/42/content';
+    const unavailable = structuredClone(first);
+    unavailable.stimulus.contentUrl = '/stimuli/404/content';
+    if (unavailable.heatmap?.stimulus) unavailable.heatmap.stimulus.contentUrl = '/stimuli/404/content';
+    response.data.contexts = [first, unavailable];
+    return response;
+  });
+  let contentRequests = 0;
+  await page.route('**/stimuli/42/content', route => {
+    contentRequests += 1;
+    return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
+  });
+  await page.route('**/stimuli/404/content', route => route.fulfill({ status: 503, json: { error: 'Media unavailable' } }));
+  const media = await page.evaluate(async template => {
+    const production = (window as any).EmocogAnalyticsProduction;
+    (window as any).EmocogAnalyticsPreviewFixture = null;
+    (window as any).apiGet = async () => structuredClone(template);
+    const response = await production.api.sessionVisuals(105, production.store.state.snapshot);
+    production.store.state.visualResponse = response;
+    production.store.state.visualStatus = 'ready';
+    production.store.emit();
+    return response.data.contexts.map((context: any) => ({ url: context.stimulus.contentUrl, error: context.stimulus.contentError }));
+  }, template);
+  expect(contentRequests).toBe(1);
+  expect(media[0].url).toMatch(/^blob:/);
+  expect(media[1].url).toBeNull();
+  expect(media[1].error).toContain('503');
+  await expect(page.locator('.analytics-stimulus-media').first()).toBeVisible();
+  await expect(page.getByText('Файл стимула недоступен. Данные анализа сохранены.').first()).toBeVisible();
+  await expect(page.locator('.analytics-heatmap-canvas').first()).toBeVisible();
+});
+
 test('completed session shows every AOI heatmap without selection filters and exports the same snapshot', async ({ page }) => {
   await expect(page.locator('#analyticsBlockFilter')).toHaveCount(0);
   await expect(page.locator('#analyticsStimulusFilter')).toHaveCount(0);
