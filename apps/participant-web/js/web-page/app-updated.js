@@ -441,6 +441,7 @@ export function getActiveInvitationParticipantShell() {
 window.getActiveInvitationParticipantShell = getActiveInvitationParticipantShell;
 
 async function loadInvitationProtocolByCode(code) {
+    window.Photodiode?.configureProtocol(null);
     const base = resolveParticipantApiBase();
     dbg('api', 'invitation:load:start', { base, codePresent: true });
     const lookupUrl = new URL(base + '/invitations/by-code/' + encodeURIComponent(code));
@@ -522,6 +523,7 @@ async function loadInvitationProtocolByCode(code) {
         }
 
         state.runtime.invitationProtocolDefinition = payload.definition;
+        window.Photodiode?.configureProtocol(payload.definition);
         configureAudioConsentUI(state, payload.definition);
         state.runtime.invitationProtocolMeta = {
             invitationId: payload.invitation_id || null,
