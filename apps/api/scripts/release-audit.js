@@ -32,18 +32,24 @@ for (const file of trackedFiles) {
 
 const workflowDir = path.join(repoRoot, '.github', 'workflows');
 if (!fs.existsSync(workflowDir)) fail('GitHub Actions workflows are missing');
-else {
-  for (const name of fs.readdirSync(workflowDir).filter(file => /\.ya?ml$/.test(file))) {
-    const source = fs.readFileSync(path.join(workflowDir, name), 'utf8');
+function auditActions(directory) {
+  if (!fs.existsSync(directory)) return;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) { auditActions(file); continue; }
+    if (!/\.ya?ml$/.test(entry.name)) continue;
+    const source = fs.readFileSync(file, 'utf8');
     for (const line of source.split('\n')) {
       const match = line.match(/^\s*-?\s*uses:\s*([^\s#]+)(?:\s*#.*)?$/);
       if (!match || match[1].startsWith('./')) continue;
       if (!/@[0-9a-f]{40}$/.test(match[1])) {
-        fail(`${name} contains an action not pinned to a full SHA: ${match[1]}`);
+        fail(`${path.relative(repoRoot, file)} contains an action not pinned to a full SHA: ${match[1]}`);
       }
     }
   }
 }
+auditActions(workflowDir);
+auditActions(path.join(repoRoot, '.github', 'actions'));
 
 const secretPatterns = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,

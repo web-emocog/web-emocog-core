@@ -1,6 +1,6 @@
 # AGENTS.md: инструкция для ИИ-агентов проекта EmoCog
 
-Актуальность описания: 2026-10-08.
+Актуальность описания: 2026-10-10.
 
 Этот файл задаёт правила работы ИИ-агента во всём репозитории
 `web-emocog-core`. Он является инженерной инструкцией, а не заявлением о
@@ -380,7 +380,7 @@ Researcher connectedness использует реальные `rt_alignment.v1`
 и условия, без p-value/групповых выводов. Методика и ограничения:
 `docs/research/rt-connectedness-methods.md`. Сырое видео не сохраняется.
 
-API: Node.js 18+, Express 4, PostgreSQL, прямой параметризованный SQL без ORM.
+API: Node.js 22+, Express 4, PostgreSQL, прямой параметризованный SQL без ORM.
 Каноническая точка входа: `apps/api/server.js`.
 
 Основные route groups:
@@ -615,12 +615,17 @@ keyboard/screen-reader и human review. Изменения participant UX тре
 
 ## 14. Локальный запуск
 
-Требования: Node.js 18+, PostgreSQL 13+, современный Chromium, камера;
-LibreOffice и Poppler нужны для document conversion.
+Требования: Node.js 22+, PostgreSQL 16 (версия CI), Python 3.10+,
+современный браузер и камера; FFmpeg/ffprobe нужны для media preview,
+LibreOffice и Poppler для document conversion. Полная инструкция локальной
+БД, env и bootstrap staff находится в разделе «Быстрый старт» `README.md`.
+Один статический сервер без API и БД не запускает опубликованный протокол.
 
 ```bash
 cd apps/api
-cp .env.example .env
+test -f .env || cp .env.example .env
+# Для локальной БД: FORCE_HTTPS=false, TRUST_PROXY_HOPS=0,
+# HOST=127.0.0.1, CORS_ORIGINS=http://127.0.0.1:4173 и свой JWT_SECRET.
 npm ci
 npm run migrate:up
 npm start
@@ -629,15 +634,15 @@ npm start
 Из корня репозитория:
 
 ```bash
-python3 -m http.server 8080
+python3 -m http.server 4173 --bind 127.0.0.1
 ```
 
 Открыть:
 
 ```text
-http://localhost:8080/apps/web/developer/login.html
-http://localhost:8080/apps/web/researcher.html
-http://localhost:8080/apps/participant-web/run_new.html?code=<CODE>
+http://127.0.0.1:4173/apps/web/developer/login.html
+http://127.0.0.1:4173/apps/web/researcher.html
+http://127.0.0.1:4173/apps/participant-web/run_new.html?code=<CODE>
 ```
 
 Не использовать production DB для тестов и миграционных экспериментов. Для
@@ -697,6 +702,10 @@ rg -n '^(<<<<<<<|=======|>>>>>>>)' . --glob '!**/node_modules/**'
 ## 16. Рабочий процесс ИИ-агента
 
 ### 16.1 Перед изменением
+
+Новые feature/fix PR направлять только в `develop`. Перенос `develop` в
+`main` выполняет пользователь после проверок. Синхронизация этих долгоживущих
+веток использует обычный merge commit, не squash/rebase и не force-push.
 
 1. Выполнить `git status --short --branch`.
 2. Не откатывать чужие изменения и не очищать dirty worktree.

@@ -1,7 +1,7 @@
 # EmoCog — web-emocog-core
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A518-43853d.svg)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-43853d.svg)](https://nodejs.org/)
 [![Backend](https://img.shields.io/badge/backend-Express%204-000000.svg)](apps/api)
 [![Database](https://img.shields.io/badge/db-PostgreSQL-336791.svg)](apps/api/migrations)
 
@@ -216,7 +216,8 @@ auth guard, доверие к staff JWT в `localStorage` и demo fallback ан�
 
 ### Проверено и осталось проверить
 
-Автоматические результаты текущего release candidate:
+Исторические результаты release candidate от 2026-08-07 (не результаты
+текущей ветки; актуальный статус смотрите в GitHub Actions и датированных отчётах):
 
 - API unit/security/contracts: `150/150`.
 - PostgreSQL integration: `14/14`, включая rollback, token mismatch, tenant
@@ -326,8 +327,8 @@ Lifecycle сессии и версионированные контракты �
 
 | Слой | Технологии |
 | --- | --- |
-| **Backend** | Node.js ≥18, Express 4, PostgreSQL (`pg`, без ORM), JWT/cookie auth, `bcryptjs`, `express-validator`, `multer`, `node-pg-migrate`, `cors`, `dotenv`; LibreOffice + Poppler для PDF/PPT/PPTX |
-| **Frontend** | статический HTML/JS/CSS, ES-модули, **без сборщика**; конфигурация через `localStorage` |
+| **Backend** | Node.js ≥22, Express 4, PostgreSQL (`pg`, без ORM), JWT/cookie auth, `bcryptjs`, `express-validator`, `multer`, `node-pg-migrate`, `cors`, `dotenv`; LibreOffice + Poppler для PDF/PPT/PPTX |
+| **Frontend** | статический HTML/JS/CSS, ES-модули, **без сборщика**; same-origin `/api` в production, loopback API на 3000 локально |
 | **Браузерный ML** | MediaPipe (Face Mesh / Iris), собственные движки rPPG и emotion/FACS |
 | **Оффлайн-анализ** | Python (`rt_component-` — разбор RT-логов; `Audio_detection` — голосовые биомаркеры) |
 | **Тесты** | `node --test` (API), Playwright (e2e/контракт) |
@@ -369,56 +370,183 @@ web-emocog-core/
 │   └── rppg_alg_qc_test_web_alg_test_v10/   # rPPG/BPM движок (ES-модули)
 ├── rt_component-/              # Python RT-анализ (оффлайн)
 ├── Audio_detection/            # ядро голосовых биомаркеров (standalone)
-├── deploy/                     # nginx-сниппеты
+├── deploy/                     # nginx, production rollout, backup и smoke scripts
+├── docker/                     # production Dockerfiles API и frontend
 ├── docs/                       # architecture.md, api/
-├── ml/, packages/, db/, docker/, scripts/   # скелет монорепы (заготовки)
+├── ml/, packages/, db/, scripts/   # дополнительные модули и инструменты
 └── LICENSE                     # Apache-2.0
 ```
 
-> Репозиторий организован как монорепо **без workspace-тулинга** — у каждого приложения свои зависимости. Часть директорий верхнего уровня (`ml/`, `packages/`, `db/`, `docker/`, `scripts/`) — заготовки под будущее развитие.
+> Репозиторий организован как монорепо **без workspace-тулинга** — у каждого приложения свои зависимости. Production-контейнеры и процедуры выпуска находятся в `docker/` и `deploy/production/`.
 
 ---
 
 ## Быстрый старт
 
-### Требования
+### Локальный запуск: БД, API и frontend
 
-- Node.js ≥ 18
-- PostgreSQL ≥ 13
-- Современный браузер с доступом к камере (для участника)
-- LibreOffice (`soffice`) и Poppler (`pdfinfo`, `pdftoppm`) для конвертации PDF/PPT/PPTX
+Один `python3 -m http.server` запускает только статику. Для входа, загрузки
+стимулов, публикации и прохождения приглашения обязательно нужны API и БД.
+Команды ниже выполняются из корня `web-emocog-core`, а не родительской папки.
+Используйте отдельную локальную БД, не production credentials.
 
-### 1. Backend (API)
+Требования: Node.js **22+**, npm, Python **3.10+**, PostgreSQL **16**
+(версия CI) или Docker с запущенным daemon, современный браузер и камера.
+FFmpeg/ffprobe нужны для media validation, thumbnails и video posters;
+LibreOffice (`soffice`) и Poppler (`pdfinfo`, `pdftoppm`) для PDF/PPT/PPTX.
+Например, на macOS: `brew install node@22 python ffmpeg libreoffice poppler`.
+Проверьте `node --version`: установленный `node@22` должен быть доступен в PATH.
+
+#### 1. Запустить отдельную PostgreSQL
+
+Если БД ещё нет, пример с Docker (пароль ниже только для локальной разработки):
+
+```bash
+docker run --detach --name wecog-local-db \
+  --publish 127.0.0.1:5432:5432 \
+  --env POSTGRES_USER=wecog \
+  --env POSTGRES_PASSWORD=wecog-local-only \
+  --env POSTGRES_DB=emocog_local \
+  --volume wecog-local-db:/var/lib/postgresql/data \
+  public.ecr.aws/docker/library/postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+
+docker exec wecog-local-db pg_isready -U wecog -d emocog_local
+```
+
+Дождитесь `accepting connections`. При следующих запусках используйте
+`docker start wecog-local-db`, не создавайте контейнер заново.
+Volume сохраняет данные после остановки. Не удаляйте volume для перезапуска.
+Если порт 5432 занят, выберите другой host port и измените `DATABASE_URL`.
+Для установленной без Docker PostgreSQL используйте свою локальную БД и роль.
+
+#### 2. Настроить и запустить API
 
 ```bash
 cd apps/api
-cp .env.example .env          # отредактируйте DATABASE_URL и JWT_SECRET
-npm install
-npm run migrate:up            # применить миграции схемы БД
-npm start                     # канонический API, порт из PORT (по умолчанию 3000)
-# или для разработки с авто-перезапуском:
-npm run dev
+test -f .env || cp .env.example .env
+npm ci
+openssl rand -base64 48
 ```
 
-Проверка живости: `GET /health`, готовность к БД: `GET /ready`.
+В `apps/api/.env` задайте следующие значения; вместо placeholder JWT вставьте
+сгенерированный секрет. Не перезаписывайте существующий `.env` и не коммитьте его.
 
-### 2. Frontend (статика)
+```dotenv
+DATABASE_URL=postgres://wecog:wecog-local-only@127.0.0.1:5432/emocog_local
+NODE_ENV=development
+HOST=127.0.0.1
+PORT=3000
+JWT_SECRET=<generated-local-secret>
+FORCE_HTTPS=false
+TRUST_PROXY_HOPS=0
+CORS_ORIGINS=http://127.0.0.1:4173
+UPLOADS_ROOT=./uploads
+```
 
-Фронтенд — статические файлы без сборки. Для локального запуска поднимите любой статический сервер из корня репозитория:
+`FORCE_HTTPS=false` допустим только локально. `UPLOADS_ROOT` сохраняет бинарные
+стимулы отдельно от БД: для переноса/резервной копии нужны **и БД, и uploads**.
+Сохраняйте настройки FFmpeg/конвертера из `.env.example`, меняя пути при необходимости.
 
 ```bash
-# из корня репозитория
-npx http-server -p 8080
-# или
-python3 -m http.server 8080
+# Всё ещё из apps/api; применять только к выбранной локальной БД.
+npm run migrate:up
+npm start
+# Альтернатива для авто-перезапуска: npm run dev
 ```
 
-Затем откройте:
-- **Исследователь:** `http://localhost:8080/apps/web/researcher.html`
-- **Вход staff:** `http://localhost:8080/apps/web/developer/login.html`
-- **Участник:** `http://localhost:8080/apps/participant-web/run_new.html?code=<КОД_ПРИГЛАШЕНИЯ>`
+В другом терминале проверьте оба endpoint:
 
-Адрес API задаётся через `localStorage` (`emocog_api_base`) или `window.API_BASE`. Браузерный staff-вход использует `HttpOnly` cookie и CSRF; bearer JWT сохранён только для внешних API-клиентов и не записывается login-страницей в `localStorage`. На проде nginx раздаёт статику и проксирует `/api` на Node.
+```bash
+curl --fail http://127.0.0.1:3000/health
+curl --fail http://127.0.0.1:3000/ready
+```
+
+`/health` проверяет процесс; `/ready` должен вернуть HTTP 200 и подтверждает
+доступ к БД. Оставьте терминал API работающим.
+
+#### 3. Создать первый локальный staff-аккаунт
+
+В новом терминале из `apps/api` (bash/zsh), только для новой локальной установки:
+
+```bash
+printf 'Local admin email: '
+read -r BOOTSTRAP_ADMIN_EMAIL
+printf 'Local admin password (at least 12 characters): '
+read -r -s BOOTSTRAP_ADMIN_PASSWORD
+printf '\n'
+export BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD
+npm run admin:bootstrap
+unset BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD
+```
+
+Пароль вводится скрыто и не попадает в командную историю. Bootstrap создаёт
+platform-admin; для существующего email меняет роль/пароль и отзывает старые
+сеансы, поэтому не запускайте его для чужого аккаунта. Публичная регистрация
+создаёт `respondent`, а не исследователя.
+
+#### 4. Запустить frontend и опубликовать протокол
+
+В отдельном терминале **из корня репозитория**:
+
+```bash
+python3 -m http.server 4173 --bind 127.0.0.1
+```
+
+- Вход: [http://127.0.0.1:4173/apps/web/developer/login.html](http://127.0.0.1:4173/apps/web/developer/login.html).
+- Кабинет: [http://127.0.0.1:4173/apps/web/researcher.html](http://127.0.0.1:4173/apps/web/researcher.html).
+- Участник: `http://127.0.0.1:4173/apps/participant-web/run_new.html?code=<CODE>`.
+
+В **пустой БД** сначала нужна организация: войдите созданным локальным
+platform-admin, откройте кабинет исследователя по ссылке выше (без hash)
+и выполните в browser console этой страницы:
+
+```javascript
+await apiPost('/organizations', { name: 'Local lab', slug: 'local-lab' });
+location.reload();
+```
+
+Это обычный авторизованный API-вызов с cookie/CSRF, не обход прав.
+Делайте его только один раз; повторный slug возвращает `409`.
+После этого создайте проект, протокол и опубликуйте его. Для отдельных исследователей
+администратор выдаёт organization/project membership через страницу
+`apps/web/developer/accounts.html`; одной роли `researcher` недостаточно.
+Открывайте **новую ссылку из этой локальной БД**: код с production или
+другой установки здесь не работает. Разрешите камеру на participant-странице.
+Не смешивайте `localhost` и `127.0.0.1`: это разные browser origins для cookie
+и CORS. Для одновременной проверки разных аккаунтов нужны отдельные browser
+profiles/contexts, а не две вкладки с общей cookie.
+
+На loopback frontend автоматически обращается к API на том же hostname,
+порту **3000**, без `/api`. На production используется same-origin `/api`.
+Не нужно сохранять JWT в `localStorage`; staff-вход использует HttpOnly cookie
+и CSRF. Удалите только устаревший `emocog_api_base`, если ранее вручную
+настраивали другой API. Login не доверяет этому storage override.
+
+#### 5. Проверить фотодиод
+
+В конструкторе, на шаге контроля качества, включите **«Квадрат для
+фотодетектора (временная функция)»**, опубликуйте протокол и откройте новую
+ссылку. Старое приглашение сохраняет прежние настройки. Квадрат должен быть
+скрыт до эксперимента, при precheck/калибровке и после завершения.
+Выключенный протокол не должен выдавать импульсы. Участник не переопределяет
+настройку опубликованного протокола через `?photodiode=1`.
+Опция не означает аппаратную валидацию времени; нужна проверка физическим датчиком.
+
+#### Если запуск не работает
+
+| Ошибка | Что проверить |
+| --- | --- |
+| `ERR_CONNECTION_REFUSED` | API на 3000 не запущен или браузер обращается к другой установке; проверьте `/health` и `/ready` |
+| `426 https_required` | Для локального API нужны `NODE_ENV=development`, `FORCE_HTTPS=false` и перезапуск процесса |
+| `503` на `/ready` | PostgreSQL, порт, `DATABASE_URL` и миграции выбранной БД |
+| CORS/нет cookie | Точный frontend origin в `CORS_ORIGINS`; используйте один hostname и войдите заново |
+| `404` для invitation | Опубликуйте протокол в локальной БД и возьмите новый code; не используйте production-ссылку |
+| Не загружаются стимулы | Проверьте API, права аккаунта, сохранность uploads и доступность FFmpeg/ffprobe |
+
+Остановка: Ctrl+C для API/frontend, `docker stop wecog-local-db` для БД.
+Не выставляйте этот Python-сервер в сеть: он раздаёт дерево репозитория,
+а не production-safe allowlist. Для LAN/public deployment нужны отдельная
+защищённая статика, HTTPS и согласованные CORS, а не `--bind 0.0.0.0`.
 
 > **Важно для ES-модулей:** rPPG-движок в `lib/` подключается как ES-модуль и требует корректного `Content-Type: text/javascript`. Готовый сниппет — [deploy/nginx-snippet-emocog-lib.conf](deploy/nginx-snippet-emocog-lib.conf).
 
@@ -650,6 +778,12 @@ flowchart LR
 
 - Основная ветка — `main` (прод). Интеграционная — `develop`.
 - Фичи разрабатываются в отдельных ветках и вливаются в `develop`, затем `develop` → `main`.
+- Все новые PR с исправлениями направляйте в `develop`; перенос в `main`
+  выполняет владелец проекта после зелёных проверок. Не отправляйте feature PR
+  напрямую в `main`.
+- Между `develop` и `main` используйте **Create a merge commit**, не squash/rebase:
+  общая история сохраняется и повторная синхронизация не дублирует исправления.
+  Если в `main` появился hotfix, сначала включите его обычным merge в `develop`.
 - Frontend без сборки: правьте HTML/JS напрямую, проверяйте в браузере.
 - Backend: соблюдайте миграции (`node-pg-migrate`) при изменениях схемы; покрывайте новую логику тестами в `apps/api/tests/`.
 
