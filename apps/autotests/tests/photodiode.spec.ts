@@ -1,6 +1,14 @@
 import { test, expect, Page } from '@playwright/test';
 
-const participant = 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
+const participant = process.env.PAGE_URL || 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/auth/me', route => route.fulfill({
+    status: 401,
+    headers: { 'Access-Control-Allow-Origin': new URL(participant).origin, 'Access-Control-Allow-Credentials': 'true' },
+    json: { error: 'Synthetic unauthenticated session' }
+  }));
+});
 
 async function loadTask(page: Page, fixation = false, media = false) {
   await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));

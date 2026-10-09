@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const baseUrl = 'http://127.0.0.1:4173';
+const baseUrl = process.env.WECOG_TEST_BASE_URL || 'http://127.0.0.1:4173';
 
 test.describe('wecog design system', () => {
   test('landing has one role chooser and three theme modes', async ({ page }) => {
@@ -120,6 +120,13 @@ test.describe('wecog design system', () => {
   });
 
   test('researcher navigation supports search and mobile drawer without redundant header navigation', async ({ page }) => {
+    // This is a preview layout test, not a request to the developer's staff API.
+    for (const path of ['auth/me', 'auth/permissions']) {
+      await page.route(`**/${path}`, route => route.fulfill({
+        status: 401,
+        json: { error: 'Synthetic unauthenticated preview' },
+      }));
+    }
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     await page.goto(

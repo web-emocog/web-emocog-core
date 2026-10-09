@@ -56,6 +56,45 @@ test('photodiode is opt-in and restricted to loopback hosts', async () => {
   }
 });
 
+test('published protocol explicitly enables the temporary feature on deployed hosts', async () => {
+  for (const hostname of ['wecog.ru', 'localhost', '192.168.1.2']) {
+    const h = harness(hostname, '?code=fixture&photodiode=1');
+    assert.equal(h.pd.isEnabled(), false);
+    assert.equal(h.pd.setEnabled(true), false);
+    assert.equal(h.pd.configureProtocol({ settings: { featureFlags: { photodiode: true } } }), true);
+    assert.equal(h.pd.setEnabled(false), true);
+    const started = h.pd.begin();
+    await h.advance(800);
+    assert.equal((await started).status, 'emitted');
+    h.listeners.get('wecog:session-phase-change')({ detail: { phase: 'gaze_validation' } });
+    assert.equal(h.square.hidden, true);
+    assert.equal(h.pd.isEnabled(), true);
+  }
+});
+
+test('disabled, missing or malformed protocol flags cannot be overridden by the URL', async () => {
+  for (const value of [false, undefined, null, 'true', 1, {}, []]) {
+    const h = harness('localhost', '?code=fixture&photodiode=1');
+    assert.equal(h.pd.configureProtocol({ settings: { featureFlags: { photodiode: value } } }), false);
+    assert.equal(h.pd.setEnabled(true), false);
+    assert.equal((await h.pd.begin()).status, 'disabled');
+    assert.equal(h.timers.size, 0);
+    assert.equal(h.square.hidden, true);
+  }
+});
+
+test('loading a different or failed invitation clears previous protocol flashes and selection', async () => {
+  const h = harness('wecog.ru', '?code=fixture');
+  h.pd.configureProtocol({ settings: { featureFlags: { photodiode: true } } });
+  const started = h.pd.begin();
+  h.pd.configureProtocol(null);
+  assert.equal((await started).status, 'cancelled');
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.pd.isEnabled(), false);
+  assert.equal(h.pd.setEnabled(true), false);
+  assert.equal(h.square.hidden, true);
+});
+
 test('serializes start/task/stage codes without dropping or interleaving pulses', async () => {
   const h = harness();
   const start = h.pd.begin();

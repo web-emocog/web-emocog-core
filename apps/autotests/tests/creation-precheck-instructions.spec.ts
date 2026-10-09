@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const base = 'http://127.0.0.1:4173';
+const base = process.env.WECOG_TEST_BASE_URL || 'http://127.0.0.1:4173';
 const researcher = `${base}/apps/web/researcher.html?analyticsPreview=1`;
 const participant = `${base}/apps/participant-web/mvp_with_precheck_1-updated.html`;
 
