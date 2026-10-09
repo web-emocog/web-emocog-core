@@ -120,6 +120,13 @@ test.describe('wecog design system', () => {
   });
 
   test('researcher navigation supports search and mobile drawer without redundant header navigation', async ({ page }) => {
+    // This is a preview layout test, not a request to the developer's staff API.
+    for (const path of ['auth/me', 'auth/permissions']) {
+      await page.route(`**/${path}`, route => route.fulfill({
+        status: 401,
+        json: { error: 'Synthetic unauthenticated preview' },
+      }));
+    }
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     await page.goto(

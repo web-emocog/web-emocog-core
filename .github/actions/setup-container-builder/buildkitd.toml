@@ -1,0 +1,3 @@
+# Cache official Docker Hub images; BuildKit retains the canonical fallback.
+[registry."docker.io"]
+  mirrors = ["mirror.gcr.io"]

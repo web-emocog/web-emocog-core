@@ -81,6 +81,39 @@ describe('S3-01 release hardening', () => {
     assert.match(workflow, /\[\[ "\$BROWSER_RESULT" == "success" \]\]/);
   });
 
+  it('uses identical pinned BuildKit sources and keeps the fallback fail-closed', () => {
+    const repositoryRoot = path.resolve(apiRoot, '../..');
+    const action = fs.readFileSync(path.join(repositoryRoot,
+      '.github/actions/setup-container-builder/action.yml'), 'utf8');
+    const config = fs.readFileSync(path.join(repositoryRoot,
+      '.github/actions/setup-container-builder/buildkitd.toml'), 'utf8');
+    const sources = [...action.matchAll(/driver-opts: image=([^\s]+)@sha256:([a-f0-9]{64})/g)];
+    assert.equal(sources.length, 2);
+    assert.equal(sources[0][1], 'mirror.gcr.io/moby/buildkit');
+    assert.equal(sources[1][1], 'moby/buildkit');
+    assert.equal(sources[0][2], sources[1][2]);
+    assert.equal((action.match(/continue-on-error: true/g) || []).length, 1);
+    assert.match(action, /if: steps\.mirror\.outcome == 'failure'/);
+    assert.equal((action.match(/buildkitd-config: \$\{\{ github\.action_path \}\}\/buildkitd\.toml/g) || []).length, 2);
+    assert.match(config, /\[registry\."docker\.io"\]\s+mirrors = \["mirror\.gcr\.io"\]/);
+    for (const workflowName of ['ci.yml', 'deploy-production.yml']) {
+      const workflow = fs.readFileSync(path.join(repositoryRoot, '.github/workflows', workflowName), 'utf8');
+      assert.match(workflow, /uses: \.\/\.github\/actions\/setup-container-builder/);
+    }
+    const ci = fs.readFileSync(path.join(repositoryRoot, '.github/workflows/ci.yml'), 'utf8');
+    assert.match(ci, /pull_request:\s+branches: \[develop, main\]/);
+    const deploy = fs.readFileSync(path.join(repositoryRoot, '.github/workflows/deploy-production.yml'), 'utf8');
+    assert.match(deploy, /push:\s+branches: \[main\]/);
+  });
+
+  it('runs PostgreSQL release gates against a pinned official image mirror', () => {
+    const workflow = fs.readFileSync(path.resolve(apiRoot, '../../.github/workflows/release-gates.yml'), 'utf8');
+    assert.match(workflow, /image: public\.ecr\.aws\/docker\/library\/postgres:16\.10-alpine@sha256:[a-f0-9]{64}/);
+    assert.match(workflow, /run: npm run test:postgres/);
+    assert.match(workflow, /run: npm run migrate:verify/);
+    assert.match(workflow, /run: npm run backup:verify/);
+  });
+
   it('discovers exported OS Login credentials from files instead of CLI text', () => {
     const repositoryRoot = path.resolve(apiRoot, '../..');
     const helper = path.join(repositoryRoot, 'deploy/production/export-oslogin-identity.sh');
