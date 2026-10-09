@@ -1,9 +1,11 @@
 (function (global) {
   'use strict';
 
-  // Temporary, opt-in local hardware diagnostic. Never enable on a deployed host.
+  // Published protocol settings are authoritative; URL opt-in is local diagnostics only.
   const local = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(global.location.hostname);
-  let enabled = local && new URLSearchParams(global.location.search).get('photodiode') === '1';
+  const params = new URLSearchParams(global.location.search);
+  let protocolConfigured = params.has('code');
+  let enabled = local && !protocolConfigured && params.get('photodiode') === '1';
   const COUNTS = Object.freeze({ experiment: 4, task: 3, stage: 2, stimulus: 1 });
   const queue = [];
   let current = null;
@@ -100,8 +102,16 @@
   }
 
   function setEnabled(value) {
-    if (active || ending) return enabled;
+    if (protocolConfigured || active || ending) return enabled;
     enabled = local && value === true;
+    return enabled;
+  }
+
+  function configureProtocol(definition) {
+    stop();
+    protocolConfigured = true;
+    enabled = definition?.settings?.featureFlags?.photodiode === true;
+    setupNotice();
     return enabled;
   }
 
@@ -110,17 +120,23 @@
     const toggle = document.getElementById('photodiodeTemporaryToggle');
     const text = document.getElementById('photodiodeTemporaryText');
     if (!notice || !toggle || !text) return;
-    notice.hidden = !local;
+    notice.hidden = protocolConfigured ? !enabled : !local;
     toggle.checked = enabled;
-    text.textContent = (global.__WECOG_STATE__?.currentLang || document.documentElement.lang) === 'ru'
-      ? 'Временная локальная функция: квадрат для фотодетектора. Только для проверки оборудования; точность импульсов не валидирована.'
-      : 'Temporary local feature: photodiode square. For hardware testing only; pulse timing has not been validated.';
+    toggle.disabled = protocolConfigured;
+    const russian = (global.__WECOG_STATE__?.currentLang || document.documentElement.lang) === 'ru';
+    text.textContent = protocolConfigured
+      ? (russian
+        ? 'Временная функция: квадрат для фотодетектора включён исследователем в протоколе. Точность импульсов не валидирована.'
+        : 'Temporary feature: the photodiode square is enabled by the researcher in this protocol. Pulse timing has not been validated.')
+      : (russian
+        ? 'Временная локальная функция: квадрат для фотодетектора. Только для проверки оборудования; точность импульсов не валидирована.'
+        : 'Temporary local feature: photodiode square. For hardware testing only; pulse timing has not been validated.');
     toggle.onchange = () => { toggle.checked = setEnabled(toggle.checked); };
   }
 
-  global.Photodiode = { signal, begin, finish, stop, setEnabled,
+  global.Photodiode = { signal, begin, finish, stop, setEnabled, configureProtocol,
     isEnabled: () => enabled, isActive: () => active,
-    version: 'photodiode.local.v1', temporary: true };
+    version: 'photodiode.temporary.v1', temporary: true };
   document.addEventListener('DOMContentLoaded', setupNotice, { once: true });
   global.addEventListener('wecog:languagechange', setupNotice);
   global.addEventListener('wecog:session-phase-change', event => {

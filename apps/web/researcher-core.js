@@ -516,6 +516,7 @@ function navigate(href){
 }
 
 function clearExperimentBuilderDraft() {
+  localStorage.removeItem('emocog_session_features_draft');
   localStorage.removeItem('emocog_protocol_blocks');
   localStorage.removeItem('emocog_protocol_meta_draft');
   localStorage.removeItem('emocog_protocol_step_draft');
