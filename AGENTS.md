@@ -750,6 +750,11 @@ rg -n '^(<<<<<<<|=======|>>>>>>>)' . --glob '!**/node_modules/**'
 
 ### 16.1 Перед изменением
 
+Production snapshot gate: доступ к inventory проверяется до побочных эффектов,
+ротация выполняется после logical backup и до создания нового `READY` snapshot.
+Нельзя скрывать ошибки list/delete, удалять baseline/manual/foreign snapshots,
+пропускать snapshot gate или снижать retention floor без явного согласования.
+
 Новые feature/fix PR направлять только в `develop`. Перенос `develop` в
 `main` выполняет пользователь после проверок. Синхронизация этих долгоживущих
 веток использует обычный merge commit, не squash/rebase и не force-push.
