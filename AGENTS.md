@@ -1,6 +1,6 @@
 # AGENTS.md: инструкция для ИИ-агентов проекта EmoCog
 
-Актуальность описания: 2026-10-10.
+Актуальность описания: 2026-10-19.
 
 Этот файл задаёт правила работы ИИ-агента во всём репозитории
 `web-emocog-core`. Он является инженерной инструкцией, а не заявлением о
@@ -707,6 +707,7 @@ fallbacks.
 | rPPG/emotion/body | unit/synthetic tests + reference-device validation |
 | PDF/PPT/PPTX | signature/boundary/cleanup tests + real conversion smoke |
 | Dependency/model update | license/hash update, audit, full browser smoke |
+| Production snapshot/deploy gate | `python3 -B -m unittest discover -s deploy/production/tests -v`, `cd apps/api && npm test` |
 
 Команды:
 
@@ -736,6 +737,15 @@ PostgreSQL release gate запускает отдельный disposable-кон�
 `scripts/start-ci-postgres.sh`: оба registry-источника закреплены одним digest,
 проверка готовности обязательна, порты доступны только на loopback. Скрипт
 не заменяет существующий контейнер и вне CI требует явного разрешения local test.
+
+Production snapshot gate: `deploy/production/predeploy-snapshot.py` выполняется
+на runner после успешного DB/media backup и до миграций/deploy. Ротация касается
+только `READY`-снимков заданного folder/disk с `app=wecog`, `reason=predeploy` и
+каноническим именем `wecog-predeploy-*`; `protected=true` исключает удаление.
+Последний прежний `READY` сохраняется до подтверждения нового. Дополнительное
+удаление по одному разрешено только при явной snapshot quota error; ошибки
+доступа, CLI/JSON и таймауты останавливают выпуск. Все production workflows
+используют одну concurrency group `wecog-production`, без отмены активного job.
 
 ```bash
 git diff --check
