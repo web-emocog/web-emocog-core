@@ -25,6 +25,57 @@ SNAPSHOT_QUOTA = re.compile(
     r"has (?:been )?exceeded\.?\s*$", re.MULTILINE,
 )
 LIST_LIMIT = 1000
+GRPC_CODES = frozenset((
+    "OK", "Canceled", "Cancelled", "Unknown", "InvalidArgument", "DeadlineExceeded", "NotFound",
+    "AlreadyExists", "PermissionDenied", "ResourceExhausted", "FailedPrecondition",
+    "Aborted", "OutOfRange", "Unimplemented", "Internal", "Unavailable", "DataLoss",
+    "Unauthenticated",
+))
+SAFE_CAUSES = (
+    (r"The limit on total size of snapshots has (?:been )?exceeded|Limit compute\.snapshots\.size exceeded",
+     "Snapshot storage quota exceeded"),
+    (r"The limit on (?:(?:total )?(?:number|count) of snapshots|snapshots count) has (?:been )?exceeded|Limit compute\.snapshots\.count exceeded",
+     "Snapshot count quota exceeded"),
+    (r"Too many operations", "Too many cloud operations"),
+    (r"Too many requests|rate limit exceeded", "Cloud API request rate limit exceeded"),
+    (r"context deadline exceeded|DeadlineExceeded", "Cloud request deadline exceeded"),
+    (r"error dialing endpoint|connection refused", "Cloud API connection failed"),
+    (r"Permission denied|PermissionDenied", "Cloud access denied"),
+    (r"Unauthenticated", "Cloud authentication failed"),
+)
+
+
+def safe_cli_diagnostics(action, stderr, stdout="", returncode=None, quota_cleanup_allowed=False):
+    # Logs are public: allowlist summaries/IDs, never echo a raw description,
+    # stdout, credential, URL, local trace path or arbitrary provider text.
+    source = stderr or ""
+    if isinstance(source, bytes):
+        source = source[:65536].decode("utf-8", errors="replace")
+    source = source[:65536]
+    code = re.search(r"\bcode = ([A-Za-z]+)\b", source)
+    code = code[1] if code and code[1] in GRPC_CODES else None
+    summary = next((message for pattern, message in SAFE_CAUSES
+                    if re.search(pattern, source, re.IGNORECASE)),
+                   "Unrecognized error; raw CLI output withheld")
+    stdout_present = bool(stdout and stdout.strip())
+    details = {
+        "action": action, "exit_code": returncode, "rpc_code": code, "summary": summary,
+        "stdout_present": stdout_present, "quota_cleanup_allowed": quota_cleanup_allowed,
+        "quota_cleanup_blocker": None if quota_cleanup_allowed else (
+            "command_not_create" if action != "create" else
+            "stdout_not_empty" if stdout_present else "snapshot_quota_not_confirmed"
+        ),
+    }
+    uuid = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    for name in ("client-request-id", "client-trace-id"):
+        match = re.search(rf"^[ \t]*{name}:[ \t]*({uuid})[ \t]*\r?$", source,
+                          re.MULTILINE | re.IGNORECASE)
+        if match:
+            details[name.replace("-", "_")] = match[1].lower()
+    operation = re.search(r"\boperation \(id=([a-z0-9]{20})\)", source)
+    if operation:
+        details["operation_id"] = operation[1]
+    return details
 
 
 class SnapshotError(RuntimeError):
@@ -33,14 +84,18 @@ class SnapshotError(RuntimeError):
 
 class CLIError(SnapshotError):
     def __init__(self, action, result):
-        # Do not echo arbitrary CLI output, environment values or trace paths.
-        code = re.search(r"\bcode = ([A-Za-z]+)\b", result.stderr)
-        reason = code[1] if code else "CLI failure"
-        super().__init__(f"yc snapshot {action} failed ({reason}); release stopped")
+        # This decision still uses the ORIGINAL strict matcher and empty stdout.
+        # Diagnostic summaries must never authorize retries or extra deletion.
         self.snapshot_quota = bool(
             action == "create" and not result.stdout.strip()
             and SNAPSHOT_QUOTA.search(result.stderr)
         )
+        self.diagnostics = safe_cli_diagnostics(
+            action, result.stderr, result.stdout, result.returncode, self.snapshot_quota,
+        )
+        reason = self.diagnostics["rpc_code"] or "CLI failure"
+        super().__init__(f"yc snapshot {action} failed ({reason}); release stopped; "
+                         f"diagnostics={json.dumps(self.diagnostics, sort_keys=True)}")
 
 
 def unique_object(pairs):
@@ -117,10 +172,13 @@ class Snapshots:
                 capture_output=True, text=True, check=False,
                 timeout=min(600, remaining), env={**os.environ, "LC_ALL": "C"},
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
             # A timed-out create may still finish in the cloud. Never delete
             # anything else or retry creation on an ambiguous result.
-            raise SnapshotError(f"yc snapshot {action} timed out; inspect cloud operations before retry") from None
+            details = safe_cli_diagnostics(action, error.stderr, error.stdout)
+            details["timed_out"] = True
+            raise SnapshotError(f"yc snapshot {action} timed out; inspect cloud operations before retry; "
+                                f"diagnostics={json.dumps(details, sort_keys=True)}") from None
         except OSError:
             raise SnapshotError("Cannot execute yc; release stopped") from None
         if result.returncode:
@@ -201,6 +259,8 @@ class Snapshots:
             except CLIError as error:
                 if not error.snapshot_quota:
                     raise
+                print("predeploy-snapshot: quota recovery diagnostics="
+                      + json.dumps(error.diagnostics, sort_keys=True), file=sys.stderr, flush=True)
                 print("Confirmed snapshot quota exhaustion; trying one older automated copy", flush=True)
                 # Strictly decreases the fixed initial inventory, so retries are
                 # bounded. The final old READY copy is never a candidate.
