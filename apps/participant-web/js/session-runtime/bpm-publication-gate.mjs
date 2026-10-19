@@ -32,6 +32,11 @@ export class BpmPublicationGate {
             this.reset();
             return { accepted: false, bpm: null, reason: 'outside_physiological_range', confidence: Number.isFinite(confidence) ? confidence : null };
         }
+        if (isHeldEngineValue) {
+            this.reset();
+            return { accepted: true, bpm, reason: 'held_last_valid', confidence,
+                classification: 'held', held: true };
+        }
 
         const zone = bpm < this.limits.cautionLow ? 'low' : (bpm > this.limits.cautionHigh ? 'high' : null);
         if (!zone) {

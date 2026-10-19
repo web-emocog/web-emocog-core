@@ -1602,7 +1602,16 @@ async function openAoiEditor(stimulusId, options = {}) {
       console.warn('[Stimuli] Failed to load AOI preview:', error);
     }
   }
-  const mediaUrl = stimulusPreviewSource(stimulus);
+  let mediaUrl = stimulusPreviewSource(stimulus);
+  const standard = window.StandardStimuli?.resolveStandardStimulus?.(stimulus.id, stimulus, { lang: CURRENT_LANG });
+  let previewHtml = options.previewHtml;
+  if (standard?.type === 'image' && !mediaUrl) mediaUrl = standard.src;
+  if (!previewHtml && ['shape', 'text'].includes(standard?.type)) {
+    const element = document.createElement('div');
+    Object.assign(element.style, standard.style || {});
+    element.textContent = standard.text || '';
+    previewHtml = element.outerHTML;
+  }
 
   const hasScopedAois = Object.prototype.hasOwnProperty.call(options, 'initialAois');
   let aois = (hasScopedAois ? options.initialAois : stimulus.aois || [])
@@ -1646,8 +1655,8 @@ async function openAoiEditor(stimulusId, options = {}) {
             ? `<img id="aoiMedia" src="${aoiEscape(mediaUrl)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
             : stimulus.type === 'video' && mediaUrl
               ? `<video id="aoiMedia" src="${aoiEscape(mediaUrl)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`
-              : options.previewHtml
-                ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;">${options.previewHtml}</div>`
+              : previewHtml
+                ? `<div id="aoiStandardPreview" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;">${previewHtml}</div>`
                 : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#111827;font-size:42px;font-weight:800;">${aoiEscape(stimulus.text || stimulus.name)}</div>`}
           <svg id="aoiSvg" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;"></svg>
         </div>
@@ -1660,7 +1669,7 @@ async function openAoiEditor(stimulusId, options = {}) {
           <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Gaze sequence number' : 'Номер в последовательности взгляда'}<select id="aoiOrder" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;background:var(--card-bg);color:var(--text);"></select></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <label style="font-size:11px;color:var(--muted);">startMs<input id="aoiStart" type="number" min="0" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
-            <label style="font-size:11px;color:var(--muted);">endMs<input id="aoiEnd" type="number" min="1" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
+            <label style="font-size:11px;color:var(--muted);">endMs<input id="aoiEnd" type="number" min="1" placeholder="${CURRENT_LANG === 'en' ? 'Until stimulus ends' : 'До конца показа'}" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
           </div>
           <div id="aoiCoordinates" style="font:10px/1.45 var(--mono,monospace);color:var(--muted);background:rgba(92,102,189,.06);padding:8px;border-radius:8px;word-break:break-all;"></div>
           <div style="display:flex;gap:7px;"><button id="aoiSave" class="quick-btn" style="flex:1;background:var(--accent);color:white;border-color:var(--accent);">${CURRENT_LANG === 'en' ? 'Save changes' : 'Сохранить изменения'}</button><button id="aoiDelete" class="quick-btn" style="color:var(--bad);">${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}</button></div>
@@ -1691,6 +1700,21 @@ async function openAoiEditor(stimulusId, options = {}) {
   };
   const selectedAoi = () => aois.find(aoi => aoi.id === selectedId) || null;
   let stimulusAspectRatio = 16 / 9;
+  const standardElement = modal.querySelector('#aoiStandardPreview')?.firstElementChild;
+  const standardContent = standardElement && ['shape', 'text'].includes(standard?.type);
+  if (standardContent) {
+    // AOIs are normalized to the stimulus content, not the surrounding white viewport.
+    const bounds = standardElement.getBoundingClientRect();
+    stimulusAspectRatio = bounds.height > 0 ? bounds.width / bounds.height : 1;
+    if (standard.type === 'shape') {
+      if (/rotate\(45deg\)/.test(standard.style?.transform || '')) {
+        standardElement.style.transform = 'none';
+        standardElement.style.clipPath = 'polygon(50% 0,100% 50%,50% 100%,0 50%)';
+      }
+      standardElement.style.width = '100%';
+      standardElement.style.height = '100%';
+    }
+  }
   function fitStage() {
     const bounds = viewport.getBoundingClientRect();
     const availableWidth = Math.max(1, bounds.width - 36);
@@ -1704,6 +1728,12 @@ async function openAoiEditor(stimulusId, options = {}) {
     stage.style.width = `${width}px`;
     stage.style.height = `${height}px`;
     stage.style.aspectRatio = 'auto';
+    if (standardContent && standard.type === 'text') {
+      standardElement.style.transform = 'none';
+      const bounds = standardElement.getBoundingClientRect();
+      const scale = Math.min(width / Math.max(1, bounds.width), height / Math.max(1, bounds.height));
+      standardElement.style.transform = `scale(${scale})`;
+    }
   }
   const media = modal.querySelector('#aoiMedia');
   const useMediaRatio = () => {
@@ -1744,7 +1774,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     if (!aoi || form.style.display === 'none') return;
     const name = modal.querySelector('#aoiName').value.trim();
     const startMs = parseInt(modal.querySelector('#aoiStart').value, 10);
-    const endMs = parseInt(modal.querySelector('#aoiEnd').value, 10);
+    const endMs = modal.querySelector('#aoiEnd').value === '' ? Number.MAX_SAFE_INTEGER : parseInt(modal.querySelector('#aoiEnd').value, 10);
     if (name) aoi.name = name;
     aoi.isTarget = modal.querySelector('#aoiTarget').checked;
     if (Number.isFinite(startMs) && startMs >= 0 && Number.isFinite(endMs) && endMs > startMs) {
@@ -1828,7 +1858,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     modal.querySelector('#aoiTarget').checked = aoi.isTarget;
     modal.querySelector('#aoiOrder').innerHTML = aois.map((item, index) => `<option value="${index + 1}" ${aoi.order === index + 1 ? 'selected' : ''}>${index + 1}</option>`).join('');
     modal.querySelector('#aoiStart').value = aoi.validityInterval.startMs;
-    modal.querySelector('#aoiEnd').value = aoi.validityInterval.endMs;
+    modal.querySelector('#aoiEnd').value = aoi.validityInterval.endMs === Number.MAX_SAFE_INTEGER ? '' : aoi.validityInterval.endMs;
     modal.querySelector('#aoiCoordinates').textContent = aoi.points.map(point => `(${point.x.toFixed(4)}, ${point.y.toFixed(4)})`).join(' · ');
   }
   function shapeMarkup(aoi) {
@@ -2057,7 +2087,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     const name = modal.querySelector('#aoiName').value.trim();
     const order = parseInt(modal.querySelector('#aoiOrder').value, 10);
     const startMs = Math.max(0, parseInt(modal.querySelector('#aoiStart').value, 10) || 0);
-    const endMs = parseInt(modal.querySelector('#aoiEnd').value, 10);
+    const endMs = modal.querySelector('#aoiEnd').value === '' ? Number.MAX_SAFE_INTEGER : parseInt(modal.querySelector('#aoiEnd').value, 10);
     if (!name) return toast(CURRENT_LANG === 'en' ? 'Enter an AOI name' : 'Введите название AOI');
     if (!Number.isFinite(order) || order < 1 || order > aois.length) return toast(CURRENT_LANG === 'en' ? `Order must be from 1 to ${aois.length}` : `Номер должен быть от 1 до ${aois.length}`);
     if (!Number.isFinite(endMs) || endMs <= startMs) return toast(CURRENT_LANG === 'en' ? 'endMs must be greater than startMs' : 'endMs должен быть больше startMs');

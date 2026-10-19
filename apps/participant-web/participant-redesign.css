@@ -258,6 +258,11 @@ p, .sub { color: var(--text-secondary); }
   background: var(--input-bg);
 }
 .survey-runtime-question legend {
+  float: left;
+  box-sizing: border-box;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   width: 100%;
   margin: 0 0 14px;
   padding: 0;
@@ -266,6 +271,8 @@ p, .sub { color: var(--text-secondary); }
   font-weight: 720;
   line-height: 1.4;
 }
+.survey-runtime-question legend + * { clear: both; }
+.survey-runtime-question > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
 .survey-required-mark { color: #c62828; }
 .survey-runtime-open {
   width: 100%;

@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261008-2';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261019-4';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261008-2';
+} from './ui-updated.js?v=20261019-4';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20261008-2';
+} from './precheck-updated.js?v=20261019-4';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20261008-2';
+} from './tests-updated.js?v=20261019-4';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,13 +34,15 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261008-2';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261019-4';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
-import { mediaContentRect } from './stimulus-geometry.mjs?v=20261008-2';
+import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261019-4';
+import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261019-4';
+import { mediaContentRect } from './stimulus-geometry.mjs?v=20261019-4';
 import {
     captureAudioConsent,
     configureAudioConsentUI
@@ -57,6 +59,7 @@ function participantText(ru, en, es) {
 }
 
 export function appendGazeSample(sample) {
+    appendGazeHistory(state.sessionData, state.runtime, sample);
     state.sessionData.eyeTracking.push(sample);
     if (state.sessionData.eyeTracking.length > RETAINED_GAZE_HARD_CAP) {
         const overflow = state.sessionData.eyeTracking.length - RETAINED_GAZE_TARGET;
@@ -99,9 +102,10 @@ async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
         || typeof URL === 'undefined'
         || typeof URL.createObjectURL !== 'function'
     ) return null;
-    const response = await fetch(contentUrl, { credentials: 'include', cache: 'no-store' });
-    if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
-    const blob = await response.blob();
+    const blob = await fetchWithDeadline(contentUrl, { credentials: 'include', cache: 'no-store' }, async response => {
+        if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
+        return response.blob();
+    }, 120000);
     if (!blob.size) throw new Error('Stimulus preload returned an empty file');
     const expectedMime = String(declaredMimeType || '').toLowerCase();
     const actualMime = String(blob.type || expectedMime).toLowerCase();
@@ -135,15 +139,23 @@ async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
             }
         } else {
             const image = new Image();
-            image.src = objectUrl;
-            if (typeof image.decode === 'function') {
-                await image.decode();
-            } else {
-                await new Promise((resolve, reject) => {
-                    image.onload = resolve;
-                    image.onerror = () => reject(new Error('Stimulus image could not be decoded'));
-                });
-            }
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => { cleanup(); reject(new Error('Stimulus image decode timed out')); }, 15000);
+                const cleanup = () => { clearTimeout(timeout); image.onload = null; image.onerror = null; };
+                let decoding = false;
+                const ready = async () => {
+                    if (decoding) return;
+                    decoding = true;
+                    try {
+                        if (typeof image.decode === 'function') await image.decode();
+                        cleanup(); resolve();
+                    } catch (_) { cleanup(); reject(new Error('Stimulus image could not be decoded')); }
+                };
+                image.onload = ready;
+                image.onerror = () => { cleanup(); reject(new Error('Stimulus image could not be decoded')); };
+                image.src = objectUrl;
+                if (image.complete && image.naturalWidth > 0) ready();
+            });
             if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) {
                 throw new Error('Stimulus image has invalid dimensions');
             }
@@ -447,38 +459,44 @@ async function loadInvitationProtocolByCode(code) {
     const lookupUrl = new URL(base + '/invitations/by-code/' + encodeURIComponent(code));
     const restoredSessionId = state.sessionData?.ids?.session;
     if (restoredSessionId) lookupUrl.searchParams.set('session_id', restoredSessionId);
-    const response = await fetch(lookupUrl.toString());
+    const { response, payload } = await fetchWithDeadline(lookupUrl.toString(), { cache: 'no-store' }, async response => ({
+        response, payload: await response.json().catch(() => null)
+    }));
     if (!response.ok) {
         dbgErr('api', 'invitation:load:error', { base, status: response.status });
         let detail = '';
         try {
-            const errorPayload = await response.json();
+            const errorPayload = payload;
             detail = errorPayload?.message || errorPayload?.error || '';
         } catch (_) { /* Use the HTTP status below. */ }
         throw new Error(detail || ('Invitation lookup failed: HTTP ' + response.status));
     }
-    const payload = await response.json();
+    if (!payload?.definition || typeof payload.definition !== 'object' || Array.isArray(payload.definition)) throw new Error('Invalid invitation response');
     if (payload && payload.definition && typeof payload.definition === 'object') {
         const stimulusIds = window.WecogProtocolStimuli?.referencedStimulusIds
             ? window.WecogProtocolStimuli.referencedStimulusIds(payload.definition)
             : [];
 
-        let stimuliMap = {};
-        revokeInvitationStimulusObjectUrls();
-        if (payload.project_id && stimulusIds.length) {
+        const previousMap = state.runtime.invitationStimuliMap || {};
+        const reusable = state.runtime.invitationProtocolMeta?.code === payload.code
+            && stimulusIds.filter(id => /^\d+$/.test(id)).every(id => String(previousMap[id]?.metadata?.url || '').startsWith('blob:'));
+        let stimuliMap = reusable ? previousMap : {};
+        if (!reusable) revokeInvitationStimulusObjectUrls();
+        if (!reusable && payload.project_id && stimulusIds.length) {
             try {
-                const stimuliResp = await fetch(
-                    base + '/invitations/by-code/' + encodeURIComponent(code) + '/stimuli'
+                const { response: stimuliResp, rows } = await fetchWithDeadline(
+                    base + '/invitations/by-code/' + encodeURIComponent(payload.code || code) + '/stimuli', {},
+                    async response => ({ response, rows: await response.json().catch(() => null) })
                 );
                 if (!stimuliResp.ok) {
                     let detail = '';
                     try {
-                        const errorPayload = await stimuliResp.json();
+                        const errorPayload = rows;
                         detail = errorPayload?.message || errorPayload?.error || '';
                     } catch (_) { /* Use status-only diagnostics. */ }
                     throw new Error(detail || `Stimulus metadata failed: HTTP ${stimuliResp.status}`);
                 }
-                const rows = await stimuliResp.json();
+                if (!Array.isArray(rows)) throw new Error('Invalid stimulus metadata response');
                 if (Array.isArray(rows)) {
                     const mappedRows = await Promise.all(rows.map(async (row) => {
                             const id = String(row?.id);
@@ -530,6 +548,7 @@ async function loadInvitationProtocolByCode(code) {
             protocolId: payload.protocol_id || null,
             projectId: payload.project_id || null,
             protocolName: payload.protocol_name || null,
+            publicationVersion: payload.publication_version || null,
             code: payload.code || code
         };
         state.runtime.invitationStimuliMap = stimuliMap;
@@ -539,6 +558,8 @@ async function loadInvitationProtocolByCode(code) {
             protocolId: payload.protocol_id || null,
             projectId: payload.project_id || null,
             protocolName: payload.protocol_name || null,
+            publicationVersion: payload.publication_version || null,
+            invitationEntryCode: payload.public_code || code,
             loadedAt: Date.now()
         };
         if (payload.protocol_id != null) {
@@ -674,7 +695,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (_) {}
     const inviteHintGlobal = document.getElementById('inviteLinkHint');
     if (invitationCode && invitationCode.trim()) {
-        state.sessionData.ids.invitationCode = invitationCode.trim();
         try {
             await loadInvitationProtocolByCode(invitationCode.trim());
             recordSessionEvent('invitation_protocol_loaded', {
@@ -730,8 +750,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnStartIntro = document.getElementById('btnStartIntro');
     if (btnStartIntro) {
         btnStartIntro.addEventListener('click', async () => {
+            if (btnStartIntro.disabled) return;
             dbg('ui', 'button:btnStartIntro', { hasInviteInput: !!inviteInput });
             const hint = inviteHint || inviteHintGlobal;
+            if (sessionRuntime?.checkpointRestoreFailed) {
+                if (hint) hint.textContent = participantText(
+                    'Не удалось прочитать сохранённую сессию. Не очищайте данные сайта. Закройте другие вкладки исследования и повторите загрузку страницы; если ошибка останется, обратитесь к исследователю.',
+                    'The saved session could not be read. Do not clear site data. Close other study tabs and reload; if the error persists, contact the researcher.'
+                );
+                return;
+            }
             if (inviteInput) {
                 const raw = (inviteInput.value || '').trim();
                 if (!raw) {
@@ -765,33 +793,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                     return;
                 }
-                const loadedMeta = state.runtime?.invitationProtocolMeta;
-                const loadedDef = state.runtime?.invitationProtocolDefinition;
-                const same =
-                    loadedDef &&
-                    loadedMeta &&
-                    String(loadedMeta.code || '') === String(code);
-                if (!same) {
-                    try {
-                        await loadInvitationProtocolByCode(code);
-                    } catch (e) {
-                        if (hint) {
-                            hint.textContent = participantInviteBypass
-                                ? 'Приглашение не найдено. Проверьте код или очистите поле для тестового режима.'
-                                : 'Приглашение не найдено. Проверьте код или получите новую ссылку у исследователя.';
-                        }
-                        return;
+                // Refresh the entry link before consent. Existing admissions
+                // remain pinned by the session_id lookup on the server.
+                btnStartIntro.disabled = true;
+                try {
+                    await loadInvitationProtocolByCode(code);
+                } catch (e) {
+                    if (hint) {
+                        hint.textContent = participantInviteBypass
+                            ? 'Приглашение не найдено. Проверьте код или очистите поле для тестового режима.'
+                            : 'Приглашение не найдено. Проверьте код или получите новую ссылку у исследователя.';
                     }
-                    if (!state.runtime.invitationProtocolDefinition) {
-                        if (hint) {
-                            hint.textContent =
-                                'Приглашение не найдено. Введите другой код.';
-                        }
-                        return;
-                    }
-                    state.sessionData.ids.invitationCode = code;
-                    if (hint) hint.textContent = 'Приглашение загружено.';
+                    return;
+                } finally {
+                    btnStartIntro.disabled = false;
                 }
+                if (!state.runtime.invitationProtocolDefinition) {
+                    if (hint) hint.textContent = 'Приглашение не найдено. Введите другой код.';
+                    return;
+                }
+                // Admission keeps the immutable code returned by the lookup.
+                if (hint) hint.textContent = 'Приглашение загружено.';
             }
             nextStep(2);
         });
@@ -909,6 +931,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.WECOG_DEBUG_HUD.start();
     }
 
+    state.runtime.participantShellReady = true;
+    window.dispatchEvent(new Event('wecog:participant-ready'));
+    if (sessionRuntime?.restoringFinal) return;
+    if (state.sessionData.admissionPending) {
+        nextStep(2);
+        return;
+    }
     if (sessionRuntime?.reloadRecovery) {
         const requiresPrompt = sessionRuntime.reloadRecovery.requiresPrompt !== false;
         const interruptedBlock = sessionRuntime.reloadRecovery.interruptedBlock;

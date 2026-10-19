@@ -2,8 +2,9 @@ const crypto = require('crypto');
 const { withTransaction } = require('../db/transaction');
 const { HttpError } = require('../security/http-error');
 const { METRIC_CATALOG } = require('./query');
+const { sessionVersion, resolveProtocolVersion } = require('./protocol-versions');
 
-const ANALYTICS_BACKEND_VERSION = 'analytics-api-1.0.0';
+const ANALYTICS_BACKEND_VERSION = 'analytics-api-1.1.0';
 const QC_RULES_VERSION = 'qc-rules-1.0.0';
 
 function stableJson(value) {
@@ -34,15 +35,18 @@ function collectProtocolOptions(definition) {
   const blocks = [];
   const stimuli = new Map();
   const aois = [];
+  const conditions = new Set();
   protocolBlocks(definition).forEach((block, blockIndex) => {
     const blockId = String(block?.id || `block-${blockIndex + 1}`);
     blocks.push({
       id: blockId,
+      hasTrials: Boolean(block?.trials?.length || block?.content?.trials?.length),
       name_ru: block?.title || block?.content?.title || blockId,
       name_en: block?.title_en || block?.content?.title_en || block?.title || blockId,
     });
     const config = block?.blockConfig || block?.content || {};
-    const trials = Array.isArray(block?.trials) ? block.trials : [];
+    const trials = Array.isArray(block?.trials) ? block.trials : (block?.content?.trials || []);
+    trials.forEach(trial => { if (trial?.condition) conditions.add(String(trial.condition)); });
     const ids = [
       ...trials.map(trial => trial?.stimulusId),
       ...(Array.isArray(block?.params?.stimuli_ids) ? block.params.stimuli_ids : []),
@@ -90,7 +94,7 @@ function collectProtocolOptions(definition) {
     stimuli: Array.from(stimuli.values()),
     aois,
     groups: [],
-    conditions: [],
+    conditions: [...conditions].map(id => ({ id, name_ru: id, name_en: id })),
     comparisons,
   };
 }
@@ -103,6 +107,12 @@ function gazeSummary(features) {
 function sessionMatchesQuery(row, query) {
   const filters = query.filters;
   const reasons = [];
+  if (query.comparison?.design === 'independent') {
+    const cohort = [...query.comparison.referenceParticipantIds, ...query.comparison.comparisonParticipantIds];
+    if (!cohort.includes(String(row.participant_key || row.participant_id))) reasons.push('comparison_participant_filter');
+  }
+  if ((/^(publication|invitation):/.test(query.protocolVersion) || query.protocolVersion === 'legacy')
+    && sessionVersion(row) !== query.protocolVersion) reasons.push('protocol_version_filter');
   const idMatches = !filters.sessionIds.length || filters.sessionIds.some(value => (
     String(value) === String(row.id) || String(value) === String(row.session_id)
   ));
@@ -110,7 +120,7 @@ function sessionMatchesQuery(row, query) {
   if (filters.participantIds.length && !filters.participantIds.some(value => String(value) === String(row.participant_id))) {
     reasons.push('participant_filter');
   }
-  if (!filters.includeIncompleteSessions && !row.stopped_at) reasons.push('incomplete_session');
+  if (!filters.includeIncompleteSessions && (!row.stopped_at || row.features_payload?.experimentMeta?.protocolTermination)) reasons.push('incomplete_session');
   const validity = String(row.qc_validity || 'not_computed').toLowerCase();
   if (filters.qcMode === 'valid_only' && validity !== 'valid') reasons.push('qc_not_valid');
   if (filters.qcMode === 'valid_and_borderline' && !['valid', 'borderline'].includes(validity)) {
@@ -137,7 +147,8 @@ function sessionMatchesQuery(row, query) {
       || null;
     if (!device || !filters.deviceClasses.includes(String(device))) reasons.push('device_filter');
   }
-  if (filters.groupIds.length || filters.conditionIds.length) reasons.push('group_or_condition_not_configured');
+  if (filters.groupIds.length) reasons.push('group_or_condition_not_configured');
+  if (filters.conditionIds.length && !(row.features_payload?.cognitiveResults || []).some(trial => filters.conditionIds.map(String).includes(String(trial.condition)))) reasons.push('condition_filter');
   if (filters.blockIds.length || filters.stimulusIds.length) {
     const presentations = Array.isArray(row.features_payload?.gaze_analytics?.presentations)
       ? row.features_payload.gaze_analytics.presentations
@@ -149,7 +160,12 @@ function sessionMatchesQuery(row, query) {
         || filters.stimulusIds.some(value => normalizeStimulusId(value) === normalizeStimulusId(presentation.stimulusId));
       return blockOk && stimulusOk;
     });
-    if (!hasPresentation) reasons.push('requested_gaze_presentation_missing');
+    const hasTaskTrial = (row.features_payload?.cognitiveResults || []).some(trial => {
+      const blockOk = !filters.blockIds.length || filters.blockIds.some(value => String(value) === String(trial?.blockId));
+      const stimulusOk = !filters.stimulusIds.length || filters.stimulusIds.some(value => normalizeStimulusId(value) === normalizeStimulusId(trial?.stimulusId));
+      return blockOk && stimulusOk;
+    });
+    if (!hasPresentation && !hasTaskTrial) reasons.push('requested_gaze_presentation_missing');
   }
   return reasons;
 }
@@ -167,22 +183,24 @@ async function loadProtocol(queryable, projectId, protocolId) {
 async function loadCandidateSessions(queryable, projectId, protocolId) {
   const result = await queryable.query(
     `SELECT s.id, s.session_id,
-            COALESCE(NULLIF(f.payload->'ids'->>'participantAlias', ''), s.participant_id) AS participant_id,
+            COALESCE(s.participant_id, NULLIF(f.payload->'ids'->>'participantAlias', '')) AS participant_id,
             s.project_id, s.protocol_id,
             s.started_at, s.stopped_at, s.updated_at,
             q.qc_score, q.validity AS qc_validity, q.fail_reasons,
             q.payload AS qc_payload, q.updated_at AS qc_updated_at,
             f.payload AS features_payload, f.updated_at AS features_updated_at,
-            i.protocol_definition
+            s.invitation_id, i.publication_version, i.protocol_definition,
+            s.participant_id AS participant_key
      FROM sessions s
      LEFT JOIN invitations i ON i.id = s.invitation_id
      LEFT JOIN session_qc_summary q ON q.session_id = s.id
      LEFT JOIN session_features f ON f.session_id = s.id
      WHERE s.project_id = $1 AND s.protocol_id = $2
      ORDER BY s.started_at ASC NULLS LAST, s.id ASC
-     LIMIT 2000`,
+     LIMIT 2001`,
     [projectId, protocolId]
   );
+  if (result.rows.length > 2000) throw new HttpError(422, 'This protocol requires paginated analysis: the 2000-session limit was exceeded', 'analytics_session_limit');
   return result.rows;
 }
 
@@ -191,7 +209,8 @@ function datasetFingerprint(protocol, rows) {
     protocol: {
       id: protocol.id,
       updatedAt: protocol.updated_at ? new Date(protocol.updated_at).toISOString() : null,
-      version: protocolVersion(protocol.definition),
+      version: protocol.analyticsVersion || protocolVersion(protocol.definition),
+      definitionHash: sha256(protocol.definition),
     },
     sessions: rows.map(row => ({
       id: Number(row.id),
@@ -201,6 +220,8 @@ function datasetFingerprint(protocol, rows) {
       featuresUpdatedAt: row.features_updated_at ? new Date(row.features_updated_at).toISOString() : null,
       qcUpdatedAt: row.qc_updated_at ? new Date(row.qc_updated_at).toISOString() : null,
       mediaManifest: row.protocol_definition?.mediaManifest || null,
+      protocolVersion: sessionVersion(row),
+      protocolDefinitionHash: row.protocol_definition ? sha256(row.protocol_definition) : null,
     })),
   });
 }
@@ -244,13 +265,19 @@ function publicSnapshot(row) {
 
 async function createSnapshot(pool, query, userId) {
   return withTransaction(pool, async client => {
-    const protocol = await loadProtocol(client, query.projectId, query.protocolId);
-    if (!protocol) throw new HttpError(404, 'Protocol not found', 'analytics_protocol_not_found');
-    const actualVersion = protocolVersion(protocol.definition);
-    if (actualVersion !== query.protocolVersion) {
-      throw new HttpError(409, 'Protocol version does not match', 'analytics_protocol_version_mismatch');
-    }
+    const current = await loadProtocol(client, query.projectId, query.protocolId);
+    if (!current) throw new HttpError(404, 'Protocol not found', 'analytics_protocol_not_found');
+    const protocol = await resolveProtocolVersion(client, current, query.protocolVersion);
     const candidates = await loadCandidateSessions(client, query.projectId, query.protocolId);
+    if (query.comparison?.design === 'independent') {
+      const roster = new Set(candidates.filter(row => !sessionMatchesQuery(row, { ...query, comparison: null,
+        filters: { ...query.filters, sessionIds: [], participantIds: [], qcMode: 'all', minValidFraction: null, minSignalConfidence: null,
+          dateFrom: null, dateTo: null, includeIncompleteSessions: true, groupIds: [], conditionIds: [], blockIds: [], stimulusIds: [], deviceClasses: [] } }).length)
+        .map(row => String(row.participant_key || row.participant_id)));
+      if ([...query.comparison.referenceParticipantIds, ...query.comparison.comparisonParticipantIds].some(id => !roster.has(String(id)))) {
+        throw new HttpError(422, 'Comparison participants must belong to the selected protocol version', 'comparison_participant_out_of_scope');
+      }
+    }
     const included = [];
     const excluded = [];
     candidates.forEach(row => {
@@ -297,8 +324,9 @@ async function loadSnapshot(pool, snapshotId) {
 }
 
 async function hydrateSnapshot(pool, snapshotRow) {
-  const protocol = await loadProtocol(pool, snapshotRow.project_id, snapshotRow.protocol_id);
-  if (!protocol) throw new HttpError(409, 'Snapshot protocol is unavailable', 'analytics_snapshot_stale');
+  const current = await loadProtocol(pool, snapshotRow.project_id, snapshotRow.protocol_id);
+  if (!current) throw new HttpError(409, 'Snapshot protocol is unavailable', 'analytics_snapshot_stale');
+  const protocol = await resolveProtocolVersion(pool, current, snapshotRow.query.protocolVersion);
   const allRows = await loadCandidateSessions(pool, snapshotRow.project_id, snapshotRow.protocol_id);
   const ids = new Set((snapshotRow.included_session_ids || []).map(Number));
   const sessionRows = allRows.filter(row => ids.has(Number(row.id)));

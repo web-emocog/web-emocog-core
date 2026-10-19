@@ -98,7 +98,7 @@
     <h1 id="loginTitle">Вход</h1>
     <p class="sub" id="loginSubtitle">Введите данные рабочей учётной записи.</p>
     <form id="form" method="post" action="../developer.html">
-      <div class="error" id="error">Ошибка входа</div>
+      <div class="error" id="error" role="alert">Ошибка входа</div>
       <label for="login">Email</label>
       <input type="email" id="login" name="login" autocomplete="username" required autofocus placeholder="name@example.com">
       <label for="password">Пароль</label>
@@ -111,7 +111,7 @@
     <a href="../index.html" class="back">← На главную</a>
   </div>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../account-storage.js?v=20261008-1"></script>
+  <script src="../account-storage.js?v=20261019-4"></script>
   <script>
     (function () {
       var requestedPortal = new URLSearchParams(window.location.search || '').get('portal');
@@ -228,6 +228,11 @@
           credentials: 'include',
           body: JSON.stringify({ email: login, password: password })
         })
+          .catch(function () {
+            var error = new Error('Login server unavailable');
+            error.code = 'login_network_unavailable';
+            throw error;
+          })
           .then(function (r) {
             if (!r.ok) {
               return r.json().catch(function () { return {}; }).then(function (j) {
@@ -264,7 +269,14 @@
             window.location.href = destination;
           })
           .catch(function (err) {
-            errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
+            if (err.code === 'login_network_unavailable') {
+              var local = ['localhost', '127.0.0.1', '[::1]'].indexOf(window.location.hostname) >= 0;
+              errEl.textContent = local
+                ? 'Не удалось связаться с локальным сервером. Убедитесь, что решение запущено, и повторите вход. Это не подтверждает ошибку в пароле.'
+                : 'Не удалось связаться с сервером. Проверьте подключение и повторите вход.';
+            } else {
+              errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
+            }
             errEl.classList.add('visible');
           });
       });

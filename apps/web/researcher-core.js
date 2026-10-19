@@ -153,6 +153,7 @@ async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
     throw new Error('Нужен вход в API. Откройте apps/web/developer/login.html');
   }
   var projectId = options.projectId != null ? parseInt(options.projectId, 10) : await resolveApiProjectId();
+  var selectionAtSaveStart = localStorage.getItem('emocog_selected_project_id');
   var apiState = loadBuilderApiState(experimentKey);
   var slug = String(exportJson.protocolId || options.invitationCode || '').trim();
   var definition = Object.assign({}, exportJson, {
@@ -160,6 +161,9 @@ async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
     selected_metrics: deriveSelectedMetricsFromBlocks(exportJson.blocks)
   });
   var payload = { name: String(exportJson.title || 'Protocol').trim(), definition: definition };
+  payload.save_mode = options.draftOnly ? 'draft' : 'publish';
+  if (apiState.revision) payload.expected_revision = apiState.revision;
+  else if (apiState.updatedAt) payload.expected_updated_at = apiState.updatedAt;
   var targetProtocolId = options.forceProtocolId || apiState.apiProtocolId;
   var saved;
   if (targetProtocolId && !options.forceCreate) {
@@ -173,9 +177,13 @@ async function persistBuilderProtocolToApi(exportJson, experimentKey, options) {
     apiProtocolId: saved.id,
     projectId: saved.project_id || projectId,
     invitationCode: options.invitationCode || apiState.invitationCode || null,
-    publishVerifiedAt: null
+    publishVerifiedAt: apiState.publishVerifiedAt || null,
+    updatedAt: saved.updated_at,
+    revision: saved.revision
   });
-  setResearcherProjectSelection(saved.project_id || projectId);
+  if (localStorage.getItem('emocog_selected_project_id') === selectionAtSaveStart) {
+    setResearcherProjectSelection(saved.project_id || projectId);
+  }
   return saved;
 }
 async function createInvitationForProtocol(protocolId, options) {
@@ -183,6 +191,8 @@ async function createInvitationForProtocol(protocolId, options) {
   var pid = parseInt(protocolId, 10);
   if (!Number.isFinite(pid)) throw new Error('Invalid protocol ID');
   var body = { protocol_id: pid };
+  if (options.expectedUpdatedAt) body.expected_updated_at = options.expectedUpdatedAt;
+  if (options.expectedRevision) body.expected_revision = options.expectedRevision;
   if (options.maxRuns) body.max_runs = parseInt(options.maxRuns, 10);
   if (options.expiresAt) body.expires_at = options.expiresAt;
   return apiPost('/invitations', body);
@@ -190,22 +200,19 @@ async function createInvitationForProtocol(protocolId, options) {
 async function publishBuilderProtocolAndInvitation(exportJson, experimentKey, protocolSlug) {
   var slug = String(protocolSlug || exportJson.protocolId || '').trim();
   if (!slug) throw new Error('Укажите Protocol ID');
-  var isNewProtocol = String(experimentKey || '') === 'draft';
-  var publishOpts = isNewProtocol ? { forceCreate: true } : {};
-  var savedProtocol = await persistBuilderProtocolToApi(exportJson, experimentKey, publishOpts);
-  // Invitations pin immutable protocol/media snapshots. Reusing a code after
-  // editing a protocol would launch the previous experiment, not this publish.
-  var inv = await createInvitationForProtocol(savedProtocol.id);
+  var savedProtocol = await persistBuilderProtocolToApi(exportJson, experimentKey);
+  // A stable entry code follows the latest immutable invitation for new sessions.
+  var inv = await createInvitationForProtocol(savedProtocol.id, { expectedUpdatedAt: savedProtocol.updated_at, expectedRevision: savedProtocol.revision });
   saveBuilderApiState(experimentKey, {
     apiProtocolId: savedProtocol.id,
-    invitationCode: inv.code,
+    invitationCode: inv.public_code || inv.code,
     projectId: savedProtocol.project_id,
     publishVerifiedAt: new Date().toISOString()
   });
   return {
     protocol: savedProtocol,
     invitation: inv,
-    link: buildParticipantRunLink(inv.code)
+    link: buildParticipantRunLink(inv.public_code || inv.code)
   };
 }
 window.publishBuilderProtocolAndInvitation = publishBuilderProtocolAndInvitation;
@@ -516,6 +523,7 @@ function navigate(href){
 }
 
 function clearExperimentBuilderDraft() {
+  localStorage.removeItem('emocog_protocol_persistence_draft');
   localStorage.removeItem('emocog_session_features_draft');
   localStorage.removeItem('emocog_protocol_blocks');
   localStorage.removeItem('emocog_protocol_meta_draft');

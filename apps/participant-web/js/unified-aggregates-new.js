@@ -1,6 +1,6 @@
 import { getEmotionSummary } from './emotion-stub-new.js';
-import '../../shared/rt-alignment.js';
-import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261008-2';
+import '../../shared/rt-alignment.js?v=20261019-4';
+import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261019-4';
 
 /**
  * Формирование payload агрегатов для отправки на сервер (Фаза 0.1).
@@ -213,6 +213,12 @@ function buildBlocksFromSession(sessionData, emotion_summary) {
 }
 
 function buildBpmSummary(sessionData) {
+    if (sessionData.continuousSignalState) {
+        const summary = sessionData.continuousSignalState;
+        return { sampleCount: summary.sampleCount, validSampleCount: summary.validSampleCount,
+            bpmMean: roundN(summary.bpmMean, 2), bpmMin: summary.bpmMin, bpmMax: summary.bpmMax,
+            scope: 'session_cumulative_fresh_publications', methodVersion: summary.methodVersion || null };
+    }
     const provided = sessionData?.bpm_summary ?? sessionData?.bpmSummary ?? null;
     if (provided && typeof provided === 'object') {
         return { ...provided };
@@ -313,6 +319,7 @@ function normalizeRespirationSummaryPayload(summary) {
 }
 
 function buildRespirationSummary(sessionData) {
+    if (sessionData.continuousSignalState) return normalizeRespirationSummaryPayload(sessionData.continuousSignalState);
     const provided = sessionData?.respiration_summary ?? sessionData?.respirationSummary ?? null;
     if (provided && typeof provided === 'object') {
         return normalizeRespirationSummaryPayload(provided);
@@ -444,6 +451,8 @@ function buildGazeAnalyticsPayload(sessionData) {
             intrinsicHeight: Number.isFinite(entry.intrinsicHeight) ? entry.intrinsicHeight : null,
             grid: entry.grid || { width: 0, height: 0, values: [] },
             fixationPoints: Array.isArray(entry.fixationPoints) ? entry.fixationPoints : [],
+            fixationCountTotal: entry.fixationCountTotal ?? entry.fixationPoints?.length ?? 0,
+            fixationsTruncated: entry.fixationsTruncated === true,
             sampleCountTotal: Number(entry.sampleCountTotal || 0),
             sampleCountValid: Number(entry.sampleCountValid || 0),
             lowConfidenceCount: Number(entry.lowConfidenceCount || 0),
@@ -453,27 +462,46 @@ function buildGazeAnalyticsPayload(sessionData) {
             meanConfidence: Number.isFinite(entry.meanConfidence) ? entry.meanConfidence : null,
             algorithm: entry.algorithm || null
         }));
+    const storedFixations = presentations.reduce((count, entry) => count + entry.fixationPoints.length, 0);
+    // Bound wire detail independently of session duration; keep every full grid.
+    // Incomplete point lists must never be used as complete AOI observations.
+    if (storedFixations > 4000) {
+        const nonempty = presentations.filter(entry => entry.fixationPoints.length > 0).length;
+        const ratio = (4000 - nonempty) / (storedFixations - nonempty);
+        for (const entry of presentations) {
+            const retained = entry.fixationPoints.length ? 1 + Math.floor((entry.fixationPoints.length - 1) * ratio) : 0;
+            if (retained < entry.fixationPoints.length) {
+                entry.fixationPoints = entry.fixationPoints.slice(0, retained);
+                entry.fixationsTruncated = true;
+            }
+        }
+    }
     const validSamples = samples.filter(sample => sample?.valid !== false
         && Number.isFinite(sample?.correctedX) && Number.isFinite(sample?.correctedY));
     const confidences = validSamples.map(sample => sample?.confidence).filter(Number.isFinite);
     const times = samples.map(sample => sample?.t).filter(Number.isFinite).sort((a, b) => a - b);
     const observationDurationMs = times.length > 1 ? Math.max(0, times[times.length - 1] - times[0]) : 0;
+    const cumulative = sessionData.heatmaps?.accumulation?.summary;
     const outsideStimulusCount = presentations.reduce((sum, entry) => sum + entry.outsideStimulusCount, 0);
     return {
         schemaVersion: 'gaze_analytics.v1',
         coordinateSpace: 'stimulus_normalized_0_1',
         summary: {
-            sampleCountTotal: samples.length,
-            sampleCountValid: validSamples.length,
-            validFraction: samples.length ? roundN(validSamples.length / samples.length, 4) : null,
-            lowConfidenceCount: samples.filter(sample => Number.isFinite(sample?.confidence) && sample.confidence < 0.65).length,
-            offScreenCount: samples.filter(sample => sample?.onScreen === false).length,
+            sampleCountTotal: cumulative?.sampleCountTotal ?? samples.length,
+            sampleCountValid: cumulative?.sampleCountValid ?? validSamples.length,
+            validFraction: cumulative ? (cumulative.sampleCountTotal ? roundN(cumulative.sampleCountValid / cumulative.sampleCountTotal, 4) : null)
+                : (samples.length ? roundN(validSamples.length / samples.length, 4) : null),
+            lowConfidenceCount: cumulative?.lowConfidenceCount ?? samples.filter(sample => Number.isFinite(sample?.confidence) && sample.confidence < 0.65).length,
+            offScreenCount: cumulative?.offScreenCount ?? samples.filter(sample => sample?.onScreen === false).length,
             outsideStimulusCount,
-            observationDurationMs: Math.round(observationDurationMs),
-            meanConfidence: confidences.length ? roundN(mean(confidences), 4) : null,
+            observationDurationMs: Math.round(cumulative?.lastT != null ? Math.max(0, cumulative.lastT - cumulative.firstT) : observationDurationMs),
+            meanConfidence: cumulative ? (cumulative.confidenceCount ? roundN(cumulative.confidenceSum / cumulative.confidenceCount, 4) : null)
+                : (confidences.length ? roundN(mean(confidences), 4) : null),
+            accumulationMethod: sessionData.heatmaps?.accumulation?.method || 'retained_samples',
+            ignoredTimestampCount: cumulative?.ignoredTimestamps || 0,
             presentationCountTotal: allPresentations.length,
             presentationCountStored: presentations.length,
-            presentationsTruncated: allPresentations.length > presentations.length
+            presentationsTruncated: allPresentations.length > presentations.length || (cumulative?.omittedPresentations || 0) > 0
         },
         presentations
     };

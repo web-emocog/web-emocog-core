@@ -80,6 +80,31 @@
       "then": {
         "required": ["comparison"]
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "comparison": {
+            "required": [
+              "design"
+            ]
+          }
+        },
+        "required": [
+          "comparison"
+        ]
+      },
+      "then": {
+        "properties": {
+          "filters": { "properties": { "groupIds": { "maxItems": 0 }, "conditionIds": { "maxItems": 0 }, "blockIds": { "maxItems": 0 }, "stimulusIds": { "maxItems": 0 }, "aoiIds": { "maxItems": 0 } } },
+          "mode": {
+            "const": "group"
+          },
+          "analysisLevel": {
+            "const": "level_2"
+          }
+        }
+      }
     }
   ],
   "additionalProperties": false,
@@ -154,23 +179,113 @@
       "additionalProperties": false
     },
     "comparison": {
-      "type": "object",
-      "required": ["factorIds", "contrastIds"],
-      "properties": {
-        "factorIds": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "factorIds",
+            "contrastIds"
+          ],
+          "properties": {
+            "factorIds": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "contrastIds": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          },
+          "additionalProperties": false
         },
-        "contrastIds": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        {
+          "type": "object",
+          "required": [
+            "design",
+            "metricId",
+            "axis",
+            "referenceId",
+            "comparisonId"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "design": {
+              "const": "paired"
+            },
+            "metricId": {
+              "enum": [
+                "task.rt_mean_ms",
+                "task.rt_median_ms",
+                "task.accuracy_pct"
+              ]
+            },
+            "axis": {
+              "enum": [
+                "block",
+                "condition"
+              ]
+            },
+            "referenceId": {
+              "$ref": "#/$defs/id"
+            },
+            "comparisonId": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "design",
+            "metricId",
+            "referenceParticipantIds",
+            "comparisonParticipantIds"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "design": {
+              "const": "independent"
+            },
+            "metricId": {
+              "enum": [
+                "task.rt_mean_ms",
+                "task.rt_median_ms",
+                "task.accuracy_pct"
+              ]
+            },
+            "referenceParticipantIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "comparisonParticipantIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
         }
-      },
-      "additionalProperties": false
+      ]
     }
   }
 }

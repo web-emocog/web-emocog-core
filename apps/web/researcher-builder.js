@@ -67,6 +67,8 @@ function ExperimentBuilderView(options = {}) {
   if (typeof activateStimulusLibraryScope === 'function') activateStimulusLibraryScope();
   const startStep = options.startStep !== undefined ? options.startStep : 0;
   const experimentId = options.experimentId || null;
+  let savedExperimentId = experimentId;
+  let persistenceSettingsDraft = null;
 
   let currentStep = startStep;
   let importMode = null;
@@ -547,8 +549,8 @@ function ExperimentBuilderView(options = {}) {
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Заголовок', 'Title')}</label>
           <input class="proto-field" data-field="title" value="${previewEscape(localizedInstructionValue(c, 'title'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Текст', 'Text')}</label>
-          <textarea class="proto-field" data-field="text" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${previewEscape(localizedInstructionValue(c, 'text'))}</textarea>
-          <div style="font-size:10px;color:var(--muted);line-height:1.45;">${trb('В авторской инструкции используйте {response}: способ ответа подставится из таблицы проб следующей задачи.', 'Use {response} in custom instructions: the response method comes from the next task’s trial table.')}</div>
+          <textarea class="proto-field" data-field="text" rows="3" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;resize:vertical;">${previewEscape(resolvedInstructionText(block, CURRENT_LANG))}</textarea>
+          <div style="font-size:10px;color:var(--muted);line-height:1.45;">${trb('Способ ответа подставляется автоматически из таблицы проб. Укажите только правила задания — клавиши и схему ответов система покажет участнику сама.', 'The response method is inserted automatically from the trial table. Describe only the task rules; the system shows the keys and response mapping.')}</div>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Кнопка', 'Button')}</label>
           <input class="proto-field" data-field="buttonText" value="${previewEscape(localizedInstructionValue(c, 'buttonText', 'Далее'))}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;" />
         </div>`;
@@ -654,10 +656,15 @@ function ExperimentBuilderView(options = {}) {
       block.content.selected_metrics = autoRtMetricsForTaskType(block.content.taskType, block.content);
     }
     if (block.type === 'instruction') {
+      block.content.standardInstruction = false;
       ['title', 'text', 'buttonText'].forEach(field => {
         if (block.content[field] === undefined) return;
         block.content[field + (CURRENT_LANG === 'en' ? 'En' : 'Ru')] = block.content[field];
       });
+      block.label = block.content.title || trb('Инструкция', 'Instruction');
+      block[CURRENT_LANG === 'en' ? 'labelEn' : 'labelRu'] = block.label;
+      const heading = card.querySelector('.proto-card-title');
+      if (heading) heading.textContent = block.label;
     }
     localStorage.setItem('emocog_protocol_blocks', JSON.stringify(experimentBlocks));
   }
@@ -795,6 +802,7 @@ function ExperimentBuilderView(options = {}) {
     card.querySelectorAll('.proto-field').forEach(el => {
       el.addEventListener('click', e => e.stopPropagation());
       el.addEventListener('change', () => saveBlockInlineFields(block, card));
+      if (el.matches('input, textarea')) el.addEventListener('input', () => saveBlockInlineFields(block, card));
     });
     card.querySelectorAll('.proto-label-input, .proto-inline-editor input, .proto-inline-editor textarea, .proto-inline-editor select').forEach(el => {
       el.addEventListener('click', e => e.stopPropagation());
@@ -803,6 +811,7 @@ function ExperimentBuilderView(options = {}) {
   const instructionValueForLocale = (content, field, locale, fallback = '') => {
     const c = content || {};
     if (locale === 'en') {
+      if (c[field + 'En']) return c[field + 'En'];
       const knownTranslations = typeof TEMPLATE_INSTRUCTION_TRANSLATIONS !== 'undefined' ? TEMPLATE_INSTRUCTION_TRANSLATIONS : {};
       const known = knownTranslations[c.titleRu || c.title] || null;
       if (field === 'title' && known?.title) return known.title;
@@ -815,8 +824,26 @@ function ExperimentBuilderView(options = {}) {
   const localizedInstructionValue = (content, field, fallback = '') => (
     instructionValueForLocale(content, field, CURRENT_LANG, fallback)
   );
+
+  function resolvedInstructionText(block, locale) {
+    const index = experimentBlocks.indexOf(block);
+    const next = experimentBlocks.slice(index + 1).find(item => !['instruction', 'instructions', 'fixation'].includes(item.type));
+    const text = instructionValueForLocale(block.content, 'text', locale, '');
+    if (next?.type !== 'cognitive_task') return text;
+    const actions = [...new Set((next.content?.trials || []).map(trial => trial.action || trial.correctResponse).filter(Boolean))];
+    const labels = { space: ['нажмите Пробел', 'press Space'], Space: ['нажмите Пробел', 'press Space'],
+      arrow_up: ['нажмите стрелку вверх', 'press the Up Arrow'], arrow_down: ['нажмите стрелку вниз', 'press the Down Arrow'],
+      arrow_left: ['нажмите стрелку влево', 'press the Left Arrow'], arrow_right: ['нажмите стрелку вправо', 'press the Right Arrow'],
+      ArrowUp: ['нажмите стрелку вверх', 'press the Up Arrow'], ArrowDown: ['нажмите стрелку вниз', 'press the Down Arrow'],
+      ArrowLeft: ['нажмите стрелку влево', 'press the Left Arrow'], ArrowRight: ['нажмите стрелку вправо', 'press the Right Arrow'],
+      mouse_click: ['нажмите левую кнопку мыши', 'click the left mouse button'], mouse_intent: ['начните осознанное движение мышью', 'start a deliberate mouse movement'] };
+    const response = actions.map(action => labels[action]?.[locale === 'en' ? 1 : 0]
+      || ((locale === 'en' ? 'press ' : 'нажмите клавишу ') + (window.WecogKeyboardResponses.label(action) || action))).join(' / ');
+    return window.WecogInstructionResponses.render(text, response, { lang: locale, multiple: actions.length > 1 });
+  }
   const localizedBlockLabel = (block, fallback = '') => {
     if (!block) return fallback;
+    if (block.type === 'instruction') return localizedInstructionValue(block.content, 'title', block.label || fallback);
     if (CURRENT_LANG === 'en') {
       const blockTranslations = typeof TEMPLATE_BLOCK_LABEL_TRANSLATIONS !== 'undefined' ? TEMPLATE_BLOCK_LABEL_TRANSLATIONS : {};
       if (blockTranslations[block.labelRu || block.label]) return blockTranslations[block.labelRu || block.label];
@@ -1041,6 +1068,65 @@ function ExperimentBuilderView(options = {}) {
     let currentTrials = JSON.parse(JSON.stringify(block.content.trials));
     let autoGenSnapshot = null;
     let dirty = false;
+    const selectedTrials = new Set();
+    const keyboard = window.WecogKeyboardResponses;
+    function responseOptions(action = '') {
+      const keys = ['KeyZ', 'KeyX', 'Comma', 'Period', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM'];
+      const custom = keyboard.normalize(action);
+      if (custom && keyboard.label(custom) && !keys.includes(custom)) keys.push(custom);
+      return `<option value="">— ${trb('не нужно', 'none')} —</option>
+        <option value="mouse_click">${trb('Клик мышью', 'Mouse click')}</option>
+        <option value="mouse_intent">${trb('Движение мыши', 'Pointer intent')}</option>
+        <option value="space">${trb('Пробел', 'Space')}</option>
+        ${keys.map(key => `<option value="${key}">${previewEscape(keyboard.label(key))}</option>`).join('')}
+        <option value="arrow_up">${trb('Вверх', 'Up')}</option>
+        <option value="arrow_down">${trb('Вниз', 'Down')}</option>
+        <option value="arrow_right">${trb('Вправо', 'Right')}</option>
+        <option value="arrow_left">${trb('Влево', 'Left')}</option>
+        <option value="__custom__">${trb('Выбрать свою кнопку…', 'Choose a custom key…')}</option>`;
+    }
+
+    function captureResponseKey(onSave, onCancel) {
+      const dialog = document.createElement('dialog');
+      dialog.setAttribute('aria-label', trb('Выбрать свою кнопку', 'Choose a custom key'));
+      dialog.style.cssText = 'background:var(--card-bg,#fff);color:var(--text);border:1px solid var(--stroke);border-radius:18px;padding:24px;width:min(440px,90vw);box-sizing:border-box;';
+      dialog.innerHTML = `<h3>${trb('Нажмите нужную клавишу', 'Press the key you want')}</h3>
+        <p>${trb('Буквы, цифры, знаки, стрелки или Enter. Tab и Escape служат для навигации; системные сочетания не назначаются.', 'Letters, digits, punctuation, arrows or Enter. Tab and Escape are navigation keys; system shortcuts cannot be assigned.')}</p>
+        <p role="status" class="captured-key" tabindex="0" autofocus style="font-weight:700;min-height:2em;"></p>
+        <div style="display:flex;justify-content:flex-end;gap:12px;">
+          <button type="button" class="quick-btn cancel-key">${trb('Отмена', 'Cancel')}</button>
+          <button type="button" class="quick-btn save-key" disabled>${trb('Сохранить', 'Save')}</button>
+        </div>`;
+      let captured = null;
+      const finish = saved => {
+        dialog.close();
+        dialog.remove();
+        if (saved) onSave(captured); else onCancel();
+      };
+      dialog.addEventListener('keydown', event => {
+        if (event.code === 'Escape' || event.code === 'Tab') return;
+        if (event.target.closest('button') && ['Enter', 'Space'].includes(event.code)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat || event.isComposing) return;
+        const key = keyboard.fromEvent(event);
+        if (!key) {
+          captured = null;
+          dialog.querySelector('.save-key').disabled = true;
+          dialog.querySelector('.captured-key').textContent = trb('Эту клавишу или сочетание назначить нельзя.', 'This key or shortcut cannot be assigned.');
+          return;
+        }
+        captured = key;
+        dialog.querySelector('.captured-key').textContent = `${trb('Ваша кнопка:', 'Your key:')} ${keyboard.label(key) || key}`;
+        dialog.querySelector('.save-key').disabled = false;
+      }, true);
+      dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
+      dialog.querySelector('.cancel-key').addEventListener('click', () => finish(false));
+      dialog.querySelector('.save-key').addEventListener('click', () => finish(true));
+      overlay.appendChild(dialog);
+      dialog.showModal();
+      dialog.querySelector('.captured-key').focus();
+    }
 
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.65);backdrop-filter:blur(5px);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -1189,10 +1275,19 @@ function ExperimentBuilderView(options = {}) {
         <button id="autoGenUndoBtn" class="quick-btn" style="display:none;font-size:12px;">${trb('Отменить генерацию', 'Undo generation')}</button>
       </div>
 
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <label style="font-size:12px;"><input type="checkbox" id="selectAllTrials"> ${trb('Все пробы', 'All trials')}</label>
+        <label style="font-size:12px;">${trb('Ответ для отмеченных:', 'Response for selected:')}
+          <select id="bulkResponseAction">${responseOptions()}</select>
+        </label>
+        <button type="button" class="quick-btn" id="applyBulkResponse">${trb('Применить', 'Apply')}</button>
+      </div>
+
       <div id="trialsContainer" style="flex:1 0 220px;min-height:220px;overflow:auto;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.45);">
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
           <thead>
             <tr style="background:rgba(92,102,189,.08);border-bottom:1px solid var(--stroke);">
+              <th style="width:32px;"></th>
               <th style="padding:10px 8px;width:44px;text-align:center;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">№</th>
               <th style="padding:10px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">${trb('Стимул', 'Stimulus')}</th>
               <th style="padding:10px 8px;width:120px;text-align:left;font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;">${trb('Условие', 'Condition')}</th>
@@ -1307,12 +1402,13 @@ function ExperimentBuilderView(options = {}) {
     function renderRows() {
       updateTrialCountBadge();
       if (currentTrials.length === 0) {
-        container.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:48px 20px;color:var(--muted);font-size:13px;">${trb('Таблица пуста. Добавьте пробу или сгенерируйте из папки.', 'Table is empty. Add a trial or generate from a folder.')}</td></tr>`;
+        container.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:48px 20px;color:var(--muted);font-size:13px;">${trb('Таблица пуста. Добавьте пробу или сгенерируйте из папки.', 'Table is empty. Add a trial or generate from a folder.')}</td></tr>`;
         return;
       }
 
       container.innerHTML = currentTrials.map((trial, index) => `
         <tr class="trial-row" data-index="${index}" style="border-bottom:1px solid var(--stroke);background:${index % 2 ? 'rgba(92,102,189,.03)' : 'transparent'};">
+          <td style="text-align:center;"><input type="checkbox" class="trial-select" aria-label="${trb('Выбрать пробу', 'Select trial')} ${index + 1}" ${selectedTrials.has(index) ? 'checked' : ''}></td>
           <td style="padding:8px;text-align:center;font-weight:600;color:var(--muted);">${index + 1}</td>
           <td style="padding:8px;">
             <select class="t-input t-stimulus" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);">
@@ -1325,18 +1421,7 @@ function ExperimentBuilderView(options = {}) {
           </td>
           <td style="padding:8px;">
             <select class="t-input t-action" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;background:var(--card-bg);" ${trial.stimulusId ? '' : 'disabled'}>
-              <option value="">— ${trb('не нужно', 'none')} —</option>
-              <option value="mouse_click">${trb('Клик мышью', 'Mouse click')}</option>
-              <option value="mouse_intent">${trb('Движение мыши', 'Pointer intent')}</option>
-              <option value="space">${trb('Пробел', 'Space')}</option>
-              <option value="KeyZ">Я / Z</option>
-              <option value="KeyX">Ч / X</option>
-              <option value="Comma">Б / ,</option>
-              <option value="Period">Ю / .</option>
-              <option value="arrow_up">${trb('Вверх', 'Up')}</option>
-              <option value="arrow_down">${trb('Вниз', 'Down')}</option>
-              <option value="arrow_right">${trb('Вправо', 'Right')}</option>
-              <option value="arrow_left">${trb('Влево', 'Left')}</option>
+              ${responseOptions(trial.action || trial.correctResponse)}
             </select>
           </td>
           <td style="padding:8px;">
@@ -1393,11 +1478,26 @@ function ExperimentBuilderView(options = {}) {
     }
 
     container.addEventListener('input', (e) => {
+      if (e.target.classList.contains('trial-select')) {
+        const idx = Number(e.target.closest('.trial-row').dataset.index);
+        if (e.target.checked) selectedTrials.add(idx); else selectedTrials.delete(idx);
+        return;
+      }
       if (e.target.classList.contains('t-input')) {
         const row = e.target.closest('.trial-row');
         const idx = row.dataset.index;
         const stimulusValue = row.querySelector('.t-stimulus').value;
         const actionEl = row.querySelector('.t-action');
+        if (actionEl.value === '__custom__') {
+          captureResponseKey(key => {
+            currentTrials[idx].action = currentTrials[idx].correctResponse = key;
+            responseModeSel.value = 'keypress';
+            refreshResponseModeHint();
+            markDirty();
+            renderRows();
+          }, renderRows);
+          return;
+        }
         actionEl.disabled = !stimulusValue;
         if (!stimulusValue) actionEl.value = '';
         currentTrials[idx] = {
@@ -1418,10 +1518,42 @@ function ExperimentBuilderView(options = {}) {
       const delBtn = e.target.closest('.del-row-btn');
       if (delBtn) {
         currentTrials.splice(delBtn.dataset.index, 1);
+        selectedTrials.clear();
+        modal.querySelector('#selectAllTrials').checked = false;
         markDirty();
         renderRows();
       }
     });
+
+    modal.querySelector('#selectAllTrials').addEventListener('change', event => {
+      selectedTrials.clear();
+      if (event.target.checked) currentTrials.forEach((trial, index) => { if (trial.stimulusId) selectedTrials.add(index); });
+      renderRows();
+    });
+    const bulkSelect = modal.querySelector('#bulkResponseAction');
+    let bulkAction = '';
+    bulkSelect.addEventListener('change', () => {
+      if (bulkSelect.value !== '__custom__') { bulkAction = bulkSelect.value; return; }
+      captureResponseKey(key => {
+        bulkAction = key;
+        bulkSelect.innerHTML = responseOptions(key);
+        bulkSelect.value = { Space: 'space', ArrowUp: 'arrow_up', ArrowDown: 'arrow_down', ArrowLeft: 'arrow_left', ArrowRight: 'arrow_right' }[key] || key;
+        applyBulkAction();
+      }, () => { bulkSelect.value = bulkAction; });
+    });
+    function applyBulkAction() {
+      if (!selectedTrials.size) { toast(trb('Отметьте нужные пробы.', 'Select the trials first.')); return; }
+      selectedTrials.forEach(index => {
+        if (currentTrials[index]?.stimulusId) currentTrials[index].action = currentTrials[index].correctResponse = bulkAction;
+      });
+      if (bulkAction || !currentTrials.some(trial => trial.action || trial.correctResponse)) {
+        responseModeSel.value = !bulkAction ? 'none' : bulkAction === 'mouse_click' ? 'click' : bulkAction === 'mouse_intent' ? 'pointer_intent' : 'keypress';
+      }
+      refreshResponseModeHint();
+      markDirty();
+      renderRows();
+    }
+    modal.querySelector('#applyBulkResponse').addEventListener('click', applyBulkAction);
 
     modal.querySelector('#addTrialRowBtn').addEventListener('click', () => {
       currentTrials.push({ stimulusId: '', condition: '', action: '', correctResponse: '', duration: 1000, repetitions: 1 });
@@ -2383,7 +2515,7 @@ function ExperimentBuilderView(options = {}) {
       const blockLabel = localizedBlockLabel(b, meta.label);
       const rawInlineEditor = sel ? buildBlockInlineEditor(b) : '';
       const inlineEditor = rawInlineEditor
-        ? rawInlineEditor.replace(/<\/div>\s*$/, `<div style="font-size:10px;color:var(--good);margin-top:2px;">✓ ${trb('Изменения сохраняются автоматически', 'Changes are saved automatically')}</div></div>`)
+        ? rawInlineEditor.replace(/<\/div>\s*$/, `<div style="font-size:10px;color:var(--good);margin-top:2px;">${trb('Правки сохраняются в этом браузере. Для проекта нажмите «Сохранить черновик».', 'Changes are saved in this browser. Use “Save draft” to save them to the project.')}</div></div>`)
         : '';
       const canEdit = ['instruction', 'survey', 'rest', 'audio_test', 'timer', 'finish', 'cognitive_task', 'passive'].includes(b.type);
 
@@ -2395,7 +2527,7 @@ function ExperimentBuilderView(options = {}) {
               <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
             </div>
             <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${previewEscape(blockLabel)}</div>
+              <div class="proto-card-title" style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${previewEscape(blockLabel)}</div>
             </div>
             <div style="display:flex;gap:2px;flex-shrink:0;align-items:center;">
               ${canEdit ? `<button class="pcbtn edit-btn" data-id="${previewEscape(b.id)}" title="${trb('Редактировать', 'Edit')}" style="background:${sel ? 'rgba(92,102,189,.14)' : 'none'};border:none;cursor:pointer;color:${sel ? 'var(--accent)' : 'var(--muted2)'};padding:3px;border-radius:5px;display:flex;align-items:center;">
@@ -3151,7 +3283,7 @@ function ExperimentBuilderView(options = {}) {
             <input id="participantLinkInput" readonly value="${previewEscape(link)}" placeholder="${trb('Ссылка появится после публикации','The link will appear after publishing')}" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.62);font-size:12px;color:var(--text);font-family:var(--mono);">
             <button class="quick-btn" id="copyParticipantLinkBtn" style="font-size:12px;" ${link ? '' : 'disabled'}>${trb('Скопировать','Copy')}</button>
           </div>
-          <div id="protocolSaveStatus" role="status" aria-live="polite" style="font-size:11px;color:${link ? 'var(--good)' : 'var(--muted)'};font-weight:${link ? '700' : '400'};">${link ? trb('Протокол опубликован, ссылка готова к отправке участникам.','Protocol published; the participant link is ready to share.') : trb('После успешной публикации здесь появится рабочая ссылка.','A working link will appear here after successful publishing.')}</div>
+          <div id="protocolSaveStatus" role="status" aria-live="polite" style="font-size:11px;color:${link ? 'var(--good)' : 'var(--muted)'};font-weight:${link ? '700' : '400'};">${link ? trb('Протокол опубликован, постоянная ссылка готова к отправке участникам.','Protocol published; the stable participant link is ready to share.') : trb('После успешной публикации здесь появится рабочая ссылка.','A working link will appear here after successful publishing.')}${editingExp?.publicationVersion ? ` ${trb('Версия публикации:', 'Publication version:')} ${editingExp.publicationVersion}.` : ''}</div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:1px solid var(--stroke);">
           <button class="quick-btn" id="finishBackBtn" style="font-size:12px;">← Назад</button>
@@ -3360,7 +3492,7 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function previewBlockSummary(block) {
-    if (block.type === 'instruction') return localizedInstructionValue(block.content, 'text', trb('Инструкция без текста','Instruction without text'));
+    if (block.type === 'instruction') return resolvedInstructionText(block, CURRENT_LANG);
     if (block.type === 'cognitive_task') {
       const trials = block.content?.trials || [];
       const total = trials.reduce((sum, tr) => sum + (parseInt(tr.repetitions) || 1), 0);
@@ -3392,7 +3524,7 @@ function ExperimentBuilderView(options = {}) {
           blockIndex,
           manual:true,
           title:localizedInstructionValue(block.content, 'title', block.label || trb('Инструкция','Instruction')),
-          text:localizedInstructionValue(block.content, 'text', trb('Инструкция без текста','Instruction without text'))
+          text:resolvedInstructionText(block, CURRENT_LANG)
         });
         return;
       }
@@ -3768,24 +3900,60 @@ function ExperimentBuilderView(options = {}) {
     };
   }
 
-  function renderQCStep() {
-    // Load saved QC thresholds or defaults
-    const qcKey = 'emocog_qc_thresholds_' + (experimentId || 'draft');
-    let qc = JSON.parse(localStorage.getItem(qcKey) || 'null') || {
+  function getBuilderPersistenceSettings() {
+    const key = 'emocog_protocol_persistence_' + (experimentId || 'draft');
+    let cached;
+    try { cached = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { cached = null; }
+    const source = cached || persistenceSettingsDraft || editingExp?.persistenceSettings || parsedExperimentData?.json?.settings?.persistence || {};
+    const control = canvasCol.querySelector('#protocolBackupNotificationsToggle');
+    persistenceSettingsDraft = { showBackupNotifications: control ? control.checked : source.showBackupNotifications !== false };
+    return { ...persistenceSettingsDraft };
+  }
+
+  function getBuilderQCThresholds() {
+    const key = 'emocog_qc_thresholds_' + (experimentId || 'draft');
+    const defaults = {
       gazeValid: { enabled: true, threshold: 70, hardStop: false },
       faceDetected: { enabled: true, threshold: 80, hardStop: true },
       fpsStable: { enabled: true, threshold: 25, hardStop: false },
-      lighting: { enabled: true, threshold: 60, hardStop: false },
+      lighting: { enabled: true, threshold: 60, hardStop: false }
     };
+    let source;
+    try { source = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { source = null; }
+    source = source || editingExp?.qcThresholds || parsedExperimentData?.json?.settings?.qualityControl?.rules || {};
+    const qc = Object.fromEntries(Object.entries(defaults).map(([name, fallback]) => {
+      const saved = source[name] || {};
+      return [name, { enabled: typeof saved.enabled === 'boolean' ? saved.enabled : fallback.enabled,
+        hardStop: typeof saved.hardStop === 'boolean' ? saved.hardStop : fallback.hardStop,
+        threshold: Number.isFinite(Number(saved.threshold)) ? Number(saved.threshold) : fallback.threshold }];
+    }));
+    canvasCol.querySelectorAll('.qc-enabled').forEach(cb => { qc[cb.dataset.key].enabled = cb.checked; });
+    canvasCol.querySelectorAll('.qc-range').forEach(input => { qc[input.dataset.key].threshold = Number(input.value); });
+    canvasCol.querySelectorAll('.qc-hardstop').forEach(cb => { qc[cb.dataset.key].hardStop = cb.checked; });
+    return qc;
+  }
+
+  function renderQCStep() {
+    // Load saved QC thresholds or defaults
+    const qcKey = 'emocog_qc_thresholds_' + (experimentId || 'draft');
+    let qc = getBuilderQCThresholds();
     const featuresKey = 'emocog_session_features_' + (experimentId || 'draft');
     const sessionFeatures = getBuilderSessionFeatures();
+    const persistenceSettings = getBuilderPersistenceSettings();
 
     canvasCol.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.cssText = `display:flex;flex-direction:column;height:100%;padding:${BUILDER_CANVAS_PAD};gap:14px;overflow-y:auto;`;
     wrap.innerHTML = `
       ${builderStepHeader(6)}
+      <p style="font-size:12px;color:var(--muted);margin:0;">${trb('Это дополнительные правила протокола; базовые проверки качества остаются включены. Используются накопленные показатели сессии после 10 секунд измерений. При нарушении дольше 3 секунд жёсткая остановка завершит текущую пробу и сохранит неполный результат.', 'These are additional protocol rules; baseline quality checks remain enabled. Cumulative session metrics are evaluated after 10 seconds of measurement. A violation lasting over 3 seconds schedules a hard stop after the current trial, saving an incomplete result.')}</p>
       <div style="flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+        <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;color:var(--text);">
+            <input type="checkbox" id="protocolBackupNotificationsToggle" ${persistenceSettings.showBackupNotifications ? 'checked' : ''} style="width:auto;margin-top:2px;" aria-describedby="protocolBackupNotificationsHelp">
+            <span><strong>${trb('Показывать участнику уведомления о промежуточном сохранении','Show interim-save notifications to the participant')}</strong><small id="protocolBackupNotificationsHelp" style="display:block;color:var(--muted);line-height:1.4;margin-top:2px;">${trb('Промежуточные результаты сохраняются и при выключенной опции. Важные предупреждения об ошибках сохранения остаются видимыми.','Interim results are saved even when this option is off. Important warnings about save failures remain visible.')}</small></span>
+          </label>
+        </div>
         <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;">
           <div style="font-size:13px;font-weight:700;color:var(--text);">${trb('Фоновые исследовательские модули','Background research modules')}</div>
           <div style="font-size:11px;color:var(--muted);margin:4px 0 10px;line-height:1.45;">${trb('Аудио требует отдельного согласия участника. Сырые аудио, видео и landmarks не сохраняются.','Audio requires separate participant consent. Raw audio, video, and landmarks are not stored.')}</div>
@@ -3807,7 +3975,7 @@ function ExperimentBuilderView(options = {}) {
           { key:'gazeValid', label:trb('Взгляд валиден','Gaze valid'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с валидным взглядом','Minimum % of frames with valid gaze'), yellowFrom:51, greenFrom:70 },
           { key:'faceDetected', label:trb('Лицо обнаружено','Face detected'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с обнаруженным лицом','Minimum % of frames with face detected'), yellowFrom:51, greenFrom:80 },
           { key:'fpsStable', label:trb('FPS (кадров в секунду) стабилен','FPS (frames per second) stable'), unit:'fps', min:0, max:60, hint:trb('Минимальная частота обработки кадров для стабильной записи','Minimum frame-processing rate for stable recording'), yellowFrom:16, greenFrom:25 },
-          { key:'lighting', label:trb('Освещение','Lighting'), unit:'%', min:0, max:100, hint:trb('Минимальное качество освещения (0–100)','Minimum lighting quality (0-100)'), yellowFrom:51, greenFrom:70 },
+          { key:'lighting', label:trb('Освещение','Lighting'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с допустимым освещением','Minimum % of frames with acceptable lighting'), yellowFrom:51, greenFrom:70 },
         ].map(param => `
           <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
@@ -3843,6 +4011,7 @@ function ExperimentBuilderView(options = {}) {
     canvasCol.appendChild(wrap);
 
     function saveQC() {
+      localStorage.setItem('emocog_protocol_persistence_' + (experimentId || 'draft'), JSON.stringify(getBuilderPersistenceSettings()));
       wrap.querySelectorAll('.qc-enabled').forEach(cb => { qc[cb.dataset.key].enabled = cb.checked; });
       wrap.querySelectorAll('.qc-range').forEach(r => { qc[r.dataset.key].threshold = parseInt(r.value); });
       wrap.querySelectorAll('.qc-hardstop').forEach(cb => { qc[cb.dataset.key].hardStop = cb.checked; });
@@ -3853,7 +4022,7 @@ function ExperimentBuilderView(options = {}) {
       if (!sessionFeatures.multimodal) sessionFeatures.gamerMode = false;
       localStorage.setItem(featuresKey, JSON.stringify(sessionFeatures));
     }
-    wrap.querySelectorAll('.session-feature').forEach(cb => cb.addEventListener('change', saveQC));
+    wrap.querySelectorAll('#protocolBackupNotificationsToggle, .session-feature, .qc-enabled, .qc-range, .qc-hardstop').forEach(cb => cb.addEventListener('change', saveQC));
     wrap.querySelectorAll('#qcBack2').forEach(b => b.addEventListener('click', () => { saveQC(); currentStep--; renderStepper(); renderCanvas(); }));
     wrap.querySelector('#qcNext').addEventListener('click', () => { saveQC(); currentStep++; renderStepper(); renderCanvas(); });
   }
@@ -4167,61 +4336,24 @@ function ExperimentBuilderView(options = {}) {
   }
 
   function saveDraft() {
-    const metaFromForm = canvasCol.querySelector('#metaTitle') ? getProtocolMetaFromForm() : protocolMeta;
-    protocolMeta = { ...protocolMeta, ...metaFromForm };
-    const expTitle = protocolMeta.title || editingExp?.title || trb('Черновик эксперимента','Experiment draft');
-
-    const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
-    const id = experimentId || 'exp_' + Date.now();
-    if (hasLocalProtocolIdConflict(protocolMeta.protocolId, id)) {
-      toast(trb('Этот ID протокола уже используется. Укажите уникальный ID.','This Protocol ID is already in use. Enter a unique ID.'));
-      return;
-    }
-    const userBlocks = experimentBlocks.filter(b => !SYSTEM_BLOCK_TYPES.includes(b.type));
-    const analyticsPlan = getBuilderAnalyticsPlan();
-    const sessionFeatureFlags = getBuilderSessionFeatures();
-    if (userBlocks.some(block => block.type === 'audio_test')) sessionFeatureFlags.audio = true;
-
-    const entry = {
-      id,
-      projectId: parseInt(localStorage.getItem('emocog_selected_project_id') || '', 10) || editingExp?.projectId || null,
-      title: expTitle,
-      protocolId: protocolMeta.protocolId,
-      metadata: protocolMeta,
-      sessionFeatureFlags,
-      analyticsPlan,
-      blocks: userBlocks,
-      version: editingExp?.status === 'active' ? protocolVersion : (editingExp?.version || '1.0'),
-      history: editingExp?.history || [],
-      savedStep: currentStep,
-      createdAt: editingExp?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: 'draft'
-    };
-
-    const idx = experiments.findIndex(e => e.id === id);
-    if (idx >= 0) experiments[idx] = entry; else experiments.push(entry);
-    localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
-    localStorage.removeItem(metadataDraftKey);
-    clearExperimentBuilderDraft();
-
-    toast(trb('Черновик успешно сохранён!','Draft saved successfully!'));
-    setTimeout(() => navigate('#/experiments'), 700);
+    return runProtocolSave(true);
   }
 
   let protocolSaveInProgress = false;
 
-  async function runProtocolSave() {
+  async function runProtocolSave(draftOnly = false) {
     if (protocolSaveInProgress) return;
     protocolSaveInProgress = true;
-    const button = canvasCol.querySelector('#finishSaveProtocolBtn');
+    canvasCol.inert = true;
+    stepperCol.inert = true;
+    const button = draftOnly ? stepperCol.querySelector('#saveDraftGlobalBtn') : canvasCol.querySelector('#finishSaveProtocolBtn');
     const originalText = button?.textContent || trb('Сохранить протокол', 'Save protocol');
     if (button) {
       button.disabled = true;
       button.textContent = trb('Сохранение…', 'Saving…');
     }
     try {
-      await doSave();
+      await doSave({ draftOnly });
     } catch (error) {
       console.error('[ResearcherBuilder] protocol save failed', error);
       toast(
@@ -4230,6 +4362,8 @@ function ExperimentBuilderView(options = {}) {
       );
     } finally {
       protocolSaveInProgress = false;
+      canvasCol.inert = false;
+      stepperCol.inert = false;
       if (button?.isConnected) {
         button.disabled = false;
         button.textContent = button.dataset.saved === 'true'
@@ -4243,7 +4377,7 @@ function ExperimentBuilderView(options = {}) {
     const errors = [];
     let hasBlockingErrors = false;
     validateProtocolMeta(protocolMeta).forEach(field => errors.push(trb('Заполните поле: ','Fill in field: ') + field));
-    if (hasLocalProtocolIdConflict(protocolMeta.protocolId, experimentId)) {
+    if (hasLocalProtocolIdConflict(protocolMeta.protocolId, savedExperimentId)) {
       hasBlockingErrors = true;
       errors.push(trb('ID протокола уже используется в другом протоколе.','The Protocol ID is already used by another protocol.'));
     }
@@ -4311,9 +4445,14 @@ function ExperimentBuilderView(options = {}) {
     runProtocolSave();
   }
 
-  async function doSave() {
+  async function doSave({ draftOnly = false } = {}) {
+    if (canvasCol.querySelector('#metaTitle')) protocolMeta = { ...protocolMeta, ...getProtocolMetaFromForm() };
+    canvasCol.querySelectorAll('.proto-card-sel').forEach(card => {
+      const block = experimentBlocks.find(item => item.id === card.dataset.id);
+      if (block && block.type !== 'survey') saveBlockInlineFields(block, card);
+    });
     const srcData = parsedExperimentData?.json || {};
-    const builderKey = experimentId || 'draft';
+    const builderKey = savedExperimentId || 'draft';
 
     const expTitle = protocolMeta.title || srcData.title || 'Новый эксперимент';
 
@@ -4353,7 +4492,9 @@ function ExperimentBuilderView(options = {}) {
       version: 'v2.0_universal',
       settings: {
         ...(srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' }),
-        featureFlags: sessionFeatureFlags
+        featureFlags: sessionFeatureFlags,
+        qualityControl: { schemaVersion: 'protocol_quality.v1', rules: getBuilderQCThresholds() },
+        persistence: getBuilderPersistenceSettings()
       },
       blocks: [
         ...systemBlocks,
@@ -4361,14 +4502,15 @@ function ExperimentBuilderView(options = {}) {
         const out = { id: b.id, type: b.type, label: localizedBlockLabel(b, b.label || b.type) };
         if (b.type === 'instruction') {
           const titleRu = instructionValueForLocale(b.content, 'title', 'ru', b.label || 'Инструкция');
-          const textRu = instructionValueForLocale(b.content, 'text', 'ru', '');
+          const textRu = resolvedInstructionText(b, 'ru');
           const buttonTextRu = instructionValueForLocale(b.content, 'buttonText', 'ru', 'Далее');
           const titleEn = instructionValueForLocale(b.content, 'title', 'en', titleRu);
-          const textEn = instructionValueForLocale(b.content, 'text', 'en', textRu);
+          const textEn = resolvedInstructionText(b, 'en');
           const buttonTextEn = instructionValueForLocale(b.content, 'buttonText', 'en', 'Continue');
           out.content = {
             title: localizedInstructionValue(b.content, 'title', b.label),
-            text: localizedInstructionValue(b.content, 'text', ''),
+            text: resolvedInstructionText(b, CURRENT_LANG),
+            standardInstruction: b.content?.standardInstruction,
             buttonText: localizedInstructionValue(b.content, 'buttonText', 'Далее'),
             titleRu,
             textRu,
@@ -4486,12 +4628,13 @@ function ExperimentBuilderView(options = {}) {
     }
 
     const experiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
-    const id = experimentId || 'exp_' + Date.now();
+    const id = savedExperimentId || 'exp_' + Date.now();
+    savedExperimentId = id;
     if (hasLocalProtocolIdConflict(protocolMeta.protocolId, id)) {
       throw new Error(trb('ID протокола уже используется. Укажите уникальный ID.','Protocol ID is already in use. Enter a unique ID.'));
     }
 
-    let history = editingExp?.history || [];
+    let history = [...(editingExp?.history || [])];
     if (editingExp && editingExp.status === 'active') {
       history.push({
         version: editingExp.version,
@@ -4501,20 +4644,24 @@ function ExperimentBuilderView(options = {}) {
     }
 
     const entry = {
+      ...(experiments.find(item => item.id === id) || editingExp || {}),
       id,
       projectId: parseInt(localStorage.getItem('emocog_selected_project_id') || '', 10) || editingExp?.projectId || null,
       title: json.title,
       protocolId: protocolMeta.protocolId,
       metadata: protocolMeta,
       sessionFeatureFlags,
+      qcThresholds: getBuilderQCThresholds(),
+      persistenceSettings: getBuilderPersistenceSettings(),
       analyticsPlan,
       blocks: userBlocks,
       version: protocolVersion,
       history: history,
-      savedStep: 8,
+      savedStep: draftOnly ? currentStep : 8,
       createdAt: editingExp?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      status: 'draft'
+      status: 'draft',
+      pendingSync: true
     };
 
     const idx = experiments.findIndex(e => e.id === id);
@@ -4522,6 +4669,35 @@ function ExperimentBuilderView(options = {}) {
     localStorage.setItem('emocog_my_experiments', JSON.stringify(experiments));
     localStorage.removeItem(metadataDraftKey);
     localStorage.setItem('emocog_active_experiment_id', id);
+    json.builderState = {
+      metadata: protocolMeta, blocks: userBlocks, version: protocolVersion,
+      savedStep: entry.savedStep, sessionFeatureFlags, analyticsPlan, qcThresholds: entry.qcThresholds,
+      persistenceSettings: entry.persistenceSettings
+    };
+    if (entry.apiProtocolId && typeof loadBuilderApiState === 'function' && !loadBuilderApiState(id).apiProtocolId) {
+      saveBuilderApiState(id, { apiProtocolId: entry.apiProtocolId, projectId: entry.projectId,
+        invitationCode: entry.invitationCode || null, publishVerifiedAt: entry.publishVerifiedAt || null });
+    }
+    if (draftOnly) {
+      if (typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken()) {
+        toast(trb('Черновик сохранён только локально. Войдите в API, чтобы поделиться им с проектом.', 'Draft saved locally only. Sign in to the API to share it with the project.'));
+        return;
+      }
+      try {
+        const saved = await persistBuilderProtocolToApi(json, id, { draftOnly: true, projectId: entry.projectId });
+        const rows = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
+        const index = rows.findIndex(item => item.id === id);
+        if (index >= 0) rows[index] = { ...rows[index], apiProtocolId: saved.id, projectId: saved.project_id,
+          updatedAt: saved.updated_at, pendingSync: false };
+        localStorage.setItem('emocog_my_experiments', JSON.stringify(rows));
+        if (canvasCol.isConnected) clearExperimentBuilderDraft();
+        toast(trb('Черновик сохранён в проекте и доступен коллегам.', 'Draft saved in the project and available to colleagues.'));
+        if (canvasCol.isConnected) navigate('#/experiments');
+      } catch (error) {
+        toast(trb('Черновик сохранён локально, но не в БД. Повторите сохранение: ', 'Draft saved locally, but not in the database. Retry saving: ') + error.message);
+      }
+      return;
+    }
 
     let toastMain = trb(
       'Сохранено локально в этом браузере. Участники по ссылке не увидят протокол, пока он не опубликован в API.',
@@ -4529,17 +4705,19 @@ function ExperimentBuilderView(options = {}) {
     );
     if (typeof publishBuilderProtocolAndInvitation === 'function' && typeof hasResearcherApiToken === 'function' && hasResearcherApiToken()) {
       try {
-        const pub = await publishBuilderProtocolAndInvitation(json, builderKey, protocolMeta.protocolId);
+        const pub = await publishBuilderProtocolAndInvitation(json, id, protocolMeta.protocolId);
         const publishedExperiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
         const publishedIndex = publishedExperiments.findIndex(item => item.id === id);
         if (publishedIndex >= 0) {
           publishedExperiments[publishedIndex] = {
             ...publishedExperiments[publishedIndex],
-            invitationCode: pub.invitation.code,
+            invitationCode: pub.invitation.public_code || pub.invitation.code,
+            publicationVersion: pub.invitation.publication_version,
             participantLink: pub.link,
             apiProtocolId: pub.protocol.id,
             publishVerifiedAt: new Date().toISOString(),
             status: 'active',
+            pendingSync: false,
             updatedAt: new Date().toISOString()
           };
           localStorage.setItem('emocog_my_experiments', JSON.stringify(publishedExperiments));
@@ -4548,53 +4726,51 @@ function ExperimentBuilderView(options = {}) {
           saveBuilderApiState(id, {
             apiProtocolId: pub.protocol.id,
             projectId: pub.protocol.project_id,
-            invitationCode: pub.invitation.code,
-            publishVerifiedAt: new Date().toISOString()
+            invitationCode: pub.invitation.public_code || pub.invitation.code,
+            publishVerifiedAt: new Date().toISOString(),
+            updatedAt: pub.protocol.updated_at,
+            revision: pub.protocol.revision
           });
         }
         toastMain = trb(
           'Протокол опубликован в API. Код приглашения: ',
           'Protocol published to the API. Invitation code: '
-        ) + pub.invitation.code + trb('. Ссылка обновлена.', ' Link updated.');
-        const linkInput = document.getElementById('participantLinkInput');
+        ) + (pub.invitation.public_code || pub.invitation.code) + trb('. Постоянная ссылка готова.', ' Stable link ready.');
+        const linkInput = canvasCol.querySelector('#participantLinkInput');
         if (linkInput) linkInput.value = pub.link;
-        const copyLinkButton = document.getElementById('copyParticipantLinkBtn');
+        const copyLinkButton = canvasCol.querySelector('#copyParticipantLinkBtn');
         if (copyLinkButton) copyLinkButton.disabled = false;
-        const saveStatus = document.getElementById('protocolSaveStatus');
+        const saveStatus = canvasCol.querySelector('#protocolSaveStatus');
         if (saveStatus) {
-          saveStatus.textContent = trb('Протокол успешно опубликован. Рабочая ссылка готова к отправке участникам.','Protocol published successfully. The participant link is ready to share.');
+          saveStatus.textContent = trb('Протокол успешно опубликован. Постоянная ссылка готова к отправке участникам.','Protocol published successfully. The stable participant link is ready to share.')
+            + (pub.invitation.publication_version ? ` ${trb('Версия публикации:', 'Publication version:')} ${pub.invitation.publication_version}.` : '');
           saveStatus.style.color = 'var(--good)';
           saveStatus.style.fontWeight = '700';
         }
-        const saveButton = document.getElementById('finishSaveProtocolBtn');
+        const saveButton = canvasCol.querySelector('#finishSaveProtocolBtn');
         if (saveButton) {
           saveButton.dataset.saved = 'true';
           saveButton.textContent = trb('Опубликовано ✓','Published ✓');
         }
-        clearExperimentBuilderDraft();
+        if (canvasCol.isConnected) clearExperimentBuilderDraft();
       } catch (e) {
         var apiErr = e?.message || String(e);
-        if (typeof saveBuilderApiState === 'function') {
-          saveBuilderApiState(builderKey, { invitationCode: null, publishVerifiedAt: null });
-          if (builderKey !== id) saveBuilderApiState(id, { invitationCode: null, publishVerifiedAt: null });
-        }
         const failedExperiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
         const failedIndex = failedExperiments.findIndex(item => item.id === id);
         if (failedIndex >= 0) {
-          delete failedExperiments[failedIndex].invitationCode;
-          delete failedExperiments[failedIndex].participantLink;
-          delete failedExperiments[failedIndex].publishVerifiedAt;
           failedExperiments[failedIndex].status = 'draft';
           failedExperiments[failedIndex].publishError = apiErr;
+          const savedState = loadBuilderApiState(id);
+          if (savedState.apiProtocolId) failedExperiments[failedIndex].apiProtocolId = savedState.apiProtocolId;
           localStorage.setItem('emocog_my_experiments', JSON.stringify(failedExperiments));
         }
-        const linkInput = document.getElementById('participantLinkInput');
-        if (linkInput) linkInput.value = '';
-        const copyLinkButton = document.getElementById('copyParticipantLinkBtn');
-        if (copyLinkButton) copyLinkButton.disabled = true;
-        const saveStatus = document.getElementById('protocolSaveStatus');
+        const linkInput = canvasCol.querySelector('#participantLinkInput');
+        if (linkInput) linkInput.value = entry.participantLink || '';
+        const copyLinkButton = canvasCol.querySelector('#copyParticipantLinkBtn');
+        if (copyLinkButton) copyLinkButton.disabled = !entry.participantLink;
+        const saveStatus = canvasCol.querySelector('#protocolSaveStatus');
         if (saveStatus) {
-          saveStatus.textContent = trb('Черновик сохранён, но публикация не выполнена: ','Draft saved, but publishing failed: ') + apiErr;
+          saveStatus.textContent = trb('Правки сохранены локально. Новая публикация не выполнена; прежняя ссылка (если есть) ведёт на прежнюю версию. Ошибка: ', 'Changes saved locally. Publishing failed; any previous link still opens the previous version. Error: ') + apiErr;
           saveStatus.style.color = 'var(--bad)';
           saveStatus.style.fontWeight = '700';
         }
@@ -4605,8 +4781,8 @@ function ExperimentBuilderView(options = {}) {
           ) + apiErr;
         } else {
           toastMain = trb(
-            'Протокол не опубликован. Черновик сохранён, несуществующая ссылка удалена. Ошибка API: ',
-            'Protocol was not published. The draft is saved and the invalid link was removed. API error: '
+            'Новая версия не опубликована. Правки сохранены локально, прежняя ссылка не удалена. Ошибка API: ',
+            'New version was not published. Changes saved locally; the previous link was not removed. API error: '
           ) + apiErr;
         }
         toast(toastMain);
@@ -4617,11 +4793,7 @@ function ExperimentBuilderView(options = {}) {
         'Протокол сохранён как черновик, но не опубликован. Войдите как исследователь и повторите публикацию.',
         'The protocol was saved as a draft but not published. Sign in as a researcher and publish again.'
       );
-      if (typeof saveBuilderApiState === 'function') {
-        saveBuilderApiState(builderKey, { invitationCode: null, publishVerifiedAt: null });
-        if (builderKey !== id) saveBuilderApiState(id, { invitationCode: null, publishVerifiedAt: null });
-      }
-      const saveStatus = document.getElementById('protocolSaveStatus');
+      const saveStatus = canvasCol.querySelector('#protocolSaveStatus');
       if (saveStatus) {
         saveStatus.textContent = trb('Черновик сохранён локально. Войдите как исследователь, чтобы получить рабочую ссылку.','Draft saved locally. Sign in as a researcher to create a working link.');
         saveStatus.style.color = 'var(--warn)';

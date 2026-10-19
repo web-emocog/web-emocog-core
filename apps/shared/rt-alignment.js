@@ -6,7 +6,7 @@
   'use strict';
   const VERSION = 'rt_alignment.v1';
   const MAX_TRIALS = 200;
-  const CHANNELS = ['gaze', 'body', 'valence', 'arousal', 'bpm'];
+  const CHANNELS = ['gaze', 'body', 'valence', 'arousal', 'bpm', 'respiration'];
   const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
   const text = value => value == null ? null : String(value).slice(0, 128);
   const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
@@ -47,12 +47,15 @@
     series.arousal = series.valence;
     // Wall-clock-only legacy samples are rejected when the selected clock is monotonic.
     series.bpm = indexed(objects(session?.bpmRuns).flatMap(run => objects(run.samples)));
+    series.respiration = series.bpm;
     const read = {
       gaze: sample => sample.valid === true && sample.onScreen !== false && number(sample.correctedX) != null && number(sample.correctedY) != null ? 1 : null,
       body: sample => sample.valid === true && sample.ood !== true ? number(sample.movementVelocity) : null,
       valence: sample => sample.degraded !== true && sample.dataSource !== 'landmarks' ? number(sample.valence) : null,
       arousal: sample => sample.degraded !== true && sample.dataSource !== 'landmarks' ? number(sample.arousal) : null,
-      bpm: sample => sample.published === true ? number(sample.bpm) : null
+      bpm: sample => sample.published === true && sample.held !== true ? number(sample.bpm) : null,
+      respiration: sample => sample.respPublished !== false && sample.respHeld !== true && number(sample.respConf) >= .20
+        && number(sample.respRate) >= 6 && number(sample.respRate) <= 24 ? number(sample.respRate) : null
     };
     const results = objects(session?.cognitiveResults);
     let previousEnd = -Infinity;
@@ -92,7 +95,7 @@
       }
       previousEnd = end ?? next;
     }
-    return { schemaVersion: VERSION, algorithmVersion: 'event-windows-1.0.0', clock,
+    return { schemaVersion: VERSION, algorithmVersion: 'event-windows-1.1.0', clock,
       baselineMs: 1000, postMs: 1000, trialCountTotal: onsets.filter(row => row.event.response_mode !== 'none' && row.event.task_id !== 'passive_viewing').length,
       truncated: onsets.filter(row => row.event.response_mode !== 'none' && row.event.task_id !== 'passive_viewing').length > trials.length,
       rawVideoStored: false, trials };

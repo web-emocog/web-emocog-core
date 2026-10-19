@@ -1,3 +1,9 @@
+const crypto = require('crypto');
+
+function protocolRevision(row) {
+  return crypto.createHash('sha256').update(JSON.stringify([row.name, row.definition, row.updated_at])).digest('hex');
+}
+
 // Library metadata is researcher-owned, not a participant protocol contract.
 function publicStimulusMetadata(metadata) {
   const result = {};
@@ -8,9 +14,10 @@ function publicStimulusMetadata(metadata) {
   return result;
 }
 
-function publicProtocolDefinition(definition) {
+function publicProtocolDefinition(definition, options = {}) {
   if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return definition;
   const projected = { ...definition };
+  if (!options.includeBuilderState) delete projected.builderState;
   if (definition.mediaManifest) {
     projected.mediaManifest = {};
     for (const [id, entry] of Object.entries(definition.mediaManifest)) {
@@ -25,7 +32,7 @@ function publicProtocolDefinition(definition) {
 }
 
 function publicProtocol(row) {
-  return { ...row, definition: publicProtocolDefinition(row.definition) };
+  return { ...row, revision: protocolRevision(row), definition: publicProtocolDefinition(row.definition, { includeBuilderState: true }) };
 }
 
-module.exports = { publicStimulusMetadata, publicProtocolDefinition, publicProtocol };
+module.exports = { publicStimulusMetadata, publicProtocolDefinition, publicProtocol, protocolRevision };

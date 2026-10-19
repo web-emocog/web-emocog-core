@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.0",
+  "catalogVersion": "1.1",
   "status": "draft_for_backend_alignment",
   "valueStatuses": {
     "computed": "The value was calculated. A numeric zero is a real result.",
@@ -13,7 +13,10 @@
   "packages": [
     {
       "id": "aoi_attention",
-      "label": { "ru": "AOI и внимание", "en": "AOI and attention" },
+      "label": {
+        "ru": "AOI и внимание",
+        "en": "AOI and attention"
+      },
       "description": {
         "ru": "Heatmap и показатели внимания по областям интереса.",
         "en": "Heatmap and attention metrics by area of interest."
@@ -23,7 +26,10 @@
     },
     {
       "id": "task_performance",
-      "label": { "ru": "Выполнение задачи", "en": "Task performance" },
+      "label": {
+        "ru": "Выполнение задачи",
+        "en": "Task performance"
+      },
       "description": {
         "ru": "Точность, время реакции и типы ошибок для совместимых задач.",
         "en": "Accuracy, reaction time and error types for compatible tasks."
@@ -33,7 +39,10 @@
     },
     {
       "id": "group_descriptive",
-      "label": { "ru": "Групповая аналитика", "en": "Group analytics" },
+      "label": {
+        "ru": "Групповая аналитика",
+        "en": "Group analytics"
+      },
       "description": {
         "ru": "Состав выборки, распределения и описательные сравнения выбранных метрик.",
         "en": "Cohort composition, distributions and descriptive comparisons of selected metrics."
@@ -43,13 +52,29 @@
     },
     {
       "id": "data_quality",
-      "label": { "ru": "Качество данных", "en": "Data quality" },
+      "label": {
+        "ru": "Качество данных",
+        "en": "Data quality"
+      },
       "description": {
         "ru": "QC по каналам, объём валидных данных и причины исключения.",
         "en": "Channel-specific QC, valid data volume and exclusion reasons."
       },
       "availability": "always",
       "mandatory": true
+    },
+    {
+      "id": "continuous_signals",
+      "label": {
+        "ru": "Фоновые показатели",
+        "en": "Background signals"
+      },
+      "description": {
+        "ru": "ЧСС, дыхание, моргания, PERCLOS, движение и мимика: сводки измеренной сессии.",
+        "en": "Heart rate, respiration, blinks, PERCLOS, movement and facial-expression summaries."
+      },
+      "availability": "always",
+      "mandatory": false
     }
   ],
   "metrics": [
@@ -57,15 +82,26 @@
       "id": "viz.heatmap",
       "packageId": "aoi_attention",
       "kind": "visualization",
-      "label": { "ru": "Тепловая карта", "en": "Heatmap" },
+      "label": {
+        "ru": "Тепловая карта",
+        "en": "Heatmap"
+      },
       "description": {
         "ru": "Распределение валидных фиксаций на выбранном стимуле.",
         "en": "Distribution of valid fixations on the selected stimulus."
       },
       "unit": null,
       "valueType": "object",
-      "scopes": ["session", "participant", "group"],
-      "requires": ["gaze", "stimulus", "fixations"],
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "stimulus",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "session_then_participant_then_group_equal_weight"
     },
@@ -73,379 +109,728 @@
       "id": "aoi.gaze_on_target_pct",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Взгляд на целевые AOI", "en": "Gaze on target" },
+      "label": {
+        "ru": "Взгляд на целевые AOI",
+        "en": "Gaze on target"
+      },
       "description": {
         "ru": "Доля валидного времени взгляда внутри объединения активных целевых AOI.",
         "en": "Share of valid gaze time inside the union of active target AOIs."
       },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "target_aoi"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "target_aoi"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "valid_observation_duration", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "valid_observation_duration",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.dwell_time_ms",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Время в AOI", "en": "AOI dwell time" },
+      "label": {
+        "ru": "Время в AOI",
+        "en": "AOI dwell time"
+      },
       "description": {
         "ru": "Суммарная длительность валидных фиксаций внутри AOI.",
         "en": "Total duration of valid fixations inside the AOI."
       },
       "unit": "ms",
       "valueType": "number",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["valid_observation_duration", "fixation_count", "gaze_qc"]
+      "requiredContext": [
+        "valid_observation_duration",
+        "fixation_count",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.dwell_time_pct",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Доля времени в AOI", "en": "AOI dwell time share" },
+      "label": {
+        "ru": "Доля времени в AOI",
+        "en": "AOI dwell time share"
+      },
       "description": {
         "ru": "Dwell time относительно валидного времени наблюдения в том же окне.",
         "en": "Dwell time relative to valid observation time in the same window."
       },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.fixation_count",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Количество фиксаций", "en": "Fixation count" },
+      "label": {
+        "ru": "Количество фиксаций",
+        "en": "Fixation count"
+      },
       "description": {
         "ru": "Количество валидных фиксаций, отнесённых к AOI.",
         "en": "Number of valid fixations assigned to the AOI."
       },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["valid_observation_duration", "gaze_qc"]
+      "requiredContext": [
+        "valid_observation_duration",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.fixation_rate_per_min",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Частота фиксаций", "en": "Fixation rate" },
+      "label": {
+        "ru": "Частота фиксаций",
+        "en": "Fixation rate"
+      },
       "description": {
         "ru": "Количество фиксаций на минуту валидного времени наблюдения.",
         "en": "Fixations per minute of valid observation time."
       },
       "unit": "count_per_min",
       "valueType": "number",
-      "scopes": ["session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": false,
       "groupAggregation": "participant_median",
-      "requiredContext": ["fixation_count", "valid_observation_duration"]
+      "requiredContext": [
+        "fixation_count",
+        "valid_observation_duration"
+      ]
     },
     {
       "id": "aoi.fixation_duration_median_ms",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Медианная длительность фиксации", "en": "Median fixation duration" },
+      "label": {
+        "ru": "Медианная длительность фиксации",
+        "en": "Median fixation duration"
+      },
       "description": {
         "ru": "Медианная длительность валидных фиксаций в AOI.",
         "en": "Median duration of valid fixations in the AOI."
       },
       "unit": "ms",
       "valueType": "number",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["fixation_count", "gaze_qc"]
+      "requiredContext": [
+        "fixation_count",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.fixation_duration_mean_ms",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Средняя длительность фиксации", "en": "Mean fixation duration" },
+      "label": {
+        "ru": "Средняя длительность фиксации",
+        "en": "Mean fixation duration"
+      },
       "description": {
         "ru": "Средняя длительность валидных фиксаций в AOI; дополнительное значение и export.",
         "en": "Mean duration of valid fixations in the AOI; secondary display and export value."
       },
       "unit": "ms",
       "valueType": "number",
-      "scopes": ["session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": false,
       "groupAggregation": "participant_mean",
-      "requiredContext": ["fixation_count", "gaze_qc"]
+      "requiredContext": [
+        "fixation_count",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.ttff_ms",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Время до первой фиксации", "en": "Time to first fixation" },
+      "label": {
+        "ru": "Время до первой фиксации",
+        "en": "Time to first fixation"
+      },
       "description": {
         "ru": "Время от согласованной точки отсчёта до первой валидной фиксации в AOI; недостижение имеет статус no_event.",
         "en": "Time from the agreed reference point to the first valid fixation in the AOI; non-reached AOI has no_event status."
       },
       "unit": "ms",
       "valueType": "number",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median_among_reached",
-      "requiredContext": ["target_reached", "observation_end", "ttff_reference", "gaze_qc"]
+      "requiredContext": [
+        "target_reached",
+        "observation_end",
+        "ttff_reference",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.target_reached",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "AOI достигнута", "en": "AOI reached" },
+      "label": {
+        "ru": "AOI достигнута",
+        "en": "AOI reached"
+      },
       "description": {
         "ru": "Была ли хотя бы одна валидная фиксация в AOI в период её активности.",
         "en": "Whether at least one valid fixation occurred in the AOI while it was active."
       },
       "unit": "boolean",
       "valueType": "boolean",
-      "scopes": ["trial", "session"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "derive_target_reached_pct",
-      "requiredContext": ["valid_opportunities", "gaze_qc"]
+      "requiredContext": [
+        "valid_opportunities",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.target_reached_pct",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Доля достигших AOI", "en": "AOI reach rate" },
+      "label": {
+        "ru": "Доля достигших AOI",
+        "en": "AOI reach rate"
+      },
       "description": {
         "ru": "Доля валидных участников или проб, в которых AOI была достигнута.",
         "en": "Share of valid participants or trials in which the AOI was reached."
       },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["session", "group"],
-      "requires": ["aoi.target_reached"],
+      "scopes": [
+        "session",
+        "group"
+      ],
+      "requires": [
+        "aoi.target_reached"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_level_ratio",
-      "requiredContext": ["numerator", "denominator", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "gaze_qc"
+      ]
     },
     {
       "id": "aoi.visit_count",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Количество посещений AOI", "en": "AOI visit count" },
+      "label": {
+        "ru": "Количество посещений AOI",
+        "en": "AOI visit count"
+      },
       "description": {
         "ru": "Количество отдельных посещений AOI.",
         "en": "Number of separate AOI visits."
       },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": false,
       "groupAggregation": "participant_median",
-      "requiredContext": ["visit_gap_rule", "valid_observation_duration"]
+      "requiredContext": [
+        "visit_gap_rule",
+        "valid_observation_duration"
+      ]
     },
     {
       "id": "aoi.revisit_count",
       "packageId": "aoi_attention",
       "kind": "metric",
-      "label": { "ru": "Повторные посещения AOI", "en": "AOI revisits" },
+      "label": {
+        "ru": "Повторные посещения AOI",
+        "en": "AOI revisits"
+      },
       "description": {
         "ru": "Количество возвращений в AOI после первого посещения.",
         "en": "Number of returns to the AOI after the first visit."
       },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["trial", "session", "group"],
-      "requires": ["gaze", "aoi", "fixations"],
+      "scopes": [
+        "trial",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "aoi",
+        "fixations"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["visit_count", "visit_gap_rule", "valid_observation_duration"]
+      "requiredContext": [
+        "visit_count",
+        "visit_gap_rule",
+        "valid_observation_duration"
+      ]
     },
     {
       "id": "task.accuracy_pct",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Точность ответов", "en": "Response accuracy" },
+      "label": {
+        "ru": "Точность ответов",
+        "en": "Response accuracy"
+      },
       "description": {
         "ru": "Доля правильных ответов среди валидных оцениваемых проб.",
         "en": "Share of correct responses among valid scorable trials."
       },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["block", "session", "group"],
-      "requires": ["scorable_task", "task_events"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "scorable_task",
+        "task_events"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "task_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.rt_median_ms",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Медианное время реакции", "en": "Median reaction time" },
+      "label": {
+        "ru": "Медианное время реакции",
+        "en": "Median reaction time"
+      },
       "description": {
         "ru": "Медианное время реакции для валидных проб с ответом.",
         "en": "Median reaction time for valid trials with a response."
       },
       "unit": "ms",
       "valueType": "number",
-      "scopes": ["block", "session", "group"],
-      "requires": ["reaction_time_task", "task_events"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "reaction_time_task",
+        "task_events"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["n_observations", "task_qc"]
+      "requiredContext": [
+        "n_observations",
+        "task_qc"
+      ]
     },
     {
       "id": "task.rt_mean_ms",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Среднее время реакции", "en": "Mean reaction time" },
+      "label": {
+        "ru": "Среднее время реакции",
+        "en": "Mean reaction time"
+      },
       "description": {
         "ru": "Среднее время реакции; дополнительное значение и export.",
         "en": "Mean reaction time; secondary display and export value."
       },
       "unit": "ms",
       "valueType": "number",
-      "scopes": ["block", "session", "group"],
-      "requires": ["reaction_time_task", "task_events"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "reaction_time_task",
+        "task_events"
+      ],
       "defaultSelected": false,
       "groupAggregation": "participant_mean",
-      "requiredContext": ["n_observations", "task_qc"]
+      "requiredContext": [
+        "n_observations",
+        "task_qc"
+      ]
     },
     {
       "id": "task.correct_count",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Правильные ответы", "en": "Correct responses" },
-      "description": { "ru": "Количество правильных ответов.", "en": "Number of correct responses." },
+      "label": {
+        "ru": "Правильные ответы",
+        "en": "Correct responses"
+      },
+      "description": {
+        "ru": "Количество правильных ответов.",
+        "en": "Number of correct responses."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["block", "session"],
-      "requires": ["scorable_task", "task_events"],
+      "scopes": [
+        "block",
+        "session"
+      ],
+      "requires": [
+        "scorable_task",
+        "task_events"
+      ],
       "defaultSelected": true,
       "groupAggregation": "not_primary",
-      "requiredContext": ["denominator", "task_qc"]
+      "requiredContext": [
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.error_count",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Ошибочные ответы", "en": "Incorrect responses" },
-      "description": { "ru": "Количество ошибочных ответов.", "en": "Number of incorrect responses." },
+      "label": {
+        "ru": "Ошибочные ответы",
+        "en": "Incorrect responses"
+      },
+      "description": {
+        "ru": "Количество ошибочных ответов.",
+        "en": "Number of incorrect responses."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["block", "session"],
-      "requires": ["scorable_task", "task_events"],
+      "scopes": [
+        "block",
+        "session"
+      ],
+      "requires": [
+        "scorable_task",
+        "task_events"
+      ],
       "defaultSelected": true,
       "groupAggregation": "not_primary",
-      "requiredContext": ["denominator", "task_qc"]
+      "requiredContext": [
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.omission_count",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Пропуски", "en": "Omissions" },
-      "description": { "ru": "Количество требуемых, но отсутствующих ответов.", "en": "Number of required responses that were not made." },
+      "label": {
+        "ru": "Пропуски",
+        "en": "Omissions"
+      },
+      "description": {
+        "ru": "Количество требуемых, но отсутствующих ответов.",
+        "en": "Number of required responses that were not made."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["block", "session", "group"],
-      "requires": ["task_events", "omission_rule"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "task_events",
+        "omission_rule"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["denominator", "task_qc"]
+      "requiredContext": [
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.omission_rate_pct",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Доля пропусков", "en": "Omission rate" },
-      "description": { "ru": "Пропуски относительно числа возможностей ответа.", "en": "Omissions relative to the number of response opportunities." },
+      "label": {
+        "ru": "Доля пропусков",
+        "en": "Omission rate"
+      },
+      "description": {
+        "ru": "Пропуски относительно числа возможностей ответа.",
+        "en": "Omissions relative to the number of response opportunities."
+      },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["block", "session", "group"],
-      "requires": ["task_events", "omission_rule"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "task_events",
+        "omission_rule"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "task_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.commission_count",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Лишние ответы", "en": "Commissions" },
-      "description": { "ru": "Количество ответов там, где отвечать не требовалось.", "en": "Number of responses when no response was required." },
+      "label": {
+        "ru": "Лишние ответы",
+        "en": "Commissions"
+      },
+      "description": {
+        "ru": "Количество ответов там, где отвечать не требовалось.",
+        "en": "Number of responses when no response was required."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["block", "session", "group"],
-      "requires": ["task_events", "commission_rule"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "task_events",
+        "commission_rule"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["denominator", "task_qc"]
+      "requiredContext": [
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.commission_rate_pct",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Доля лишних ответов", "en": "Commission rate" },
-      "description": { "ru": "Лишние ответы относительно числа возможностей.", "en": "Commissions relative to the number of opportunities." },
+      "label": {
+        "ru": "Доля лишних ответов",
+        "en": "Commission rate"
+      },
+      "description": {
+        "ru": "Лишние ответы относительно числа возможностей.",
+        "en": "Commissions relative to the number of opportunities."
+      },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["block", "session", "group"],
-      "requires": ["task_events", "commission_rule"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "task_events",
+        "commission_rule"
+      ],
       "defaultSelected": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "task_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "task_qc"
+      ]
     },
     {
       "id": "task.trial_count_valid",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Валидные пробы", "en": "Valid trials" },
-      "description": { "ru": "Количество проб, включённых в расчёт.", "en": "Number of trials included in the calculation." },
+      "label": {
+        "ru": "Валидные пробы",
+        "en": "Valid trials"
+      },
+      "description": {
+        "ru": "Количество проб, включённых в расчёт.",
+        "en": "Number of trials included in the calculation."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["block", "session", "group"],
-      "requires": ["task_events"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "task_events"
+      ],
       "defaultSelected": true,
       "groupAggregation": "sum_with_participant_count",
-      "requiredContext": ["trial_count_total", "task_qc"]
+      "requiredContext": [
+        "trial_count_total",
+        "task_qc"
+      ]
     },
     {
       "id": "task.trial_count_excluded",
       "packageId": "task_performance",
       "kind": "metric",
-      "label": { "ru": "Исключённые пробы", "en": "Excluded trials" },
-      "description": { "ru": "Количество исключённых проб с доступными причинами.", "en": "Number of excluded trials with available reasons." },
+      "label": {
+        "ru": "Исключённые пробы",
+        "en": "Excluded trials"
+      },
+      "description": {
+        "ru": "Количество исключённых проб с доступными причинами.",
+        "en": "Number of excluded trials with available reasons."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["block", "session", "group"],
-      "requires": ["task_events"],
+      "scopes": [
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "task_events"
+      ],
       "defaultSelected": true,
       "groupAggregation": "sum_with_participant_count",
-      "requiredContext": ["exclusion_reasons", "task_qc"]
+      "requiredContext": [
+        "exclusion_reasons",
+        "task_qc"
+      ]
     },
     {
       "id": "qc.sample_count_total",
       "packageId": "data_quality",
       "kind": "quality",
-      "label": { "ru": "Все gaze-сэмплы", "en": "Total gaze samples" },
-      "description": { "ru": "Общее число gaze-сэмплов в окне.", "en": "Total gaze samples in the observation window." },
+      "label": {
+        "ru": "Все gaze-сэмплы",
+        "en": "Total gaze samples"
+      },
+      "description": {
+        "ru": "Общее число gaze-сэмплов в окне.",
+        "en": "Total gaze samples in the observation window."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["trial", "block", "session", "group"],
-      "requires": ["gaze"],
+      "scopes": [
+        "trial",
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze"
+      ],
       "defaultSelected": true,
       "mandatory": true,
       "groupAggregation": "sum_with_participant_count"
@@ -454,12 +839,25 @@
       "id": "qc.sample_count_valid",
       "packageId": "data_quality",
       "kind": "quality",
-      "label": { "ru": "Валидные gaze-сэмплы", "en": "Valid gaze samples" },
-      "description": { "ru": "Число gaze-сэмплов, прошедших правила валидности.", "en": "Number of gaze samples passing validity rules." },
+      "label": {
+        "ru": "Валидные gaze-сэмплы",
+        "en": "Valid gaze samples"
+      },
+      "description": {
+        "ru": "Число gaze-сэмплов, прошедших правила валидности.",
+        "en": "Number of gaze samples passing validity rules."
+      },
       "unit": "count",
       "valueType": "integer",
-      "scopes": ["trial", "block", "session", "group"],
-      "requires": ["gaze"],
+      "scopes": [
+        "trial",
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze"
+      ],
       "defaultSelected": true,
       "mandatory": true,
       "groupAggregation": "sum_with_participant_count"
@@ -468,61 +866,368 @@
       "id": "qc.valid_gaze_pct",
       "packageId": "data_quality",
       "kind": "quality",
-      "label": { "ru": "Валидный взгляд", "en": "Valid gaze" },
-      "description": { "ru": "Доля валидного времени gaze в окне.", "en": "Share of valid gaze time in the observation window." },
+      "label": {
+        "ru": "Валидный взгляд",
+        "en": "Valid gaze"
+      },
+      "description": {
+        "ru": "Доля валидного времени gaze в окне.",
+        "en": "Share of valid gaze time in the observation window."
+      },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["trial", "block", "session", "group"],
-      "requires": ["gaze"],
+      "scopes": [
+        "trial",
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze"
+      ],
       "defaultSelected": true,
       "mandatory": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "gaze_qc"
+      ]
     },
     {
       "id": "qc.low_confidence_pct",
       "packageId": "data_quality",
       "kind": "quality",
-      "label": { "ru": "Низкая надёжность gaze", "en": "Low-confidence gaze" },
-      "description": { "ru": "Доля времени с signal confidence ниже порога.", "en": "Share of time with signal confidence below the threshold." },
+      "label": {
+        "ru": "Низкая надёжность gaze",
+        "en": "Low-confidence gaze"
+      },
+      "description": {
+        "ru": "Доля времени с signal confidence ниже порога.",
+        "en": "Share of time with signal confidence below the threshold."
+      },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["trial", "block", "session", "group"],
-      "requires": ["gaze", "signal_confidence"],
+      "scopes": [
+        "trial",
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "signal_confidence"
+      ],
       "defaultSelected": true,
       "mandatory": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "threshold", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "threshold",
+        "gaze_qc"
+      ]
     },
     {
       "id": "qc.off_screen_pct",
       "packageId": "data_quality",
       "kind": "quality",
-      "label": { "ru": "Взгляд вне экрана", "en": "Off-screen gaze" },
-      "description": { "ru": "Доля времени с корректно определённым взглядом вне viewport.", "en": "Share of time with validly estimated gaze outside the viewport." },
+      "label": {
+        "ru": "Взгляд вне экрана",
+        "en": "Off-screen gaze"
+      },
+      "description": {
+        "ru": "Доля времени с корректно определённым взглядом вне viewport.",
+        "en": "Share of time with validly estimated gaze outside the viewport."
+      },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["trial", "block", "session", "group"],
-      "requires": ["gaze", "on_screen_state"],
+      "scopes": [
+        "trial",
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "on_screen_state"
+      ],
       "defaultSelected": true,
       "mandatory": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "gaze_qc"
+      ]
     },
     {
       "id": "qc.outside_stimulus_pct",
       "packageId": "data_quality",
       "kind": "quality",
-      "label": { "ru": "Взгляд вне стимула", "en": "Gaze outside stimulus" },
-      "description": { "ru": "Доля валидного on-screen времени взгляда вне фактического content rect стимула.", "en": "Share of valid on-screen gaze time outside the stimulus content rectangle." },
+      "label": {
+        "ru": "Взгляд вне стимула",
+        "en": "Gaze outside stimulus"
+      },
+      "description": {
+        "ru": "Доля валидного on-screen времени взгляда вне фактического content rect стимула.",
+        "en": "Share of valid on-screen gaze time outside the stimulus content rectangle."
+      },
       "unit": "pct",
       "valueType": "number",
-      "scopes": ["trial", "block", "session", "group"],
-      "requires": ["gaze", "stimulus", "inside_stimulus_state"],
+      "scopes": [
+        "trial",
+        "block",
+        "session",
+        "group"
+      ],
+      "requires": [
+        "gaze",
+        "stimulus",
+        "inside_stimulus_state"
+      ],
       "defaultSelected": true,
       "mandatory": true,
       "groupAggregation": "participant_median",
-      "requiredContext": ["numerator", "denominator", "gaze_qc"]
+      "requiredContext": [
+        "numerator",
+        "denominator",
+        "gaze_qc"
+      ]
+    },
+    {
+      "id": "physiology.bpm_mean",
+      "label": {
+        "ru": "ЧСС: средняя оценка",
+        "en": "Heart rate: mean estimate"
+      },
+      "unit": "bpm",
+      "channel": "rppg",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "rppg"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "physiology.respiration_mean",
+      "label": {
+        "ru": "Дыхание: средняя частота",
+        "en": "Respiration: mean rate"
+      },
+      "unit": "breaths/min",
+      "channel": "respiration",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "respiration"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "blink.count",
+      "label": {
+        "ru": "Количество морганий",
+        "en": "Blink count"
+      },
+      "unit": "count",
+      "channel": "blink",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "blink"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "blink.rate_per_min",
+      "label": {
+        "ru": "Частота морганий",
+        "en": "Blink rate"
+      },
+      "unit": "blinks/min",
+      "channel": "blink",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "blink"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "blink.perclos60_pct",
+      "label": {
+        "ru": "PERCLOS: среднее по окнам 60 с",
+        "en": "PERCLOS: mean of 60 s windows"
+      },
+      "unit": "pct",
+      "channel": "blink",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "blink"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "body.velocity_mean",
+      "label": {
+        "ru": "Движение корпуса: средняя скорость",
+        "en": "Body movement: mean velocity"
+      },
+      "unit": "torso/s",
+      "channel": "head_hands",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "head_hands"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "body.velocity_p95",
+      "label": {
+        "ru": "Движение корпуса: P95 сохранённого окна",
+        "en": "Body movement: retained-window P95"
+      },
+      "unit": "torso/s",
+      "channel": "head_hands",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "head_hands"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "face.valence_mean",
+      "label": {
+        "ru": "Мимика: валентность (proxy)",
+        "en": "Facial expression: valence (proxy)"
+      },
+      "unit": "index",
+      "channel": "face",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "face"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
+    },
+    {
+      "id": "face.arousal_mean",
+      "label": {
+        "ru": "Мимика: возбуждение (proxy)",
+        "en": "Facial expression: arousal (proxy)"
+      },
+      "unit": "index",
+      "channel": "face",
+      "packageId": "continuous_signals",
+      "defaultSelected": true,
+      "description": {
+        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
+        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+      },
+      "kind": "metric",
+      "valueType": "number",
+      "scopes": [
+        "session",
+        "participant",
+        "group"
+      ],
+      "requires": [
+        "face"
+      ],
+      "groupAggregation": "session_then_participant_then_group_equal_weight"
     }
   ]
 }

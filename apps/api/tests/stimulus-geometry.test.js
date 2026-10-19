@@ -58,12 +58,13 @@ test('stimulus geometry uses only displayed media pixels, not letterboxes or the
     const sample = { correctedX: rect.left + rect.width * 0.25, correctedY: rect.top + rect.height * 0.75,
       valid: true, onScreen: true, confidence: 1, phase: 'cognitive_stimulus', blockId: 'main', trialId: 'trial', stimulusId: '42',
       stimulusType: 'image', stimulusRect: rect, screenWidth: 1000, screenHeight: 800 };
-    const result = buildHeatmaps([{ ...sample, t: 1000 }, { ...sample, t: 1033, correctedX: rect.left - 1 }],
+    const result = buildHeatmaps([...[1000, 1033, 1066, 1100, 1133].map(t => ({ ...sample, t })),
+      { ...sample, t: 1166, correctedX: rect.left - 1 }],
       { screenWidth: 1000, screenHeight: 800, gridWidth: 4, gridHeight: 4 });
     const entry = result.perStimulus[0];
     assert.equal(entry.outsideStimulusCount, 1);
     assert.equal(entry.intrinsicWidth, 200);
-    assert.equal(entry.algorithm.version, '1.1.0');
+    assert.equal(entry.algorithm.version, '1.2.0');
     assert.equal(entry.algorithm.parameters.coordinateMappingVersion, 'media-content-rect.v1');
     assert.ok(entry.grid.values.some(value => value > 0));
   });

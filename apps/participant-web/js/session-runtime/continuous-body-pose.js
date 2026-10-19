@@ -78,6 +78,7 @@ export function summarizeBodyPoseState(state, movementBursts = 0) {
         oodSampleCount: accumulator?.oodCount ?? samples.filter(sample => sample.ood).length,
         occludedSampleCount: accumulator?.occludedCount ?? 0,
         retainedSampleCount: samples.length,
+        retainedValidSampleCount: validSamples.length,
         durationMs: Number.isFinite(accumulator?.startedAt)
             ? Math.max(0, (accumulator.updatedAt || accumulator.startedAt) - accumulator.startedAt)
             : (samples.length > 1 ? samples.at(-1).t - samples[0].t : 0),
@@ -88,6 +89,7 @@ export function summarizeBodyPoseState(state, movementBursts = 0) {
             ? finite(accumulator.movementVelocitySum / validCount)
             : finite(mean(velocities)),
         movementVelocityP95: finite(percentile(velocities, 0.95)),
+        movementVelocityP95Scope: 'retained_samples',
         movementBurstCount: accumulator?.movementBurstCount ?? movementBursts,
         torsoLeanAbsMeanDeg: validCount > 0 && Number.isFinite(accumulator?.torsoLeanAbsSum)
             ? finite(accumulator.torsoLeanAbsSum / validCount)

@@ -350,7 +350,37 @@ function resolveParticipantStimulus(params) {
   return fallback;
 }
 
+// Heatmaps use stimulus-local coordinates, so previews contain the stimulus
+// itself, without the surrounding participant viewport or task background.
+function standardStimulusPreview(stimulusId, options = {}) {
+  const stimulus = resolveStandardStimulus(stimulusId, null, options);
+  if (!stimulus) return null;
+  if (stimulus.type === 'image') return { src: stimulus.src, width: 640, height: 480 };
+  const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char]));
+  const dimension = (value, fallback) => Number.isFinite(value) && value > 0 && value <= 16384 ? Math.max(1, Math.round(value)) : fallback;
+  const text = stimulus.text || '';
+  const width = dimension(options.intrinsicWidth, stimulus.type === 'text' ? Math.max(160, text.length * 100) : 512);
+  const height = dimension(options.intrinsicHeight, stimulus.type === 'text' ? 180 : 512);
+  const style = stimulus.style || {};
+  const color = escape(style.backgroundColor || '#020617');
+  let body;
+  if (stimulus.type === 'text') {
+    body = `<text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" font-family="sans-serif" font-weight="900" font-size="${Math.min(height * .8, width / Math.max(1, text.length) * 1.35)}" fill="${escape(style.color || '#0f172a')}">${escape(text)}</text>`;
+  } else if (style.clipPath) {
+    body = `<polygon points="${width / 2},0 ${width},${height} 0,${height}" fill="${color}"/>`;
+  } else if (style.transform) {
+    body = `<polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${color}"/>`;
+  } else if (style.borderRadius === '50%') {
+    body = `<ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${color}"/>`;
+  } else {
+    body = `<rect width="${width}" height="${height}" rx="${parseFloat(style.borderRadius) || 0}" fill="${color}"/>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`;
+  return { src: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), width, height };
+}
+
 const standardStimuliApi = {
+  standardStimulusPreview,
   normalizeStimulusId,
   parseEmotionFromStdId,
   resolveEmotionKey,

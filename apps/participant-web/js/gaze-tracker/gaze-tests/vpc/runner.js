@@ -1,4 +1,4 @@
-import { state, setSessionPhase, setTaskContext, clearTaskContext, recordSessionEvent } from '../../../web-page/state.js?v=20261008-2';
+import { state, setSessionPhase, setTaskContext, clearTaskContext, recordSessionEvent } from '../../../web-page/state.js?v=20261019-4';
 import { TEST_PHASES, VPC_CONFIG } from '../constants.js';
 import { FELIDAE_SPECIES_POOLS, FELIDAE_TRIALS } from './manifest-felidae.js';
 import { pickLoadableStimulusFromPool } from './fallback.js';

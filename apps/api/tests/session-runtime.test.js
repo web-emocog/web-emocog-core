@@ -438,6 +438,9 @@ describe('session checkpoint', () => {
     assert.equal(matchesCheckpointInvitation(data, '?code=old-invitation'), true);
     assert.equal(matchesCheckpointInvitation(data, ''), true);
     assert.equal(matchesCheckpointInvitation({}, '?code=new-invitation'), false);
+    const versioned = { ids: { invitationCode: 'immutable-v2' }, experimentMeta: { invitationEntryCode: 'stable-entry' } };
+    assert.equal(matchesCheckpointInvitation(versioned, '?code=stable-entry'), true);
+    assert.equal(matchesCheckpointInvitation(versioned, '?code=another-entry'), false);
   });
 
   it('persists and restores a checkpoint without IndexedDB', async () => {
@@ -481,6 +484,31 @@ describe('session checkpoint', () => {
     const restored = await store.load('S-PRIVATE');
     assert.equal(restored.schemaVersion, 3);
     assert.equal(restored.sessionData.user.age, 30);
+  });
+  it('survives primary storage failure across new store instances with an explicit compact backup', async () => {
+    const { SessionCheckpointStore } = await importRuntimeModule('checkpoint-store.mjs');
+    const data = new Map();
+    const storage = { getItem: key => data.get(key) || null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) };
+    const store = new SessionCheckpointStore({ sessionStorage: storage });
+    store._savePrimary = async () => { throw new Error('QuotaExceededError'); };
+    const payload = { ids: { session: 'S-FALLBACK' }, eyeTracking: [{ x: 1 }], cognitiveResults: [{ rt: 400 }],
+      user: { email: 'person@example.test' }, pendingFinalUpload: { payload: { schemaVersion: 'session_feature.v1', ids: { session: 'S-FALLBACK' } } } };
+    assert.equal(await store.save('S-FALLBACK', payload, { state: 'completed' }), true);
+    const restored = await new SessionCheckpointStore({ sessionStorage: storage }).load();
+    assert.equal(restored.machineSnapshot.state, 'completed');
+    assert.equal(restored.sessionData.cognitiveResults[0].rt, 400);
+    assert.equal(restored.sessionData.pendingFinalUpload.payload.schemaVersion, 'session_feature.v1');
+    assert.deepEqual(restored.sessionData.eyeTracking, []);
+    assert.equal(restored.sessionData.storageRecovery.compactCheckpoint, true);
+    assert.equal(restored.sessionData.user.email, undefined);
+    await store.clear('S-FALLBACK');
+    assert.equal(storage.getItem('wecog_session_backup:S-FALLBACK'), null);
+  });
+  it('does not claim durable backup when both storage paths reject writes', async () => {
+    const { SessionCheckpointStore } = await importRuntimeModule('checkpoint-store.mjs');
+    const store = new SessionCheckpointStore({ sessionStorage: { getItem: () => null, setItem: () => { throw new Error('blocked'); } } });
+    store._savePrimary = async () => { throw new Error('QuotaExceededError'); };
+    await assert.rejects(store.save('S-FAIL', { ids: { session: 'S-FAIL' } }, { state: 'running' }), /QuotaExceededError/);
   });
 });
 
@@ -576,6 +604,28 @@ describe('participant API origin and retry policy', () => {
     }
   });
 
+  it('does not replay admission denials or retry before a long Retry-After', async () => {
+    const { primeParticipantSession } = await importRuntimeModule('ingest-transport.mjs');
+    const previousFetch = global.fetch;
+    const previousSessionStorage = global.sessionStorage;
+    global.sessionStorage = { getItem: () => null };
+    try {
+      for (const status of [403, 429]) {
+        let requests = 0;
+        global.fetch = async () => {
+          requests++;
+          return { ok: false, status, headers: { get: () => status === 429 ? '2' : null }, json: async () => ({ error: 'denied' }) };
+        };
+        await assert.rejects(primeParticipantSession({ apiBase: 'https://api.wecog.test', sessionId: 'denied', invitationCode: 'denied' }),
+          error => error.httpStatus === status);
+        assert.equal(requests, 1);
+      }
+    } finally {
+      global.fetch = previousFetch;
+      global.sessionStorage = previousSessionStorage;
+    }
+  });
+
   it('honors Retry-After and clears a completed participant token', async () => {
     const { sendSessionFeature } = await importRuntimeModule('ingest-transport.mjs');
     const previousFetch = global.fetch;
@@ -588,7 +638,7 @@ describe('participant API origin and retry policy', () => {
       setItem: (key, value) => storage.set(key, value),
       removeItem: key => storage.delete(key),
     };
-    global.fetch = async (url) => {
+    global.fetch = async (url, options) => {
       calls.push(url);
       if (url.endsWith('/ingest-token')) {
         return {
@@ -610,7 +660,8 @@ describe('participant API origin and retry policy', () => {
         ok: true,
         status: 200,
         headers: { get: () => null },
-        json: async () => ({ ingested: true }),
+        json: async () => ({ session_id: 'S-RETRY', ingested: true, idempotent: false, idempotency_key: null,
+          qc_validity: null, proxy_ready: false, lifecycle_status: 'completed', completed_at: new Date().toISOString() }),
       };
     };
     try {
@@ -675,7 +726,8 @@ describe('participant API origin and retry policy', () => {
         status: ingestRequests > 1 ? 200 : 401,
         headers: { get: () => null },
         json: async () => ingestRequests > 1
-          ? ({ ingested: true })
+          ? ({ session_id: 'S-REFRESH', ingested: true, idempotent: false, idempotency_key: null,
+            qc_validity: null, proxy_ready: false, lifecycle_status: 'in_progress', completed_at: null })
           : ({ error: 'expired' }),
       };
     };

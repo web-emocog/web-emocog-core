@@ -4,14 +4,15 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
-import { state, recordSessionEvent } from './state.js?v=20261008-2';
-import { translations } from '../../translations.js?v=20261008-2';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261008-2';
-import { measureRenderFPS } from './camera.js?v=20261008-2';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261008-2';
+import { state, recordSessionEvent } from './state.js?v=20261019-4';
+import { translations } from '../../translations.js?v=20261019-4';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261019-4';
+import { measureRenderFPS } from './camera.js?v=20261019-4';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-4';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
-import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
+import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261019-4';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-4';
 
 const MVP_STEP = {
     INTRO: 1,
@@ -72,7 +73,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261008-2');
+        const mod = await import('./tests-updated.js?v=20261019-4');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;
@@ -305,11 +306,17 @@ export function generateUniqueId() {
 
 export async function generateIdsAndProceed() {
     dbg('ui', 'button:consentBtn', { action: 'generateIdsAndProceed' });
+    if (state.runtime?.sessionRuntime?.checkpointRestoreFailed) {
+        const errorNode = document.getElementById('consentError');
+        if (errorNode) { errorNode.hidden = false; errorNode.textContent = persistenceMessage('restore', state.currentLang); }
+        return false;
+    }
     const sessionId = state.sessionData.ids.session || generateUniqueId();
     const participantId = state.sessionData.ids.participant || generateUniqueId();
 
     state.sessionData.ids.session     = sessionId;
     state.sessionData.ids.participant = participantId;
+    state.sessionData.user = state.sessionData.user || {};
     state.sessionData.user.interfaceLanguage = state.currentLang;
     const consentCheck = document.getElementById('consentCheck');
     if (!consentCheck?.checked) {
@@ -345,16 +352,27 @@ export async function generateIdsAndProceed() {
         idDisplay.innerText = `ID: ${participantId.substring(0, 8)}...`;
     }
 
+    let admissionStage = 'network';
     try {
         const invitationCode = state.sessionData.ids.invitationCode || null;
         if (invitationCode && !state.runtime?.invitationProtocolDefinition) {
             throw new Error('invitation_not_loaded');
         }
+        if (invitationCode) {
+            admissionStage = 'local';
+            state.sessionData.admissionPending = true;
+            if (await state.runtime?.sessionRuntime?.saveCheckpoint?.() !== true) {
+                throw new Error('checkpoint_persistence_failed');
+            }
+        }
+        admissionStage = 'network';
         await primeParticipantSession({
             sessionId,
             invitationCode
         });
         if (invitationCode) {
+            delete state.sessionData.admissionPending;
+            admissionStage = 'local';
             const checkpointSaved = await state.runtime?.sessionRuntime?.saveCheckpoint?.();
             if (checkpointSaved !== true) {
                 throw new Error('checkpoint_persistence_failed');
@@ -373,17 +391,14 @@ export async function generateIdsAndProceed() {
         const consentError = document.getElementById('consentError');
         if (consentError) {
             consentError.hidden = false;
-            consentError.textContent = translations[state.currentLang]?.session_reservation_error
-                || participantText(
-                    'Не удалось открыть сессию. Проверьте ссылку приглашения и подключение к сети.',
-                    'The session could not be opened. Check the invitation link and network connection.',
-                    'No se pudo abrir la sesión. Compruebe el enlace de invitación y la conexión.'
-                );
+            consentError.textContent = persistenceMessage(persistenceErrorCode(error, admissionStage), state.currentLang);
         }
         recordSessionEvent('participant_admission_failed', {
             category: 'technical',
             severity: 'error',
-            message: error?.message || String(error)
+            stage: admissionStage,
+            errorCode: persistenceErrorCode(error, admissionStage),
+            httpStatus: error?.httpStatus || null
         });
         return false;
     }
@@ -738,6 +753,34 @@ function renderFinalQcMetrics(payload, lang) {
 }
 
 export function updateFinalStepWithQC(qcSummary, options = {}) {
+    const protocolQc = qcSummary?.protocolQc;
+    let policyNotice = document.getElementById('protocolQcNotice');
+    if (protocolQc || state.sessionData.experimentMeta?.protocolTermination) {
+        if (!policyNotice) {
+            policyNotice = document.createElement('p'); policyNotice.id = 'protocolQcNotice'; policyNotice.setAttribute('role', 'status');
+            document.getElementById('downloadBtn')?.before(policyNotice);
+        }
+        const introduction = state.sessionData.experimentMeta?.protocolTermination
+            ? participantText('Протокол остановлен по правилу контроля качества. Собранные результаты будут сохранены; прохождение неполное.', 'The protocol stopped under its quality rule. Collected results will be saved; the protocol is incomplete.')
+            : protocolQc.failed.length || protocolQc.missing.length
+                ? participantText('Правила качества протокола: есть нарушения или отсутствующие измерения.', 'Protocol quality rules: some checks failed or measurements are missing.')
+                : participantText('Правила качества протокола выполнены.', 'Protocol quality rules passed.');
+        const labels = state.currentLang === 'ru'
+            ? { gazeValid: 'Валидный взгляд', faceDetected: 'Обнаружение лица', fpsStable: 'FPS', lighting: 'Допустимое освещение' }
+            : { gazeValid: 'Valid gaze', faceDetected: 'Face detection', fpsStable: 'FPS', lighting: 'Acceptable lighting' };
+        policyNotice.textContent = introduction + ' ' + Object.entries(protocolQc?.checks || {}).filter(([, check]) => check.enabled)
+            .map(([key, check]) => `${labels[key] || key}: ${check.value == null ? participantText('нет данных', 'no data') : check.value} / ${check.threshold}`).join('; ');
+    }
+    if (state.sessionData.storageRecovery?.compactCheckpoint && !document.getElementById('compactRecoveryNotice')) {
+        const notice = document.createElement('p');
+        notice.id = 'compactRecoveryNotice';
+        notice.setAttribute('role', 'status');
+        notice.textContent = participantText(
+            'Восстановлена резервная копия. Сырые отсчёты могут быть неполными; подготовленный итоговый пакет сохранён отдельно.',
+            'A backup was restored. Raw samples may be incomplete; the prepared final payload is preserved separately.'
+        );
+        document.getElementById('downloadBtn')?.before(notice);
+    }
     try {
         hideQcOverlay();
     } catch (_) {}
@@ -823,8 +866,11 @@ export function downloadData() {
     try {
         const aggregatesOnly = document.getElementById('aggregatesOnlyCheckbox')?.checked;
         const sessionId = state.sessionData?.ids?.session || 'session';
+        const saved = state.sessionData.pendingFinalUpload?.payload || state.sessionData.finalizedPayload;
+        const canonical = saved?.ids?.session === state.sessionData.ids?.session
+            && saved?.ids?.invitationCode === state.sessionData.ids?.invitationCode ? saved : null;
         const data = aggregatesOnly
-            ? buildAggregatesPayload(state.sessionData)
+            ? (canonical || buildAggregatesPayload(state.sessionData))
             : state.sessionData;
         const fileName = aggregatesOnly
             ? `session_${sessionId}_aggregates.json`

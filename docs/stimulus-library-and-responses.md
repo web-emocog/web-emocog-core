@@ -2,7 +2,7 @@
 
 ## Response Contract
 
-The trial editor supports four additional physical response keys:
+The trial editor supports layout-independent physical response keys:
 
 | Russian layout | English layout | Saved response |
 | --- | --- | --- |
@@ -10,6 +10,23 @@ The trial editor supports four additional physical response keys:
 | Ч | X | `KeyX` |
 | Б | comma | `Comma` |
 | Ю | period | `Period` |
+| С | C | `KeyC` |
+| М | V | `KeyV` |
+| И | B | `KeyB` |
+| Т | N | `KeyN` |
+| Ь | M | `KeyM` |
+
+Choose a custom key opens a modal capture. The candidate (for example `В / D`)
+is committed only by Save; Cancel/Escape retains the previous response. Row
+checkboxes allow assigning one response to selected trials; saving a custom
+bulk key applies only to checked rows. Save the trial table and publish the
+protocol to make changes available to participants. Custom codes survive draft,
+publication and reload, using the same instruction substitution as presets.
+Letters, digits, punctuation, arrows, Enter and numpad codes are supported.
+Numpad digits are distinct from the number row. Tab/Escape, modifier-only keys,
+function keys, composing events and system shortcuts cannot be bound. The app
+cannot override OS/browser-reserved shortcuts. Labels describe Russian/US
+physical layouts; other keyboard layouts still use the same physical code.
 
 The editor shows both actual Cyrillic and Latin labels. `KeyboardEvent.code`
 determines the response regardless of the active layout. Imported Russian or
@@ -164,3 +181,52 @@ These capabilities are tested locally, not deployed. The API image requires
 FFmpeg/ffprobe and migration 17. For first upgrade, pause old writers that do not
 participate in the lock, preserve a verified pre-upgrade backup, and upgrade
 API/controller/helper/static assets together.
+
+## Virtual Stimuli In Analytics
+
+Standard `std_*` shapes do not have uploaded files. Analytics resolves their
+previews using the same standard-stimulus registry as the participant runtime,
+returning an inline SVG in `stimulus.contentUrl`. The square preview covers the
+stimulus itself, not the surrounding browser viewport. Recorded intrinsic
+dimensions are retained when available; a square fallback uses a square aspect
+ratio. AOI/fixation coordinates and their mapping-version checks are unchanged.
+An unrecognised ID does not acquire a fabricated image, and numeric database IDs
+still require their existing project authorization and pinned media version.
+Text previews require a recorded supported participant language; they do not use
+the current researcher language. A template preview is not a frame-by-frame
+recording of a dynamic stimulus such as the PVT counter.
+
+## Media Failure Boundaries
+
+Participant JSON requests bound both headers and response bodies to 30 seconds.
+Binary preload has a 120-second deadline, followed by a 15-second image decode
+or video-metadata deadline. Refreshing Start for the same immutable publication
+reuses successfully preloaded object URLs; a new publication or page load resolves
+media again. A failed preload is not a successful presentation: the task has its
+own readiness/error handling, and never starts RT timing on a failed stimulus.
+
+The task gives a primary image 10 seconds and a video 15 seconds. Switching to
+the server fallback starts a fresh, bounded deadline. A hanging fallback cannot
+trap the participant forever. Retry/skip stays available; a skipped presentation
+is explicitly invalid, not a valid no-response trial. Late events cannot replace
+the following stimulus, including a late video play promise from the old source.
+
+Visual task blocks accept database-backed images/video, not audio masquerading
+as an image. Publishing/admitting a protocol with such an unsupported visual
+reference fails closed. This is not an implementation of arbitrary audio stimuli;
+separately consented audio-research tasks retain their existing behavior.
+
+Analytics descriptors use contract types `image`, `video` or `other`, not MIME
+strings; intrinsic dimensions are positive integers or null. Optional `sha256`
+and `contentError` are documented in the analytics response schema. URLs retain
+the pinned version and project authorization. Failure to load or decode one file
+does not discard other contexts or their statistics. A decode failure evicts its
+cached object URL; the visible media-retry button downloads it again. A missing
+or corrupt historical file is never replaced with another version or another
+researcher's media.
+
+Network resilience covers an already loaded page and recovery when static assets
+are available. There is no promise of a fresh full-page load without any network
+or cached assets, and no guarantee of survival after clearing browser data or
+closing a tab that only has a sessionStorage fallback. Periodic checkpoints do
+not make every uncommitted frame power-failure-safe.

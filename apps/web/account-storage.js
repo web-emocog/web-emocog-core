@@ -14,6 +14,7 @@
   var EXACT_KEYS = new Set([
     'wecog_researcher_language',
     'emocog_active_experiment_id',
+    'emocog_analytics_query_draft_v1',
     'emocog_experiments_tab',
     'emocog_folders',
     'emocog_my_experiments',
@@ -35,6 +36,7 @@
     'emocog_analytics_plan_',
     'emocog_builder_api_',
     'emocog_qc_thresholds_',
+    'emocog_protocol_persistence_',
     'emocog_session_features_'
   ];
 

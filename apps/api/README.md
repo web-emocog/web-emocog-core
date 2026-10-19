@@ -153,9 +153,15 @@ caller получает обновлённую HttpOnly cookie и `csrf_token`, 
 Канонический поток: `filter-options` -> `POST /analytics/v1/snapshots` ->
 session/group endpoints -> `GET /analytics/v1/exports` с тем же `snapshot_id`.
 Production UI не использует demo fallback. `null + status/reason` означает
-отсутствие данных и не заменяется нулём. Level 2 comparison возвращает
-`not_configured`/`insufficient_data`, пока в протоколе нет утверждённого метода;
-backend не фабрикует effect, CI или p-value.
+отсутствие данных и не заменяется нулём. Версия выборки — `publication:N`,
+историческая `invitation:ID` или `legacy` для неподтверждённых импортов, а не
+версия формата JSON. Стимулы и AOI берутся из выбранной публикации.
+Level 2 поддерживает свои описательные сравнения парных условий/блоков и
+независимых групп через `/analytics/v1/comparisons/custom`: равный вес участников,
+разность B − A, явные пропуски. CI и p-value не рассчитываются. Старые
+преднастроенные модели без утверждённого метода по-прежнему возвращают
+`not_configured`/`insufficient_data`. Подробности — в
+`../web/docs/analytics-contract/README.md`.
 
 ## Конвертация документов
 
@@ -209,6 +215,23 @@ project`; mismatch возвращает `409`. Staff JWT может отправ
 контрактом. Обязательны `schemaVersion=session_feature.v1`, `ids.session`,
 `lifecycle` и typed `events`; JSON Schema публикуется на
 `GET /contracts/session_feature.v1`.
+
+Опциональный `delivery` содержит `schemaVersion=session_delivery.v1`,
+`sequence` (1..2147483647) и `kind=checkpoint|final`. Промежуточные пакеты
+сохраняются в существующих таблицах без остановки сессии и без Python RT-анализатора.
+Меньшие номера и одинаковые номера с разным содержимым отклоняются; идентичный
+повтор не перезаписывает данные. Сервер владеет digest в
+`experimentMeta.serverDeliveryDigest`. Финальная запись запечатывает сессию;
+старый checkpoint не может её изменить. Это тот же tuple-auth, PII/schema policy
+и tenant boundary, не новый публичный endpoint.
+
+`settings.qualityControl` опубликованного протокола задаёт дополнительные
+проверки процентов/FPS. Сервер пересчитывает `qcSummary.protocolQc` по immutable
+invitation, а не по изменённому черновику или клиентскому флагу pass.
+Остановка `protocolTermination.reason=quality_stopped` возвращается как
+`session_status=aborted`. В списке сессий `include_incomplete=false` исключает
+такую запись; в аналитике используется `filters.includeIncompleteSessions`.
+Она не считается полным прохождением. Новых миграций для этого изменения нет.
 
 - `qcSummary`:
   - принимаются оба варианта ключа score: `qc_score` и `qcScore`,

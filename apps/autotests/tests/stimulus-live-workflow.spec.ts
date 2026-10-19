@@ -5,12 +5,15 @@ import { randomUUID } from 'node:crypto';
 
 const fixturePath = process.env.LIVE_STIMULUS_FIXTURE;
 const fixture = fixturePath ? JSON.parse(readFileSync(fixturePath, 'utf8')) : null;
-const api = 'http://127.0.0.1:3000';
+const api = fixture?.apiBase || 'http://127.0.0.1:3000';
 const web = 'http://127.0.0.1:4173';
 
 test.describe('Live stimulus workflow on an isolated API and database', () => {
   test.skip(!fixture, 'Set LIVE_STIMULUS_FIXTURE after seeding an isolated test database');
   test.setTimeout(60_000);
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; localStorage.setItem('emocog_api_base', api); }, api);
+  });
 
   const cases = ([['image', 800, 200], ['image', 200, 800], ['image', 400, 400], ['video', 640, 360]] as const)
     .flatMap(([kind, width, height]) => [{ width: 1280, height: 720 }, { width: 390, height: 844 }]
@@ -77,7 +80,7 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261008-2', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-4', location.href).href);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
       await page.locator('#cogStartBtn').click();
@@ -92,7 +95,7 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await expect(page.locator('#step6')).toHaveCSS('animation-name', 'none');
       await expect(page.locator('#step6')).toHaveCSS('transform', 'none');
       const { rect, gazeRect, actualViewport } = await page.evaluate(async kind => {
-        const { currentStimulusContentRect } = await import(new URL('js/web-page/app-updated.js?v=20261008-2', location.href).href);
+        const { currentStimulusContentRect } = await import(new URL('js/web-page/app-updated.js?v=20261019-4', location.href).href);
         const element = document.getElementById(kind === 'video' ? 'cogVideo' : 'cogImage')!;
         const box = element.getBoundingClientRect();
         return { rect: { x: box.x, y: box.y, width: box.width, height: box.height },
@@ -226,6 +229,16 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
     await assertLoaded();
     await login('peer', true);
     await page.reload();
+    await expect(page.getByRole('alertdialog')).toBeVisible();
+    const enterThroughLogin = async (name: string) => {
+      await page.goto(`${web}/apps/web/developer/login.html?portal=researcher`);
+      await page.locator('#login').fill(fixture.users[name].email);
+      await page.locator('#password').fill(fixture.users[name].password);
+      await page.locator('button[type="submit"]').click();
+      await page.waitForURL(/researcher\.html/);
+      await page.goto(`${web}/apps/web/researcher.html#/stimuli`);
+    };
+    await enterThroughLogin('peer');
     await page.waitForFunction(id => (window as any).__EMOCOG_AUTH_USER?.id === id || JSON.parse(localStorage.getItem('emocog_api_user') || '{}').id === id, fixture.users.peer.id);
     await expect(card).toHaveCount(0);
     expect((await page.request.get(`${api}${stimulus.content_url}`)).status()).toBe(403);
@@ -237,8 +250,7 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
     await page.reload();
     await expect(card).toHaveCount(0);
     expect((await page.request.get(`${api}${stimulus.content_url}`)).status()).toBe(403);
-    await login('owner', true);
-    await page.reload();
+    await enterThroughLogin('owner');
     await assertLoaded();
   });
 

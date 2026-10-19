@@ -1,4 +1,4 @@
-import '../../../shared/keyboard-responses.js?v=20261008-2';
+import '../../../shared/keyboard-responses.js?v=20261019-4';
 
 export const normalizeKeyboardResponse = globalThis.WecogKeyboardResponses.normalize;
 export const keyboardResponseLabel = globalThis.WecogKeyboardResponses.label;
@@ -202,6 +202,7 @@ export class RtResponseCollector {
         if (this.decided) return;
         const response = responseValueForMode(RESPONSE_MODES.KEYPRESS, event);
         if (!response) return;
+        event.preventDefault?.();
         this._decide(response, 'keyboard');
     }
 

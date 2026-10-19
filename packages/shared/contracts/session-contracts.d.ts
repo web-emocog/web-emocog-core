@@ -10,6 +10,12 @@ export type SessionState =
   | 'completed'
   | 'failed';
 
+export interface SessionDeliveryV1 {
+  schemaVersion: 'session_delivery.v1';
+  sequence: number;
+  kind: 'checkpoint' | 'final';
+}
+
 export type SessionEventCategory =
   | 'lifecycle'
   | 'quality'
@@ -63,12 +69,13 @@ export interface RtAlignmentMetricV1 {
 export interface RtAlignmentWindowV1 {
   startMs: number | null;
   endMs: number | null;
-  channels: Record<'gaze' | 'body' | 'valence' | 'arousal' | 'bpm', RtAlignmentMetricV1>;
+  channels: Record<'gaze' | 'body' | 'valence' | 'arousal' | 'bpm', RtAlignmentMetricV1>
+    & { respiration?: RtAlignmentMetricV1 };
 }
 
 export interface RtAlignmentV1 {
   schemaVersion: 'rt_alignment.v1';
-  algorithmVersion: 'event-windows-1.0.0';
+  algorithmVersion: 'event-windows-1.0.0' | 'event-windows-1.1.0';
   clock: 'monotonic_epoch_ms' | 'wall_epoch_ms';
   baselineMs: 1000;
   postMs: 1000;
@@ -93,6 +100,7 @@ export interface RtAlignmentV1 {
 }
 
 export interface SessionFeatureV1 {
+  delivery?: SessionDeliveryV1;
   schemaVersion: 'session_feature.v1';
   ids: {
     session: string;

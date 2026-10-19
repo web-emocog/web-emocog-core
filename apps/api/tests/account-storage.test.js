@@ -38,6 +38,7 @@ describe('researcher account workspace isolation', () => {
     accountStorage.activate('researcher-a');
     storage.setItem('emocog_my_experiments', JSON.stringify([{ id: 'a' }]));
     storage.setItem('emocog_stimuli', JSON.stringify([{ id: 'stimulus-a' }]));
+    storage.setItem('emocog_analytics_query_draft_v1', JSON.stringify({ protocolVersion: 'publication:1', referenceParticipants: ['participant-a'] }));
     const libraryKey = 'emocog_stimulus_library_v1:account-a-project-7';
     const metadataKey = 'emocog_protocol_metadata_draft_v1:study-a';
     storage.setItem(libraryKey, 'project-a-library');
@@ -47,6 +48,7 @@ describe('researcher account workspace isolation', () => {
     accountStorage.activate('researcher-b');
     assert.equal(storage.getItem('emocog_my_experiments'), null);
     assert.equal(storage.getItem('emocog_stimuli'), null);
+    assert.equal(storage.getItem('emocog_analytics_query_draft_v1'), null);
     assert.equal(storage.getItem(libraryKey), null);
     assert.equal(storage.getItem(metadataKey), null);
     assert.equal(storage.getItem('emocog_stimulus_quarantine_v1'), null);
@@ -55,6 +57,7 @@ describe('researcher account workspace isolation', () => {
     accountStorage.activate('researcher-a');
     assert.deepEqual(JSON.parse(storage.getItem('emocog_my_experiments')), [{ id: 'a' }]);
     assert.deepEqual(JSON.parse(storage.getItem('emocog_stimuli')), [{ id: 'stimulus-a' }]);
+    assert.deepEqual(JSON.parse(storage.getItem('emocog_analytics_query_draft_v1')), { protocolVersion: 'publication:1', referenceParticipants: ['participant-a'] });
     assert.equal(storage.getItem(libraryKey), 'project-a-library');
     assert.equal(storage.getItem(metadataKey), 'account-a-metadata');
     assert.equal(storage.getItem('emocog_stimulus_quarantine_v1'), 'legacy-a');
@@ -86,11 +89,14 @@ describe('researcher account workspace isolation', () => {
     const accounts = createAccountStorage(storage);
     accounts.activate('1');
     storage.setItem('wecog_researcher_language', 'ru');
+    storage.setItem('emocog_protocol_persistence_test', JSON.stringify({ showBackupNotifications: false }));
     accounts.activate('2');
     assert.equal(storage.getItem('wecog_researcher_language'), null);
+    assert.equal(storage.getItem('emocog_protocol_persistence_test'), null);
     storage.setItem('wecog_researcher_language', 'en');
     accounts.activate('1');
     assert.equal(storage.getItem('wecog_researcher_language'), 'ru');
+    assert.equal(JSON.parse(storage.getItem('emocog_protocol_persistence_test')).showBackupNotifications, false);
     accounts.activate('2');
     assert.equal(storage.getItem('wecog_researcher_language'), 'en');
   });

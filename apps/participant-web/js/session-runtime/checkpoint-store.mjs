@@ -3,6 +3,7 @@ const DB_VERSION = 2;
 const STORE_NAME = 'session-checkpoints';
 const SAMPLE_STORE_NAME = 'session-sample-chunks';
 const ACTIVE_SESSION_KEY = 'wecog_active_session_id';
+const BACKUP_PREFIX = 'wecog_session_backup:';
 const CHECKPOINT_SCHEMA_VERSION = 3;
 const CHUNKED_ARRAY_KEYS = Object.freeze(['eyeTracking', 'eyeSignals']);
 const OMIT_KEYS = /^(email|e-mail|phone|phoneNumber|ip|ipAddress|userAgent|authorization|accessToken|refreshToken|ingestToken|cookie|fullName|displayName)$/i;
@@ -10,7 +11,8 @@ const EMAIL_VALUE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function matchesCheckpointInvitation(sessionData, search = '') {
     const requestedCode = new URLSearchParams(search).get('code')?.trim();
-    return !requestedCode || sessionData?.ids?.invitationCode === requestedCode;
+    return !requestedCode || sessionData?.ids?.invitationCode === requestedCode
+        || sessionData?.experimentMeta?.invitationEntryCode === requestedCode;
 }
 
 function sanitizeCheckpointValue(value, seen = new WeakSet()) {
@@ -39,13 +41,15 @@ export function buildCheckpointSessionData(sessionData) {
     return sanitizeCheckpointValue(sessionData || {});
 }
 
-function openDatabase(indexedDb) {
+function openDatabase(indexedDb, timeoutMs) {
     return new Promise((resolve, reject) => {
         const request = indexedDb.open(DB_NAME, DB_VERSION);
         let settled = false;
+        const timeout = setTimeout(() => rejectOnce(new Error('IndexedDB open timed out')), timeoutMs);
         const rejectOnce = error => {
             if (settled) return;
             settled = true;
+            clearTimeout(timeout);
             reject(error);
         };
         request.onerror = () => rejectOnce(
@@ -55,6 +59,7 @@ function openDatabase(indexedDb) {
             new Error('IndexedDB upgrade blocked by another tab')
         );
         request.onupgradeneeded = () => {
+            if (settled) { request.transaction?.abort(); return; }
             const db = request.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {
                 db.createObjectStore(STORE_NAME, { keyPath: 'sessionId' });
@@ -73,18 +78,46 @@ function openDatabase(indexedDb) {
                 return;
             }
             settled = true;
+            clearTimeout(timeout);
             request.result.onversionchange = () => request.result.close();
             resolve(request.result);
         };
     });
 }
 
+function checkpointTransaction(db, mode, timeoutMs, operation) {
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME, SAMPLE_STORE_NAME], mode);
+        const timeout = setTimeout(() => {
+            // Aborting prevents a late write from replacing a newer fallback.
+            try { transaction.abort(); } catch (_) {}
+            reject(new Error('Checkpoint transaction timed out'));
+        }, timeoutMs);
+        transaction.oncomplete = () => { clearTimeout(timeout); resolve(); };
+        transaction.onerror = transaction.onabort = () => {
+            clearTimeout(timeout);
+            reject(transaction.error || new Error('Checkpoint transaction failed'));
+        };
+        try { operation(transaction); } catch (error) {
+            clearTimeout(timeout);
+            try { transaction.abort(); } catch (_) {}
+            reject(error);
+        }
+    });
+}
+
 export class SessionCheckpointStore {
     constructor(options = {}) {
-        this.indexedDb = options.indexedDB || globalThis.indexedDB || null;
-        this.sessionStorage = options.sessionStorage || globalThis.sessionStorage || null;
+        const storage = name => { try { return globalThis[name] || null; } catch (_) { return null; } };
+        this.indexedDb = Object.hasOwn(options, 'indexedDB') ? options.indexedDB : storage('indexedDB');
+        this.sessionStorage = Object.hasOwn(options, 'sessionStorage') ? options.sessionStorage : storage('sessionStorage');
         this.memory = new Map();
         this.persistedSampleCounts = new Map();
+        this.persistedSampleHeads = new Map();
+        this.fallbackSessions = new Set();
+        this.lastPersistenceMode = null;
+        this.operationTimeoutMs = Number.isFinite(options.operationTimeoutMs)
+            ? Math.max(10, Math.min(30000, options.operationTimeoutMs)) : 10000;
     }
 
     getActiveSessionId() {
@@ -100,11 +133,49 @@ export class SessionCheckpointStore {
         try {
             this.sessionStorage?.setItem(ACTIVE_SESSION_KEY, String(sessionId));
         } catch (_) {
-            // IndexedDB checkpoint still works if sessionStorage is unavailable.
+            // The caller must check the reference before claiming reload recovery.
         }
     }
 
+    _saveBackup(sessionId, sessionData, machineSnapshot) {
+        if (!this.sessionStorage) return false;
+        const compact = { ...sessionData };
+        const omitted = ['eyeTracking', 'eyeSignals', 'trackingTest', 'emotionSamples', 'bodyPoseSamples', 'emotionEvents'];
+        for (const key of omitted) compact[key] = [];
+        compact.storageRecovery = { compactCheckpoint: true, omittedSampleArrays: omitted };
+        const backup = { schemaVersion: CHECKPOINT_SCHEMA_VERSION, sessionId: String(sessionId), savedAt: Date.now(),
+            sessionData: buildCheckpointSessionData(compact), machineSnapshot: sanitizeCheckpointValue(machineSnapshot || {}) };
+        try {
+            this.sessionStorage.setItem(BACKUP_PREFIX + sessionId, JSON.stringify(backup));
+            this.setActiveSessionId(sessionId);
+            this.memory.set(String(sessionId), backup);
+            this.fallbackSessions.add(String(sessionId));
+            this.lastPersistenceMode = 'session_storage_compact';
+            return true;
+        } catch (_) { return false; }
+    }
+
     async save(sessionId, sessionData, machineSnapshot) {
+        if (!sessionId) return false;
+        if (this.fallbackSessions.has(String(sessionId))) {
+            if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
+            throw new Error('Session backup storage is unavailable');
+        }
+        try {
+            const saved = await this._savePrimary(sessionId, sessionData, machineSnapshot);
+            if (!this.indexedDb && this.sessionStorage) {
+                if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
+                throw new Error('Session backup storage is unavailable');
+            }
+            this.lastPersistenceMode = this.indexedDb ? 'indexeddb' : 'memory';
+            return saved;
+        } catch (error) {
+            if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
+            throw error;
+        }
+    }
+
+    async _savePrimary(sessionId, sessionData, machineSnapshot) {
         if (!sessionId) return false;
         const normalizedSessionId = String(sessionId);
         const useChunks = Boolean(this.indexedDb);
@@ -113,15 +184,22 @@ export class SessionCheckpointStore {
             for (const key of CHUNKED_ARRAY_KEYS) delete compactSource[key];
         }
         const previousCounts = this.persistedSampleCounts.get(normalizedSessionId) || {};
+        const previousHeads = this.persistedSampleHeads.get(normalizedSessionId) || {};
         const nextCounts = {};
+        const nextHeads = {};
+        const resetTypes = new Set();
         const sampleChunks = [];
         for (const key of CHUNKED_ARRAY_KEYS) {
             const samples = Array.isArray(sessionData?.[key]) ? sessionData[key] : [];
-            const previousCount = Number.isInteger(previousCounts[key])
+            let previousCount = Number.isInteger(previousCounts[key])
                 ? previousCounts[key]
                 : 0;
-            if (previousCount > samples.length) {
-                throw new Error(`Checkpoint sample array ${key} was truncated`);
+            nextHeads[key] = samples.length ? JSON.stringify(samples[0]) : null;
+            // Gaze uses a bounded rolling window. Rebase its chunks atomically
+            // when the retained head moves, rather than treating retention as corruption.
+            if (previousCount > samples.length || (previousCount > 0 && previousHeads[key] !== undefined && previousHeads[key] !== nextHeads[key])) {
+                resetTypes.add(key);
+                previousCount = 0;
             }
             nextCounts[key] = samples.length;
             if (useChunks && samples.length > previousCount) {
@@ -152,21 +230,24 @@ export class SessionCheckpointStore {
             this.persistedSampleCounts.set(normalizedSessionId, nextCounts);
             return true;
         }
-        const db = await openDatabase(this.indexedDb);
+        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs);
         try {
-            await new Promise((resolve, reject) => {
-                const transaction = db.transaction(
-                    [STORE_NAME, SAMPLE_STORE_NAME],
-                    'readwrite'
-                );
-                transaction.oncomplete = () => resolve();
-                transaction.onerror = () => reject(transaction.error || new Error('Checkpoint save failed'));
-                transaction.onabort = () => reject(transaction.error || new Error('Checkpoint save aborted'));
+            await checkpointTransaction(db, 'readwrite', this.operationTimeoutMs, transaction => {
                 transaction.objectStore(STORE_NAME).put(checkpoint);
                 const chunkStore = transaction.objectStore(SAMPLE_STORE_NAME);
-                for (const chunk of sampleChunks) chunkStore.add(chunk);
+                const appendChunks = () => { for (const chunk of sampleChunks) chunkStore.add(chunk); };
+                if (resetTypes.size) {
+                    const cursorRequest = chunkStore.index('sessionId').openCursor(normalizedSessionId);
+                    cursorRequest.onsuccess = () => {
+                        const cursor = cursorRequest.result;
+                        if (!cursor) { appendChunks(); return; }
+                        if (resetTypes.has(cursor.value.sampleType)) cursor.delete();
+                        cursor.continue();
+                    };
+                } else appendChunks();
             });
             this.persistedSampleCounts.set(normalizedSessionId, nextCounts);
+            this.persistedSampleHeads.set(normalizedSessionId, nextHeads);
         } finally {
             db.close();
         }
@@ -176,32 +257,34 @@ export class SessionCheckpointStore {
     async load(sessionId = this.getActiveSessionId()) {
         if (!sessionId) return null;
         const normalizedSessionId = String(sessionId);
-        if (!this.indexedDb) return this.memory.get(normalizedSessionId) || null;
-        const db = await openDatabase(this.indexedDb);
         try {
-            const { checkpoint, chunks } = await new Promise((resolve, reject) => {
-                const transaction = db.transaction(
-                    [STORE_NAME, SAMPLE_STORE_NAME],
-                    'readonly'
-                );
-                const checkpointRequest = transaction
+            const backup = JSON.parse(this.sessionStorage?.getItem(BACKUP_PREFIX + normalizedSessionId) || 'null');
+            if (backup?.sessionId === normalizedSessionId && backup.sessionData?.ids?.session === normalizedSessionId) {
+                if (!backup.sessionData.pendingFinalUpload?.payload && !backup.sessionData.finalizedPayload) {
+                    backup.sessionData.experimentMeta = { ...(backup.sessionData.experimentMeta || {}),
+                        storageRecovery: { method: 'session_storage_compact', signalSeriesIncomplete: true,
+                            omittedSeries: ['eyeTracking', 'eyeSignals', 'trackingTest', 'emotionSamples', 'bodyPoseSamples', 'emotionEvents'] } };
+                }
+                this.fallbackSessions.add(normalizedSessionId);
+                this.lastPersistenceMode = 'session_storage_compact';
+                this.memory.set(normalizedSessionId, backup);
+                return backup;
+            }
+        } catch (_) { /* The primary checkpoint remains independently readable. */ }
+        if (!this.indexedDb) return this.memory.get(normalizedSessionId) || null;
+        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs);
+        try {
+            let checkpointRequest, chunksRequest;
+            await checkpointTransaction(db, 'readonly', this.operationTimeoutMs, transaction => {
+                checkpointRequest = transaction
                     .objectStore(STORE_NAME)
                     .get(normalizedSessionId);
-                const chunksRequest = transaction
+                chunksRequest = transaction
                     .objectStore(SAMPLE_STORE_NAME)
                     .index('sessionId')
                     .getAll(normalizedSessionId);
-                transaction.oncomplete = () => resolve({
-                    checkpoint: checkpointRequest.result || null,
-                    chunks: chunksRequest.result || []
-                });
-                transaction.onerror = () => reject(
-                    transaction.error || new Error('Checkpoint load failed')
-                );
-                transaction.onabort = () => reject(
-                    transaction.error || new Error('Checkpoint load aborted')
-                );
             });
+            const checkpoint = checkpointRequest.result || null, chunks = chunksRequest.result || [];
             if (!checkpoint) return null;
             if (checkpoint.schemaVersion >= 3) {
                 const orderedChunks = [...chunks].sort((a, b) => a.id - b.id);
@@ -227,6 +310,9 @@ export class SessionCheckpointStore {
                     ])
                 )
             );
+            this.persistedSampleHeads.set(normalizedSessionId, Object.fromEntries(CHUNKED_ARRAY_KEYS.map(key => [
+                key, checkpoint.sessionData?.[key]?.length ? JSON.stringify(checkpoint.sessionData[key][0]) : null
+            ])));
             return checkpoint;
         } finally {
             db.close();
@@ -238,23 +324,19 @@ export class SessionCheckpointStore {
         const normalizedSessionId = String(sessionId);
         this.memory.delete(normalizedSessionId);
         this.persistedSampleCounts.delete(normalizedSessionId);
+        this.persistedSampleHeads.delete(normalizedSessionId);
+        this.fallbackSessions.delete(normalizedSessionId);
         try {
+            this.sessionStorage?.removeItem(BACKUP_PREFIX + normalizedSessionId);
             if (this.sessionStorage?.getItem(ACTIVE_SESSION_KEY) === normalizedSessionId) {
                 this.sessionStorage.removeItem(ACTIVE_SESSION_KEY);
             }
         } catch (_) {}
 
         if (!this.indexedDb) return;
-        const db = await openDatabase(this.indexedDb);
+        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs);
         try {
-            await new Promise((resolve, reject) => {
-                const transaction = db.transaction(
-                    [STORE_NAME, SAMPLE_STORE_NAME],
-                    'readwrite'
-                );
-                transaction.oncomplete = () => resolve();
-                transaction.onerror = () => reject(transaction.error || new Error('Checkpoint clear failed'));
-                transaction.onabort = () => reject(transaction.error || new Error('Checkpoint clear aborted'));
+            await checkpointTransaction(db, 'readwrite', this.operationTimeoutMs, transaction => {
                 transaction.objectStore(STORE_NAME).delete(normalizedSessionId);
                 const cursorRequest = transaction
                     .objectStore(SAMPLE_STORE_NAME)

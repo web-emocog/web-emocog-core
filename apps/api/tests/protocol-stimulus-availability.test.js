@@ -80,6 +80,15 @@ test('returns an empty successful report for protocols without uploaded media', 
   assert.deepEqual(report, { ok: true, referencedIds: [], unavailable: [] });
 });
 
+test('constructor-only media selections never expand a participant invitation manifest', async () => {
+  const definition = { blocks: [{ trials: [{ stimulusId: 'std_simple_black_square' }] }],
+    builderState: { blocks: [{ content: { slides: [{ stimulusId: 42 }] } }] } };
+  assert.deepEqual(referencedDatabaseStimulusIds(definition), []);
+  assert.deepEqual(referencedDatabaseStimulusIds(definition, { includeBuilderState: true }), [42]);
+  const report = await inspectProtocolStimuli({ query: async () => assert.fail('editor-only media must not be published') }, 1, definition);
+  assert.equal(report.ok, true);
+});
+
 test('rejects browser-only stimulus IDs instead of publishing a broken session', async () => {
   const queryable = { query: async () => assert.fail('browser-only files must not query the database') };
   const report = await inspectProtocolStimuli(queryable, 1, {

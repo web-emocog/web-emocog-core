@@ -69,7 +69,9 @@ function createAccumulator(width, height) {
     return {
         bins: createBins(width, height),
         stimulusBins: createBins(width, height),
-        stimulusPoints: [],
+        fixation: null,
+        fixations: [],
+        fixationCount: 0,
         totalSamples: 0,
         onScreenSamples: 0,
         validSamples: 0,
@@ -81,58 +83,41 @@ function createAccumulator(width, height) {
         confidenceCount: 0,
         weightedTotalMs: 0,    // суммарный взвешенный вклад (ms × qualityWeight)
         lastT: null,           // для расчёта dtMs внутри аккумулятора
-        minT: Infinity,
-        maxT: -Infinity
+        minT: null,
+        maxT: null
     };
 }
 
-function detectFixations(points, options = {}) {
-    const dispersionNorm = Number.isFinite(options.dispersionNorm) ? options.dispersionNorm : 0.04;
-    const minDurationMs = Number.isFinite(options.minDurationMs) ? options.minDurationMs : 100;
-    const maxGapMs = Number.isFinite(options.maxGapMs) ? options.maxGapMs : 100;
-    const sorted = (points || []).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
-        .slice().sort((a, b) => a.t - b.t);
-    const fixations = [];
-    let group = [];
-
-    function flush() {
-        if (!group.length) return;
-        const durationMs = group.reduce((sum, point) => sum + (Number.isFinite(point.dtMs) ? point.dtMs : 0), 0);
-        if (durationMs >= minDurationMs) {
-            const weight = group.reduce((sum, point) => sum + Math.max(1, point.dtMs || 0), 0);
-            fixations.push({
-                x: group.reduce((sum, point) => sum + point.x * Math.max(1, point.dtMs || 0), 0) / weight,
-                y: group.reduce((sum, point) => sum + point.y * Math.max(1, point.dtMs || 0), 0) / weight,
-                startMs: group[0].tRelMs,
-                durationMs,
-                signalConfidence: meanFinite(group.map(point => point.confidence))
-            });
-        }
-        group = [];
-    }
-
-    for (const point of sorted) {
-        if (!group.length) {
-            group.push(point);
-            continue;
-        }
-        const previous = group[group.length - 1];
-        const cx = group.reduce((sum, item) => sum + item.x, 0) / group.length;
-        const cy = group.reduce((sum, item) => sum + item.y, 0) / group.length;
-        const distance = Math.hypot(point.x - cx, point.y - cy);
-        if (point.t - previous.t <= maxGapMs && distance <= dispersionNorm) group.push(point);
-        else {
-            flush();
-            group.push(point);
-        }
-    }
-    flush();
-    return fixations.slice(0, 500);
+function fixationResult(group) {
+    return group && group.durationMs >= 100 && group.lastT - group.firstT >= 100 ? {
+        x: group.wx / group.weight, y: group.wy / group.weight,
+        startMs: group.startMs, durationMs: group.durationMs,
+        signalConfidence: group.confidenceCount ? group.confidenceSum / group.confidenceCount : null
+    } : null;
 }
 
-function meanFinite(values) {
-    const finite = values.filter(Number.isFinite);
-    return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+function appendFixationPoint(acc, point, qualityWeight) {
+    let group = acc.fixation;
+    if (group && (point.t - group.lastT > 100
+        || Math.hypot(point.x - group.x / group.count, point.y - group.y / group.count) > 0.04)) {
+        const result = fixationResult(group);
+        if (result) {
+            acc.fixationCount++;
+            addPointToBins(acc.stimulusBins, result.x, result.y, group.qualityWeightedMs);
+            if (acc.fixations.length < 500) acc.fixations.push(result);
+        }
+        group = null;
+    }
+    if (!group) group = { x: 0, y: 0, wx: 0, wy: 0, count: 0, weight: 0, durationMs: 0,
+        startMs: point.tRelMs, firstT: point.t, lastT: point.t, qualityWeightedMs: 0, confidenceSum: 0, confidenceCount: 0 };
+    const weight = Math.max(1, point.dtMs || 0);
+    group.x += point.x; group.y += point.y; group.count++;
+    group.wx += point.x * weight; group.wy += point.y * weight; group.weight += weight;
+    group.durationMs += point.dtMs; group.lastT = point.t;
+    group.qualityWeightedMs += point.dtMs * qualityWeight;
+    if (Number.isFinite(point.confidence)) { group.confidenceSum += point.confidence; group.confidenceCount++; }
+    acc.fixation = group;
+    if (Number.isFinite(point.confidence)) { acc.confidenceSum += point.confidence; acc.confidenceCount++; }
 }
 
 function flattenRoundedBins(bins) {
@@ -140,26 +125,32 @@ function flattenRoundedBins(bins) {
 }
 
 function finalizeStimulusEntry(meta, acc, qualityWeight, width, height) {
+    const pending = fixationResult(acc.fixation);
+    const bins = acc.stimulusBins.map(row => [...row]);
+    if (pending) addPointToBins(bins, pending.x, pending.y, acc.fixation.qualityWeightedMs);
     return {
         ...finalizeEntry(meta, acc, qualityWeight),
         coordinateSpace: 'stimulus_normalized_0_1',
         grid: {
             width,
             height,
-            values: flattenRoundedBins(acc.stimulusBins)
+            values: flattenRoundedBins(bins)
         },
-        fixationPoints: detectFixations(acc.stimulusPoints),
+        fixationPoints: [...acc.fixations, ...(fixationResult(acc.fixation) ? [fixationResult(acc.fixation)] : [])].slice(0, 500),
+        fixationCountTotal: acc.fixationCount + (fixationResult(acc.fixation) ? 1 : 0),
+        fixationsTruncated: acc.fixationCount + (fixationResult(acc.fixation) ? 1 : 0) > 500,
         sampleCountTotal: acc.totalSamples,
         sampleCountValid: acc.validSamples,
         lowConfidenceCount: acc.lowConfidenceSamples,
         offScreenCount: acc.offScreenSamples,
         outsideStimulusCount: acc.outsideStimulusSamples,
         validObservationDurationMs: Math.round(acc.validObservationDurationMs),
-        meanConfidence: meanFinite(acc.stimulusPoints.map(point => point.confidence)),
+        meanConfidence: acc.confidenceCount ? acc.confidenceSum / acc.confidenceCount : null,
         algorithm: {
             id: 'idt-fixation-heatmap',
-            version: meta.coordinateMappingVersion ? '1.1.0' : '1.0.0',
+            version: '1.2.0',
             parameters: { dispersionNorm: 0.04, minDurationMs: 100, maxGapMs: 100,
+                qualityWeighting: 'latest_validated_segment',
                 ...(meta.coordinateMappingVersion ? { coordinateMappingVersion: meta.coordinateMappingVersion } : {}) }
         }
     };
@@ -167,8 +158,8 @@ function finalizeStimulusEntry(meta, acc, qualityWeight, width, height) {
 
 function updateTimeRange(acc, t) {
     if (!Number.isFinite(t)) return;
-    if (t < acc.minT) acc.minT = t;
-    if (t > acc.maxT) acc.maxT = t;
+    if (acc.minT === null || t < acc.minT) acc.minT = t;
+    if (acc.maxT === null || t > acc.maxT) acc.maxT = t;
 }
 
 function finalizeTimeRange(acc) {
@@ -189,7 +180,8 @@ function finalizeEntry(meta, acc, qualityWeight) {
         sampleCount: acc.totalSamples,
         onScreenPct: acc.totalSamples > 0 ? Math.round((acc.onScreenSamples / acc.totalSamples) * 1000) / 10 : 0,
         weightedTotalMs: Math.round(acc.weightedTotalMs * 10) / 10,
-        qualityWeight: Math.round(qualityWeight * 1000) / 1000,
+        qualityWeight: acc.validObservationDurationMs > 0
+            ? Math.round(acc.weightedTotalMs / acc.validObservationDurationMs * 1000) / 1000 : null,
         normMethod: 'screen_xy_0_1',
         weighting: 'time_quality_v1',
         bins: acc.bins,
@@ -225,7 +217,9 @@ function nextDtMs(acc, t) {
  * @param {number} [options.aoiRadiusPx] - эталонный радиус AOI для нормализации
  *   качества. По умолчанию min(screenW, screenH) / 50.
  */
-export function buildHeatmaps(samples, options = {}) {
+export function createHeatmapAccumulator(options = {}, saved = null) {
+    if (saved && saved.schemaVersion !== 'heatmap_accumulator.v1') throw new Error('Unsupported heatmap checkpoint');
+    options = saved?.options || options;
     const width = Number.isFinite(options.gridWidth) ? options.gridWidth : DEFAULT_GRID_WIDTH;
     const height = Number.isFinite(options.gridHeight) ? options.gridHeight : DEFAULT_GRID_HEIGHT;
     const fallbackW = Number.isFinite(options.screenWidth) ? options.screenWidth : (typeof window !== 'undefined' ? window.innerWidth : 1920);
@@ -236,21 +230,40 @@ export function buildHeatmaps(samples, options = {}) {
         : Math.max(1, Math.min(fallbackW, fallbackH) / DEFAULT_AOI_DIVISOR);
 
     let qualityWeight = 1;
-    if (Number.isFinite(options.validationRmsPx) && options.validationRmsPx >= 0) {
-        const ratio = options.validationRmsPx / aoiRadiusPx;
+    function setValidationRmsPx(value) {
+        if (!Number.isFinite(value) || value < 0) return;
+        options = { ...options, validationRmsPx: value };
+        const ratio = value / aoiRadiusPx;
         qualityWeight = 1 / (1 + ratio * ratio);
     }
+    setValidationRmsPx(options.validationRmsPx);
 
-    const perStimulusMap = new Map();
-    const perBlockMap = new Map();
-    const sessionAcc = createAccumulator(width, height);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 128 || height > 128) throw new Error('Invalid heatmap grid');
+    if (saved) validateCheckpoint(saved, width, height);
+    const perStimulusMap = new Map(saved ? structuredClone(saved.perStimulus) : []);
+    const perBlockMap = new Map(saved ? structuredClone(saved.perBlock) : []);
+    if (perStimulusMap.size > 2000 || perBlockMap.size > 200) throw new Error('Heatmap checkpoint exceeds context limits');
+    const sessionAcc = saved ? structuredClone(saved.session) : createAccumulator(width, height);
+    const summary = saved ? { ...saved.summary } : { sampleCountTotal: 0, sampleCountValid: 0, lowConfidenceCount: 0,
+        offScreenCount: 0, confidenceSum: 0, confidenceCount: 0, firstT: null, lastT: null, ignoredTimestamps: 0, omittedPresentations: 0 };
 
-    for (const sample of samples || []) {
+    function add(sample) {
         const analysisX = Number.isFinite(sample?.correctedX) ? sample.correctedX : sample?.x;
         const analysisY = Number.isFinite(sample?.correctedY) ? sample.correctedY : sample?.y;
-        if (!Number.isFinite(analysisX) || !Number.isFinite(analysisY)) continue;
-
-        const t = Number.isFinite(sample?.t) ? sample.t : Date.now();
+        const t = sample?.t;
+        if (!Number.isFinite(t) || (summary.lastT !== null && t <= summary.lastT)) { summary.ignoredTimestamps++; return; }
+        summary.sampleCountTotal++;
+        if (summary.firstT === null) summary.firstT = t;
+        summary.lastT = t;
+        const validSignal = sample?.valid !== false && sample?.onScreen === true
+            && Number.isFinite(analysisX) && Number.isFinite(analysisY);
+        if (sample?.onScreen === false) summary.offScreenCount++;
+        if (Number.isFinite(sample?.confidence) && sample.confidence < 0.65) summary.lowConfidenceCount++;
+        if (validSignal) {
+            summary.sampleCountValid++;
+            if (Number.isFinite(sample?.confidence)) { summary.confidenceSum += sample.confidence; summary.confidenceCount++; }
+        }
+        if (!Number.isFinite(analysisX) || !Number.isFinite(analysisY)) return;
         const { screenWidth, screenHeight } = getSampleScreenSize(sample, fallbackW, fallbackH);
         const nx = clamp01(analysisX / screenWidth);
         const ny = clamp01(analysisY / screenHeight);
@@ -260,9 +273,10 @@ export function buildHeatmaps(samples, options = {}) {
         const sessionDt = nextDtMs(sessionAcc, t);
         sessionAcc.totalSamples++;
         updateTimeRange(sessionAcc, t);
-        if (onScreen) {
-            sessionAcc.onScreenSamples++;
+        if (onScreen) sessionAcc.onScreenSamples++;
+        if (validSignal) {
             const contribution = sessionDt * qualityWeight;
+            sessionAcc.validObservationDurationMs += sessionDt;
             sessionAcc.weightedTotalMs += contribution;
             addPointToBins(sessionAcc.bins, nx, ny, contribution);
         }
@@ -277,7 +291,8 @@ export function buildHeatmaps(samples, options = {}) {
 
         if (isStimulusPhase && blockId != null && stimulusId != null) {
             const attemptKey = String(attempt ?? 'attempt');
-            const perStimulusKey = `${String(blockId)}::${attemptKey}::${String(trialId ?? 'trial')}::${String(stimulusId)}`;
+            const perStimulusKey = JSON.stringify([blockId, attempt, trialId, stimulusId, sample?.stimulusVersion || '1']);
+            if (!perStimulusMap.has(perStimulusKey) && perStimulusMap.size >= 2000) { summary.omittedPresentations++; return; }
             if (!perStimulusMap.has(perStimulusKey)) {
                 perStimulusMap.set(perStimulusKey, {
                     meta: {
@@ -306,13 +321,13 @@ export function buildHeatmaps(samples, options = {}) {
             if (Number.isFinite(sample?.confidence) && sample.confidence < 0.65) {
                 stimulusRef.acc.lowConfidenceSamples++;
             }
-            const valid = sample?.valid !== false && onScreen;
+            const valid = validSignal;
             if (valid) {
                 stimulusRef.acc.validSamples++;
                 stimulusRef.acc.validObservationDurationMs += stimDt;
             }
-            if (onScreen) {
-                stimulusRef.acc.onScreenSamples++;
+            if (onScreen) stimulusRef.acc.onScreenSamples++;
+            if (valid) {
                 const contribution = stimDt * qualityWeight;
                 stimulusRef.acc.weightedTotalMs += contribution;
                 addPointToBins(stimulusRef.acc.bins, nx, ny, contribution);
@@ -325,9 +340,7 @@ export function buildHeatmaps(samples, options = {}) {
                 const stimulusX = (analysisX - rect.left) / rect.width;
                 const stimulusY = (analysisY - rect.top) / rect.height;
                 if (stimulusX >= 0 && stimulusX <= 1 && stimulusY >= 0 && stimulusY <= 1) {
-                    const contribution = stimDt * qualityWeight;
-                    addPointToBins(stimulusRef.acc.stimulusBins, stimulusX, stimulusY, contribution);
-                    stimulusRef.acc.stimulusPoints.push({
+                    appendFixationPoint(stimulusRef.acc, {
                         x: stimulusX,
                         y: stimulusY,
                         t,
@@ -335,7 +348,7 @@ export function buildHeatmaps(samples, options = {}) {
                             - stimulusRef.meta.presentationStartMs),
                         dtMs: stimDt,
                         confidence: Number.isFinite(sample?.confidence) ? sample.confidence : null
-                    });
+                    }, qualityWeight);
                 } else {
                     stimulusRef.acc.outsideStimulusSamples++;
                 }
@@ -345,6 +358,7 @@ export function buildHeatmaps(samples, options = {}) {
         }
 
         if (isStimulusPhase && blockId != null) {
+            if (!perBlockMap.has(blockId) && perBlockMap.size >= 200) return;
             if (!perBlockMap.has(blockId)) {
                 perBlockMap.set(blockId, {
                     meta: { blockId },
@@ -355,35 +369,69 @@ export function buildHeatmaps(samples, options = {}) {
             const blockDt = nextDtMs(blockRef.acc, t);
             blockRef.acc.totalSamples++;
             updateTimeRange(blockRef.acc, t);
-            if (onScreen) {
-                blockRef.acc.onScreenSamples++;
+            if (onScreen) blockRef.acc.onScreenSamples++;
+            if (validSignal) {
                 const contribution = blockDt * qualityWeight;
+                blockRef.acc.validObservationDurationMs += blockDt;
                 blockRef.acc.weightedTotalMs += contribution;
                 addPointToBins(blockRef.acc.bins, nx, ny, contribution);
             }
         }
     }
 
-    const perStimulus = [];
-    for (const { meta, acc } of perStimulusMap.values()) {
-        perStimulus.push(finalizeStimulusEntry(meta, acc, qualityWeight, width, height));
+    function finalize() {
+        const perStimulus = [];
+        for (const { meta, acc } of perStimulusMap.values()) {
+            perStimulus.push(finalizeStimulusEntry(meta, acc, qualityWeight, width, height));
+        }
+
+        const perBlock = [];
+        for (const { meta, acc } of perBlockMap.values()) {
+            perBlock.push(finalizeEntry(meta, acc, qualityWeight));
+        }
+
+        return {
+            version: '1.2.0',
+            accumulation: { method: 'streaming_heatmap.v1', summary: { ...summary } },
+            grid: { width, height },
+            normMethod: 'screen_xy_0_1',
+            weighting: 'time_quality_v1',
+            qualityWeight: Math.round(qualityWeight * 1000) / 1000,
+            validationRmsPx: Number.isFinite(options.validationRmsPx) ? options.validationRmsPx : null,
+            aoiRadiusPx: Math.round(aoiRadiusPx * 10) / 10,
+            perStimulus,
+            perBlock,
+            session: finalizeEntry({ blockId: null, stimulusId: null }, sessionAcc, qualityWeight)
+        };
     }
 
-    const perBlock = [];
-    for (const { meta, acc } of perBlockMap.values()) {
-        perBlock.push(finalizeEntry(meta, acc, qualityWeight));
+    function snapshot() {
+        return structuredClone({ schemaVersion: 'heatmap_accumulator.v1', options: { ...options, gridWidth: width, gridHeight: height,
+            screenWidth: fallbackW, screenHeight: fallbackH }, perStimulus: [...perStimulusMap], perBlock: [...perBlockMap], session: sessionAcc, summary });
     }
+    return { add, finalize, snapshot, setValidationRmsPx, lastTimestamp: () => summary.lastT };
+}
 
-    return {
-        version: '1.1.0',
-        grid: { width, height },
-        normMethod: 'screen_xy_0_1',
-        weighting: 'time_quality_v1',
-        qualityWeight: Math.round(qualityWeight * 1000) / 1000,
-        validationRmsPx: Number.isFinite(options.validationRmsPx) ? options.validationRmsPx : null,
-        aoiRadiusPx: Math.round(aoiRadiusPx * 10) / 10,
-        perStimulus,
-        perBlock,
-        session: finalizeEntry({ blockId: null, stimulusId: null }, sessionAcc, qualityWeight)
-    };
+export function buildHeatmaps(samples, options = {}) {
+    const accumulator = createHeatmapAccumulator(options);
+    for (const sample of samples || []) accumulator.add(sample);
+    return accumulator.finalize();
+}
+
+function validateCheckpoint(saved, width, height) {
+    const gridValid = grid => Array.isArray(grid) && grid.length === height
+        && grid.every(row => Array.isArray(row) && row.length === width && row.every(v => Number.isFinite(v) && v >= 0));
+    const accValid = acc => acc && gridValid(acc.bins) && gridValid(acc.stimulusBins)
+        && Array.isArray(acc.fixations) && acc.fixations.length <= 500
+        && ['fixationCount', 'totalSamples', 'confidenceCount', 'weightedTotalMs'].every(key => Number.isFinite(acc[key]) && acc[key] >= 0)
+        && (!acc.fixation || ['x', 'y', 'wx', 'wy', 'count', 'weight', 'durationMs', 'qualityWeightedMs', 'startMs', 'firstT', 'lastT', 'confidenceSum', 'confidenceCount']
+            .every(key => Number.isFinite(acc.fixation[key])))
+        && acc.fixations.every(point => ['x', 'y', 'startMs', 'durationMs'].every(key => Number.isFinite(point[key])));
+    const entriesValid = (entries, max) => Array.isArray(entries) && entries.length <= max
+        && entries.every(entry => Array.isArray(entry) && entry.length === 2 && entry[1]?.meta && accValid(entry[1].acc));
+    if (!saved.summary || !Number.isFinite(saved.summary.sampleCountTotal)
+        || ![saved.summary.firstT, saved.summary.lastT].every(t => t === null || Number.isFinite(t))
+        || !accValid(saved.session) || !entriesValid(saved.perStimulus, 2000) || !entriesValid(saved.perBlock, 200)) {
+        throw new Error('Corrupt heatmap checkpoint');
+    }
 }

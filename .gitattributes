@@ -1,0 +1,3 @@
+# Preserve upstream bytes, license text and recorded checksums.
+apps/web/assets/vendor/jspdf/dist/jspdf.umd.min.js -whitespace
+apps/web/assets/fonts/DejaVuSans-LICENSE.txt -whitespace

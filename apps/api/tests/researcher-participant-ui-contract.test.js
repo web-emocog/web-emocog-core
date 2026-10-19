@@ -13,8 +13,8 @@ function read(relativePath) {
 describe('researcher protocol builder contract', () => {
   it('declares builderKey before analytics config is read', () => {
     const source = read('web/researcher-builder.js');
-    const saveStart = source.indexOf('async function doSave()');
-    const builderKey = source.indexOf("const builderKey = experimentId || 'draft';", saveStart);
+    const saveStart = source.indexOf('async function doSave(');
+    const builderKey = source.indexOf("const builderKey = savedExperimentId || 'draft';", saveStart);
     const analyticsRead = source.indexOf('getExperimentAnalyticsConfig(builderKey)', saveStart);
     assert.ok(saveStart >= 0);
     assert.ok(builderKey > saveStart);
@@ -163,7 +163,7 @@ describe('participant test hub contract', () => {
     assert.match(task, /classList\.toggle\('cognitive-stimulus-fullscreen'/);
     assert.match(css, /body\.cognitive-stimulus-fullscreen[\s\S]+#cognitiveStimulusArea/);
     assert.match(read('participant-web/participant-redesign.css'), /#step6\s*\{\s*animation:\s*none;\s*transform:\s*none;/);
-    assert.match(html, /participant-redesign\.css\?v=20261008-1/);
+    assert.match(html, /participant-redesign\.css\?v=20261013-1/);
     assert.doesNotMatch(css, /cognitive-stimulus-presenting/);
     assert.match(html, /id="validationIntro"/);
     assert.match(html, /id="validationResult"/);
@@ -345,7 +345,7 @@ describe('researcher navigation contract', () => {
     assert.match(experiments, /!serverSyncComplete[\s\S]+!verifiedAt/);
     assert.doesNotMatch(experiments, /apiState\.invitationCode \|\| protocolId/);
     assert.match(experiments, /exp\?\.participantLink/);
-    assert.match(read('web/researcher-builder.js'), /invitationCode: pub\.invitation\.code/);
+    assert.match(read('web/researcher-builder.js'), /invitationCode: pub\.invitation\.public_code \|\| pub\.invitation\.code/);
     assert.match(presets, /nameEn/);
     assert.match(presets, /infoEn/);
     assert.match(presets, /Simple RT: black square/);
@@ -382,7 +382,7 @@ describe('researcher navigation contract', () => {
     assert.match(ui, /wecog:languagechange/);
     assert.match(runner, /refreshLocalizedInstructionScreen/);
     assert.match(runner, /captureSurveyDraft/);
-    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20261008-2/);
+    assert.match(read('participant-web/mvp_with_precheck_1-updated.html'), /standard-stimuli\.js\?v=20261019-4/);
   });
 
   it('exports task-specific defaults instead of silently replacing tasks with Simple RT', () => {
@@ -433,7 +433,7 @@ describe('researcher navigation contract', () => {
     assert.doesNotMatch(source, /apiPatch\('\/protocols\/' \+ matching\.id/);
     assert.doesNotMatch(source, /apiGet\('\/protocols\?project_id=' \+ encodeURIComponent/);
     assert.match(source, /removeItem\(builderApiStateKey\('draft'\)\)/);
-    assert.match(source, /var inv = await createInvitationForProtocol\(savedProtocol\.id\)/);
+    assert.match(source, /createInvitationForProtocol\(savedProtocol\.id, \{ expectedUpdatedAt: savedProtocol.updated_at, expectedRevision: savedProtocol.revision \}\)/);
     assert.doesNotMatch(source, /publishOpts\.forceProtocolId/);
     assert.match(routes, /protocol_id_conflict/);
     assert.match(migration, /protocols_project_protocol_id_unique/);
@@ -508,7 +508,7 @@ describe('researcher navigation contract', () => {
     assert.match(builder, /type:'audio_oral_ddk'/);
     assert.match(builder, /userBlocks\.some\(block => block\.type === 'audio_test'\)/);
     assert.match(stimuli, /await hydrateApiStimulusPreview\(stimulus\)/);
-    assert.match(stimuli, /const mediaUrl = stimulusPreviewSource\(stimulus\)/);
+    assert.match(stimuli, /let mediaUrl = stimulusPreviewSource\(stimulus\)/);
     assert.match(builder, /stimulus\?\._previewObjectUrl \|\| stimulus\?\.url/);
   });
 
@@ -530,9 +530,9 @@ describe('researcher navigation contract', () => {
     const runtime = read('participant-web/js/session-runtime/index.js');
     const ui = read('participant-web/js/web-page/ui-updated.js');
     const gazeTests = read('participant-web/js/gaze-tracker/gaze-tests/index.js');
-    assert.match(runtime, /runtime-ui\.js\?v=20261008-2/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261019-4/);
     for (const file of ['web-page/precheck-updated.js', 'web-page/tests-updated.js', 'session-runtime/frame-pipeline.js', 'session-runtime/runtime-ui.js']) {
-      assert.match(read('participant-web/js/' + file), /head-pose-guide\.js\?v=20261008-2/);
+      assert.match(read('participant-web/js/' + file), /head-pose-guide\.js\?v=20261019-4/);
     }
     const gazeAnalysis = read('participant-web/js/gaze-tracker/gaze-tests/common/analysis-loop.js');
     const vpcRunner = read('participant-web/js/gaze-tracker/gaze-tests/vpc/runner.js');
@@ -542,22 +542,22 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20261008-2/);
-    assert.match(app, /tests-updated\.js\?v=20261008-2/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20261008-2/);
-    assert.match(task, /tests-updated\.js\?v=20261008-2/);
-    assert.match(app, /session-runtime\/index\.js\?v=20261008-2/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20261008-2/);
-    assert.match(task, /session-runtime\/index\.js\?v=20261008-2/);
-    assert.match(runtime, /tests-updated\.js\?v=20261008-2/);
-    assert.match(runtime, /runtime-ui\.js\?v=20261008-2/);
-    assert.match(app, /precheck-updated\.js\?v=20261008-2/);
-    assert.match(tests, /precheck-updated\.js\?v=20261008-2/);
-    assert.match(ui, /precheck-updated\.js\?v=20261008-2/);
-    assert.match(tests, /gaze-tests\/index\.js\?v=20261008-2/);
-    assert.match(gazeTests, /analysis-loop\.js\?v=20261008-2/);
-    assert.match(tests, /unified-aggregates-new\.js\?v=20261008-2/);
-    assert.match(ui, /unified-aggregates-new\.js\?v=20261008-2/);
+    assert.match(tests, /ui-updated\.js\?v=20261019-4/);
+    assert.match(app, /tests-updated\.js\?v=20261019-4/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20261019-4/);
+    assert.match(task, /tests-updated\.js\?v=20261019-4/);
+    assert.match(app, /session-runtime\/index\.js\?v=20261019-4/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20261019-4/);
+    assert.match(task, /session-runtime\/index\.js\?v=20261019-4/);
+    assert.match(runtime, /tests-updated\.js\?v=20261019-4/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261019-4/);
+    assert.match(app, /precheck-updated\.js\?v=20261019-4/);
+    assert.match(tests, /precheck-updated\.js\?v=20261019-4/);
+    assert.match(ui, /precheck-updated\.js\?v=20261019-4/);
+    assert.match(tests, /gaze-tests\/index\.js\?v=20261019-4/);
+    assert.match(gazeTests, /analysis-loop\.js\?v=20261019-4/);
+    assert.match(tests, /unified-aggregates-new\.js\?v=20261019-4/);
+    assert.match(ui, /unified-aggregates-new\.js\?v=20261019-4/);
     for (const source of [
       app,
       tests,
@@ -571,7 +571,7 @@ describe('researcher navigation contract', () => {
       vpcRunner,
       visuospatialRunner,
     ]) {
-      assert.match(source, /state\.js\?v=20261008-2/);
+      assert.match(source, /state\.js\?v=20261019-4/);
     }
     assert.match(app, /protocol-invite-utils\.js\?v=20260915-1/);
     assert.match(tests, /protocol-invite-utils\.js\?v=20260915-1/);
@@ -642,7 +642,8 @@ describe('researcher navigation contract', () => {
     assert.match(builder, /convertDocumentToStimuli\(file/);
     assert.ok(participant.includes('WecogProtocolStimuli?.referencedStimulusIds'));
     assert.ok(protocolStimuli.includes("for (const key of ['stimuliIds', 'stimuli_ids', 'slides'])"));
-    assert.ok(protocolStimuli.includes('Object.values(value).forEach(visit)'));
+    assert.ok(protocolStimuli.includes('Object.entries(value).forEach'));
+    assert.ok(protocolStimuli.includes("key === 'builderState' && !options.includeBuilderState"));
     assert.match(researcher, /shared\/standard-stimuli\.js/);
   });
 
@@ -654,7 +655,8 @@ describe('researcher navigation contract', () => {
     const researcher = read('web/researcher.html');
     const consent = read('participant-web/documents/informed-consent-v1.0.html');
     const privacy = read('participant-web/documents/privacy-policy-v1.0.html');
-    assert.match(core, /isNewProtocol \? \{ forceCreate: true \}/);
+    assert.match(core, /var targetProtocolId = options.forceProtocolId \|\| apiState.apiProtocolId/);
+    assert.match(read('web/researcher-builder.js'), /const id = savedExperimentId \|\| 'exp_' \+ Date.now\(\)/);
     assert.match(core, /href==='#\/experiments\/builder'[\s\S]+startNewExperimentBuilder\(\)/);
     assert.doesNotMatch(developer, /run_new\.html\?code=test/);
     assert.match(developer, /developer_module=tracking/);
