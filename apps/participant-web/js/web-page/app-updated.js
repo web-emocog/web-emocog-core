@@ -40,7 +40,7 @@ import {
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
-import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261019-5';
+import { createInvitationRequestPool } from '../session-runtime/invitation-http.mjs?v=20261019-hotfix1';
 import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261019-5';
 import { mediaContentRect } from './stimulus-geometry.mjs?v=20261019-5';
 import {
@@ -51,6 +51,7 @@ import {
 const RETAINED_GAZE_TARGET = 30_000;
 const RETAINED_GAZE_HARD_CAP = 32_000;
 const PARTICIPANT_LOCALES = new Set(['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur']);
+const fetchInvitationResource = createInvitationRequestPool();
 
 function participantText(ru, en, es) {
     if (state.currentLang === 'ru') return ru;
@@ -102,7 +103,7 @@ async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
         || typeof URL === 'undefined'
         || typeof URL.createObjectURL !== 'function'
     ) return null;
-    const blob = await fetchWithDeadline(contentUrl, { credentials: 'include', cache: 'no-store' }, async response => {
+    const blob = await fetchInvitationResource(contentUrl, { credentials: 'include', cache: 'no-store' }, async response => {
         if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
         return response.blob();
     }, 120000);
@@ -459,7 +460,7 @@ async function loadInvitationProtocolByCode(code) {
     const lookupUrl = new URL(base + '/invitations/by-code/' + encodeURIComponent(code));
     const restoredSessionId = state.sessionData?.ids?.session;
     if (restoredSessionId) lookupUrl.searchParams.set('session_id', restoredSessionId);
-    const { response, payload } = await fetchWithDeadline(lookupUrl.toString(), { cache: 'no-store' }, async response => ({
+    const { response, payload } = await fetchInvitationResource(lookupUrl.toString(), { cache: 'no-store' }, async response => ({
         response, payload: await response.json().catch(() => null)
     }));
     if (!response.ok) {
@@ -478,13 +479,16 @@ async function loadInvitationProtocolByCode(code) {
             : [];
 
         const previousMap = state.runtime.invitationStimuliMap || {};
-        const reusable = state.runtime.invitationProtocolMeta?.code === payload.code
+        const samePublication = state.runtime.invitationProtocolMeta?.code === (payload.code || code)
+            && state.runtime.invitationProtocolMeta?.protocolId === (payload.protocol_id || null)
+            && state.runtime.invitationProtocolMeta?.publicationVersion === (payload.publication_version || null);
+        const reusable = samePublication
             && stimulusIds.filter(id => /^\d+$/.test(id)).every(id => String(previousMap[id]?.metadata?.url || '').startsWith('blob:'));
         let stimuliMap = reusable ? previousMap : {};
-        if (!reusable) revokeInvitationStimulusObjectUrls();
+        if (!samePublication) revokeInvitationStimulusObjectUrls();
         if (!reusable && payload.project_id && stimulusIds.length) {
             try {
-                const { response: stimuliResp, rows } = await fetchWithDeadline(
+                const { response: stimuliResp, rows } = await fetchInvitationResource(
                     base + '/invitations/by-code/' + encodeURIComponent(payload.code || code) + '/stimuli', {},
                     async response => ({ response, rows: await response.json().catch(() => null) })
                 );
@@ -507,9 +511,15 @@ async function loadInvitationProtocolByCode(code) {
                             let displayUrl = contentUrl;
                             const mimeType = String(row?.mime_type || '').toLowerCase();
                             if (contentUrl && (mimeType.startsWith('image/') || mimeType.startsWith('video/'))) {
+                                const previous = previousMap[id];
+                                const cached = samePublication
+                                    && previous?.metadata?.source_url === contentUrl
+                                    && (previous?.version || null) === (row?.version || null)
+                                    && (previous?.sha256 || null) === (row?.sha256 || null)
+                                    && String(previous?.metadata?.url || '').startsWith('blob:');
                                 try {
-                                    displayUrl = await preloadInvitationStimulus(contentUrl, mimeType);
-                                    if (displayUrl) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
+                                    displayUrl = cached ? previous.metadata.url : await preloadInvitationStimulus(contentUrl, mimeType);
+                                    if (displayUrl && !cached) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
                                 } catch (error) {
                                     // Keep the public invitation URL as a direct browser fallback.
                                     // Dropping it here used to turn a valid API stimulus into a blue shape.
@@ -533,6 +543,12 @@ async function loadInvitationProtocolByCode(code) {
                     stimuliMap = Object.fromEntries(
                         mappedRows.filter(Boolean).map(row => [row.id, row])
                     );
+                    const retained = new Set(Object.values(stimuliMap).map(row => row.metadata?.url));
+                    state.runtime.invitationStimulusObjectUrls = state.runtime.invitationStimulusObjectUrls.filter(url => {
+                        if (retained.has(url)) return true;
+                        URL.revokeObjectURL(url);
+                        return false;
+                    });
                 }
             } catch (e) {
                 console.warn('[Invitation] Failed to load stimuli metadata:', e);
@@ -800,7 +816,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     await loadInvitationProtocolByCode(code);
                 } catch (e) {
                     if (hint) {
-                        hint.textContent = participantInviteBypass
+                        hint.textContent = e?.httpStatus === 429
+                            ? participantText(
+                                'Сервер временно ограничил загрузку. Подождите немного и нажмите «Начать» ещё раз. Ссылку менять не нужно.',
+                                'Loading is temporarily rate limited. Please wait and press Start again. You do not need a new invitation link.'
+                            )
+                            : participantInviteBypass
                             ? 'Приглашение не найдено. Проверьте код или очистите поле для тестового режима.'
                             : 'Приглашение не найдено. Проверьте код или получите новую ссылку у исследователя.';
                     }

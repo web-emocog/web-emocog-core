@@ -9,6 +9,14 @@ function classifyRoute(pathname) {
   return 'default';
 }
 
+function classifyRateLimitRoute(req) {
+  if (['GET', 'HEAD'].includes(req.method)
+      && /^\/invitations\/by-code\/[^/]+\/stimuli(?:\/\d+\/content)?\/?$/.test(req.path)) {
+    return 'media';
+  }
+  return classifyRoute(req.path);
+}
+
 function createSecurityHeaders(options = {}) {
   const hstsMaxAge = Number.isFinite(options.hstsMaxAge)
     ? options.hstsMaxAge
@@ -39,7 +47,7 @@ function buildCorsOptions(allowedOrigins) {
   const allowlist = new Set((allowedOrigins || []).map(origin => String(origin).trim()));
   return {
     credentials: true,
-    exposedHeaders: ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition'],
+    exposedHeaders: ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition', 'Retry-After'],
     origin(origin, callback) {
       if (!origin || allowlist.has(origin)) {
         return callback(null, true);
@@ -66,11 +74,11 @@ function buildRouteRateLimitOptions(rateLimits, options = {}) {
   const limiterOptions = {
     windowMs,
     limit(req) {
-      const configured = Number(rateLimits[classifyRoute(req.path)]);
+      const configured = Number(rateLimits[classifyRateLimitRoute(req)]);
       return Number.isSafeInteger(configured) && configured > 0 ? configured : 1;
     },
     keyGenerator(req) {
-      const profile = classifyRoute(req.path);
+      const profile = classifyRateLimitRoute(req);
       const address = req.ip || req.socket?.remoteAddress || 'unknown';
       const normalizedAddress = address === 'unknown' ? address : ipKeyGenerator(address);
       return `${profile}:${normalizedAddress}`;
@@ -86,7 +94,7 @@ function buildRouteRateLimitOptions(rateLimits, options = {}) {
       return res.status(429).json({
         error: 'Too many requests',
         code: 'rate_limit_exceeded',
-        route_profile: classifyRoute(req.path),
+        route_profile: classifyRateLimitRoute(req),
         retry_after_seconds: retryAfter,
       });
     },
@@ -103,6 +111,7 @@ function createRouteRateLimiter(rateLimits, options = {}) {
 
 module.exports = {
   classifyRoute,
+  classifyRateLimitRoute,
   createSecurityHeaders,
   requireSecureTransport,
   buildCorsOptions,
