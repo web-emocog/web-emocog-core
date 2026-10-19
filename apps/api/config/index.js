@@ -112,6 +112,7 @@ module.exports = {
     rateLimits: {
       auth: positiveInt(process.env.AUTH_RATE_LIMIT_PER_MINUTE, 20),
       ingest: positiveInt(process.env.INGEST_RATE_LIMIT_PER_MINUTE, 60),
+      media: positiveInt(process.env.MEDIA_RATE_LIMIT_PER_MINUTE, 300),
       default: positiveInt(process.env.DEFAULT_RATE_LIMIT_PER_MINUTE, 300),
     },
   },
