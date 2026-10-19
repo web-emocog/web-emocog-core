@@ -9,13 +9,13 @@ The normal release trigger is a merged pull request that updates `main`.
 2. It builds separate immutable `wecog-api` and `wecog-web` images.
 3. It authenticates to Yandex Cloud through GitHub OIDC; no long-lived cloud key is stored in GitHub.
 4. It pushes both images to Yandex Container Registry under the full commit SHA.
-5. Through a short-lived OS Login certificate it asks the VM's root-owned release controller to prepare the release.
+5. The runner checks snapshot list/read access without modifying snapshots. Through a short-lived OS Login certificate it asks the VM's root-owned release controller to prepare the release.
 6. The VM reads production values from Lockbox using its attached runtime service account, pulls the images, creates and validates a PostgreSQL dump and uploads archive, then uploads checksums and a completion manifest to Object Storage. Empty uploads are recorded in the manifest without uploading an empty archive.
-7. GitHub creates a boot-disk snapshot only after the logical database backup has completed.
+7. Only after the DB/media backup set has completed, the runner rotates automated disk snapshots and synchronously creates and verifies a new `READY` boot-disk snapshot. The last existing automated `READY` snapshot is preserved even under quota pressure.
 8. The VM applies forward migrations, starts the images, and checks database readiness and web health.
 9. If health checks fail, the controller starts the previously recorded application images again. It does not automatically reverse database migrations.
 10. GitHub verifies `/` and `/api/ready` through public HTTPS.
-11. Only after the public checks pass, GitHub removes old snapshots carrying both `app=wecog` and `reason=predeploy`, retaining the newest five.
+11. Snapshot retention is handled by the pre-deploy gate, not by post-deploy cleanup that cannot run when snapshot creation fails.
 
 A separate systemd timer creates a validated PostgreSQL dump every day at 00:30 UTC, with a random delay of up to 15 minutes. This protects the database even during periods without deployments.
 
@@ -38,6 +38,7 @@ Deploy service account `wecog-github-deploy` (`ajeuqpta4a5pecli5pl4`):
 
 - `container-registry.images.pusher` on registry `crphf3uq1mmhoqcsh60e`.
 - `compute.snapshotSchedules.editor` on folder `b1gakvq29fuiic89917k`.
+- `compute.auditor` on that folder for explicit snapshot metadata reads/verification (or an existing role that includes these read permissions). `resource-manager.auditor` alone does not grant Compute snapshot read access.
 - `compute.osLogin` and `compute.operator` on VM `fv45olob093b3smqvpsa`.
 - `resource-manager.auditor` on folder `b1gakvq29fuiic89917k`.
 - OS Login profile `wecog-deploy`, UID `20050`.
@@ -189,8 +190,8 @@ The workflow must complete these visible stages in order:
    secrets or database access, followed by the exact web-image smoke test for
    participant media modules, MIME types, security headers, and private-path
    denials;
-4. Lockbox read and PostgreSQL backup upload;
-5. disk snapshot creation;
+4. non-mutating snapshot list/read access check, then Lockbox read and the complete DB/media backup upload;
+5. safe automated-snapshot rotation, synchronous disk snapshot creation and `READY` verification;
 6. migrations and container deployment;
 7. public HTTPS checks.
 
@@ -209,7 +210,7 @@ Do not switch host Nginx to the web container before that first workflow is gree
 
 The retention policy is intentionally bounded:
 
-- automatic pre-deploy disk snapshots: keep the latest 5;
+- automatic pre-deploy disk snapshots: normally retain up to 5 `READY` copies, with a quota-pressure floor of one previous `READY` copy plus the newly verified copy;
 - automatic PostgreSQL dumps: keep for 35 days;
 - failed local dump artifacts on the VM: keep for at most 2 days;
 - immutable Container Registry images: retain at least the latest 10 and allow deletion after 30 days;
@@ -217,7 +218,60 @@ The retention policy is intentionally bounded:
 
 The VM also retains only the current and previous local `wecog-api` and `wecog-web` image tags after a healthy deployment or rollback. This cleanup matches those two exact registry repository names and does not prune unrelated Docker images or containers.
 
-The manually created baseline snapshot and the manually uploaded baseline archives are protected because automated cleanup selects only labelled snapshots and objects under the `postgresql/` prefix. Successful backup files are deleted from the VM after the entire set and completion manifest reach Object Storage.
+The manually created baseline snapshot and the manually uploaded baseline archives are protected because automated cleanup selects only snapshots from the configured folder and source disk, with BOTH `app=wecog` and `reason=predeploy`, and a canonical `wecog-predeploy-<UTC timestamp>-<short SHA>` name. A snapshot label `protected=true` additionally prevents automated deletion. Do not apply this automation identity to manual recovery copies. Object lifecycle remains limited to `postgresql/`. Successful backup files are deleted from the VM after the entire set and completion manifest reach Object Storage.
+
+### Snapshot quota and failure handling
+
+The runner-only helper `deploy/production/predeploy-snapshot.py` uses the Python
+standard library and checked, bounded subprocess calls to `yc`. It does not
+install anything on the VM or grant IAM roles. This helper-only change needs no
+VM bootstrap. Keep the deploy and rollback workflows in the same
+`wecog-production` concurrency group with `cancel-in-progress: false`; do not run
+manual snapshot deletion or another writer against these snapshots concurrently.
+
+Before any deletion, `wecog-release prepare` must finish its validated DB/media
+backup and completion-manifest upload. Normal rotation reserves one slot by
+keeping at most four old automated `READY` copies before creating the fifth.
+If the synchronous create explicitly reports `ResourceExhausted` for the
+snapshot size/count quota, the helper deletes the oldest eligible copy and
+retries, one at a time. CLI-level retries are disabled (`--retry 0`); only this
+confirmed quota-recovery path may replay creation. It never deletes the newest prior `READY` snapshot,
+manual/unlabelled copies, snapshots from other disks/folders, protected copies,
+or `ERROR`/in-flight snapshots. The retry budget strictly decreases with the
+initial eligible inventory; cloud calls have individual and total deadlines.
+
+If one old `READY` copy remains and creation still fails, deployment stops:
+review the actual cloud-wide `compute.snapshots.size` and `compute.snapshots.count`
+usage and request a quota increase if necessary. Free filesystem space inside
+the VM is unrelated. With no previous automated snapshots, a successful first
+run creates one; it cannot promise two recovery points on bootstrap.
+
+`PermissionDenied`, list/get/delete failures, malformed/truncated list/get/create JSON, unexpected
+inventory changes and non-`READY` creation results stop deployment. Timeout or
+network failures during creation are ambiguous: creation might still finish in
+the cloud. The helper does NOT delete more snapshots or replay such a create;
+inspect the cloud operations before rerunning. A successful create is checked
+again with `snapshot get`, including the folder/disk/name/commit binding, and
+the retained old recovery points are rechecked before allowing deployment.
+
+The access preflight verifies list/get only; it cannot non-destructively prove
+delete/create authorization. An administrator must confirm the deploy service
+account has the intended folder-scoped roles above. Do not compensate with
+organization-wide `admin`. Write authorization failures remain mandatory gate
+failures, not warnings. The helper never changes roles itself.
+
+For a failed release, retain the current application and inspect the safe error
+code in the job. Merge the fix through `develop`, then promote to `main` after
+CI/review. Reverting the workflow/helper via another PR restores the former
+gate but does not recover deleted old snapshots; automatic deletion is not
+reversible. The protected prior snapshot, manual baseline and independent
+DB/media backup sets remain the recovery sources. Do not bypass the snapshot
+gate to unblock a release. This change does not repair or reconfigure the
+separate Cloud Backup/Acronis service.
+
+References: [snapshot CLI](https://yandex.cloud/ru/docs/compute/cli-ref/snapshot/),
+[Compute quotas](https://yandex.cloud/ru/docs/compute/concepts/limits),
+[Compute access roles](https://yandex.cloud/ru/docs/compute/security/).
 
 ### Configure Object Storage lifecycle once
 

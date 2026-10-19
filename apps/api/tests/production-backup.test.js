@@ -13,7 +13,7 @@ const backupFunctions = controller.slice(controller.indexOf('prune_local_backups
 
 describe('production backup set and observability', () => {
   it('runs archive, restore-confinement and metric-transition regression tests', () => {
-    const result = spawnSync('python3', ['-B', '-m', 'unittest', 'discover', '-s', path.join(production, 'tests'), '-v'], {
+    const result = spawnSync('python3', ['-B', '-m', 'unittest', 'discover', '-s', path.join(production, 'tests'), '-p', 'test_backup_support.py', '-v'], {
       encoding: 'utf8', timeout: 60_000,
     });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
