@@ -49,7 +49,8 @@
         "aoi_attention",
         "task_performance",
         "group_descriptive",
-        "data_quality"
+        "data_quality",
+        "continuous_signals"
       ]
     },
     "metricId": {
@@ -58,7 +59,10 @@
     },
     "blockOverride": {
       "type": "object",
-      "required": ["packages", "selectedMetricIds"],
+      "required": [
+        "packages",
+        "selectedMetricIds"
+      ],
       "properties": {
         "packages": {
           "type": "array",

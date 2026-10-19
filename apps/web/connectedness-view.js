@@ -24,7 +24,8 @@
     return trials.filter(trial => trial.qualityValid === true && trial.correct === true && finite(trial.rtMs)
       && trial.windows?.[window]?.channels?.[channel]?.status === 'observed'
       && finite(trial.windows[window].channels[channel].value))
-      .map(trial => ({ x: trial.rtMs, y: trial.windows[window].channels[channel].value, trialId: trial.trialId, attempt: trial.attempt }));
+      .map(trial => ({ x: trial.rtMs, y: trial.windows[window].channels[channel].value, trialId: trial.trialId,
+        blockId: trial.blockId, onsetMs: trial.onsetMs, attempt: trial.attempt }));
   }
   function csv(bundle) {
     const fields = ['snapshotId', 'datasetHash', 'sessionId', 'blockId', 'condition', 'trialId', 'attempt', 'stimulusId', 'rtMs', 'correct', 'qualityValid', 'status', 'window', 'startMs', 'endMs', 'channel', 'value', 'n', 'nValid', 'validFraction', 'maxGapMs', 'signalStatus', 'clock', 'algorithmVersion', 'schemaVersion', 'baselineMs', 'postMs', 'truncated', 'trialCountTotal', 'reportSource'];
@@ -42,7 +43,7 @@
       host.innerHTML = `<div class="card" style="padding:24px"><h2>${tr('Нет RT-проб с временными метками','No timestamped RT trials')}</h2><p>${tr('Нужна сессия с задачей на время реакции. Отсутствие данных не является нулевым результатом.','A session with a reaction-time task is required. Missing data is not a zero result.')}</p></div>`;
       return;
     }
-    const names = { gaze: tr('Доля валидных gaze-сэмплов','Valid gaze sample fraction'), body: tr('Скорость движения корпуса (proxy)','Body movement velocity (proxy)'), valence: tr('Валентность (proxy)','Valence (proxy)'), arousal: tr('Возбуждение (proxy)','Arousal (proxy)'), bpm: tr('BPM: скользящая оценка','BPM: rolling estimate') };
+    const names = { gaze: tr('Доля валидных gaze-сэмплов','Valid gaze sample fraction'), body: tr('Скорость движения корпуса (proxy)','Body movement velocity (proxy)'), valence: tr('Валентность (proxy)','Valence (proxy)'), arousal: tr('Возбуждение (proxy)','Arousal (proxy)'), bpm: tr('BPM: скользящая оценка','BPM: rolling estimate'), respiration: tr('Дыхание: скользящая оценка, /мин','Respiration: rolling estimate, /min') };
     const knownValues = new Set(report.trials.flatMap(trial => [trial.blockId, trial.condition]).map(value => String(value ?? '')));
     let missingSelection = '__missing__';
     while (knownValues.has(missingSelection)) missingSelection += '_';
@@ -59,31 +60,78 @@
         <label>${tr('Окно','Window')} <select id="connectednessWindow"><option value="baseline">${tr('До стимула (до 1000 мс)','Before stimulus (up to 1000 ms)')}</option><option value="response" selected>${tr('От стимула до ответа','Stimulus to response')}</option><option value="post">${tr('После пробы (до 1000 мс)','After trial (up to 1000 ms)')}</option></select></label>
         <label>${tr('Сигнал','Signal')} <select id="connectednessChannel">${Object.entries(names).map(([key, name]) => `<option value="${key}">${escape(name)}</option>`).join('')}</select></label>
       </div>
+      <label>${tr('Масштаб линии','Timeline scale')} <select id="connectednessZoom"><option value="0">${tr('Вся сессия','Whole session')}</option><option value="5000">5 s</option><option value="30000">30 s</option></select></label>
       <div id="connectednessResults" aria-live="polite"></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
+        <button type="button" class="quick-btn" id="connectednessPrevious">${tr('Предыдущая проба','Previous trial')}</button>
+        <label style="min-width:0;max-width:100%">${tr('Выбранная проба','Selected trial')} <select id="connectednessTrial" style="width:300px;max-width:100%"></select></label>
+        <button type="button" class="quick-btn" id="connectednessNext">${tr('Следующая проба','Next trial')}</button>
+      </div>
+      <div id="connectednessTrialDetails" aria-live="polite" style="margin-top:12px;overflow:auto"></div>
       <div style="display:flex;gap:10px;margin-top:15px"><button type="button" class="quick-btn" id="connectednessJson">JSON</button><button type="button" class="quick-btn" id="connectednessCsv">CSV</button></div>
       <details style="margin-top:16px"><summary>${tr('Методика и ограничения','Methods and limitations')}</summary><p>${tr('Окна обрезаются у соседних проб. Пропуски не интерполируются, задержки камеры и дисплея не компенсируются без аппаратной проверки. Доля gaze относится к сохранённым сэмплам, а не ко всему времени. Мимика не является измерением эмоций; BPM вычисляется скользящим окном и не отражает мгновенный ответ.','Windows stop at neighboring trials. Gaps are not interpolated; camera/display delays are not corrected without hardware validation. Gaze fractions describe retained samples, not full time coverage. Facial expression is not an emotion measurement; rolling BPM is not an instantaneous response.')}</p><p>${tr('ρ Spearman показывается только для одного указанного блока и условия и минимум трёх пар как описательная величина. Три пары — ограничение отображения, а не математический минимум или достаточность выборки. Для групп нужны заранее заданные mixed-effects/rmcorr модели с учётом участников, повторов и условий.','Spearman ρ is shown only for one specified block and condition and at least three pairs as a descriptive value. Three pairs is a display policy, not a mathematical minimum or evidence of sample adequacy. Group inference requires prespecified mixed-effects/rmcorr models accounting for participants, repeats and conditions.')}</p><p><a href="https://doi.org/10.3389/fpsyg.2017.00456" target="_blank" rel="noopener noreferrer">Bakdash &amp; Marusich, 2017</a> · <a href="https://www.tobii.com/resource-center/webinars/introduction-to-tobii-pro-lab" target="_blank" rel="noopener noreferrer">Tobii TOI</a> · <a href="https://imotions.com/products/imotions-lab/" target="_blank" rel="noopener noreferrer">iMotions</a></p></details>
       <p style="font-size:11px;overflow-wrap:anywhere">snapshot ${escape(response.snapshot.id)} · ${escape(response.snapshot.datasetHash)} · ${escape(report.algorithmVersion)} · ${escape(report.clock)} ${report.truncated ? tr('· сохранены первые 200 проб','· first 200 trials retained') : ''}</p>
     </section>`;
     const select = id => host.querySelector('#' + id);
     let current = [];
+    let selectedTrial = report.trials[0];
+    function choose(index, focus = false) {
+      if (!Number.isInteger(index) || !current[index]) return;
+      selectedTrial = current[index]; update();
+      if (focus) select('connectednessTrial').focus();
+    }
     function update() {
       const block = select('connectednessBlock').value, condition = select('connectednessCondition').value;
       const window = select('connectednessWindow').value, channel = select('connectednessChannel').value;
       current = report.trials.filter(trial => (!block || selectionValue(trial.blockId) === block) && (!condition || selectionValue(trial.condition) === condition));
+      if (!current.includes(selectedTrial)) selectedTrial = current[0] || null;
+      const selectedIndex = current.indexOf(selectedTrial);
       const pairs = pairsFor(current, window, channel);
-      const rho = block && condition && block !== missingSelection && condition !== missingSelection ? spearman(pairs) : null;
+      const pairSelected = pair => selectedTrial?.trialId === pair.trialId && selectedTrial?.blockId === pair.blockId
+        && selectedTrial?.attempt === pair.attempt && selectedTrial?.onsetMs === pair.onsetMs;
+      const rolling = channel === 'bpm' || channel === 'respiration';
+      const rho = !rolling && block && condition && block !== missingSelection && condition !== missingSelection ? spearman(pairs) : null;
       const value = metric => finite(metric?.value) ? metric.value.toFixed(3) : tr('Нет данных','No data');
       const maxX = Math.max(1, ...pairs.map(pair => pair.x)), ys = pairs.map(pair => pair.y), minY = Math.min(0, ...ys), maxY = Math.max(1, ...ys);
       const duration = Math.max(1, ...current.map(trial => trial.endMs ?? trial.onsetMs));
-      const timeline = `<svg role="img" aria-label="${escape(tr('Временная шкала стимулов и ответов','Stimulus and response timeline'))}" viewBox="0 0 640 65" style="width:100%;max-width:760px"><path d="M20 35H620" stroke="currentColor"/>${current.map(trial => `<rect x="${20 + trial.onsetMs / duration * 600}" y="25" width="${Math.max(2, ((trial.endMs ?? trial.onsetMs) - trial.onsetMs) / duration * 600)}" height="20" fill="var(--accent)" opacity=".35"><title>${escape(trial.trialId)} · ${trial.onsetMs}–${trial.endMs ?? '?'} ms</title></rect>${trial.responseMs == null ? '' : `<circle cx="${20 + trial.responseMs / duration * 600}" cy="35" r="4" fill="currentColor"><title>RT ${trial.rtMs ?? '?'} ms</title></circle>`}`).join('')}<text x="20" y="62" fill="currentColor">0</text><text x="510" y="62" fill="currentColor">${(duration / 1000).toFixed(1)} s</text></svg>`;
-      const plot = pairs.length ? `<svg role="img" aria-label="${escape(tr('RT и выбранный сигнал','RT versus selected signal'))}" viewBox="0 0 640 210" style="width:100%;max-width:760px"><path d="M45 10V180H630" fill="none" stroke="currentColor"/>${pairs.map(pair => `<circle cx="${45 + pair.x / maxX * 575}" cy="${170 - (pair.y - minY) / (maxY - minY) * 150}" r="4" fill="var(--accent)"><title>${escape(pair.trialId)} · ${pair.x.toFixed(1)} ms · ${pair.y.toFixed(3)}</title></circle>`).join('')}<text x="45" y="202" fill="currentColor">0</text><text x="510" y="202" fill="currentColor">RT ${maxX.toFixed(0)} ms</text><text x="5" y="25" fill="currentColor">${maxY.toFixed(2)}</text></svg>` : `<p>${tr('Нет валидных правильных ответов с этим сигналом.','No valid correct responses with this signal.')}</p>`;
+      const span = Number(select('connectednessZoom').value) || duration;
+      const rangeStart = span >= duration ? 0 : Math.max(0, Math.min(duration - span, (selectedTrial?.onsetMs || 0) - span / 2));
+      const rangeEnd = Math.min(duration, rangeStart + span);
+      const xTime = time => 20 + (time - rangeStart) / (rangeEnd - rangeStart || 1) * 600;
+      const timeline = `<svg role="img" aria-label="${escape(tr('Временная шкала стимулов и ответов','Stimulus and response timeline'))}" viewBox="0 0 640 85" style="width:100%;max-width:900px"><path d="M20 35H620" stroke="currentColor"/>${current.map((trial, index) => {
+        const ending = trial.endMs ?? trial.onsetMs;
+        if (ending < rangeStart || trial.onsetMs > rangeEnd) return '';
+        const x = xTime(Math.max(rangeStart, trial.onsetMs));
+        return `<g role="button" tabindex="0" data-trial-index="${index}" aria-label="${escape(tr('Выбрать пробу','Select trial'))} ${index + 1}" aria-pressed="${trial === selectedTrial}" style="cursor:pointer">
+          <rect x="${x}" y="22" width="${Math.max(5, xTime(Math.min(rangeEnd, ending)) - x)}" height="26" stroke="${trial === selectedTrial ? 'currentColor' : 'none'}" stroke-width="2" fill="var(--accent)" opacity="${trial === selectedTrial ? 1 : .35}"><title>${escape(trial.trialId)} · ${trial.onsetMs}–${trial.endMs ?? '?'} ms</title></rect>
+          ${trial.responseMs == null || trial.responseMs < rangeStart || trial.responseMs > rangeEnd ? '' : `<circle cx="${xTime(trial.responseMs)}" cy="35" r="5" fill="currentColor"><title>RT ${trial.rtMs ?? '?'} ms</title></circle>`}</g>`;
+      }).join('')}<text x="20" y="73" fill="currentColor">${(rangeStart / 1000).toFixed(1)} s</text><text x="510" y="73" fill="currentColor">${(rangeEnd / 1000).toFixed(1)} s</text></svg>`;
+      const plot = pairs.length ? `<svg role="img" aria-label="${escape(tr('RT и выбранный сигнал','RT versus selected signal'))}" viewBox="0 0 640 210" style="width:100%;max-width:760px"><path d="M45 10V180H630" fill="none" stroke="currentColor"/>${pairs.map(pair => `<circle role="button" tabindex="0" aria-pressed="${pairSelected(pair)}" data-trial-index="${current.findIndex(trial => trial.trialId === pair.trialId && trial.blockId === pair.blockId && trial.attempt === pair.attempt && trial.onsetMs === pair.onsetMs)}" aria-label="${escape(tr('Выбрать пробу','Select trial'))} ${escape(pair.trialId)}" style="cursor:pointer" cx="${45 + pair.x / maxX * 575}" cy="${170 - (pair.y - minY) / (maxY - minY) * 150}" r="${pairSelected(pair) ? 6 : 4}" stroke="${pairSelected(pair) ? 'currentColor' : 'none'}" stroke-width="2" fill="var(--accent)"><title>${escape(pair.trialId)} · ${pair.x.toFixed(1)} ms · ${pair.y.toFixed(3)}</title></circle>`).join('')}<text x="45" y="202" fill="currentColor">0</text><text x="510" y="202" fill="currentColor">RT ${maxX.toFixed(0)} ms</text><text x="5" y="25" fill="currentColor">${maxY.toFixed(2)}</text></svg>` : `<p>${tr('Нет валидных правильных ответов с этим сигналом.','No valid correct responses with this signal.')}</p>`;
       select('connectednessResults').innerHTML = `${timeline}<p>${tr('Проб','Trials')}: ${current.length} · ${tr('Валидных правильных пар','Valid correct pairs')}: ${pairs.length} · ρ: ${rho == null ? tr('не вычислено (выберите один блок и условие; нужна вариативность)','not computed (select one block and condition; variation required)') : rho.toFixed(3)}</p>${plot}
-        <div style="overflow:auto;max-height:420px"><table style="width:100%;text-align:left"><thead><tr>${[tr('Проба / попытка','Trial / attempt'),tr('Условие','Condition'),'RT (ms)',tr('Ответ / QC','Response / QC'),names[channel],tr('Валидные / всего','Valid / total'),tr('Макс. пробел, мс','Max gap, ms')].map(label => `<th>${escape(label)}</th>`).join('')}</tr></thead><tbody>${current.map(trial => { const metric = trial.windows[window].channels[channel]; return `<tr><td>${escape(trial.trialId)} / ${trial.attempt}</td><td>${escape(trial.condition)}</td><td>${trial.rtMs == null ? '—' : trial.rtMs.toFixed(1)}</td><td>${trial.correct === null ? '—' : trial.correct ? tr('Верно','Correct') : tr('Неверно','Incorrect')} / ${trial.qualityValid ? tr('Допустимо','Eligible') : tr('Исключено','Excluded')}</td><td>${value(metric)}</td><td>${metric.nValid} / ${metric.n}</td><td>${metric.maxGapMs ?? '—'}</td></tr>`; }).join('')}</tbody></table></div>`;
+        <div style="overflow:auto;max-height:420px"><table style="width:100%;text-align:left"><thead><tr>${[tr('Проба / попытка','Trial / attempt'),tr('Условие','Condition'),'RT (ms)',tr('Ответ / QC','Response / QC'),names[channel],tr('Валидные / всего','Valid / total'),tr('Макс. пробел, мс','Max gap, ms')].map(label => `<th>${escape(label)}</th>`).join('')}</tr></thead><tbody>${current.map(trial => { const metric = trial.windows[window].channels[channel] || { n: 0, nValid: 0, maxGapMs: null }; return `<tr style="background:${trial === selectedTrial ? 'var(--accent-soft,rgba(30,90,250,.10))' : 'transparent'}"><td><button type="button" class="quick-btn" data-trial-index="${current.indexOf(trial)}" aria-pressed="${trial === selectedTrial}">${escape(trial.trialId)} / ${trial.attempt}</button></td><td>${escape(trial.condition)}</td><td>${trial.rtMs == null ? '—' : trial.rtMs.toFixed(1)}</td><td>${trial.correct === null ? '—' : trial.correct ? tr('Верно','Correct') : tr('Неверно','Incorrect')} / ${trial.qualityValid ? tr('Допустимо','Eligible') : tr('Исключено','Excluded')}</td><td>${value(metric)}</td><td>${metric.nValid} / ${metric.n}</td><td>${metric.maxGapMs ?? '—'}</td></tr>`; }).join('')}</tbody></table></div>`;
+      select('connectednessTrial').innerHTML = current.map((trial, index) => `<option value="${index}" ${index === selectedIndex ? 'selected' : ''}>${index + 1} · ${escape(trial.trialId)} / ${trial.attempt}</option>`).join('');
+      select('connectednessPrevious').disabled = selectedIndex <= 0;
+      select('connectednessNext').disabled = selectedIndex < 0 || selectedIndex >= current.length - 1;
+      select('connectednessTrial').disabled = !current.length;
+      select('connectednessTrialDetails').innerHTML = selectedTrial ? `<h3>${tr('Проба','Trial')} ${escape(selectedTrial.trialId)} / ${selectedTrial.attempt}</h3>
+        <p>RT: ${selectedTrial.rtMs == null ? '—' : selectedTrial.rtMs.toFixed(1) + ' ms'} · ${tr('Стимул','Stimulus')}: ${escape(selectedTrial.stimulusId)} · ${tr('Начало','Onset')}: ${(selectedTrial.onsetMs / 1000).toFixed(3)} s</p>
+        <p>${tr('ЧСС и дыхание рассчитаны скользящим окном. Окна до 1 с показывают лишь контекст доступных оценок, не мгновенную реакцию и не независимые измерения; корреляция для них не рассчитывается.','Heart rate and respiration use rolling windows. Windows up to 1 s show available context, not an instantaneous response or independent measurements; their correlation is not computed.')}</p>
+        <table style="width:100%;min-width:600px;text-align:left"><thead><tr><th>${tr('Сигнал','Signal')}</th>${['baseline','response','post'].map(key => `<th>${{baseline:tr('До стимула','Before stimulus'),response:tr('До ответа','Until response'),post:tr('После пробы','After trial')}[key]}</th>`).join('')}</tr></thead><tbody>${Object.entries(names).map(([key, label]) => `<tr><th>${escape(label)}</th>${['baseline','response','post'].map(period => { const metric = selectedTrial.windows?.[period]?.channels?.[key]; return `<td>${value(metric)}<br><small>n=${metric?.nValid ?? 0}/${metric?.n ?? 0} · ${tr('пробел','gap')} ${metric?.maxGapMs ?? '—'} ms</small></td>`; }).join('')}</tr>`).join('')}</tbody></table>` : tr('Нет выбранной пробы','No trial selected');
+      if (rolling) select('connectednessResults').insertAdjacentHTML('afterbegin', `<p role="status">${tr('Описательный контекст скользящей физиологической оценки. ρ для коротких окон отключён.','Descriptive context of a rolling physiological estimate. Correlation is disabled for short windows.')}</p>`);
+      select('connectednessResults').querySelectorAll('[data-trial-index]').forEach(element => {
+        element.addEventListener('click', () => choose(Number(element.dataset.trialIndex), true));
+        if (element.tagName.toLowerCase() !== 'button') element.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(Number(element.dataset.trialIndex), true); }
+        });
+      });
     }
-    for (const id of ['connectednessBlock','connectednessCondition','connectednessWindow','connectednessChannel']) select(id).addEventListener('change', update);
+    select('connectednessTrial').addEventListener('change', event => choose(Number(event.target.value)));
+    select('connectednessPrevious').addEventListener('click', () => choose(current.indexOf(selectedTrial) - 1, true));
+    select('connectednessNext').addEventListener('click', () => choose(current.indexOf(selectedTrial) + 1, true));
+    for (const id of ['connectednessBlock','connectednessCondition','connectednessWindow','connectednessChannel','connectednessZoom']) select(id).addEventListener('change', update);
     for (const format of ['Json','Csv']) select('connectedness' + format).addEventListener('click', () => {
       const bundle = { contractVersion: '1.0', kind: 'rt_connectedness_export', snapshot: response.snapshot,
-        view: { blockId: select('connectednessBlock').value === missingSelection ? null : select('connectednessBlock').value,
+        view: { selectedTrialId: selectedTrial?.trialId ?? null, selectedAttempt: selectedTrial?.attempt ?? null, blockId: select('connectednessBlock').value === missingSelection ? null : select('connectednessBlock').value,
           condition: select('connectednessCondition').value === missingSelection ? null : select('connectednessCondition').value,
           unspecifiedBlockSelected: select('connectednessBlock').value === missingSelection,
           unspecifiedConditionSelected: select('connectednessCondition').value === missingSelection,

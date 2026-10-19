@@ -1,5 +1,21 @@
 # Third-party licenses
 
+## Analytics PDF export
+
+- jsPDF **4.2.1**, MIT, vendored from the npm release published by
+  https://github.com/parallax/jsPDF/releases/tag/v4.2.1.
+- File: `apps/web/assets/vendor/jspdf/dist/jspdf.umd.min.js`.
+- SHA-256: `e6551fcdc32f09d6853b2c5126d18d01d9447e0da618a41a11ebeee0f6c20d54`.
+- License: `apps/web/assets/vendor/jspdf/LICENSE`.
+- DejaVu Sans 2.37: Bitstream Vera license / public-domain DejaVu changes,
+  https://github.com/dejavu-fonts/dejavu-fonts/blob/master/LICENSE.
+- File: `apps/web/assets/fonts/DejaVuSans.ttf`; unmodified runtime-bundled font.
+- SHA-256: `7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954`.
+- License: `apps/web/assets/fonts/DejaVuSans-LICENSE.txt`.
+- PDF generation stays in the browser, uses an authorized analysis snapshot,
+  embeds Cyrillic glyphs, and does not contact a CDN. No HTML-to-PDF, AcroForm,
+  annotation, executable JavaScript or user-supplied font API is used.
+
 ## MediaPipe Tasks Vision
 
 - Компонент: `@mediapipe/tasks-vision`.

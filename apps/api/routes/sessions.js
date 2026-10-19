@@ -193,15 +193,23 @@ router.get(
   [
     query('project_id').optional().isInt(),
     query('protocol_id').optional().isInt(),
+    query('protocol_version').optional().isString().isLength({ min: 1, max: 64 }),
+    query('include_incomplete').optional().isBoolean(),
     query('date_from').optional().isISO8601(),
     query('date_to').optional().isISO8601(),
     query('qc_validity').optional().isIn(['valid', 'borderline', 'invalid']),
   ],
   async (req, res) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       let sql = `
         SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id, s.started_at, s.stopped_at, s.created_at,
-               CASE WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
+               CASE WHEN i.publication_version IS NOT NULL THEN 'publication:' || i.publication_version
+                    WHEN i.id IS NOT NULL THEN 'invitation:' || i.id ELSE 'legacy' END AS protocol_version,
+               i.publication_version,
+               CASE WHEN sf.payload->'experimentMeta'->>'protocolTermination' IS NOT NULL THEN 'aborted'
+                    WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
                s.stopped_at AS completed_at,
                q.qc_score, q.validity AS qc_validity,
                q.fail_reasons AS qc_fail_reasons,
@@ -211,6 +219,8 @@ router.get(
                pm.respiration_rate_mean, pm.respiration_sample_count, pm.respiration_available,
                pm.payload AS proxy_metrics
         FROM sessions s
+        LEFT JOIN invitations i ON i.id = s.invitation_id
+        LEFT JOIN session_features sf ON sf.session_id = s.id
         LEFT JOIN session_qc_summary q ON q.session_id = s.id
         LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
         ${scopedJoinAndWhere(1, req.user)}
@@ -220,6 +230,15 @@ router.get(
       let i = params.length + 1;
       if (req.query.project_id) { params.push(req.query.project_id); sql += ` AND s.project_id = $${i++}`; }
       if (req.query.protocol_id) { params.push(req.query.protocol_id); sql += ` AND s.protocol_id = $${i++}`; }
+      if (req.query.include_incomplete === 'false') sql += " AND s.stopped_at IS NOT NULL AND sf.payload->'experimentMeta'->>'protocolTermination' IS NULL";
+      if (req.query.protocol_version) {
+        const version = String(req.query.protocol_version);
+        if (/^(publication|invitation):/.test(version) && Number(version.split(':')[1]) > 2147483647) return res.status(400).json({ error: 'Invalid protocol version' });
+        if (version === 'legacy') sql += ' AND s.invitation_id IS NULL';
+        else if (/^publication:[1-9]\d*$/.test(version)) { params.push(version.split(':')[1]); sql += ` AND i.publication_version = $${i++}`; }
+        else if (/^invitation:[1-9]\d*$/.test(version)) { params.push(version.split(':')[1]); sql += ` AND i.id = $${i++}`; }
+        else if (/^(publication|invitation):/.test(version)) return res.status(400).json({ error: 'Invalid protocol version' });
+      }
       if (req.query.date_from) { params.push(req.query.date_from); sql += ` AND s.started_at >= $${i++}`; }
       if (req.query.date_to) { params.push(req.query.date_to); sql += ` AND s.started_at <= $${i++}`; }
       if (req.query.qc_validity) { params.push(req.query.qc_validity); sql += ` AND q.validity = $${i++}`; }
@@ -272,6 +291,7 @@ router.get(
       const session = r.rows[0];
       const features = await pool.query('SELECT payload FROM session_features WHERE session_id = $1', [session.id]);
       session.features = features.rows[0] ? features.rows[0].payload : null;
+      if (session.features?.experimentMeta?.protocolTermination) session.session_status = 'aborted';
       res.json(session);
     } catch (err) {
       console.error(err);

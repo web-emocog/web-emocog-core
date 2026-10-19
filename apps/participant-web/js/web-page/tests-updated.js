@@ -4,31 +4,32 @@ import {
     recordSessionEvent,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20261008-2';
-import { translations } from '../../translations.js?v=20261008-2';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261008-2';
-import { stopPreCheck } from './precheck-updated.js?v=20261008-2';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261008-2';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261008-2';
+} from './state.js?v=20261019-5';
+import { translations } from '../../translations.js?v=20261019-5';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261019-5';
+import { stopPreCheck } from './precheck-updated.js?v=20261019-5';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261019-5';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261019-5';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
 } from './protocol-invite-utils.js?v=20260915-1';
-import { buildHeatmaps } from './heatmap.js?v=20261008-2';
-import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
+import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261019-5';
+import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261019-5';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261008-2';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261019-5';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261008-2';
-import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20260807-1';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-5';
+import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261019-5';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-5';
 import {
     getContentViewport,
     targetCenterInContentViewport
@@ -44,12 +45,12 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261008-2';
+} from '../session-runtime/index.js?v=20261019-5';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
     showCalibrationHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20261008-2';
+} from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
 
 function participantMessage(key, replacements = {}) {
     const pack = translations[state.currentLang] || translations.en;
@@ -185,7 +186,7 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
             recordSessionEvent('upload_retry', {
                 attempt,
                 retries,
-                message: error?.message || String(error)
+                errorCode: persistenceErrorCode(error), httpStatus: error?.httpStatus || null
             });
             setUploadStatus(participantMessage('runtime_upload_retry_wait', {
                 seconds: Math.round(delayMs / 1000)
@@ -196,19 +197,13 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
             setUploadStatus(participantMessage('runtime_upload_success'), 'success');
         },
         onFailure: error => {
-            recordSessionEvent('upload_failed', { message: error?.message || String(error) });
+            recordSessionEvent('upload_failed', { errorCode: persistenceErrorCode(error), httpStatus: error?.httpStatus || null });
             console.error('[Final upload]', {
                 message: error?.message || String(error),
                 status: error?.httpStatus || null,
                 payload: error?.payload || null
             });
-            const rejected = Number.isFinite(error?.httpStatus)
-                && error.httpStatus >= 400 && error.httpStatus < 500
-                && ![408, 425, 429].includes(error.httpStatus);
-            setUploadStatus(participantMessage(rejected
-                ? 'runtime_upload_rejected' : 'runtime_upload_failure', {
-                status: error?.httpStatus
-            }), 'error');
+            setUploadStatus(persistenceMessage(persistenceErrorCode(error), state.currentLang), 'error');
         }
     });
 }
@@ -2059,6 +2054,7 @@ export function finishSession() {
 function prepareFinalUploadPayload(finishAttemptId, completedAt) {
     const uploadPayload = buildAggregatesPayload(state.sessionData, { forIngest: true });
     if (!uploadPayload) return null;
+    if (state.sessionData.finalDelivery) uploadPayload.delivery = { ...state.sessionData.finalDelivery };
     if (!uploadPayload.ids.invitationCode) {
         const code = state.sessionData?.ids?.invitationCode
             || state.runtime?.invitationProtocolMeta?.code
@@ -2071,13 +2067,18 @@ function prepareFinalUploadPayload(finishAttemptId, completedAt) {
         state: 'completed',
         status: 'completed',
         completedAt,
-        finishAttemptId
+        finishAttemptId,
+        modules: { ...(getSessionRuntime()?.moduleStatus || state.sessionData.lifecycle?.modules || {}) }
     };
     return uploadPayload;
 }
 
 async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
-    const uploadPayload = prepareFinalUploadPayload(finishAttemptId, completedAt);
+    const saved = state.sessionData.pendingFinalUpload;
+    const uploadPayload = saved?.finishAttemptId === finishAttemptId
+        && saved.payload?.ids?.session === state.sessionData.ids?.session
+        && saved.payload?.ids?.invitationCode === state.sessionData.ids?.invitationCode
+        ? saved.payload : prepareFinalUploadPayload(finishAttemptId, completedAt);
     if (!uploadPayload) {
         const result = {
             ok: false,
@@ -2116,7 +2117,10 @@ async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
         error: uploadResult.error || null
     });
     if (uploadResult.ok) {
-        await runtime?.clearCompletedCheckpoint();
+        state.sessionData.finalizedPayload = uploadPayload;
+        delete state.sessionData.pendingFinalUpload;
+        try { await runtime?.clearCompletedCheckpoint(); }
+        catch (error) { console.warn('[finishSession] accepted result checkpoint cleanup failed:', error); }
     } else {
         await runtime?.persistCompletedCheckpoint();
     }
@@ -2153,6 +2157,7 @@ async function finishSessionOnce() {
     if (!finish.accepted && runtime?.machine?.state !== 'finishing') {
         throw new Error('Session finish rejected while a test block is active');
     }
+    runtime?.stopServerCheckpoints();
     setSessionPhase('final', { source: 'finishSession' });
     runtime?.ui?.hideIssue?.();
     recordSessionEvent('session_finish_start', {
@@ -2161,6 +2166,8 @@ async function finishSessionOnce() {
     state.flags.isRecording = false;
     try {
         await runtime?.stopContinuousModules('session_finish');
+    } catch (error) {
+        console.warn('[finishSession] module shutdown failed:', error);
     } finally {
         // Teardown does not depend on analytics or final-screen DOM succeeding.
         stopSessionMediaResources();
@@ -2210,7 +2217,7 @@ async function finishSessionOnce() {
         const validationRmsPx = Number.isFinite(state.sessionData?.gazeValidation?.metrics?.accuracyPx)
             ? state.sessionData.gazeValidation.metrics.accuracyPx
             : null;
-        const heatmaps = buildHeatmaps(state.sessionData.eyeTracking, {
+        const heatmaps = buildSessionHeatmaps(state.sessionData, state.runtime, {
             gridWidth: 32,
             gridHeight: 18,
             validationRmsPx
@@ -2257,7 +2264,11 @@ async function finishSessionOnce() {
         try {
             const qcSummary = state.runtime.qcMetrics.getSummary();
             finalQcSummary = qcSummary;
-            state.sessionData.qcSummary = qcSummary;
+            state.sessionData.qcSummary = { ...qcSummary,
+                protocolQc: globalThis.WecogProtocolQuality?.evaluate(state.runtime.invitationProtocolDefinition, qcSummary) || null };
+            if (state.sessionData.qcSummary.protocolQc?.failed.length || state.sessionData.qcSummary.protocolQc?.missing.length
+                || state.sessionData.experimentMeta?.protocolTermination) state.sessionData.qcSummary.overallPass = false;
+            finalQcSummary = state.sessionData.qcSummary;
             console.log('[QC] Summary:', qcSummary);
             dbg('respiration', 'respiration:summary', summarizeRespirationForDebug(state.sessionData));
 
@@ -2270,7 +2281,8 @@ async function finishSessionOnce() {
     }
     // The aggregate cards (blinks, PERCLOS, emotion, body pose) do not depend
     // on QCMetrics and must be rendered for every completed session.
-    updateFinalStepWithQC(finalQcSummary);
+    try { updateFinalStepWithQC(finalQcSummary); }
+    catch (error) { console.warn('[finishSession] final summary rendering failed:', error); }
     hideQcOverlay();
     
     // Убираем класс active со step5 до вызова nextStep,
@@ -2284,6 +2296,11 @@ async function finishSessionOnce() {
     if (topBar) topBar.style.display = 'flex';
     
     const completedAt = Date.now();
+    const terminalTime = new Date(completedAt).toISOString();
+    state.sessionData.pendingFinalUpload = {
+        finishAttemptId: finish.finishAttemptId,
+        payload: prepareFinalUploadPayload(finish.finishAttemptId, terminalTime)
+    };
     if (runtime) {
         // Keep a completed checkpoint until the final ingest confirms receipt.
         await runtime.completeFinish({ source: 'finishSession' }, { clearCheckpoint: false });

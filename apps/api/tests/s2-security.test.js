@@ -488,6 +488,7 @@ describe('S2-01 route-specific HTTP controls', () => {
     assert.equal((await check(undefined)).allowed, true);
     assert.equal((await check('https://attacker.test')).error.code, 'cors_origin_denied');
     assert.equal(options.credentials, true);
+    assert.deepEqual(options.exposedHeaders, ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition']);
   });
 
   it('uses different JSON limits for auth and ingest', async () => {

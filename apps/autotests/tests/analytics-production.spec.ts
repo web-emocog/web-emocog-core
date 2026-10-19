@@ -183,7 +183,8 @@ test('uploaded heatmap media is authenticated and one unavailable file does not 
   expect(media[1].url).toBeNull();
   expect(media[1].error).toContain('503');
   await expect(page.locator('.analytics-stimulus-media').first()).toBeVisible();
-  await expect(page.getByText('Файл стимула недоступен. Данные анализа сохранены.').first()).toBeVisible();
+  await expect(page.locator('.analytics-stimulus-fallback:visible')).toHaveCount(1);
+  await expect(page.locator('.analytics-stimulus-fallback:visible')).toContainText('Данные анализа сохранены');
   await expect(page.locator('.analytics-heatmap-canvas').first()).toBeVisible();
 });
 

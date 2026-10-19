@@ -95,6 +95,18 @@ function round(value, digits = 2) {
     return Math.round(value * factor) / factor;
 }
 
+function minimumFinite(values) {
+    let minimum = null;
+    for (const value of values) if (Number.isFinite(value) && (minimum === null || value < minimum)) minimum = value;
+    return minimum;
+}
+
+function maximumFinite(values) {
+    let maximum = null;
+    for (const value of values) if (Number.isFinite(value) && (maximum === null || value > maximum)) maximum = value;
+    return maximum;
+}
+
 function pickScopeStartMs(eyeSignals, gazeSamples) {
     const trackingTimestamps = [
         ...(eyeSignals || [])
@@ -108,7 +120,7 @@ function pickScopeStartMs(eyeSignals, gazeSamples) {
     if (trackingTimestamps.length > 0) {
         return {
             scopeStartPhase: TRACKING_START_PHASE,
-            scopeStartMs: Math.min(...trackingTimestamps),
+            scopeStartMs: minimumFinite(trackingTimestamps),
             scopeFilterApplied: true
         };
     }
@@ -120,7 +132,7 @@ function pickScopeStartMs(eyeSignals, gazeSamples) {
 
     return {
         scopeStartPhase: 'fallback_first_sample',
-        scopeStartMs: fallbackTimestamps.length > 0 ? Math.min(...fallbackTimestamps) : null,
+        scopeStartMs: minimumFinite(fallbackTimestamps),
         scopeFilterApplied: false
     };
 }
@@ -602,7 +614,7 @@ function computeSlidingPERCLOS(samples, windowMs, config) {
         windowMs,
         values,
         mean: toFiniteNumber(mean(series), null),
-        max: series.length > 0 ? Math.max(...series) : null
+        max: maximumFinite(series)
     };
 }
 
@@ -622,10 +634,10 @@ function summarizePerclosEpisodes(events, eyeDurationMs) {
         ratePerMin: round(ratePerMin, 2),
         durationsMs: durations,
         meanDurationMs: round(mean(durations) || 0, 2),
-        maxDurationMs: durations.length > 0 ? Math.max(...durations) : 0,
+        maxDurationMs: maximumFinite(durations) ?? 0,
         bothOpenDiagnostics: {
             meanBothOpenFalsePct: round(mean(bothOpenFalsePctSeries) || 0, 2),
-            maxBothOpenFalsePct: bothOpenFalsePctSeries.length > 0 ? Math.max(...bothOpenFalsePctSeries) : 0,
+            maxBothOpenFalsePct: maximumFinite(bothOpenFalsePctSeries) ?? 0,
             meanKnownSamplesPerEpisode: round(mean(bothOpenKnownSamplesSeries) || 0, 2)
         }
     };
@@ -738,7 +750,7 @@ function computeSaccadeFixationMetrics(gazeSamples, config) {
     }
 
     const saccades = intervals.filter(i => i.isSaccade);
-    const peakSaccadeVelocity = saccades.length > 0 ? Math.max(...saccades.map(s => s.velocity)) : 0;
+    const peakSaccadeVelocity = maximumFinite(saccades.map(s => s.velocity)) ?? 0;
 
     const fixationSegments = [];
     let current = [];
@@ -757,7 +769,7 @@ function computeSaccadeFixationMetrics(gazeSamples, config) {
             const durationMs = segment.reduce((acc, interval) => acc + interval.durationMs, 0);
             const xs = segment.map(interval => interval.nx);
             const ys = segment.map(interval => interval.ny);
-            const dispersion = (Math.max(...xs) - Math.min(...xs)) + (Math.max(...ys) - Math.min(...ys));
+            const dispersion = (maximumFinite(xs) - minimumFinite(xs)) + (maximumFinite(ys) - minimumFinite(ys));
             return { durationMs, dispersion };
         })
         .filter(fixation => fixation.durationMs >= config.minFixationDurationMs);
@@ -1085,10 +1097,10 @@ export function buildAttentionMetrics(sessionData) {
     const rawGazeSamples = Array.isArray(sessionData?.eyeTracking) ? sessionData.eyeTracking : [];
     const eyeSignals = rawEyeSignals;
     const gazeSamples = rawGazeSamples;
-    const firstTimestamp = [
+    const firstTimestamp = minimumFinite([
         ...eyeSignals.map(sample => sample?.t),
         ...gazeSamples.map(sample => sample?.t)
-    ].filter(Number.isFinite).sort((a, b) => a - b)[0] ?? null;
+    ]);
     const scopeMeta = {
         scopeStartPhase: 'session_first_measured_frame',
         scopeStartMs: firstTimestamp,
@@ -1144,6 +1156,11 @@ export function buildAttentionMetrics(sessionData) {
         version: ATTENTION_ALGO_VERSION,
         computedAt: Date.now(),
         scope: 'whole_measured_session',
+        coverage: { gaze: (sessionData.heatmaps?.accumulation?.summary?.sampleCountTotal
+            ?? sessionData.heatmapState?.summary?.sampleCountTotal) > rawGazeSamples.length
+            ? 'retained_window' : 'whole_measured_session',
+            eyeSignals: sessionData.experimentMeta?.storageRecovery?.signalSeriesIncomplete
+                ? 'incomplete_recovered_series' : 'whole_measured_session' },
         windows: ['30s', '60s'],
         sampleCounts: {
             eyeSignals: eyeSignals.length,

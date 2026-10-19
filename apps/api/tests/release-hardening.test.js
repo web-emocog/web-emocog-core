@@ -106,9 +106,17 @@ describe('S3-01 release hardening', () => {
     assert.match(deploy, /push:\s+branches: \[main\]/);
   });
 
-  it('runs PostgreSQL release gates against a pinned official image mirror', () => {
+  it('starts digest-pinned PostgreSQL with a registry fallback before all required release checks', () => {
     const workflow = fs.readFileSync(path.resolve(apiRoot, '../../.github/workflows/release-gates.yml'), 'utf8');
-    assert.match(workflow, /image: public\.ecr\.aws\/docker\/library\/postgres:16\.10-alpine@sha256:[a-f0-9]{64}/);
+    const start = fs.readFileSync(path.resolve(apiRoot, '../../scripts/start-ci-postgres.sh'), 'utf8');
+    assert.doesNotMatch(workflow, /public\.ecr\.aws\/docker\/library\/postgres/);
+    assert.match(workflow, /id: postgres\s+run: bash scripts\/start-ci-postgres\.sh/);
+    assert.match(start, /digest='sha256:[a-f0-9]{64}'/);
+    assert.match(start, /mirror\.gcr\.io\/library\/postgres docker\.io\/library\/postgres/);
+    assert.match(start, /candidate="\$\{repository\}:16\.10-alpine@\$\{digest\}"/);
+    assert.match(start, /timeout 90s docker pull/);
+    assert.match(start, /127\.0\.0\.1:\$\{port\}:5432/);
+    assert.match(workflow, /always\(\) && steps\.postgres\.outcome == 'success'/);
     assert.match(workflow, /run: npm run test:postgres/);
     assert.match(workflow, /run: npm run migrate:verify/);
     assert.match(workflow, /run: npm run backup:verify/);

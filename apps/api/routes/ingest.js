@@ -38,6 +38,16 @@ const {
 const { withTransaction, lockSessionKey } = require('../db/transaction');
 const { HttpError } = require('../security/http-error');
 const { requireSessionFeaturePayload } = require('../security/payload-policy');
+const protocolQuality = require('../../shared/protocol-quality');
+const { createHash } = require('node:crypto');
+
+function deliveryDigest(raw) {
+  const experimentMeta = { ...(raw.experimentMeta || {}) };
+  delete experimentMeta.serverDeliveryDigest;
+  const serialized = JSON.stringify({ ...raw, experimentMeta }, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+  return createHash('sha256').update(serialized).digest('hex');
+}
 
 const router = express.Router();
 
@@ -470,6 +480,8 @@ router.post(
           `SELECT s.id, s.participant_id, s.started_at, s.stopped_at, s.project_id,
                   s.protocol_id, s.invitation_id,
                   sf.payload->'lifecycle'->>'finishAttemptId' AS stored_finish_attempt_id,
+                  sf.payload->'delivery'->>'sequence' AS stored_delivery_sequence,
+                  sf.payload->'experimentMeta'->>'serverDeliveryDigest' AS stored_delivery_digest,
                   sq.validity AS stored_qc_validity,
                   sp.payload->>'proxy_ready' AS stored_proxy_ready
            FROM sessions s
@@ -536,6 +548,17 @@ router.post(
                WHERE id = $2 AND participant_id IS NULL`,
               [participantId, dbSessionId]
             );
+          }
+          if (!alreadyCompleted && lifecycle?.status !== 'completed' && Number(storedSession.stored_delivery_sequence) > 0) {
+            if (!raw.delivery || raw.delivery.sequence < Number(storedSession.stored_delivery_sequence)) {
+              throw new HttpError(409, 'A newer checkpoint is already saved', 'checkpoint_stale');
+            }
+            if (raw.delivery.sequence === Number(storedSession.stored_delivery_sequence)) {
+              if (storedSession.stored_delivery_digest !== deliveryDigest(raw)) throw new HttpError(409, 'Checkpoint sequence already contains different data', 'checkpoint_sequence_conflict');
+              return { status: 200, body: { session_id: sessionId, ingested: true, idempotent: true,
+                idempotency_key: null, qc_validity: storedSession.stored_qc_validity || null,
+                proxy_ready: storedSession.stored_proxy_ready === 'true', lifecycle_status: 'in_progress', completed_at: null } };
+            }
           }
           if (alreadyCompleted) {
             const existingFinish = resolveExistingFinish(
@@ -630,8 +653,11 @@ router.post(
           completedAtIso = completedAt.toISOString();
         }
 
-        let protocolDefinition = null;
-        if (scope.protocol_id) {
+        let protocolDefinition = invitation?.protocol_definition || null;
+        if (!protocolDefinition && storedSession?.invitation_id) {
+          protocolDefinition = (await client.query('SELECT protocol_definition FROM invitations WHERE id = $1', [storedSession.invitation_id])).rows[0]?.protocol_definition || null;
+        }
+        if (!protocolDefinition && scope.protocol_id) {
           const protocol = await client.query(
             'SELECT definition FROM protocols WHERE id = $1',
             [scope.protocol_id]
@@ -646,18 +672,34 @@ router.post(
           }
         }
 
-        const rtFeatures = computeSessionRtFeatures(payload, protocolDefinition);
+        // Backups are provisional; expensive RT inference is final-only.
+        const rtFeatures = raw.delivery?.kind === 'checkpoint' ? null : computeSessionRtFeatures(payload, protocolDefinition);
         if (rtFeatures && rtFeatures.blocks && rtFeatures.blocks.length) {
           payload = { ...payload, rt_features: rtFeatures };
         }
 
-        const qcSummary = raw.qcSummary || null;
+        const protocolQc = protocolQuality.evaluate(protocolDefinition, raw.qcSummary);
+        const qcSummary = raw.qcSummary ? { ...raw.qcSummary, protocolQc } : null;
+        payload = { ...payload, qcSummary };
+        if (payload.experimentMeta) {
+          payload.experimentMeta = { ...payload.experimentMeta };
+          delete payload.experimentMeta.serverDeliveryDigest;
+        }
+        if (raw.delivery) payload.experimentMeta = { ...(payload.experimentMeta || {}), serverDeliveryDigest: deliveryDigest(raw) };
         let { validity, qc_score, fail_reasons } = computeQcValidity(qcSummary, payload);
         ({ validity, qc_score, fail_reasons } = mergeBehavioralRtQc(
           { validity, qc_score, fail_reasons },
           rtFeatures,
           payload,
         ));
+        if (protocolQc?.failed.length || (completionApplied && protocolQc?.missing.length)) {
+          validity = 'invalid';
+          fail_reasons.push(...protocolQc.failed.map(key => `protocol_qc_${key}`),
+            ...(completionApplied ? protocolQc.missing.map(key => `protocol_qc_missing_${key}`) : []));
+        }
+        if (payload.experimentMeta?.protocolTermination?.reason === 'quality_stopped') {
+          validity = 'invalid'; fail_reasons.push('protocol_quality_stopped');
+        }
 
         await client.query(
           `INSERT INTO session_features (session_id, payload) VALUES ($1, $2::jsonb)

@@ -1,5 +1,7 @@
 const { METRIC_CATALOG } = require('./query');
 const { buildConnectedness } = require('./connectedness');
+const { IDS: PASSIVE_IDS, passiveMetric } = require('./passive');
+const { definitions: passiveDefinitions, measurement } = require('../../shared/passive-metrics');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
 
 const CATALOG_BY_ID = new Map((METRIC_CATALOG.metrics || []).map(metric => [metric.id, metric]));
@@ -119,21 +121,15 @@ function channelQc(row, channel) {
       ruleVersion: 'task-qc-1.1.0',
     };
   }
-  const aliases = {
-    blink: 'blink_summary',
-    head_hands: 'body_pose_summary',
-    rppg: 'rppg_summary',
-    respiration: 'respiration_summary',
-    face: 'emotion_summary',
-  };
-  const available = aliases[channel] && row.features_payload?.[aliases[channel]] != null;
+  const available = passiveDefinitions.some(definition => definition.channel === channel
+    && measurement(row.features_payload || {}, definition.id).value != null);
   return {
     channel,
-    status: available ? (overall === 'invalid' ? 'invalid' : 'valid') : 'not_computed',
+    status: available && overall === 'invalid' ? 'invalid' : 'not_computed',
     validFraction: null,
     signalConfidence: null,
-    reasons: [],
-    ruleVersion: `${channel}-qc-1.0.0`,
+    reasons: [available ? 'summary_not_independent_validation' : 'signal_data_missing'],
+    ruleVersion: 'passive-summary-qc.v1',
   };
 }
 
@@ -260,6 +256,7 @@ function buildSessionMetrics(row, query) {
   return query.metricIds
     .filter(metricId => metricId !== 'viz.heatmap' && !metricId.startsWith('aoi.'))
     .map(metricId => {
+      if (PASSIVE_IDS.has(metricId)) return passiveMetric(metricId, row, query);
       if (metricId.startsWith('task.')) return buildTaskMetric(metricId, row, query);
       if (metricId.startsWith('qc.')) return buildQcMetric(metricId, row);
       return metricBase(metricId, row, { reason: 'metric_not_supported' });
@@ -339,12 +336,18 @@ function matchingPresentations(row, blockId, stimulusId) {
 
 function coordinateMappings(presentations) {
   return new Set(presentations.map(presentation => (
-    presentation.algorithm?.parameters?.coordinateMappingVersion || 'stage-rect.legacy'
+    `${presentation.algorithm?.parameters?.coordinateMappingVersion || 'stage-rect.legacy'}:${presentation.algorithm?.version === '1.2.0' ? 'fixation-grid.v1' : 'legacy-grid'}`
   )));
 }
 
 function gazeAlgorithm(presentation, id = GAZE_ALGORITHM.id) {
   const mapping = presentation?.algorithm?.parameters?.coordinateMappingVersion;
+    if (presentation?.algorithm?.version === '1.2.0') {
+      const parameters = { fixation: 'centroid-dispersion', dispersionNorm: 0.04, minDurationMs: 100,
+        maxGapMs: 100, accumulation: 'streaming_heatmap.v1', qualityWeighting: 'latest_validated_segment',
+        ...(mapping ? { coordinateMappingVersion: mapping } : {}) };
+      return { id, version: '1.2.0', parametersHash: sha256(parameters), parameters };
+    }
   if (!mapping) return { ...GAZE_ALGORITHM, id };
   const parameters = { fixation: 'idt', dispersionNorm: 0.04, minDurationMs: 100,
     maxGapMs: 100, coordinateMappingVersion: mapping };
@@ -352,6 +355,9 @@ function gazeAlgorithm(presentation, id = GAZE_ALGORITHM.id) {
 }
 
 function aoiMetric(metricId, row, aoiRow, presentations) {
+  if (presentations.some(item => item.fixationsTruncated === true)) return metricBase(metricId, row, {
+    reason: 'gaze_fixations_truncated', blockId: aoiRow.blockId, stimulusId: aoiRow.stimulusId, aoiId: aoiRow.aoi.id
+  });
   const mixedMappings = coordinateMappings(presentations).size > 1;
   if (!presentations.length || mixedMappings) return metricBase(metricId, row, {
     reason: mixedMappings ? 'gaze_coordinate_mappings_mixed' : 'gaze_presentation_missing',
@@ -563,7 +569,7 @@ function buildHeatmapData(row, query) {
     }));
   return {
     status: 'computed',
-    reason: null,
+    reason: presentations.some(item => item.fixationsTruncated === true) ? 'gaze_fixations_truncated' : null,
     aggregationLevel: 'session',
     stimulus: stimulusDescriptor(presentation),
     coordinateSpace: 'stimulus_normalized_0_1',
@@ -574,7 +580,7 @@ function buildHeatmapData(row, query) {
     fixationPoints: fixations,
     nParticipants: row.participant_id ? 1 : 0,
     nSessions: 1,
-    nFixations: fixations.length,
+    nFixations: presentations.reduce((sum, item) => sum + (finite(item.fixationCountTotal) ?? item.fixationPoints?.length ?? 0), 0),
     validObservationDurationMs: presentations.reduce((sum, item) => sum + (finite(item.validObservationDurationMs) ?? 0), 0),
     algorithm: presentation.algorithm || GAZE_ALGORITHM,
   };
@@ -893,7 +899,7 @@ function buildGroupHeatmap(rows, query) {
     nParticipants: perParticipant.length,
     nSessions: rows.length,
     nFixations: rows.reduce((sum, row) => sum + selectPresentations(row, query)
-      .reduce((count, presentation) => count + (presentation.fixationPoints?.length || 0), 0), 0),
+      .reduce((count, presentation) => count + (finite(presentation.fixationCountTotal) ?? presentation.fixationPoints?.length ?? 0), 0), 0),
     validObservationDurationMs: rows.reduce((sum, row) => sum + selectPresentations(row, query)
       .reduce((duration, presentation) => duration + (finite(presentation.validObservationDurationMs) || 0), 0), 0),
     algorithm: gazeAlgorithm(template.presentation, 'participant-equal-heatmap'),

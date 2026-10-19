@@ -103,3 +103,86 @@ test('English labels and API failure state do not expose stale results or stack 
   await expect(page.locator('#connectednessModule')).toHaveCount(0);
   await expect(page.getByText('SECRET SQL stack trace')).toHaveCount(0);
 });
+
+test('timeline, scatter plot, table and keyboard select the same trial and zoom follows it', async ({ page }) => {
+  const timeline = page.getByRole('img', { name: 'Временная шкала стимулов и ответов' });
+  await expect(page.locator('#connectednessPrevious')).toBeDisabled();
+  await timeline.locator('[data-trial-index="2"]').click();
+  await expect(page.locator('#connectednessTrial')).toHaveValue('2');
+  await expect(page.locator('#connectednessTrialDetails h3')).toContainText('trial-2');
+  await expect(page.locator('#connectednessResults tbody button[aria-pressed="true"]')).toContainText('trial-2');
+  await page.locator('#connectednessZoom').selectOption('5000');
+  await expect(timeline.locator('[data-trial-index]')).toHaveCount(1);
+  await page.locator('#connectednessNext').click();
+  await expect(page.locator('#connectednessTrial')).toHaveValue('3');
+  await expect(timeline.locator('[aria-pressed="true"]')).toHaveAttribute('data-trial-index', '3');
+  await page.locator('#connectednessPrevious').click();
+  await page.locator('#connectednessZoom').selectOption('0');
+  await timeline.locator('[data-trial-index="1"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#connectednessTrial')).toHaveValue('1');
+  await timeline.locator('[data-trial-index="0"]').focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('#connectednessTrial')).toHaveValue('0');
+  const plot = page.getByRole('img', { name: 'RT и выбранный сигнал' });
+  await plot.locator('[data-trial-index="2"]').click();
+  await expect(page.locator('#connectednessTrial')).toHaveValue('2');
+  await expect(plot.locator('[data-trial-index="2"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#connectednessResults tbody button[data-trial-index="4"]').click();
+  await expect(page.locator('#connectednessNext')).toBeDisabled();
+  await expect(page.locator('#connectednessTrialDetails img')).toHaveCount(0);
+  const downloadEvent = page.waitForEvent('download');
+  await page.locator('#connectednessJson').click();
+  const file = await (await downloadEvent).path();
+  const result = JSON.parse(await readFile(file!, 'utf8'));
+  expect(result.view.selectedTrialId).toContain('<img');
+  expect(result.report.trials).toHaveLength(5);
+});
+
+test('respiration displays fresh event context, not short-window physiology correlations', async ({ page }) => {
+  await page.evaluate(async () => {
+    const api = (window as any).EmocogAnalyticsProduction;
+    const load = api.api.sessionSummary;
+    api.api.sessionSummary = async (...args: any[]) => {
+      const response = await load(...args);
+      response.data.connectedness.trials.forEach((trial: any, index: number) => {
+        const metric = trial.windows.response.channels.respiration;
+        Object.assign(metric, { value: 12 + index, n: 1, nValid: 1, validFraction: 1, maxGapMs: 100, status: 'observed' });
+      });
+      return response;
+    };
+    await api.store.loadSessionSummary();
+  });
+  await page.locator('#connectednessBlock').selectOption('rt');
+  await page.locator('#connectednessCondition').selectOption('go');
+  await page.locator('#connectednessChannel').selectOption('respiration');
+  await expect(page.locator('#connectednessResults')).toContainText('ρ для коротких окон отключён');
+  await expect(page.locator('#connectednessResults')).not.toContainText('ρ: 1.000');
+  await expect(page.locator('#connectednessResults tbody tr').first()).toContainText('12.000');
+  await expect(page.locator('#connectednessTrialDetails')).toContainText('не мгновенную реакцию');
+  await page.locator('#connectednessTrial').selectOption('2');
+  await expect(page.locator('#connectednessTrialDetails')).toContainText('14.000');
+});
+
+test('legacy reports without respiration stay interactive and mobile layout contains long identifiers', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(async () => {
+    const api = (window as any).EmocogAnalyticsProduction, load = api.api.sessionSummary;
+    api.api.sessionSummary = async (...args: any[]) => {
+      const result = await load(...args);
+      result.data.connectedness.trials.forEach((trial: any) => {
+        trial.trialId = 'long-identifier-'.repeat(30);
+        Object.values(trial.windows).forEach((period: any) => delete period.channels.respiration);
+      });
+      return result;
+    };
+    await api.store.loadSessionSummary();
+  });
+  await page.locator('#connectednessChannel').selectOption('respiration');
+  await expect(page.locator('#connectednessResults tbody tr')).toHaveCount(5);
+  await expect(page.locator('#connectednessTrialDetails')).toContainText('Нет данных');
+  await page.locator('#connectednessNext').click();
+  await expect(page.locator('#connectednessTrial')).toHaveValue('1');
+  const widths = await page.locator('#connectednessModule').evaluate(node => ({ client: node.clientWidth, scroll: node.scrollWidth }));
+  expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1);
+});

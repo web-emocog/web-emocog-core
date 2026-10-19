@@ -6,19 +6,20 @@ import {
     setTaskContext,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20261008-2';
-import { finishSession } from './tests-updated.js?v=20261008-2';
+} from './state.js?v=20261019-5';
+import { finishSession } from './tests-updated.js?v=20261019-5';
+import '../../../shared/instruction-responses.js?v=20261019-5';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20261008-2';
+import { translations } from '../../translations.js?v=20261019-5';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261008-2';
+} from '../session-runtime/index.js?v=20261019-5';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -28,7 +29,7 @@ import {
     normalizeResponseMode,
     normalizeKeyboardResponse,
     keyboardResponseLabel
-} from '../rt-input/response-policy.mjs?v=20261008-2';
+} from '../rt-input/response-policy.mjs?v=20261019-5';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -230,6 +231,7 @@ const STANDARD_INSTRUCTION_PHASES = Object.freeze({
 });
 
 function standardInstructionTaskKey(content, nextBlock = null) {
+    if (content?.standardInstruction === false) return null;
     const rawTaskType = String(
         nextBlock?.taskType
         || nextBlock?.rt_task
@@ -314,7 +316,9 @@ function responseGuidanceForBlock(block) {
         .map(trial => responseForTrial(block, trial, t)).filter(Boolean))];
     const hasNoResponseTrials = trials.some(trial => trial?.correctResponse == null || trial.correctResponse === '');
     const method = actions.length ? actions.join(' / ') : t.runtime_response_none;
-    return `${t.runtime_response_method}: ${method}.${hasNoResponseTrials && actions.length ? ` ${t.runtime_response_withhold}` : ''}`;
+    const mappings = actions.length > 1 ? [...new Set(trials.map(trial => trial.condition
+        ? `${trial.condition}: ${responseForTrial(block, trial, t)}.` : null).filter(Boolean))] : [];
+    return `${t.runtime_response_method}: ${method}.${hasNoResponseTrials && actions.length ? ` ${t.runtime_response_withhold}` : ''}${mappings.length ? '\n' + mappings.join('\n') : ''}`;
 }
 
 function responseForTrial(block, trial, t) {
@@ -738,12 +742,14 @@ function normalizeProtocolDefinition(definition, options = {}) {
                 return;
             }
             if (type === 'finish' || type === 'final') {
-                outBlocks.push(toInstructionBlock(
+                const finalBlock = toInstructionBlock(
                     block.id || `finish_${index}`,
                     block.content?.title || block.label || 'Эксперимент завершён',
                     block.content?.text || 'Спасибо за участие!',
                     block.content
-                ));
+                );
+                finalBlock.type = 'finish';
+                outBlocks.push(finalBlock);
                 return;
             }
             if (type === 'rest' || type === 'audio_test') {
@@ -973,6 +979,8 @@ function renderStimulus(trial) {
         return new Promise(resolve => {
             let settled = false;
             let readyInProgress = false;
+            let loadTimeout;
+            let sourceAttempt = 0;
             const settle = value => {
                 if (settled) return;
                 settled = true;
@@ -980,8 +988,13 @@ function renderStimulus(trial) {
                 resolve(value);
             };
             const fail = () => {
+                if (settled) return;
                 if (!videoEl.dataset.fallbackAttempted && videoEl.dataset.fallbackSrc) {
                     videoEl.dataset.fallbackAttempted = '1';
+                    sourceAttempt++;
+                    readyInProgress = false;
+                    clearTimeout(loadTimeout);
+                    loadTimeout = setTimeout(fail, 15_000);
                     videoEl.src = videoEl.dataset.fallbackSrc;
                     videoEl.load();
                     return;
@@ -992,16 +1005,19 @@ function renderStimulus(trial) {
             const ready = () => {
                 if (settled || readyInProgress) return;
                 readyInProgress = true;
+                const attempt = sourceAttempt;
                 videoEl.currentTime = 0;
                 videoEl.play().then(() => {
+                    if (settled || attempt !== sourceAttempt) return;
                     videoEl.style.display = 'block';
                     settle(true);
                 }).catch(() => {
+                    if (settled || attempt !== sourceAttempt) return;
                     readyInProgress = false;
                     fail();
                 });
             };
-            const loadTimeout = setTimeout(fail, 15_000);
+            loadTimeout = setTimeout(fail, 15_000);
             videoEl.style.cssText = '';
             videoEl.muted = stimulus.muted !== false;
             if (stimulus.style && typeof stimulus.style === 'object') Object.assign(videoEl.style, stimulus.style);
@@ -1023,6 +1039,7 @@ function renderStimulus(trial) {
         }
         return new Promise(resolve => {
             let settled = false;
+            let loadTimeout;
             const settle = value => {
                 if (settled) return;
                 settled = true;
@@ -1030,15 +1047,18 @@ function renderStimulus(trial) {
                 resolve(value);
             };
             const fail = () => {
+                if (settled) return;
                 if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
                     imageEl.dataset.fallbackAttempted = '1';
+                    clearTimeout(loadTimeout);
+                    loadTimeout = setTimeout(fail, 10_000);
                     imageEl.src = imageEl.dataset.fallbackSrc;
                     return;
                 }
                 renderStimulusMediaError(stimulus);
                 settle(false);
             };
-            const loadTimeout = setTimeout(fail, 10_000);
+            loadTimeout = setTimeout(fail, 10_000);
 
             imageEl.style.cssText = '';
             if (stimulus.style && typeof stimulus.style === 'object') {
@@ -1047,6 +1067,7 @@ function renderStimulus(trial) {
             const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
             if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
             imageEl.onload = () => {
+                if (settled) return;
                 if (!(imageEl.naturalWidth > 0 && imageEl.naturalHeight > 0)) {
                     fail();
                     return;
@@ -1222,9 +1243,25 @@ function emitStimulusOffIfNeeded(rtMs, reason) {
     });
 }
 
+function protocolSignature() {
+    return JSON.stringify((experimentProtocol?.blocks || []).filter(block => block.id !== 'session_quality_policy')
+        .map(block => [block.id, block.type]));
+}
+
+function saveProtocolProgress(status, block = null) {
+    state.sessionData.experimentMeta = state.sessionData.experimentMeta || {};
+    state.sessionData.experimentMeta.protocolProgress = {
+        invitationCode: state.sessionData.ids?.invitationCode || null,
+        protocolSignature: protocolSignature(), blockId: block?.id || null,
+        blockIndex: currentBlockIndex, status, policyShown: getSessionRuntime()?.policyShown === true
+    };
+    void getSessionRuntime()?.saveCheckpoint();
+}
+
 function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (cognitiveFinished) return;
     cognitiveFinished = true;
+    if (reason === 'completed') saveProtocolProgress('ready_to_finish');
     pendingPhotodiodeTaskStart = null;
     if (reason === 'completed') void window.Photodiode?.finish();
     else window.Photodiode?.stop();
@@ -1289,7 +1326,15 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (cognitiveTaskOptions.autoFinishSession !== false) {
         setSessionPhase('final', { source: 'finishCognitiveTask' });
         console.log('[Cognitive] Задача завершена');
-        finishSession();
+        void finishSession().catch(error => {
+            console.error('[Cognitive] final save failed:', error);
+            const button = ex_state.instruction.btn;
+            if (button) {
+                button.disabled = false;
+                button.textContent = (translations[state.currentLang] || translations.en).runtime_upload_retry_action;
+                button.onclick = () => { void finishSession().catch(() => {}); };
+            }
+        });
         void exitCognitiveFullscreen();
         cognitiveTaskOptions = { autoFinishSession: true, onComplete: null };
     } else {
@@ -1352,7 +1397,11 @@ export async function loadAndStartCognitiveTask(options = {}) {
                 String(block?.id || '') === String(pendingRepeat.blockId)
             )
             : -1;
-        if (!pendingRepeat) state.sessionData.cognitiveResults = [];
+        const progress = runtime?.restoredProtocolProgress || state.sessionData.experimentMeta?.protocolProgress;
+        const resumeProgress = Boolean(runtime?.protocolRecoveryPending && progress
+            && progress.invitationCode === (state.sessionData.ids?.invitationCode || null)
+            && progress.protocolSignature === protocolSignature());
+        if (!pendingRepeat && !resumeProgress && !runtime?.protocolRecoveryPending) state.sessionData.cognitiveResults = [];
         state.sessionData.experimentMeta = {
             ...(state.sessionData.experimentMeta || {}),
             title: experimentProtocol?.title || null,
@@ -1364,7 +1413,14 @@ export async function loadAndStartCognitiveTask(options = {}) {
                 : []
         };
 
-        currentBlockIndex = repeatBlockIndex >= 0 ? repeatBlockIndex : 0;
+        const resumedIndex = resumeProgress ? protocolBlocks.findIndex(block => block.id === progress.blockId) : -1;
+        currentBlockIndex = repeatBlockIndex >= 0 ? repeatBlockIndex
+            : (resumeProgress && progress.status === 'ready_to_finish' ? protocolBlocks.length : Math.max(0, resumedIndex));
+        if (resumeProgress && progress.policyShown) runtime.policyShown = true;
+        if (runtime) {
+            runtime.protocolRecoveryPending = false;
+            runtime.restoredProtocolProgress = null;
+        }
         currentTrialIndex = 0;
         activeTrialRuntime = null;
 
@@ -1422,6 +1478,7 @@ export async function loadAndStartCognitiveTask(options = {}) {
 }
 
 function runNextBlock() {
+    if (finishAtQualityBoundary()) return;
     if (!experimentProtocol || !Array.isArray(experimentProtocol.blocks)) {
         finishCognitiveTask('error', 'Некорректный формат experiment.json');
         return;
@@ -1438,6 +1495,7 @@ function runNextBlock() {
     }
 
     const block = experimentProtocol.blocks[currentBlockIndex];
+    saveProtocolProgress('instruction', block);
     console.log('[Cognitive] Переход к блоку:', block.id, 'Тип:', block.type);
     getSessionRuntime()?.enterInstruction({
         source: 'cognitive_block_instruction',
@@ -1507,7 +1565,11 @@ function runNextBlock() {
         return;
     }
 
-    if (block.type === 'instruction' || block.type === 'instructions') {
+    if (block.type === 'finish' && !experimentProtocol.blocks.slice(currentBlockIndex + 1).some(item => item.type !== 'timer')) {
+        finishCognitiveTask();
+        return;
+    }
+    if (block.type === 'instruction' || block.type === 'instructions' || block.type === 'finish') {
         setSessionPhase('cognitive_instruction', { source: 'instruction_block' });
         showInstructions(block);
         return;
@@ -1695,8 +1757,9 @@ function showInstructions(block) {
     ex_state.instruction.text.style.textAlign = 'center';
     ex_state.instruction.text.style.whiteSpace = 'pre-wrap';
     const localizedText = localizedStandardInstruction(block.content, nextBlock)
-        || localizedProtocolValue(block.content, 'text', t.runtime_standard_instruction_body)
-            .replaceAll('{response}', responsePhraseForBlock(nextBlock));
+        || globalThis.WecogInstructionResponses.render(localizedProtocolValue(block.content, 'text', t.runtime_standard_instruction_body),
+            responsePhraseForBlock(nextBlock), { lang: state.currentLang,
+                multiple: new Set((nextBlock?.trials || []).map(trial => trial.correctResponse).filter(Boolean)).size > 1 });
     const customGuidance = !standardTaskKey ? responseGuidanceForBlock(nextBlock) : '';
     ex_state.instruction.text.innerText = customGuidance
         ? `${localizedText}\n\n${customGuidance}`
@@ -2021,7 +2084,7 @@ function showTaskBlockInstruction(block) {
         || t.runtime_standard_instruction_body;
     const responseGuidance = responseGuidanceForBlock(block);
     ex_state.instruction.text.innerText = responseGuidance
-        ? `${baseInstruction.replaceAll('{response}', responsePhraseForBlock(block))}\n\n${responseGuidance}`
+        ? `${globalThis.WecogInstructionResponses.render(baseInstruction, responsePhraseForBlock(block), { lang: state.currentLang })}\n\n${responseGuidance}`
         : baseInstruction;
     ex_state.instruction.btn.innerText = t.runtime_instruction_action;
 
@@ -2106,6 +2169,7 @@ async function startTaskBlock(block, trialPlan = null) {
 }
 
 function runTrial() {
+    if (finishAtQualityBoundary()) return;
     const block = experimentProtocol.blocks[currentBlockIndex];
     const trials = activeBlockTrialPlan;
 
@@ -2467,6 +2531,20 @@ async function finishTaskBlockAttempt(block) {
     activeBlockDeadlinePerf = null;
     currentBlockIndex++;
     runNextBlock();
+}
+
+function finishAtQualityBoundary() {
+    const runtime = getSessionRuntime();
+    if (!runtime?.pendingQualityStop || cognitiveFinished) return false;
+    state.sessionData.experimentMeta = { ...(state.sessionData.experimentMeta || {}),
+        protocolTermination: { ...runtime.pendingQualityStop, timestamp: Date.now() } };
+    runtime.completeBlock({ success: false, reason: 'protocol_quality_stop' });
+    const abandonedRepeats = runtime.machine.repeatQueue.map(repeat => repeat.blockId);
+    for (const id of abandonedRepeats) runtime.discardRepeat(id);
+    saveProtocolProgress('ready_to_finish');
+    recordSessionEvent('protocol_quality_stopped', { category: 'quality', severity: 'error', metric: runtime.pendingQualityStop.metric, abandonedRepeats });
+    finishCognitiveTask('quality_stopped');
+    return true;
 }
 
 function moveToNextTrial() {

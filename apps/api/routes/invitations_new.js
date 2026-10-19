@@ -16,6 +16,7 @@ const {
 const { issueIngestToken } = require('../security/ingest-token');
 const {
   findInvitationByCode,
+  findPublishedInvitation,
   reserveInvitationRun,
 } = require('../ingest/invitation-repository');
 const { lockSessionKey } = require('../db/transaction');
@@ -29,13 +30,16 @@ const config = require('../config');
 const crypto = require('crypto');
 const path = require('path');
 const { normalizeMandatoryParticipantShell } = require('../protocol/participant-shell');
+const { validateProtocolAois } = require('../../web/aoi-protocol');
+const { validateProtocolSurveyBlocks } = require('../../shared/survey-contract');
+const protocolQuality = require('../../shared/protocol-quality');
 const {
   referencedDatabaseStimulusIds,
 } = require('../../shared/protocol-stimuli');
 const { inspectProtocolStimuli } = require('../stimuli/protocol-availability');
 const { withMediaWrite, pinProtocolMedia, loadPinnedStimuli } = require('../stimuli/versions');
 const { HttpError } = require('../security/http-error');
-const { publicStimulusMetadata, publicProtocolDefinition } = require('../stimuli/public-projection');
+const { publicStimulusMetadata, publicProtocolDefinition, protocolRevision } = require('../stimuli/public-projection');
 
 const router = express.Router();
 const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
@@ -89,11 +93,10 @@ router.get(
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const code = req.params.code.trim();
-      const resolved = await resolveInvitationByCode(code);
-      if (!resolved) {
+      const inv = await findPublishedInvitation(pool, code, req.query.session_id);
+      if (!inv) {
         return res.status(404).json({ error: 'Invitation not found' });
       }
-      const inv = resolved.row;
       if (inv.expires_at && new Date(inv.expires_at) < new Date()) {
         return res.status(410).json({ error: 'Invitation expired' });
       }
@@ -128,9 +131,12 @@ router.get(
           code: 'invitation_stimulus_unavailable',
         });
       }
+      res.set('Cache-Control', 'no-store');
       res.json({
         invitation_id: inv.id,
         code: inv.code,
+        public_code: code,
+        publication_version: inv.publication_version,
         protocol_id: inv.protocol_id,
         protocol_name: inv.protocol_name,
         project_id: inv.project_id,
@@ -395,6 +401,8 @@ router.post(
     body('protocol_id').isInt(),
     body('max_runs').optional().isInt({ min: 1 }),
     body('expires_at').optional().isISO8601(),
+    body('expected_updated_at').optional().isISO8601(),
+    body('expected_revision').optional().isHexadecimal().isLength({ min: 64, max: 64 }),
   ],
   async (req, res) => {
     try {
@@ -441,16 +449,33 @@ router.post(
       const r = await withMediaWrite(pool, async client => {
         const row = (await client.query('SELECT * FROM protocols WHERE id = $1 FOR UPDATE', [protocol_id])).rows[0];
         if (!row || !(await hasProtocolMembership(client, protocol_id, req.user))) throw new HttpError(403, 'Access denied', 'protocol_access_denied');
+        if ((req.body.expected_revision && req.body.expected_revision !== protocolRevision(row))
+          || (req.body.expected_updated_at && new Date(req.body.expected_updated_at).getTime() !== new Date(row.updated_at).getTime())) {
+          throw new HttpError(409, 'Protocol changed before publication. Save and publish again.', 'protocol_revision_conflict');
+        }
+        if (row.definition.isDraft || !protocolQuality.validate(row.definition) || !validateProtocolAois(row.definition).ok || !validateProtocolSurveyBlocks(row.definition).ok) {
+          throw new HttpError(422, 'Save a valid protocol before publishing', 'protocol_draft_not_publishable');
+        }
         const pinned = row.definition.mediaManifest ? row.definition
           : await pinProtocolMedia(client, row.project_id, row.definition, req.user);
         const report = await inspectProtocolStimuli(client, row.project_id, pinned,
           { user: req.user, verifyDecoding: true });
         if (!report.ok) throw new HttpError(422, 'Protocol media is unavailable', 'protocol_stimulus_unavailable');
         if (!row.definition.mediaManifest) await client.query('UPDATE protocols SET definition = $1::jsonb WHERE id = $2', [JSON.stringify(pinned), row.id]);
-        return client.query(          `INSERT INTO invitations (protocol_id, code, max_runs, expires_at, protocol_definition)
-           VALUES ($1, $2, $3, $4, $5::jsonb)
-           RETURNING id, protocol_id, code, max_runs, used_runs, expires_at, created_at`,
-          [protocol_id, code, max_runs || null, expires_at || null, JSON.stringify(pinned)]);
+        const publication = (await client.query('SELECT * FROM protocol_publications WHERE protocol_id = $1', [protocol_id])).rows[0];
+        const version = (publication?.version || 0) + 1;
+        const inserted = await client.query(
+          `INSERT INTO invitations (protocol_id, code, max_runs, expires_at, protocol_definition, publication_version)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+           RETURNING id, protocol_id, code, max_runs, used_runs, expires_at, created_at, publication_version`,
+          [protocol_id, code, max_runs || null, expires_at || null, JSON.stringify(pinned), version]);
+        const publicCode = publication?.code || code;
+        await client.query(`INSERT INTO protocol_publications(protocol_id, code, invitation_id, version)
+          VALUES ($1, $2, $3, $4) ON CONFLICT(protocol_id) DO UPDATE
+          SET invitation_id = EXCLUDED.invitation_id, version = EXCLUDED.version`,
+        [protocol_id, publicCode, inserted.rows[0].id, version]);
+        inserted.rows[0].public_code = publicCode;
+        return inserted;
       });
       res.status(201).json(r.rows[0]);
     } catch (err) {
@@ -507,26 +532,21 @@ router.delete(
   [param('id').isInt()],
   async (req, res) => {
     try {
-      const globalAccess = hasGlobalInvitationAccess(req.user);
-      const r = globalAccess
-        ? await pool.query(
-          'DELETE FROM invitations WHERE id = $1 RETURNING id',
-          [req.params.id]
-        )
-        : await pool.query(
-          `DELETE FROM invitations i
-           USING protocols pr, projects p, user_organizations uo
-           WHERE i.protocol_id = pr.id AND pr.project_id = p.id AND p.organization_id = uo.organization_id AND uo.user_id = $1 AND i.id = $2
-             AND EXISTS (
-               SELECT 1 FROM user_projects up
-               WHERE up.project_id = p.id AND up.user_id = uo.user_id
-             )
-           RETURNING i.id`,
-          [req.user.sub, req.params.id]
-        );
-      if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      await withMediaWrite(pool, async client => {
+        const invitation = (await client.query('SELECT * FROM invitations WHERE id = $1 FOR UPDATE', [req.params.id])).rows[0];
+        if (!invitation || !(await hasProtocolMembership(client, invitation.protocol_id, req.user))) {
+          throw new HttpError(404, 'Not found', 'invitation_not_found');
+        }
+        if ((await client.query('SELECT 1 FROM sessions WHERE invitation_id = $1 LIMIT 1', [invitation.id])).rows[0]) {
+          throw new HttpError(409, 'Invitation has admitted sessions and cannot be deleted', 'invitation_has_sessions');
+        }
+        await client.query('DELETE FROM invitations WHERE id = $1', [invitation.id]);
+      });
       res.status(204).send();
     } catch (err) {
+      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       console.error(err);
       res.status(500).json({ error: 'Delete failed' });
     }

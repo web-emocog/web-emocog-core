@@ -35,6 +35,7 @@
         "observations": { "type": "integer", "minimum": 0 }
       }
     },
+    "comparison": { "$ref": "analytics-response-v1.schema.json#/$defs/modelResult" },
     "summary": { "type": ["object", "null"] },
     "longData": {
       "type": ["array", "null"],
