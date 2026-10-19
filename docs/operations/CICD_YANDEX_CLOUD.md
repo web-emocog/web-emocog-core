@@ -230,7 +230,8 @@ Disk rotation is implemented by `deploy/production/prepare-disk-snapshot.cjs`.
 after the validated logical backup and before migrations/container changes.
 Only `READY` snapshots in the exact folder, from the exact disk, with both
 automation labels, a release commit label and the `wecog-predeploy-...` name
-are eligible. Inventory is rechecked before each deletion. CLI errors and
+are eligible. Labels `protected=true`, `baseline=true` or `manual=true` exclude a
+snapshot even if it otherwise matches automation metadata. Inventory is rechecked before each deletion. CLI errors and
 malformed JSON cannot be swallowed by a shell process substitution.
 
 `YC_AUTOMATED_SNAPSHOTS_TO_KEEP=5` is the target including the new snapshot.
@@ -250,6 +251,15 @@ For an approved two-copy minimum an authorized maintainer can set
 without the owner's approval; an unset variable preserves the five-copy policy.
 Deleting the variable restores that default for subsequent runs. It does not
 restore copies already removed by an approved rotation.
+
+The owner approved a minimum of two on 2026-10-19 with exact disk/label scope,
+preservation of the final previous READY copy, protected manual/baseline and
+logical backups, fail-closed errors, quota-only additional rotation, serialized
+deployments, and verified backups/new READY snapshot before updating the app.
+The repository variable was set to `2` after that approval. Deploy and rollback
+use the same `wecog-production` concurrency group with cancellation disabled;
+this covers the complete rotation/create/deploy critical section. Do not add a
+parallel release path or cancel an in-flight backup/rotation.
 
 An October 19 deployment failed with `ResourceExhausted` during snapshot create.
 The October 9 job had also logged `PermissionDenied` on snapshot listing while

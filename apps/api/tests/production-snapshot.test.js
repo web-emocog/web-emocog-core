@@ -21,7 +21,9 @@ function fixture(options = {}) {
     snapshot(21, { id: 'otherdiskcopy', source_disk_id: 'anotherdisk0000000001' }),
     snapshot(22, { id: 'otherfoldercopy', folder_id: 'anotherfolder00000001' }),
     snapshot(23, { id: 'creatingcopy', status: 'CREATING' }),
-    snapshot(24, { id: 'unlabelledcopy', labels: {} })];
+    snapshot(24, { id: 'unlabelledcopy', labels: {} }),
+    ...['protected', 'baseline', 'manual'].map((label, i) => snapshot(25 + i, { id: `${label}flaggedsnapshot`,
+      labels: { ...snapshot(1).labels, [label]: 'true' } }))];
   const copies = new Map([...Array.from({ length: options.count ?? 6 }, (_, i) => snapshot(i + 1)), ...protectedCopies]
     .map(item => [item.id, item]));
   const calls = [], sleeps = [];
@@ -169,7 +171,7 @@ test('network, permission or unrelated create errors never trigger quota deletio
 
 test('a non-ready or foreign new snapshot cannot satisfy the pre-deploy backup gate', async () => {
   for (const created of [{ status: 'CREATING' }, { status: 'ERROR' }, { source_disk_id: 'anotherdisk0000000001' },
-    { folder_id: 'anotherfolder00000001' }, { labels: {} }, { name: 'foreign-snapshot' }]) {
+    { folder_id: 'anotherfolder00000001' }, { labels: {} }, { name: 'foreign-snapshot' }, { created_at: 'unknown' }]) {
     const f = fixture({ count: 2, created });
     await assert.rejects(f.prepare(), /not verified READY/);
     assert.equal(f.calls.filter(args => args[2] === 'create').length, 1);
@@ -217,4 +219,11 @@ test('every embedded production deploy shell block has valid Bash syntax', () =>
     checked++;
   }
   assert.ok(checked >= 8);
+});
+
+test('deploy and rollback serialize the entire snapshot/create/application sequence in one non-cancelling production group', () => {
+  for (const file of ['deploy-production.yml', 'rollback-production.yml']) {
+    const workflow = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows', file), 'utf8');
+    assert.match(workflow, /\nconcurrency:\s*\n  group: wecog-production\s*\n  cancel-in-progress: false\s*\n/);
+  }
 });

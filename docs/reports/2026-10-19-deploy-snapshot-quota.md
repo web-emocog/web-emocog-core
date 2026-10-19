@@ -33,10 +33,18 @@ Date: 2026-10-19. Source: `fix/production-snapshot-retention`.
    Re-read inventory before each deletion and retain the newest previous copy.
 6. Target five copies. Optional quota-specific adaptive retention requires
    explicit owner approval through `PRODUCTION_MIN_SNAPSHOTS_TO_KEEP`; unset
-   means five, not two. A floor of two means one existing READY copy remains
+   means five, not two. The owner subsequently approved the two-copy floor
+   with exact scope/protected copies/fail-closed errors and serialized rollout;
+   the repository variable was set to `2` only after that approval.
+   A floor of two means one existing READY copy remains
    until the new READY snapshot succeeds. A bounded retry accommodates delayed
    quota accounting; reaching the approved floor blocks, rather than bypasses,
    the snapshot gate.
+
+The existing global `wecog-production` concurrency group (shared by deploy and
+rollback, with cancellation disabled) serializes the whole rotation, creation
+and application-update sequence. Explicit protected/manual/baseline labels
+also exclude snapshots that otherwise have automatic metadata.
 
 The workflow no longer relies on successful deployment to make room for its
 own pre-deployment backup. No cloud IAM role or quota was changed by this patch.
@@ -45,11 +53,12 @@ does not change API/schema, participant data, scientific estimators or QC.
 
 ## Verification
 
-- Full API/unit/security suite: 446 passed, zero failures/skips.
-- Snapshot suite: 18 passed (included above), covering normal rotation,
+- Full API/unit/security suite: 447 passed, zero failures/skips.
+- Snapshot suite: 19 passed (included above), covering normal rotation,
   protected copies, approval floor, quota lag/exhaustion, IAM/network errors,
   invalid inventory/JSON, changed inventory, failed deletion and invalid new
-  snapshots. Real subprocess tests verify the CLI adapter's failure propagation.
+  snapshots and shared non-cancelling deploy/rollback concurrency. Real
+  subprocess tests verify the CLI adapter's failure propagation.
 - Embedded production workflow Bash blocks, helper JavaScript syntax and
   workflow YAML parsing passed. Release audit, RT Python smoke and
   `git diff --check` passed.

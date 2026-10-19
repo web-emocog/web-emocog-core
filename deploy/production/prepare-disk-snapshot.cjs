@@ -19,6 +19,7 @@ function readConfig(env) {
 function isOwned(snapshot, config) {
   return record(snapshot) && snapshot.folder_id === config.folder && snapshot.source_disk_id === config.disk
     && snapshot.labels?.app === 'wecog' && snapshot.labels?.reason === 'predeploy'
+    && snapshot.labels?.protected !== 'true' && snapshot.labels?.baseline !== 'true' && snapshot.labels?.manual !== 'true'
     && /^wecog-predeploy-\d{8}-\d{6}-[a-f0-9]{8}$/.test(snapshot.name || '')
     && /^[a-f0-9]{12}$/.test(snapshot.labels?.commit || '');
 }
@@ -89,7 +90,8 @@ async function prepareSnapshot(config, { run = yc, sleep = delay, now = () => ne
         '--description', `Wecog automatic pre-deploy snapshot for ${config.sha}`,
         '--labels', `app=wecog,reason=predeploy,commit=${config.sha.slice(0, 12)}`, '--disk-id', config.disk]);
       if (!isOwned(snapshot, config) || !identifier(snapshot.id) || snapshot.name !== name
-          || snapshot.labels.commit !== config.sha.slice(0, 12) || snapshot.status !== 'READY') {
+          || snapshot.labels.commit !== config.sha.slice(0, 12) || snapshot.status !== 'READY'
+          || !Number.isFinite(Date.parse(snapshot.created_at))) {
         throw new Error('New disk snapshot is not verified READY for this release; deployment must not proceed.');
       }
       log(`Verified new READY snapshot ${snapshot.id}; previous recovery snapshot and manual snapshots preserved.`);
