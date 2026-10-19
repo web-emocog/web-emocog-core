@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 import { getPageUrl } from './helpers/testUtils';
 
 test('English final results and validation headings stay English after live language changes', async ({ page }, testInfo) => {
@@ -36,7 +37,7 @@ for (const format of ['full', 'aggregate']) {
     let received: any;
     await page.route('**/ingest', async route => {
       received = route.request().postDataJSON();
-      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ qc_validity: 'invalid' }) });
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(ingestAcknowledgement(route.request(), { qc_validity: 'invalid' })) });
     });
     await page.goto('http://127.0.0.1:4173/apps/web/researcher.html?analyticsPreview=1#/overview');
     await page.waitForFunction(() => !!(window as any).EmocogAnalyticsProduction?.importResultJson);
@@ -64,6 +65,34 @@ for (const format of ['full', 'aggregate']) {
     expect(received.events[0].eventId).toBe('legacy-language');
     expect(received.qcSummary.overallPass).toBe(false);
     expect(received.eyeTracking).toBeUndefined();
+    expect(received.ids.invitationCode).toBeUndefined();
+  });
+}
+
+for (const packet of ['pendingFinalUpload', 'finalizedPayload']) {
+  test(`manual import retains canonical aggregates from ${packet} after compact recovery`, async ({ page }) => {
+    let received: any;
+    await page.route('**/ingest', route => {
+      received = route.request().postDataJSON();
+      return route.fulfill({ status: 201, json: ingestAcknowledgement(route.request(), { qc_validity: 'valid' }) });
+    });
+    await page.goto('http://127.0.0.1:4173/apps/web/researcher.html?analyticsPreview=1#/overview');
+    await page.waitForFunction(() => !!(window as any).EmocogAnalyticsProduction?.importResultJson);
+    await page.evaluate(async packet => {
+      const ids = { session: 'S-COMPACT-IMPORT', participant: 'P-COMPACT', invitationCode: 'INV-COMPACT' };
+      const payload = { schemaVersion: 'session_feature.v1', ids, events: [],
+        lifecycle: { state: 'completed', status: 'completed', finishAttemptId: 'finish-compact' },
+        gaze_analytics: { summary: { sampleCountTotal: 12345 } }, cognitiveResults: [{ rt: 432, correct: true }] };
+      const source = { ids, eyeTracking: [], cognitiveResults: [], storageRecovery: { compactCheckpoint: true },
+        [packet]: packet === 'pendingFinalUpload' ? { finishAttemptId: 'finish-compact', payload } : payload };
+      (window as any).apiPost = async () => ({ id: 1 });
+      await (window as any).EmocogAnalyticsProduction.importResultJson(new File([JSON.stringify(source)], 'compact.json'), {
+        query: { projectId: 1, protocolId: 1 }
+      });
+    }, packet);
+    expect(received.gaze_analytics.summary.sampleCountTotal).toBe(12345);
+    expect(received.cognitiveResults).toEqual([{ rt: 432, correct: true }]);
+    expect(received.lifecycle.finishAttemptId).toBe('finish-compact');
     expect(received.ids.invitationCode).toBeUndefined();
   });
 }

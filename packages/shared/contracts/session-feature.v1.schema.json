@@ -6,6 +6,14 @@
   "required": ["schemaVersion", "ids", "lifecycle", "events"],
   "properties": {
     "schemaVersion": { "const": "session_feature.v1" },
+    "delivery": {
+      "type": "object", "required": ["schemaVersion", "sequence", "kind"],
+      "properties": {
+        "schemaVersion": { "const": "session_delivery.v1" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "kind": { "enum": ["checkpoint", "final"] }
+      }, "additionalProperties": false
+    },
     "ids": {
       "type": "object",
       "required": ["session"],

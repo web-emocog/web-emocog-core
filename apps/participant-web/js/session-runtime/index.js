@@ -1,18 +1,25 @@
-import { state, recordSessionEvent } from '../web-page/state.js?v=20261008-2';
+import { state, recordSessionEvent } from '../web-page/state.js?v=20261019-5';
 import {
     ERROR_KINDS,
     EVENT_CATEGORIES,
     SESSION_STATES
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
-import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261008-2';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261008-2';
+import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261019-5';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261019-5';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261019-5';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs';
 import { SessionAudioCollector } from '../audio/session-audio.js?v=20260915-1';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
+import { SessionDelivery } from './delivery.mjs?v=20261019-5';
+import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261019-5';
+import { combineSignalSummaries } from './signal-history.mjs?v=20261019-5';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261019-5';
+import { showPersistenceNotice } from './persistence-ui.mjs?v=20261019-5';
+import { sendSessionFeature } from './ingest-transport.mjs?v=20261019-5';
+import '../../../shared/protocol-quality.js?v=20261019-5';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
 
@@ -38,6 +45,38 @@ class ParticipantSessionRuntime {
         this.checkpointTimer = null;
         this.checkpointPromise = null;
         this.checkpointRequested = false;
+        this.checkpointBuilder = new CheckpointBuilder();
+        this.delivery = new SessionDelivery({
+            sessionData: state.sessionData,
+            build: async () => {
+                captureGazeHistory(state.sessionData, state.runtime);
+                const current = state.runtime.qcMetrics?.getCurrentMetrics?.();
+                const bpm = this.getBpmSnapshot();
+                return this.checkpointBuilder.build({ ...state.sessionData,
+                    ...(bpm.ready ? { bpm, continuousSignalState: bpm,
+                        bpmRuns: this.framePipeline?.bpm?.finalized ? (state.sessionData.bpmRuns || [])
+                            : [...(state.sessionData.bpmRuns || []), { samples: this.framePipeline?.bpm?.samples || [] }] } : {})
+                }, current);
+            },
+            send: packet => sendSessionFeature(packet, { retries: 2, backoffMs: 500 }),
+            changed: async backup => {
+                state.sessionData.serverBackup = backup;
+                if (this.machine.currentBlock?.stage !== 'trial') {
+                    const visible = globalThis.WecogProtocolQuality.showBackupNotifications(state.runtime.invitationProtocolDefinition);
+                    if (backup.status === 'failed') showPersistenceNotice('backup', state.currentLang);
+                    else if (backup.status === 'saved') {
+                        if (visible) showPersistenceNotice('saved', state.currentLang);
+                        else {
+                            const notice = document.getElementById('sessionPersistenceStatus');
+                            if (['saved', 'backup'].includes(notice?.dataset.persistenceCode)) notice.remove();
+                        }
+                    }
+                }
+                await this.saveCheckpoint();
+            }
+        });
+        this.protocolQualitySince = new Map();
+        this.pendingQualityStop = null;
         this.framePipeline = null;
         this.featureFlags = resolveSessionFeatureFlags();
         this.sessionClock = null;
@@ -74,7 +113,7 @@ class ParticipantSessionRuntime {
             recoverable: true,
             invalidatesBlock: false
         });
-        this.boundOnline = () => this.resolveIssue('network_offline');
+        this.boundOnline = () => { this.resolveIssue('network_offline'); void this.delivery.checkpoint(); };
         this.boundVisibility = () => {
             if (document.visibilityState === 'hidden') this.saveCheckpoint();
         };
@@ -90,8 +129,17 @@ class ParticipantSessionRuntime {
         let restored = null;
         try {
             restored = await this.checkpoints.load();
+            if (restored && matchesCheckpointInvitation(restored.sessionData, window.location.search)
+                && !restored.sessionData.pendingFinalUpload?.payload && !restored.sessionData.finalizedPayload) {
+                validateGazeHistory(restored.sessionData);
+            }
         } catch (error) {
+            restored = null;
             console.warn('[SessionRuntime] checkpoint restore failed:', error);
+            if (this.checkpoints.getActiveSessionId()) {
+                this.checkpointRestoreFailed = true;
+                showPersistenceNotice('restore', state.currentLang);
+            }
         }
         // Opening a new invitation must not attach the previous tab's session
         // tuple or results to it. Keep that old checkpoint for explicit recovery.
@@ -100,8 +148,11 @@ class ParticipantSessionRuntime {
         }
 
         if (restored?.sessionData && restored?.machineSnapshot?.state !== SESSION_STATES.COMPLETED) {
-            const resumeInterruptedFinish = restored.machineSnapshot.state === SESSION_STATES.FINISHING;
+            const resumeInterruptedFinish = restored.machineSnapshot.state === SESSION_STATES.FINISHING
+                || (restored.sessionData.experimentMeta?.protocolProgress?.status === 'ready_to_finish' && !restored.machineSnapshot.currentBlock);
             replaceObject(state.sessionData, restored.sessionData);
+            this.protocolRecoveryPending = true;
+            this.restoredProtocolProgress = state.sessionData.experimentMeta?.protocolProgress || null;
             this.machine.restore(restored.machineSnapshot);
             if (resumeInterruptedFinish) {
                 this._scheduleFinalUploadRetry();
@@ -163,6 +214,7 @@ class ParticipantSessionRuntime {
         }
 
         if (this.machine.state !== SESSION_STATES.COMPLETED) {
+            this.pendingQualityStop = state.sessionData.pendingQualityStop || null;
             window.addEventListener('offline', this.boundOffline);
             window.addEventListener('online', this.boundOnline);
             document.addEventListener('visibilitychange', this.boundVisibility);
@@ -172,11 +224,14 @@ class ParticipantSessionRuntime {
     }
 
     _scheduleFinalUploadRetry() {
-        setTimeout(() => {
-            import('../web-page/tests-updated.js?v=20261008-2')
+        this.restoringFinal = true;
+        const retry = () => {
+            import('../web-page/tests-updated.js?v=20261019-5')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
-        }, 0);
+        };
+        if (state.runtime.participantShellReady) setTimeout(retry, 0);
+        else window.addEventListener('wecog:participant-ready', retry, { once: true });
     }
 
     _removeSessionListeners() {
@@ -187,6 +242,7 @@ class ParticipantSessionRuntime {
 
     _onTransition(transition, snapshot) {
         if (transition.state === SESSION_STATES.PAUSED) {
+            this.protocolQualitySince.clear();
             this.audioCollector?.pause?.().catch(error => {
                 console.warn('[SessionRuntime] audio pause failed:', error);
             });
@@ -213,9 +269,39 @@ class ParticipantSessionRuntime {
     _startCheckpointTimer() {
         if (this.checkpointTimer) return;
         this.checkpointTimer = setInterval(() => this.saveCheckpoint(), CHECKPOINT_INTERVAL_MS);
+        this.serverCheckpointTimer = setInterval(() => { void this.delivery.checkpoint(); }, 30000);
+    }
+
+    stopServerCheckpoints() {
+        clearInterval(this.serverCheckpointTimer);
+        this.serverCheckpointTimer = null;
+        if (!state.sessionData.finalDelivery) state.sessionData.finalDelivery = this.delivery.finish();
+        this.delivery.closed = true;
+        this.checkpointBuilder.stop();
+    }
+
+    updateProtocolQuality(metrics, now = Date.now()) {
+        if (!state.sessionData.experimentMeta?.protocolProgress || [SESSION_STATES.COMPLETED, SESSION_STATES.FINISHING, SESSION_STATES.PAUSED].includes(this.machine.state)
+            || !metrics || metrics.durationMs < 10000 || metrics.totalFrames < 10) return;
+        const report = globalThis.WecogProtocolQuality.evaluate(state.runtime.invitationProtocolDefinition, metrics);
+        if (!report) return;
+        state.sessionData.protocolQc = report;
+        for (const [key, check] of Object.entries(report.checks)) {
+            const code = `protocol_qc_${key}`;
+            if (check.status !== 'failed') {
+                this.protocolQualitySince.delete(key); this.resolveIssue(code); continue;
+            }
+            if (!this.protocolQualitySince.has(key)) this.protocolQualitySince.set(key, now);
+            if (now - this.protocolQualitySince.get(key) < 3000) continue;
+            this.reportIssue({ kind: ERROR_KINDS.QUALITY, code,
+                message: state.currentLang === 'ru' ? 'Не выполнено правило качества протокола.' : 'A protocol quality rule failed.', recoverable: true });
+            if (check.hardStop && !this.pendingQualityStop) this.pendingQualityStop = { reason: 'quality_stopped', metric: key, threshold: check.threshold, value: check.value };
+            if (this.pendingQualityStop) state.sessionData.pendingQualityStop = { ...this.pendingQualityStop };
+        }
     }
 
     async saveCheckpoint() {
+        if (this.checkpointRestoreFailed) return false;
         const sessionId = state.sessionData?.ids?.session;
         if (!sessionId || this.machine.state === SESSION_STATES.COMPLETED) return false;
         this.checkpointRequested = true;
@@ -227,24 +313,27 @@ class ParticipantSessionRuntime {
                 this.checkpointRequested = false;
                 const currentSessionId = state.sessionData?.ids?.session;
                 if (!currentSessionId || this.machine.state === SESSION_STATES.COMPLETED) continue;
+                captureGazeHistory(state.sessionData, state.runtime);
+                this.getBpmSnapshot();
                 await this.checkpoints.save(
                     currentSessionId,
                     state.sessionData,
                     this.machine.snapshot()
                 );
+                if (this.checkpoints.lastPersistenceMode === 'memory') throw new Error('durable_storage_unavailable');
+                if (this.checkpoints.getActiveSessionId() !== String(currentSessionId)) throw new Error('checkpoint_reference_unavailable');
                 saved = true;
+                if (this.checkpoints.lastPersistenceMode === 'session_storage_compact' && this.machine.currentBlock?.stage !== 'trial') showPersistenceNotice('compact', state.currentLang);
             }
             return saved;
-        })();
-
-        try {
-            return await this.checkpointPromise;
-        } catch (error) {
+        })().catch(error => {
             console.warn('[SessionRuntime] checkpoint save failed:', error);
+            if (this.machine.currentBlock?.stage !== 'trial') showPersistenceNotice('checkpointLocal', state.currentLang);
             return false;
-        } finally {
+        }).finally(() => {
             this.checkpointPromise = null;
-        }
+        });
+        return this.checkpointPromise;
     }
 
     enterInstruction(details = {}) {
@@ -252,6 +341,7 @@ class ParticipantSessionRuntime {
     }
 
     beginBlock(block) {
+        document.getElementById('sessionPersistenceStatus')?.remove();
         const run = this.machine.beginBlock(block);
         recordSessionEvent('session_block_attempt_start', {
             category: EVENT_CATEGORIES.BLOCK,
@@ -384,6 +474,7 @@ class ParticipantSessionRuntime {
     }
 
     async notifyBlockComplete(details = {}) {
+        void this.delivery.checkpoint();
         this.enterInstruction({
             source: 'block_complete_message',
             blockId: details.blockId || null,
@@ -571,13 +662,19 @@ class ParticipantSessionRuntime {
     }
 
     getBpmSnapshot() {
-        return this.framePipeline?.getBpmSnapshot() || {
+        const current = this.framePipeline?.getBpmSnapshot() || {
             ready: false,
             sampleCount: 0,
             bpmMean: null,
             respRateMean: null,
             lastSample: null
         };
+        if (!current.ready) return current;
+        if (!this.signalBaseline) this.signalBaseline = { ...(state.sessionData.continuousSignalState || {}) };
+        const combined = combineSignalSummaries(this.signalBaseline, current);
+        const { lastSample, ...summary } = combined;
+        state.sessionData.continuousSignalState = summary;
+        return { ...combined, lastSample };
     }
 
     _startRtListener() {
@@ -605,6 +702,7 @@ class ParticipantSessionRuntime {
     async stopContinuousModules(reason = 'session_finish') {
         if (this.stopModulesPromise) return this.stopModulesPromise;
         this.stopModulesPromise = (async () => {
+            this.getBpmSnapshot();
             const bpmRun = this.framePipeline?.stop(reason) || null;
             if (bpmRun) {
                 if (!Array.isArray(state.sessionData.bpmRuns)) state.sessionData.bpmRuns = [];
@@ -633,6 +731,7 @@ class ParticipantSessionRuntime {
     }
 
     beginFinish() {
+        document.getElementById('sessionPersistenceStatus')?.remove();
         const finishAttemptId = state.sessionData.lifecycle?.finishAttemptId || randomId('finish');
         const accepted = this.machine.beginFinish(finishAttemptId);
         state.sessionData.lifecycle = this.machine.lifecycle({
@@ -643,6 +742,7 @@ class ParticipantSessionRuntime {
     }
 
     async completeFinish(details = {}, options = {}) {
+        this.stopServerCheckpoints();
         this.machine.completeFinish(details);
         state.sessionData.lifecycle = this.machine.lifecycle({
             modules: { ...this.moduleStatus },
@@ -669,7 +769,18 @@ class ParticipantSessionRuntime {
                 // Still attempt the terminal checkpoint after a periodic write failure.
             }
         }
-        await this.checkpoints.save(sessionId, state.sessionData, this.machine.snapshot());
+        try {
+            await this.checkpoints.save(sessionId, state.sessionData, this.machine.snapshot());
+            if (this.checkpoints.lastPersistenceMode === 'memory') throw new Error('durable_storage_unavailable');
+            if (this.checkpoints.getActiveSessionId() !== String(sessionId)) throw new Error('checkpoint_reference_unavailable');
+            return true;
+        } catch (error) {
+            // Local persistence must not prevent the final screen or network ingest.
+            console.warn('[SessionRuntime] terminal checkpoint save failed:', error);
+            state.sessionData.storageRecovery = { ...(state.sessionData.storageRecovery || {}), terminalCheckpointFailed: true };
+            showPersistenceNotice('finalLocal', state.currentLang);
+            return false;
+        }
     }
 
     async clearCompletedCheckpoint() {

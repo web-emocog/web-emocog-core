@@ -35,6 +35,9 @@ playwright/.cache/
 
 # Build / temp
 dist/
+!apps/web/assets/vendor/jspdf/dist/
+apps/web/assets/vendor/jspdf/dist/*
+!apps/web/assets/vendor/jspdf/dist/jspdf.umd.min.js
 build/
 *.log
 *.tmp

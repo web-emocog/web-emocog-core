@@ -39,6 +39,7 @@ function buildCorsOptions(allowedOrigins) {
   const allowlist = new Set((allowedOrigins || []).map(origin => String(origin).trim()));
   return {
     credentials: true,
+    exposedHeaders: ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition'],
     origin(origin, callback) {
       if (!origin || allowlist.has(origin)) {
         return callback(null, true);

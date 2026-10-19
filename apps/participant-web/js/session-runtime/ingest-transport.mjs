@@ -1,9 +1,31 @@
 import { SESSION_CONTRACT_VERSION } from './contracts.mjs';
 import { resolveParticipantApiBase } from './api-base.mjs';
+import { fetchWithDeadline } from './http.mjs?v=20261019-5';
 
 const DEFAULT_RETRIES = 4;
 const DEFAULT_BACKOFF_MS = 1500;
 const REQUEST_TIMEOUT_MS = 30000;
+const retryCooldowns = new Map();
+
+function cooldownKey(apiBase, payload) {
+    return `wecog_ingest_retry:${apiBase}:${payload.ids.session}:${payload.ids.invitationCode || ''}`;
+}
+
+function readCooldown(key) {
+    let cooldown = retryCooldowns.get(key);
+    try { cooldown ||= JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_) {}
+    if (Number.isFinite(cooldown?.until) && cooldown.until > Date.now()) return cooldown;
+    writeCooldown(key, null);
+    return null;
+}
+
+function writeCooldown(key, cooldown) {
+    if (cooldown) retryCooldowns.set(key, cooldown); else retryCooldowns.delete(key);
+    try {
+        if (cooldown) sessionStorage.setItem(key, JSON.stringify(cooldown));
+        else sessionStorage.removeItem(key);
+    } catch (_) {}
+}
 
 function getStaffToken() {
     try {
@@ -37,14 +59,15 @@ export function clearParticipantIngestToken(sessionId, invitationCode) {
     } catch (_) {}
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-        clearTimeout(timer);
-    }
+async function fetchJsonWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS) {
+    return fetchWithDeadline(url, options, async response => {
+        const body = await response.json().catch(() => null);
+        return { response, body };
+    }, timeoutMs);
+}
+
+function notify(callback, value) {
+    try { callback?.(value)?.catch?.(() => {}); } catch (_) { /* Reporting must not change a durable acknowledgement. */ }
 }
 
 function parseRetryAfter(value, now = Date.now()) {
@@ -56,7 +79,7 @@ function parseRetryAfter(value, now = Date.now()) {
 }
 
 async function issueParticipantIngestToken(apiBase, sessionId, invitationCode) {
-    const response = await fetchWithTimeout(
+    const { response, body } = await fetchJsonWithTimeout(
         `${apiBase}/invitations/by-code/${encodeURIComponent(invitationCode)}/ingest-token`,
         {
             method: 'POST',
@@ -68,10 +91,10 @@ async function issueParticipantIngestToken(apiBase, sessionId, invitationCode) {
             body: JSON.stringify({ session_id: sessionId })
         }
     );
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || typeof body.token !== 'string') {
-        const error = new Error(body.error || `Ingest token request failed: HTTP ${response.status}`);
-        error.httpStatus = response.status;
+    if (!response.ok || typeof body?.token !== 'string' || !body.token.trim()) {
+        const error = new Error(body?.error || `Ingest token request failed: HTTP ${response.status}`);
+        error.code = body?.code || 'admission_failed';
+        error.httpStatus = response.ok ? 502 : response.status;
         error.retryAfterMs = parseRetryAfter(response.headers?.get?.('Retry-After'));
         throw error;
     }
@@ -88,7 +111,13 @@ export async function primeParticipantSession(options = {}) {
     const cached = readCachedIngestToken(sessionId, invitationCode);
     if (cached) return { ok: true, cached: true };
     const apiBase = options.apiBase || resolveParticipantApiBase();
-    await issueParticipantIngestToken(apiBase, sessionId, invitationCode);
+    try {
+        await issueParticipantIngestToken(apiBase, sessionId, invitationCode);
+    } catch (error) {
+        if (!isRetryable(error) || error.retryAfterMs > 1500) throw error;
+        await wait(error.retryAfterMs ?? 500);
+        await issueParticipantIngestToken(apiBase, sessionId, invitationCode);
+    }
     return { ok: true, admitted: true };
 }
 
@@ -129,12 +158,27 @@ function assertSessionFeature(payload) {
     }
 }
 
+export function validIngestAcknowledgement(body, payload, idempotencyKey) {
+    const completed = payload.lifecycle?.status === 'completed';
+    return !!body && body.ingested === true && body.session_id === payload.ids.session
+        && typeof body.idempotent === 'boolean' && typeof body.proxy_ready === 'boolean'
+        && (body.qc_validity === null || typeof body.qc_validity === 'string')
+        && (body.idempotency_key === null || typeof body.idempotency_key === 'string')
+        && (!idempotencyKey || body.idempotency_key === idempotencyKey)
+        && body.lifecycle_status === (completed ? 'completed' : 'in_progress')
+        && (completed ? typeof body.completed_at === 'string' && Number.isFinite(Date.parse(body.completed_at)) : body.completed_at === null);
+}
+
 /**
  * The only browser transport for participant/session aggregate ingestion.
  */
 export async function sendSessionFeature(payload, options = {}) {
     assertSessionFeature(payload);
     const apiBase = options.apiBase || resolveParticipantApiBase();
+    const retryKey = cooldownKey(apiBase, payload);
+    const cooldown = readCooldown(retryKey);
+    if (cooldown) return { ok: false, attempt: 0, status: cooldown.status, code: 'retry_after',
+        error: 'The server asked to retry later', retryAfterMs: cooldown.until - Date.now() };
     const retries = Number.isFinite(options.retries)
         ? Math.min(10, Math.max(1, Math.floor(options.retries)))
         : DEFAULT_RETRIES;
@@ -147,18 +191,20 @@ export async function sendSessionFeature(payload, options = {}) {
     const random = typeof options.random === 'function' ? options.random : Math.random;
     const sleep = typeof options.sleep === 'function' ? options.sleep : wait;
     const body = JSON.stringify(payload);
+    const timeoutMs = Number.isFinite(options.requestTimeoutMs)
+        ? Math.max(50, Math.min(REQUEST_TIMEOUT_MS, options.requestTimeoutMs)) : REQUEST_TIMEOUT_MS;
     let lastError = null;
     let forceTokenRefresh = false;
     let lastAttempt = 0;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         lastAttempt = attempt;
-        options.onAttempt?.({ attempt, retries, endpoint: '/ingest' });
+        notify(options.onAttempt, { attempt, retries, endpoint: '/ingest' });
         try {
             const refreshedThisAttempt = forceTokenRefresh;
             const authorization = await resolveAuthorization(apiBase, payload, refreshedThisAttempt);
             forceTokenRefresh = false;
-            const response = await fetchWithTimeout(`${apiBase}/ingest`, {
+            const { response, body: responseBody } = await fetchJsonWithTimeout(`${apiBase}/ingest`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -170,9 +216,14 @@ export async function sendSessionFeature(payload, options = {}) {
                 },
                 credentials: 'omit',
                 body
-            });
-            const responseBody = await response.json().catch(() => ({}));
+            }, timeoutMs);
             if (response.ok) {
+                if (![200, 201].includes(response.status) || !validIngestAcknowledgement(responseBody, payload, options.idempotencyKey)) {
+                    const error = new Error('The server did not confirm saving this session');
+                    error.code = 'ingest_ack_invalid';
+                    error.httpStatus = 502;
+                    throw error;
+                }
                 if (
                     payload.lifecycle?.status === 'completed'
                     && payload.ids?.invitationCode
@@ -182,7 +233,8 @@ export async function sendSessionFeature(payload, options = {}) {
                         payload.ids.invitationCode
                     );
                 }
-                options.onSuccess?.({ attempt, status: response.status, body: responseBody });
+                notify(options.onSuccess, { attempt, status: response.status, body: responseBody });
+                writeCooldown(retryKey, null);
                 return {
                     ok: true,
                     attempt,
@@ -191,7 +243,7 @@ export async function sendSessionFeature(payload, options = {}) {
                 };
             }
 
-            const error = new Error(responseBody.error || `HTTP ${response.status}`);
+            const error = new Error(responseBody?.error || `HTTP ${response.status}`);
             error.httpStatus = response.status;
             error.payload = responseBody;
             error.retryAfterMs = parseRetryAfter(response.headers?.get?.('Retry-After'));
@@ -208,6 +260,9 @@ export async function sendSessionFeature(payload, options = {}) {
         }
 
         if (attempt >= retries) break;
+        // Do not replay early when the server asks for a longer cooldown than
+        // this foreground retry cycle can reasonably wait.
+        if (lastError?.retryAfterMs > maxRetryDelayMs) break;
         const exponentialMs = backoffMs * (2 ** (attempt - 1));
         const randomValue = Math.min(1, Math.max(0, Number(random()) || 0));
         const jitteredMs = exponentialMs * (0.5 + randomValue);
@@ -215,16 +270,21 @@ export async function sendSessionFeature(payload, options = {}) {
             maxRetryDelayMs,
             Math.max(jitteredMs, lastError?.retryAfterMs || 0)
         );
-        options.onRetry?.({ attempt, retries, delayMs, error: lastError });
+        notify(options.onRetry, { attempt, retries, delayMs, error: lastError });
         await sleep(delayMs);
     }
 
-    options.onFailure?.(lastError);
+    if (lastError?.retryAfterMs > 0) writeCooldown(retryKey, {
+        until: Date.now() + lastError.retryAfterMs, status: lastError.httpStatus || 429
+    });
+    notify(options.onFailure, lastError);
     return {
         ok: false,
         attempt: lastAttempt,
         status: lastError?.httpStatus || null,
-        error: lastError?.message || 'Upload failed'
+        code: lastError?.payload?.code || lastError?.code || null,
+        error: lastError?.message || 'Upload failed',
+        retryAfterMs: lastError?.retryAfterMs || null
     };
 }
 

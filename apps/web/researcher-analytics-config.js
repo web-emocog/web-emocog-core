@@ -6,6 +6,9 @@
   const LEGACY_STORAGE_PREFIX = 'emocog_analytics_config_';
 
   const packages = [
+    { id: 'continuous_signals', icon: '~', color: '#0d9488', mandatory: false,
+      label: { ru: 'Фоновые показатели', en: 'Background signals' },
+      description: { ru: 'ЧСС, дыхание, моргания, движение и мимика.', en: 'Heart rate, respiration, blinks, movement and facial expression.' }, availability: 'always' },
     {
       id: 'aoi_attention', icon: '◎', color: '#5c66bd', mandatory: false,
       label: { ru: 'AOI и внимание', en: 'AOI and attention' },
@@ -33,6 +36,7 @@
   ];
 
   const metrics = [
+    ...(global.EmocogPassiveMetrics?.definitions || []).map(item => ({ ...item, kind: 'metric', mandatory: false })),
     metric('viz.heatmap', 'aoi_attention', 'Тепловая карта', 'Heatmap', true, 'Распределение валидных фиксаций на stimulus.', 'Distribution of valid fixations on the stimulus.'),
     metric('aoi.gaze_on_target_pct', 'aoi_attention', 'Взгляд на целевые AOI', 'Gaze on target', true, 'Доля валидного времени взгляда внутри целевых AOI.', 'Share of valid gaze time inside target AOIs.'),
     metric('aoi.dwell_time_ms', 'aoi_attention', 'Время в AOI, мс', 'AOI dwell time, ms', true, 'Суммарная длительность валидных фиксаций внутри AOI.', 'Total duration of valid fixations inside the AOI.'),

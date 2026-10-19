@@ -9,7 +9,7 @@ function normalizeButtonId(key) {
   const k = String(key).trim();
   if (!k) return '';
   const physicalKey = keyboardResponses.normalize(k);
-  if (['KeyZ', 'KeyX', 'Comma', 'Period'].includes(physicalKey)) return physicalKey.toLowerCase();
+  if (physicalKey && !['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(physicalKey)) return physicalKey.toLowerCase();
   if (k === 'Space' || k.toLowerCase() === 'space') return 'space';
   // Align with rt_component Tk KEYMAP: Left->left, Right->right (choice/flanker)
   if (k === 'ArrowLeft' || k === 'arrow_left') return 'left';

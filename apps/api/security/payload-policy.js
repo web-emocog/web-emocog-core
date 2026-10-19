@@ -1,5 +1,6 @@
 const TOP_LEVEL_FIELDS = new Set([
   'schemaVersion',
+  'delivery',
   'ids',
   'meta',
   'precheck',
@@ -498,6 +499,17 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   }
 
   validateKnownObjectFields(payload, TOP_LEVEL_FIELDS, '', errors);
+  if (payload.delivery !== undefined) {
+    const delivery = payload.delivery;
+    validateKnownObjectFields(delivery, new Set(['schemaVersion', 'sequence', 'kind']), '/delivery', errors);
+    if (!isObject(delivery) || delivery.schemaVersion !== 'session_delivery.v1'
+      || !Number.isInteger(delivery.sequence) || delivery.sequence < 1 || delivery.sequence > 2147483647
+      || !['checkpoint', 'final'].includes(delivery.kind)
+      || (delivery.kind === 'final') !== (payload.lifecycle?.status === 'completed')
+      || (delivery.kind === 'checkpoint' && payload.lifecycle?.status !== 'in_progress')) {
+      addError(errors, '/delivery', 'type', 'invalid delivery sequence or lifecycle');
+    }
+  }
   validateKnownObjectFields(payload.ids, IDS_FIELDS, '/ids', errors);
   validateKnownObjectFields(payload.meta, META_FIELDS, '/meta', errors);
   validateKnownObjectFields(payload.meta?.user, META_USER_FIELDS, '/meta/user', errors);

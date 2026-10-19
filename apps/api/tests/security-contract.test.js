@@ -189,9 +189,11 @@ describe('single typed participant transport', () => {
       'utf8'
     );
     assert.equal(
-      transport.includes('fetchWithTimeout(`${apiBase}/ingest`'),
+      transport.includes('fetchJsonWithTimeout(`${apiBase}/ingest`'),
       true
     );
+    assert.match(transport, /fetchWithDeadline\(url, options, async response =>/);
+    assert.match(transport, /await response\.json\(\)/);
     assert.doesNotMatch(facade, /\bfetch\s*\(/);
     assert.doesNotMatch(facade, /autoDownloadFallback/);
     assert.doesNotMatch(testsRuntime, /\bfetch\s*\([^)]*ingest/);

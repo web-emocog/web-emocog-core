@@ -197,6 +197,10 @@ function ExperimentsListView() {
       : {};
     const id = local?.id || ('api_' + protocol.id);
     const activeCode = String(protocol?.invitation_code || '');
+    const builder = definition.builderState || {};
+    if (local?.pendingSync) {
+      return { ...local, apiProtocolId: Number(protocol.id), projectId: Number(protocol.project_id) };
+    }
     const entry = {
       ...(local || {}),
       id,
@@ -209,12 +213,22 @@ function ExperimentsListView() {
         title: protocol.name || local?.metadata?.title || '',
         protocolId: definition.protocolId || local?.metadata?.protocolId || '',
         description: definition.description || local?.metadata?.description || '',
-        participantShell: definition.participantShell || local?.metadata?.participantShell
+        participantShell: definition.participantShell || local?.metadata?.participantShell,
+        estimatedDuration: definition.estimatedDuration || '',
+        ...(builder.metadata || {})
       },
-      blocks: Array.isArray(definition.blocks) ? definition.blocks : (local?.blocks || []),
+      blocks: Array.isArray(builder.blocks) ? builder.blocks : (Array.isArray(definition.blocks) ? definition.blocks : (local?.blocks || [])),
+      sessionFeatureFlags: builder.sessionFeatureFlags || definition.settings?.featureFlags || {},
+      qcThresholds: builder.qcThresholds || definition.settings?.qualityControl?.rules || local?.qcThresholds,
+      persistenceSettings: definition.settings?.persistence || builder.persistenceSettings || local?.persistenceSettings,
+      analyticsPlan: builder.analyticsPlan || definition.analyticsPlan,
+      version: builder.version || definition.version,
+      publicationVersion: protocol.publication_version || null,
+      savedStep: builder.savedStep ?? local?.savedStep ?? 0,
       createdAt: protocol.created_at || local?.createdAt || new Date().toISOString(),
       updatedAt: protocol.updated_at || local?.updatedAt || new Date().toISOString(),
-      status: activeCode ? 'active' : 'draft'
+      status: definition.isDraft || protocol.has_unpublished_changes ? 'draft' : (activeCode ? 'active' : 'draft'),
+      pendingSync: false
     };
     delete entry.publishError;
     if (activeCode) {
@@ -233,7 +247,9 @@ function ExperimentsListView() {
         apiProtocolId: Number(protocol.id),
         projectId: Number(protocol.project_id),
         invitationCode: activeCode || null,
-        publishVerifiedAt: activeCode ? entry.publishVerifiedAt : null
+        publishVerifiedAt: activeCode ? entry.publishVerifiedAt : null,
+        updatedAt: protocol.updated_at,
+        revision: protocol.revision
       });
     }
     return entry;
@@ -397,13 +413,27 @@ function ExperimentsListView() {
       });
     });
     content.querySelectorAll('.del-exp-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        let exps = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
-        exps = exps.filter(ex => ex.id !== btn.dataset.id);
-        localStorage.setItem('emocog_my_experiments', JSON.stringify(exps));
-        renderActiveTab();
-        toast(t('deleteExperiment') + ' ✓');
+        const exps = readLocalExperiments();
+        const entry = exps.find(ex => ex.id === btn.dataset.id);
+        const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(btn.dataset.id) : {};
+        const apiId = entry?.apiProtocolId || apiState.apiProtocolId;
+        btn.disabled = true;
+        try {
+          if (apiId) await apiDelete('/protocols/' + encodeURIComponent(apiId));
+          const current = readLocalExperiments().filter(ex => ex.id !== btn.dataset.id);
+          localStorage.setItem('emocog_my_experiments', JSON.stringify(current));
+          if (typeof builderApiStateKey === 'function') localStorage.removeItem(builderApiStateKey(btn.dataset.id));
+          renderActiveTab();
+          toast(t('deleteExperiment') + ' ✓');
+        } catch (error) {
+          btn.disabled = false;
+          const message = String(error?.message || error);
+          toast(message.includes('Protocol has collected sessions')
+            ? (CURRENT_LANG === 'en' ? 'This protocol has collected sessions. Deletion is blocked to preserve results.' : 'У протокола есть собранные сессии. Удаление заблокировано, чтобы сохранить результаты.')
+            : (CURRENT_LANG === 'en' ? 'Protocol was not deleted: ' : 'Протокол не удалён: ') + message);
+        }
       });
     });
     content.querySelectorAll('.exp-card').forEach(card => {

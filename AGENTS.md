@@ -164,7 +164,9 @@ Participant flow:
 
 1. Участник открывает invitation URL.
 2. API только читает существующее приглашение; неизвестный code возвращает 404.
-3. Участник подтверждает consent.
+3. Участник подтверждает consent; до admission проверяются запись локального
+   checkpoint и читаемая ссылка на восстановление. Незавершённый admission
+   возвращает к согласию с теми же ID, а не начинает новую сессию.
 4. API атомарно admission-reserves run и выдаёт короткоживущий ingest token,
    связанный с session, invitation, project и protocol.
 5. Precheck показывает видео участника и проверяет камеру/условия.
@@ -178,6 +180,11 @@ Participant flow:
     выполняется один идемпотентный ingest.
 11. При сетевой ошибке terminal checkpoint остаётся в IndexedDB и отправляется
     повторно с тем же `Idempotency-Key`.
+
+HTTP 200/201 без канонического подтверждения тех же session/lifecycle/finish-key
+не считается успешным ingest. Не заменять нечитаемый прежний checkpoint пустой
+сессией и не очищать его при ошибке восстановления. Зависшие локальные/сетевые
+операции должны иметь deadline; компактный fallback явно отмечает пропуски.
 
 ## 7. Session runtime
 
@@ -263,6 +270,17 @@ Signal contract:
 precision/jitter, latency, off-screen specificity, missingness и head-motion
 robustness. Синтетический unit test не доказывает webcam accuracy.
 
+`session-runtime/gaze-history.mjs` накапливает карты до обрезки raw gaze buffer.
+Локальный `heatmapState` входит в checkpoint, но не в ingest. Worker и final
+используют один accumulator; при reload незавершённая фиксация не дублируется.
+Метод `1.2.0` использует duration-weighted centroids фиксаций, а не raw-sample
+density. Его нельзя усреднять с legacy grid без явного разделения метода.
+Подробный API-отчёт ограничен 200 показами, 500 фиксациями на показ и общим
+wire-бюджетом 4000 фиксаций. Полные grids/counts не уменьшаются из-за ограничения
+списков фиксаций. Предупреждение об усечении должно быть видимым. Если список
+фиксаций сокращён, AOI-метрики не рассчитываются
+по его префиксу. Сетка продолжает учитывать весь принятый показ.
+
 ### 8.2 Blinks и PERCLOS
 
 Код: `apps/participant-web/js/gaze-tracker/attention-metrics.js` и общий frame
@@ -280,6 +298,30 @@ dynamics нельзя интерпретировать клинически бе
 
 Код: `lib/rppg_alg_qc_test_web_alg_test_v10/` и
 `apps/participant-web/js/session-runtime/continuous-bpm.js`.
+
+Метод `continuous_signals.v2` различает свежие публикации и удержанные значения.
+Hold может отображаться, но не увеличивает valid count и не входит в среднее.
+Respiration не публикуется из `respRateRaw`, при low confidence или hold.
+Ресэмплинг не заменяет отсутствующую историю константным padding и не закрывает
+длительные разрывы сигнала. Cumulative summaries сохраняются в checkpoint и
+объединяются по числу свежих измерений, не по числу перезапусков. Retained
+diagnostic series ограничены 7200 значениями; диапазоны из SessionReporter
+явно относятся к retained series, не обязательно ко всей сессии.
+
+Аналитика использует общий registry `apps/shared/passive-metrics.js` и пакет
+`continuous_signals` каталога 1.1. Не заменять отсутствующий сигнал нулём и не
+выдавать наличие summary за пройденный независимый QC. Полносессионные сводки
+нельзя применять к фильтру блока, условия, стимула или AOI; для такого запроса
+возвращается `session_summary_not_interval`. В группе сначала усредняются
+сессии участника, затем участники имеют равный вес. Число кадров не является
+числом независимых наблюдений/участников.
+
+`event-windows-1.1.0` добавляет опциональное дыхание в `rt_alignment.v1`;
+историческая 1.0.0 без дыхания принимается. Короткие окна вокруг RT - только
+описательный контекст скользящих ЧСС/дыхания, не мгновенный физиологический
+ответ: корреляция для этих двух каналов в UI отключена. HRV не рассчитывается
+из последовательности rolling BPM. Текущий rPPG-run попадает в worker до
+finalize; после finalize нельзя повторно добавлять уже сохранённый run.
 
 Движок использует POS/CHROM, ROI, signal-quality gates и публикует только
 допустимые значения. BPM работает фоново и не должен появляться как отдельный
@@ -689,6 +731,11 @@ S2_TEST_DATABASE_URL=postgres://... \
 ```
 
 Дополнительно перед передачей:
+
+PostgreSQL release gate запускает отдельный disposable-контейнер через
+`scripts/start-ci-postgres.sh`: оба registry-источника закреплены одним digest,
+проверка готовности обязательна, порты доступны только на loopback. Скрипт
+не заменяет существующий контейнер и вне CI требует явного разрешения local test.
 
 ```bash
 git diff --check

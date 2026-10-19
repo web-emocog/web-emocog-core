@@ -11,7 +11,8 @@ test('RT response policy', async t => {
   } = await import('../../participant-web/js/rt-input/response-policy.mjs');
 
   await t.test('normalizes Russian/English responses to physical keys and preserves legacy keys', () => {
-    for (const [code, en, ru] of [['KeyZ', 'z', '\u044f'], ['KeyX', 'x', '\u0447'], ['Comma', ',', '\u0431'], ['Period', '.', '\u044e']]) {
+    for (const [code, en, ru] of [['KeyZ', 'z', '\u044f'], ['KeyX', 'x', '\u0447'], ['Comma', ',', '\u0431'], ['Period', '.', '\u044e'],
+      ['KeyC', 'c', '\u0441'], ['KeyV', 'v', '\u043c'], ['KeyB', 'b', '\u0438'], ['KeyN', 'n', '\u0442'], ['KeyM', 'm', '\u044c'], ['KeyD', 'd', '\u0432']]) {
       for (const key of [en, ru, ru.toUpperCase()]) {
         assert.equal(normalizeKeyboardResponse(key), code);
         assert.equal(responseValueForMode('keypress', { code, key }), code);
@@ -19,7 +20,15 @@ test('RT response policy', async t => {
     }
     assert.equal(responseValueForMode('keypress', { code: 'Space' }), 'Space');
     assert.equal(responseValueForMode('keypress', { code: 'ArrowLeft' }), 'ArrowLeft');
-    assert.equal(responseValueForMode('keypress', { code: 'KeyA', key: 'z' }), null);
+    assert.equal(responseValueForMode('keypress', { code: 'KeyA', key: 'z' }), 'KeyA');
+    for (const code of ['Tab', 'Escape', 'MetaLeft', 'ControlRight', 'F5', 'F11', 'Unidentified']) {
+      assert.equal(responseValueForMode('keypress', { code, key: 'd' }), null);
+    }
+    assert.equal(normalizeKeyboardResponse('Numpad1'), 'Numpad1');
+    assert.equal(normalizeKeyboardResponse('1'), 'Digit1');
+    for (const value of ['constructor', '__proto__', 'unsupported', '', null]) {
+      assert.equal(normalizeKeyboardResponse(value), null);
+    }
     for (const flag of ['repeat', 'ctrlKey', 'altKey', 'metaKey', 'isComposing']) {
       assert.equal(responseValueForMode('keypress', { code: 'KeyZ', [flag]: true }), null);
     }
@@ -44,7 +53,7 @@ test('RT response policy', async t => {
 
   await t.test('preserves equivalent responses through the server RT event adapter', () => {
     const { eventsToRtJsonl } = require('../rt/event_adapter');
-    for (const [code, alias] of [['KeyZ', '\u044f'], ['KeyX', 'x'], ['Comma', '\u0431'], ['Period', '.']]) {
+    for (const [code, alias] of [['KeyZ', '\u044f'], ['KeyX', 'x'], ['Comma', '\u0431'], ['Period', '.'], ['KeyD', '\u0432'], ['KeyC', '\u0441'], ['Numpad1', 'Numpad1']]) {
       const { events } = eventsToRtJsonl([], [{ trialId: 'trial_1', expectedResponse: alias, response: code, rt: 320 }], { taskType: 'choice' });
       assert.equal(events[0].expected_response, code.toLowerCase());
       assert.equal(events[1].button_id, code.toLowerCase());

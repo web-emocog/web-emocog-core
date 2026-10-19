@@ -42,7 +42,10 @@
         });
       }
       if (value.stimulus && typeof value.stimulus === 'object') add(value.stimulus);
-      Object.values(value).forEach(visit);
+      Object.entries(value).forEach(([key, nested]) => {
+        if (key === 'builderState' && !options.includeBuilderState) return;
+        visit(nested);
+      });
     };
 
     visit(definition);
@@ -50,8 +53,8 @@
     return [...ids];
   }
 
-  function referencedDatabaseStimulusIds(definition) {
-    return referencedStimulusIds(definition, { databaseOnly: true })
+  function referencedDatabaseStimulusIds(definition, options = {}) {
+    return referencedStimulusIds(definition, { ...options, databaseOnly: true })
       .map(Number)
       .filter(Number.isSafeInteger);
   }

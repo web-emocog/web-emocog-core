@@ -285,14 +285,22 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       await client.query('INSERT INTO pgmigrations(name,run_on) VALUES($1,current_timestamp)', [`future-contract-${randomUUID()}`]);
       await assert.rejects(checkReleaseCompatibility(client), /newer API/);
       await client.query('ROLLBACK');
+      await client.query('BEGIN');
+      // Shadow production tables inside this transaction: rollback guards must
+      // be tested independently of other fixtures or existing local media.
+      for (const table of ['stimulus_versions', 'stimuli', 'stimulus_folders', 'invitations', 'protocols']) {
+        await client.query(`CREATE TEMP TABLE ${table} ON COMMIT DROP AS SELECT * FROM public.${table} WITH NO DATA`);
+      }
+      await client.query('INSERT INTO protocols(id,definition) VALUES($1,\'{}\'::jsonb)', [protocolId]);
       assert.equal(Number((await client.query('SELECT count(*) FROM stimulus_versions')).rows[0].count), 0);
-      for (const kind of ['private-item', 'private-folder', 'snapshot']) {
-        await client.query('BEGIN');
+      for (const kind of ['version', 'private-item', 'private-folder', 'snapshot']) {
+        await client.query('SAVEPOINT rollback_guard');
+        if (kind === 'version') await client.query('INSERT INTO stimulus_versions(id) VALUES($1)', [randomUUID()]);
         if (kind === 'private-item') await client.query("INSERT INTO stimuli(project_id,name,visibility) VALUES($1,'Private metadata-only','private')", [projectId]);
         if (kind === 'private-folder') await client.query("INSERT INTO stimulus_folders(project_id,name,visibility) VALUES($1,'Private folder','private')", [projectId]);
         if (kind === 'snapshot') await client.query("INSERT INTO invitations(protocol_id,code,protocol_definition) VALUES($1,$2,'{\"blocks\":[{\"id\":\"snapshot\"}]}'::jsonb)", [protocolId, randomUUID()]);
         await assert.rejects(client.query(downSql), /coordinated pre-migration backup/);
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK TO SAVEPOINT rollback_guard');
         assert.ok((await client.query("SELECT column_name FROM information_schema.columns WHERE table_name='stimuli' AND column_name='visibility'")).rowCount);
       }
     } finally { await client.query('ROLLBACK'); client.release(); }
@@ -524,7 +532,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(ingested.status, 200, await ingested.clone().text());
     const snapshotResponse = await request('/analytics/v1/snapshots', owner, {
       schemaVersion: '1.0', mode: 'session', analysisLevel: 'level_1', projectId, protocolId: protocol.id,
-      protocolVersion: '1.0.0', metricIds: ['viz.heatmap'], filters: { sessionIds: [sessionId], stimulusIds: [String(stimulus.id)], qcMode: 'all', qcChannels: ['task', 'gaze'] },
+      protocolVersion: `publication:${invitation.publication_version}`, metricIds: ['viz.heatmap'], filters: { sessionIds: [sessionId], stimulusIds: [String(stimulus.id)], qcMode: 'all', qcChannels: ['task', 'gaze'] },
     });
     assert.equal(snapshotResponse.status, 201, await snapshotResponse.clone().text());
     const snapshot = await snapshotResponse.json();
@@ -546,7 +554,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     })).status, 200);
     const groupSnapshotResponse = await request('/analytics/v1/snapshots', owner, {
       schemaVersion: '1.0', mode: 'group', analysisLevel: 'level_1', projectId, protocolId: protocol.id,
-      protocolVersion: '1.0.0', metricIds: ['viz.heatmap'], filters: { sessionIds: [sessionId, newSessionId],
+      protocolVersion: `publication:${invitation.publication_version}`, metricIds: ['viz.heatmap'], filters: { sessionIds: [sessionId, newSessionId],
         blockIds: ['main'], stimulusIds: [String(stimulus.id)], qcMode: 'all', qcChannels: ['task', 'gaze'] },
     });
     assert.equal(groupSnapshotResponse.status, 201, await groupSnapshotResponse.clone().text());
@@ -554,10 +562,10 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     const mixedHeatmapResponse = await fetch(`${baseUrl}/analytics/v1/groups/heatmap?snapshot_id=${groupSnapshot.id}`, { headers: owner });
     assert.equal(mixedHeatmapResponse.status, 200);
     const mixedHeatmap = await mixedHeatmapResponse.json();
-    assert.equal(mixedHeatmap.data.status, 'no_data');
-    assert.equal(mixedHeatmap.data.reason, 'stimulus_versions_mixed');
-    assert.equal(mixedHeatmap.data.stimulus.contentUrl, null);
-    assert.deepEqual(mixedHeatmap.data.grid.values, []);
+    assert.equal(groupSnapshot.includedSessionIds.length, 1);
+    assert.equal(groupSnapshot.excludedSessions[0].reasonCode, 'protocol_version_filter');
+    assert.equal(mixedHeatmap.data.stimulus.version, oldVersion);
+    assert.match(mixedHeatmap.data.stimulus.contentUrl, new RegExp(oldVersion));
 
     let downSql;
     require('../migrations/1699000000017_stimulus_versions').down({ sql: value => { downSql = value; } });
@@ -1234,17 +1242,24 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       return response.json();
     };
     const enabledInvite = await publish();
+    const pinnedSessionId = randomUUID();
+    const admitted = await fetch(`${baseUrl}/invitations/by-code/${enabledInvite.code}/ingest-token`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: pinnedSessionId })
+    });
+    assert.equal(admitted.status, 200);
     const updated = await fetch(`${baseUrl}/protocols/${protocol.id}`, { method: 'PATCH', headers,
       body: JSON.stringify({ definition: { ...definition, settings: { featureFlags: { photodiode: false } } } }) });
     assert.equal(updated.status, 200, await updated.clone().text());
     const disabledInvite = await publish();
     for (const [invitation, enabled] of [[enabledInvite, true], [disabledInvite, false]]) {
-      const response = await fetch(`${baseUrl}/invitations/by-code/${invitation.code}`);
+      const response = await fetch(`${baseUrl}/invitations/by-code/${invitation.code}${enabled ? '?session_id=' + pinnedSessionId : ''}`);
       assert.equal(response.status, 200);
       assert.equal((await response.json()).definition.settings.featureFlags.photodiode, enabled);
       assert.equal((await pool.query('SELECT protocol_definition FROM invitations WHERE id=$1', [invitation.id]))
         .rows[0].protocol_definition.settings.featureFlags.photodiode, enabled);
     }
+    assert.equal(disabledInvite.public_code, enabledInvite.public_code);
+    assert.equal((await (await fetch(`${baseUrl}/invitations/by-code/${enabledInvite.public_code}`)).json()).definition.settings.featureFlags.photodiode, false);
     const outsider = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES($1,$2,'researcher') RETURNING *",
       [`photodiode-outsider-${randomUUID()}@example.test`, user.password_hash])).rows[0];
     createdUserIds.push(outsider.id);
@@ -1900,7 +1915,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     const authorization = `Bearer ${issueStaffToken(researcher.rows[0])}`;
 
     const options = await fetch(
-      `${baseUrl}/analytics/v1/filter-options?project_id=${projectId}&protocol_id=${protocolId}`,
+      `${baseUrl}/analytics/v1/filter-options?project_id=${projectId}&protocol_id=${protocolId}&protocol_version=invitation:${analyticsInvitation.id}`,
       { headers: { authorization } }
     );
     assert.equal(options.status, 200);
@@ -1944,7 +1959,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
         analysisLevel: 'level_1',
         projectId,
         protocolId,
-        protocolVersion: '1.0.0',
+        protocolVersion: `invitation:${analyticsInvitation.id}`,
         metricIds: ['aoi.dwell_time_ms', 'aoi.fixation_count', 'aoi.ttff_ms', 'viz.heatmap'],
         filters: {
           blockIds: ['main'],

@@ -9,6 +9,7 @@
   const RESULT_IMPORT_MAX_BYTES = 128 * 1024 * 1024;
   const INGEST_PAYLOAD_MAX_BYTES = 1750 * 1024;
   const stimulusMediaCache = new Map();
+  const stimulusMediaSources = new Map();
   let stimulusMediaGeneration = 0;
 
   function clearStimulusMediaCache() {
@@ -17,6 +18,7 @@
       request.then(media => URL.revokeObjectURL(media.url)).catch(() => {});
     }
     stimulusMediaCache.clear();
+    stimulusMediaSources.clear();
   }
 
   const TABS = [
@@ -65,19 +67,23 @@
     }
     let request = stimulusMediaCache.get(url);
     if (!request) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
       request = global.fetch(url, {
         headers: typeof global.apiRequestHeaders === 'function' ? global.apiRequestHeaders(false) : {},
-        credentials: 'include'
+        credentials: 'include', signal: controller.signal
       }).then(async response => {
         if (!response.ok) throw await parseApiError(response, tr('Файл стимула недоступен', 'Stimulus file unavailable'));
         const blob = await response.blob();
         if (!blob.size) throw new Error(tr('Файл стимула пуст', 'Stimulus file is empty'));
         if (generation !== stimulusMediaGeneration) throw new Error('Stimulus media scope changed');
-        return { url: URL.createObjectURL(blob), type: blob.type || null };
+        const objectUrl = URL.createObjectURL(blob);
+        stimulusMediaSources.set(objectUrl, url);
+        return { url: objectUrl, type: blob.type || null };
       }).catch(error => {
         if (generation === stimulusMediaGeneration) stimulusMediaCache.delete(url);
         throw error;
-      });
+      }).finally(() => clearTimeout(timeout));
       stimulusMediaCache.set(url, request);
     }
     const media = await request;
@@ -102,15 +108,19 @@
     return response;
   }
 
+  function stimulusFallbackHtml(visible = true) {
+    return `<div class="analytics-stimulus-fallback" role="status" style="position:absolute;inset:0;display:${visible ? 'flex' : 'none'};flex-direction:column;gap:10px;align-items:center;justify-content:center;padding:12px;text-align:center;color:var(--muted);font-size:11px;z-index:3;background:rgba(248,250,252,.88);">${tr('Файл стимула недоступен. Данные анализа сохранены.', 'Stimulus file unavailable. Analysis data is preserved.')}<button type="button" class="quick-btn analytics-stimulus-retry">${tr('Повторить загрузку медиа','Retry loading media')}</button></div>`;
+  }
+
   function stimulusMediaHtml(stimulus, className = 'analytics-stimulus-media') {
-    if (stimulus?.contentError) return `<div role="status">${escapeHtml(tr('Файл стимула недоступен. Данные анализа сохранены.', 'Stimulus file unavailable. Analysis data is preserved.'))}</div>`;
+    if (stimulus?.contentError) return stimulusFallbackHtml();
     const url = stimulusContentUrl(stimulus?.contentUrl);
-    if (!url) return '';
+    if (!url) return stimulusFallbackHtml();
     const type = String(stimulus?.type || '').toLowerCase();
-    if (type.startsWith('video/')) {
-      return `<video class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" muted controls playsinline preload="metadata" aria-label="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;"></video>`;
+    if (type === 'video' || type.startsWith('video/')) {
+      return stimulusFallbackHtml(false) + `<video class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" muted controls playsinline preload="auto" aria-label="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;"></video>`;
     }
-    return `<img class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" alt="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;">`;
+    return stimulusFallbackHtml(false) + `<img class="${className} analytics-stimulus-media" src="${escapeHtml(url)}" alt="${escapeHtml(stimulus?.name || '')}" style="display:block;width:100%;height:100%;object-fit:contain;">`;
   }
 
   function resultImportHeaders(idempotencyKey) {
@@ -131,6 +141,9 @@
   }
 
   async function buildResultImportPayload(source) {
+    const pending = source?.pendingFinalUpload?.payload || source?.finalizedPayload;
+    if (pending?.schemaVersion === 'session_feature.v1' && pending.ids?.session === source?.ids?.session
+      && pending.ids?.invitationCode === source?.ids?.invitationCode) source = pending;
     if (source?.schemaVersion === 'session_feature.v1') {
       // Repair only the known legacy alias; unknown categories still fail API validation.
       return { ...source, events: Array.isArray(source.events) ? source.events.map(event => (
@@ -138,7 +151,7 @@
       )) : source.events };
     }
     const moduleUrl = new URL(
-      '../participant-web/js/unified-aggregates-new.js?v=20261004-2',
+      '../participant-web/js/unified-aggregates-new.js?v=20261019-5',
       global.location.href
     );
     const aggregates = await import(moduleUrl.href);
@@ -167,6 +180,10 @@
       throw new Error(tr('JSON повреждён или имеет неверный формат','The JSON is damaged or malformed'));
     }
     const payload = await buildResultImportPayload(source);
+    if (payload.delivery?.kind === 'checkpoint') {
+      throw new Error(tr('Это промежуточная копия незавершённой сессии. Она доступна в аналитике с включёнными незавершёнными сессиями.',
+        'This is an interim copy of an incomplete session. Include incomplete sessions in analytics to view it.'));
+    }
     payload.ids = payload.ids && typeof payload.ids === 'object' ? { ...payload.ids } : {};
     delete payload.ids.invitationCode;
 
@@ -203,14 +220,18 @@
       project_id: projectId,
       protocol_id: protocolId,
     });
-    const response = await global.fetch(importApiUrl('/ingest'), {
+    const { fetchWithDeadline } = await import('../participant-web/js/session-runtime/http.mjs?v=20261019-5');
+    const { validIngestAcknowledgement } = await import('../participant-web/js/session-runtime/ingest-transport.mjs?v=20261019-5');
+    const { response, result } = await fetchWithDeadline(importApiUrl('/ingest'), {
       method: 'POST',
       headers: resultImportHeaders(idempotencyKey),
       credentials: 'include',
       body: encoded,
-    });
-    if (!response.ok) throw await parseApiError(response, tr('Импорт отклонён','Import rejected'));
-    const result = await response.json();
+    }, async response => ({ response, result: await response.json().catch(() => null) }));
+    if (!response.ok) throw new Error(`${response.status} — ${result?.error || tr('Импорт отклонён','Import rejected')}`);
+    if (![200, 201].includes(response.status) || !validIngestAcknowledgement(result, payload, idempotencyKey)) {
+      throw new Error(tr('502 — Сервер не подтвердил сохранение этой сессии. Повторите импорт.', '502 — The server did not confirm saving this session. Retry the import.'));
+    }
     return { sessionId, payloadBytes, result };
   }
 
@@ -303,6 +324,14 @@
       off_screen: ['Взгляд вне экрана', 'Gaze off screen'],
       outside_stimulus: ['Взгляд вне стимула', 'Gaze outside stimulus'],
       missing_samples: ['Нет необходимых сэмплов', 'Required samples are missing'],
+      signal_data_missing: ['Нет опубликованных измерений этого канала', 'No published measurements for this channel'],
+      signal_history_incomplete: ['История сигналов восстановлена не полностью; сводка скрыта', 'Signal history is incomplete after recovery; summary hidden'],
+      signal_summary_invalid: ['Некорректная сводка сигнала', 'Invalid signal summary'],
+      insufficient_window_duration: ['Недостаточно данных для полного окна 60 секунд', 'Insufficient data for a full 60-second window'],
+      session_summary_not_interval: ['Сводка относится ко всей сессии. Для неё снимите фильтр блока, стимула или условия; оконные данные смотрите в связанности.', 'This is a whole-session summary. Clear block, stimulus or condition filters; use Connectedness for trial windows.'],
+      summary_not_independent_validation: ['Сводка не является независимой проверкой точности канала', 'A summary is not independent channel-accuracy validation'],
+      gaze_fixations_truncated: ['Карта накоплена за весь показ. Список фиксаций сокращён до 500 или из-за общего лимита размера отчёта; показатели AOI для этого показа недоступны.', 'The map covers the entire presentation. The fixation list is limited to 500 or shortened by the overall report size limit; AOI metrics for this presentation are unavailable.'],
+      gaze_presentations_truncated: ['Сохранена только часть показов: достигнут лимит отчёта в 200 показов. Общая статистика взгляда сохранена; не используйте эту выборку как полную историю стимулов.', 'Only some presentations were retained: the 200-presentation report limit was reached. Overall gaze statistics are retained; do not treat this as the complete stimulus history.'],
       stimulus_versions_mixed: ['В этих сессиях показаны разные версии файла. Выберите сессии одной версии или откройте их тепловые карты отдельно.', 'These sessions used different file versions. Select sessions with one version or open their heatmaps separately.'],
       gaze_coordinate_mappings_mixed: ['В сессиях использованы разные способы расчёта координат стимула. Откройте карты отдельно или выберите сессии одной версии расчёта.', 'These sessions use different stimulus coordinate mappings. Open heatmaps separately or select sessions using one mapping version.'],
       gaze_qc_invalid: ['Сессия исключена по gaze QC', 'Session excluded by gaze QC'],
@@ -403,6 +432,7 @@
       groups: Array.isArray(value && value.groups) ? value.groups : [],
       conditions: Array.isArray(value && value.conditions) ? value.conditions : [],
       comparisons: Array.isArray(value && value.comparisons) ? value.comparisons : [],
+      selectedMetricIds: Array.isArray(value?.selectedMetricIds) ? value.selectedMetricIds : [],
       qcChannels: Array.isArray(value && value.qcChannels) ? value.qcChannels : ['task', 'gaze'],
       dateMin: value && value.dateMin || '',
       dateMax: value && value.dateMax || ''
@@ -819,6 +849,8 @@
       const params = new URLSearchParams();
       if (query.projectId) params.set('project_id', query.projectId);
       if (query.protocolId) params.set('protocol_id', query.protocolId);
+      if (query.protocolVersion) params.set('protocol_version', query.protocolVersion);
+      params.set('include_incomplete', query.mode !== 'session' || query.includeIncompleteSessions ? 'true' : 'false');
       const suffix = params.toString() ? `?${params}` : '';
       return listFromResponse(await global.apiGet('/sessions' + suffix));
     },
@@ -915,6 +947,8 @@
   const defaultDraft = {
     mode: 'session', protocolVersion: '', blockId: '', stimulusId: '', aoiId: '',
     groupId: '', conditionId: '', comparisonId: '',
+    comparisonDesign: 'paired', comparisonAxis: 'block', comparisonMetric: 'task.rt_mean_ms',
+    referenceLevel: '', comparisonLevel: '', referenceParticipants: [], comparisonParticipants: [],
     qcMode: 'valid_and_borderline', qcChannels: ['task', 'gaze'],
     dateFrom: '', dateTo: '', includeIncompleteSessions: false
   };
@@ -927,17 +961,28 @@
     if (!protocol) return [];
     const values = [];
     if (Array.isArray(protocol.versions)) protocol.versions.forEach(item => values.push(typeof item === 'object' ? item.version : item));
+    if (values.length) return [...new Set(values.filter(Boolean).map(String))];
     values.push(protocol.version, protocol.protocol_version, protocol.definition && (protocol.definition.version || protocol.definition.schemaVersion));
     return [...new Set(values.filter(Boolean).map(String))];
   }
 
+  function protocolVersionLabel(version) {
+    if (/^publication:/.test(version)) return tr('Публикация ', 'Publication ') + version.split(':')[1];
+    if (/^invitation:/.test(version)) return tr('Историческая версия ', 'Historical version ') + version.split(':')[1];
+    if (version === 'legacy') return tr('Без подтверждённой версии', 'Unverified version');
+    return version;
+  }
+
   function metricIdsForState(state) {
+    const passive = (global.EmocogPassiveMetrics?.definitions || []).map(item => item.id);
+    const includePassive = selected => [...new Set([...selected, ...passive])];
+    if (state.filterOptions?.selectedMetricIds?.length) return includePassive(state.filterOptions.selectedMetricIds);
     const protocol = selectedProtocol(state);
     const plan = protocol && (protocol.analyticsPlan || protocol.analytics_plan || protocol.definition && protocol.definition.analyticsPlan);
     const selected = plan && (plan.selectedMetricIds || plan.metricIds);
-    if (Array.isArray(selected) && selected.length) return selected.slice();
+    if (Array.isArray(selected) && selected.length) return includePassive(selected);
     const metrics = global.EmocogAnalyticsPlan && global.EmocogAnalyticsPlan.metrics || [];
-    return metrics.filter(item => item.defaultSelected || item.mandatory).map(item => item.id);
+    return includePassive(metrics.filter(item => item.defaultSelected || item.mandatory).map(item => item.id));
   }
 
   function dateBoundary(value, endOfDay) {
@@ -961,7 +1006,7 @@
       protocolVersion: state.query.protocolVersion,
       metricIds: metricIdsForState(state),
       filters: {
-        participantIds: sessionMode && row && (row.participant_id || row.participant_alias) ? [row.participant_id || row.participant_alias] : [],
+        participantIds: [],
         sessionIds: sessionMode && row ? [coerceId(row.id)] : [],
         groupIds: levelTwo && comparison ? (comparison.groupIds || []).slice() : (state.query.groupId ? [state.query.groupId] : []),
         conditionIds: state.query.conditionId ? [state.query.conditionId] : (levelTwo && comparison && Array.isArray(comparison.conditionIds) ? comparison.conditionIds.slice() : []),
@@ -973,13 +1018,34 @@
         qcChannels: state.query.qcChannels.slice(),
         minValidFraction: null,
         minSignalConfidence: null,
-        dateFrom: dateBoundary(state.query.dateFrom, false),
-        dateTo: dateBoundary(state.query.dateTo, true),
-        includeIncompleteSessions: state.query.includeIncompleteSessions === true
+        dateFrom: sessionMode ? null : dateBoundary(state.query.dateFrom, false),
+        dateTo: sessionMode ? null : dateBoundary(state.query.dateTo, true),
+        includeIncompleteSessions: sessionMode || state.query.includeIncompleteSessions === true
       }
     };
-    if (levelTwo && comparison) query.comparison = { factorIds: (comparison.factorIds || []).slice(), contrastIds: (comparison.contrastIds || []).slice() };
+    if (levelTwo && state.query.comparisonId === 'custom') {
+      const draft = state.query;
+      query.metricIds = [draft.comparisonMetric];
+      ['groupIds', 'conditionIds', 'blockIds', 'stimulusIds', 'aoiIds'].forEach(key => { query.filters[key] = []; });
+      query.comparison = draft.comparisonDesign === 'independent'
+        ? { design: 'independent', metricId: draft.comparisonMetric, referenceParticipantIds: draft.referenceParticipants.slice(), comparisonParticipantIds: draft.comparisonParticipants.slice() }
+        : { design: 'paired', metricId: draft.comparisonMetric, axis: draft.comparisonAxis, referenceId: draft.referenceLevel, comparisonId: draft.comparisonLevel };
+    } else if (levelTwo && comparison) query.comparison = { factorIds: (comparison.factorIds || []).slice(), contrastIds: (comparison.contrastIds || []).slice() };
     return query;
+  }
+
+  function comparisonIssue(state) {
+    const q = state.query;
+    if (q.mode !== 'group' || state.groupLevel !== 'level-2') return '';
+    if (!q.comparisonId) return tr('Настройте сравнение ниже.', 'Configure a comparison below.');
+    if (q.comparisonId !== 'custom') return '';
+    if (q.comparisonDesign === 'paired') {
+      if (!q.referenceLevel || !q.comparisonLevel || q.referenceLevel === q.comparisonLevel) return tr('Выберите два разных блока или условия.', 'Select two different blocks or conditions.');
+    } else {
+      if (!q.referenceParticipants.length || !q.comparisonParticipants.length) return tr('Выберите участников обеих групп.', 'Select participants for both groups.');
+      if (q.referenceParticipants.some(id => q.comparisonParticipants.includes(id))) return tr('Участник не может входить в обе независимые группы.', 'A participant cannot belong to both independent groups.');
+    }
+    return '';
   }
 
   const store = {
@@ -1084,6 +1150,9 @@
       }
       this.initialized = true;
       if (!Array.isArray(this.state.query.qcChannels)) this.state.query.qcChannels = defaultDraft.qcChannels.slice();
+      ['referenceParticipants', 'comparisonParticipants'].forEach(key => {
+        if (!Array.isArray(this.state.query[key])) this.state.query[key] = [];
+      });
       if (!hasAuth() || (!global.EmocogAnalyticsPreviewFixture && typeof global.apiGet !== 'function')) {
         this.setStatus('unauthorized', { error: null, projects: [], protocols: [], sessions: [] });
         return;
@@ -1118,6 +1187,9 @@
       this.emit();
       try {
         const imported = await importResultJson(file, this.state);
+        const allSessions = await api.sessions({ ...this.state.query, protocolVersion: '', mode: 'group', includeIncompleteSessions: true });
+        const versionRow = allSessions.find(row => String(row.session_id) === imported.sessionId);
+        if (versionRow?.protocol_version) this.state.query.protocolVersion = versionRow.protocol_version;
         const importedQc = String(imported.result?.qc_validity || '').toLowerCase();
         if (importedQc === 'invalid') this.state.query.qcMode = 'all';
         else if (importedQc === 'borderline' && this.state.query.qcMode === 'valid_only') {
@@ -1243,6 +1315,10 @@
       this.state.query.groupId = '';
       this.state.query.conditionId = '';
       this.state.query.comparisonId = '';
+      this.state.query.referenceLevel = '';
+      this.state.query.comparisonLevel = '';
+      this.state.query.referenceParticipants = [];
+      this.state.query.comparisonParticipants = [];
       this.state.query.blockId = '';
       this.state.query.stimulusId = '';
       this.state.query.aoiId = '';
@@ -1252,7 +1328,18 @@
 
     setFilter(name, value) {
       if (!(name in defaultDraft)) return;
-      this.state.query[name] = name === 'includeIncompleteSessions' ? value === true : String(value || '');
+      this.state.query[name] = ['referenceParticipants', 'comparisonParticipants'].includes(name)
+        ? [...new Set(Array.isArray(value) ? value.map(String) : [])]
+        : name === 'includeIncompleteSessions' ? value === true : String(value || '');
+      if (name === 'comparisonAxis') {
+        this.state.query.referenceLevel = '';
+        this.state.query.comparisonLevel = '';
+      }
+      if (name === 'includeIncompleteSessions' && this.state.query.mode === 'session') {
+        this.changed();
+        this.loadSessions();
+        return;
+      }
       if (name === 'blockId') {
         this.state.query.stimulusId = '';
         this.state.query.aoiId = '';
@@ -1315,7 +1402,7 @@
         this.state.query.stimulusId = '';
         this.state.query.aoiId = '';
       }
-      if (this.state.query.dateFrom && this.state.query.dateTo && this.state.query.dateFrom > this.state.query.dateTo) {
+      if (this.state.query.mode !== 'session' && this.state.query.dateFrom && this.state.query.dateTo && this.state.query.dateFrom > this.state.query.dateTo) {
         this.state.snapshotStatus = 'error';
         this.state.snapshotError = new Error(tr('Дата начала не может быть позже даты окончания','Start date cannot be later than end date'));
         this.emit();
@@ -1327,9 +1414,9 @@
         this.emit();
         return;
       }
-      if (this.state.query.mode === 'group' && this.state.groupLevel === 'level-2' && !this.state.query.comparisonId) {
+      if (comparisonIssue(this.state)) {
         this.state.snapshotStatus = 'error';
-        this.state.snapshotError = new Error(tr('Выберите заранее настроенное сравнение','Select a predefined comparison'));
+        this.state.snapshotError = new Error(comparisonIssue(this.state));
         this.emit();
         return;
       }
@@ -1519,6 +1606,7 @@
     setGroupLevel(level) {
       if (level === 'level-3') return;
       this.state.groupLevel = level;
+      if (level === 'level-2' && !this.state.query.comparisonId) this.state.query.comparisonId = 'custom';
       this.changed();
     }
   };
@@ -1561,7 +1649,7 @@
     const optionName = (rows, id) => localizedName(rows.find(row => String(row.id) === String(id)), id);
     const chips = [
       optionName(state.projects, source.projectId),
-      `${optionName(state.protocols, source.protocolId)} · v${source.protocolVersion}`,
+      `${optionName(state.protocols, source.protocolId)} · ${protocolVersionLabel(source.protocolVersion)}`,
       source.mode === 'session' ? optionLabel(selectedSession(state) || {}, 'session') : tr('Все подходящие сессии','All matching sessions'),
       source.mode === 'group' && state.query.comparisonId && optionName(state.filterOptions.comparisons, state.query.comparisonId),
       filters.groupIds.length && filters.groupIds.map(id => optionName(state.filterOptions.groups, id)).join(' + '),
@@ -1639,7 +1727,7 @@
     const counts = buildExportBundle(state, 'both').counts;
     root.innerHTML = `<div class="card" style="grid-column:span 12;padding:0;overflow:hidden;">
       <header style="padding:17px 18px;border-bottom:1px solid var(--stroke);display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;"><div><h2 style="font-size:17px;color:var(--text);margin:0;">${tr('Экспорт зафиксированной выборки','Fixed-selection export')}</h2><p style="font-size:11px;color:var(--muted);line-height:1.55;margin:6px 0 0;max-width:700px;">${tr('Файл использует тот же snapshot, QC и версии, что и дашборд. Изменить фильтры на этой странице нельзя.','The file uses the same snapshot, QC, and versions as the dashboard. Filters cannot be changed on this page.')}</p></div>${global.EmocogAnalyticsPreviewFixture ? `<span style="padding:5px 8px;border-radius:999px;background:rgba(245,158,11,.10);color:var(--warn);font-size:9px;font-weight:700;">${tr('PREVIEW · условные данные','PREVIEW · fictional data')}</span>` : ''}</header>
-      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;">${[[tr('Snapshot','Snapshot'),snapshot.id],[tr('Dataset hash','Dataset hash'),snapshot.datasetHash],[tr('Участники','Participants'),counts.participants],[tr('Сессии','Sessions'),counts.sessions],[tr('Наблюдения','Observations'),counts.observations],[tr('QC-режим','QC mode'),qcModeLabel(filters.qcMode)]].map(([label,value]) => `<div style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:12px;font-weight:700;color:var(--text);margin-top:4px;word-break:break-word;">${escapeHtml(value)}</div></div>`).join('')}</div><div style="font-size:9px;color:var(--muted);line-height:1.6;margin-top:9px;">${tr('Создан','Created')}: ${escapeHtml(formatDateTime(snapshot.createdAt))} · ${tr('Протокол','Protocol')} ${escapeHtml(query.protocolId)} v${escapeHtml(query.protocolVersion)} · ${tr('Каналы','Channels')}: ${escapeHtml((filters.qcChannels || []).map(channelLabel).join(', '))}<br>${Object.entries(snapshot.versions || {}).map(([key,value]) => `${escapeHtml(key)}=${escapeHtml(value == null ? '—' : value)}`).join(' · ')}</div></section>
+      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;">${[[tr('Snapshot','Snapshot'),snapshot.id],[tr('Dataset hash','Dataset hash'),snapshot.datasetHash],[tr('Участники','Participants'),counts.participants],[tr('Сессии','Sessions'),counts.sessions],[tr('Наблюдения','Observations'),counts.observations],[tr('QC-режим','QC mode'),qcModeLabel(filters.qcMode)]].map(([label,value]) => `<div style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:12px;font-weight:700;color:var(--text);margin-top:4px;word-break:break-word;">${escapeHtml(value)}</div></div>`).join('')}</div><div style="font-size:9px;color:var(--muted);line-height:1.6;margin-top:9px;">${tr('Создан','Created')}: ${escapeHtml(formatDateTime(snapshot.createdAt))} · ${tr('Протокол','Protocol')} ${escapeHtml(query.protocolId)} ${escapeHtml(protocolVersionLabel(query.protocolVersion))} · ${tr('Каналы','Channels')}: ${escapeHtml((filters.qcChannels || []).map(channelLabel).join(', '))}<br>${Object.entries(snapshot.versions || {}).map(([key,value]) => `${escapeHtml(key)}=${escapeHtml(value == null ? '—' : value)}`).join(' · ')}</div></section>
       <form id="analyticsExportForm" style="padding:16px 18px;display:flex;gap:11px;align-items:flex-end;flex-wrap:wrap;">
         <label style="display:flex;flex-direction:column;gap:5px;min-width:180px;"><span style="font-size:10px;font-weight:700;color:var(--muted);">${tr('Формат','Format')}</span><select id="analyticsExportFormat" style="padding:9px;border:1px solid var(--stroke);border-radius:9px;background:var(--card-bg);color:var(--text);"><option value="csv">CSV</option><option value="json">JSON</option></select></label>
         <label style="display:flex;flex-direction:column;gap:5px;min-width:230px;"><span style="font-size:10px;font-weight:700;color:var(--muted);">${tr('Состав','Contents')}</span><select id="analyticsExportContent" style="padding:9px;border:1px solid var(--stroke);border-radius:9px;background:var(--card-bg);color:var(--text);"><option value="both">${tr('Сводка + длинный формат','Summary + long format')}</option><option value="summary">${tr('Сводка','Summary')}</option><option value="long">${tr('Длинный формат','Long format')}</option></select></label>
@@ -1676,10 +1764,29 @@
     return root;
   }
 
+  function comparisonDesignerHtml(state, disabled) {
+    const q = state.query;
+    if (q.mode !== 'group' || state.groupLevel !== 'level-2') return '';
+    const levels = q.comparisonAxis === 'condition' ? state.filterOptions.conditions : state.filterOptions.blocks.filter(block => block.hasTrials !== false);
+    const roster = [...new Map(state.sessions.filter(row => row.participant_id).map(row => [String(row.participant_id), { id: String(row.participant_id), label: row.participant_alias || String(row.participant_id) }])).values()];
+    const multi = (id, label, chosen) => `<label style="display:flex;flex-direction:column;gap:6px;min-width:220px;flex:1;"><span>${escapeHtml(label)}</span><select id="${id}" multiple size="5" aria-label="${escapeHtml(label)}" style="padding:8px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);color:var(--text);" ${disabled ? 'disabled' : ''}>${roster.map(row => `<option value="${escapeHtml(row.id)}" ${chosen.includes(row.id) ? 'selected' : ''}>${escapeHtml(row.label)}</option>`).join('')}</select></label>`;
+    return `<section id="analyticsComparisonDesigner" style="padding:14px;border:1px solid var(--stroke);border-radius:12px;">
+      <h3 style="font-size:14px;margin:0 0 10px;">${tr('Настройка сравнения', 'Comparison setup')}</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+      ${simpleSelectHtml('analyticsComparisonFilter', tr('Расчёт', 'Calculation'), [{ id: 'custom', label: tr('Своё описательное сравнение', 'Custom descriptive comparison') }, ...state.filterOptions.comparisons], q.comparisonId, disabled, null)}
+      ${q.comparisonId === 'custom' ? `${simpleSelectHtml('analyticsComparisonDesign', tr('Дизайн', 'Design'), [{ id: 'paired', label: tr('Одни и те же участники', 'Same participants') }, { id: 'independent', label: tr('Независимые группы', 'Independent groups') }], q.comparisonDesign, disabled, null)}
+      ${simpleSelectHtml('analyticsComparisonMetric', tr('Показатель', 'Metric'), ['task.rt_mean_ms','task.rt_median_ms','task.accuracy_pct'].map(id => ({ id, label: metricLabel(id) })), q.comparisonMetric, disabled, null)}
+      ${q.comparisonDesign === 'paired'
+        ? `${simpleSelectHtml('analyticsComparisonAxis', tr('Сравнить', 'Compare'), [{ id: 'block', label: tr('Блоки', 'Blocks') }, { id: 'condition', label: tr('Условия', 'Conditions') }], q.comparisonAxis, disabled, null)}${simpleSelectHtml('analyticsReferenceLevel', 'A', levels, q.referenceLevel, disabled, tr('Выберите A', 'Select A'))}${simpleSelectHtml('analyticsComparisonLevel', 'B', levels, q.comparisonLevel, disabled, tr('Выберите B', 'Select B'))}`
+        : `${multi('analyticsReferenceParticipants', tr('Группа A · участники', 'Group A · participants'), q.referenceParticipants)}${multi('analyticsComparisonParticipants', tr('Группа B · участники', 'Group B · participants'), q.comparisonParticipants)}`}` : ''}
+      </div><p style="font-size:11px;color:var(--muted);line-height:1.6;margin:12px 0 0;">${tr('Разница B − A. У каждого участника равный вес; повторные сессии объединяются. Для RT используются правильные валидные ответы. Это описательное сравнение: p-value и доверительные интервалы не рассчитываются. Для групп удерживайте Ctrl/Cmd, чтобы выбрать несколько участников.', 'Difference B − A. Participants receive equal weight; repeated sessions are pooled. RT uses correct valid responses. This is descriptive: no p-values or confidence intervals are computed. Hold Ctrl/Cmd to select multiple group members.')}</p>
+    </section>`;
+  }
+
   function filtersHtml(state) {
     const disabled = state.status === 'loading';
     const protocol = selectedProtocol(state);
-    const versions = protocolVersions(protocol).map(id => ({ id, label: id }));
+    const versions = protocolVersions(protocol).map(id => ({ id, label: protocolVersionLabel(id) }));
     const blocks = state.filterOptions.blocks;
     const stimuli = state.filterOptions.stimuli.filter(row => !state.query.blockId || String(row.blockId || row.block_id) === state.query.blockId);
     const aois = state.filterOptions.aois.filter(row => !state.query.stimulusId || String(row.stimulusId || row.stimulus_id) === state.query.stimulusId);
@@ -1697,28 +1804,30 @@
       </div>
       ${state.query.mode === 'session' && state.importMessage ? `<div id="analyticsResultImportStatus" role="status" aria-live="polite" style="font-size:10px;color:${state.importStatus === 'error' ? 'var(--bad)' : state.importStatus === 'success' ? 'var(--good)' : 'var(--muted)'};">${escapeHtml(state.importMessage)}</div>` : ''}
       ${state.query.mode === 'group' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--stroke);padding-top:10px;"><button type="button" class="quick-btn analytics-level" data-level="level-1" style="${state.groupLevel==='level-1'?'background:rgba(92,102,189,.12);color:var(--accent);border-color:rgba(92,102,189,.3);':''}">${tr('Уровень 1 · Описание','Level 1 · Descriptive')}</button><button type="button" class="quick-btn analytics-level" data-level="level-2" style="${state.groupLevel==='level-2'?'background:rgba(92,102,189,.12);color:var(--accent);border-color:rgba(92,102,189,.3);':''}">${tr('Уровень 2 · Сравнение','Level 2 · Comparison')}</button><button type="button" class="quick-btn" disabled style="opacity:.55;">${tr('Уровень 3 · Модели','Level 3 · Models')} · 🔒</button></div>` : ''}
+      ${state.query.protocolVersion === 'legacy' ? `<p role="status" style="font-size:12px;color:var(--warn);">${tr('У этих сессий нет подтверждённой версии публикации. Показатели доступны, но восстановить исходные AOI и медиа достоверно нельзя; последняя версия не подставляется.', 'These sessions have no verified publication version. Metrics remain available, but original AOIs and media cannot be reliably reconstructed; the latest version is not substituted.')}</p>` : ''}
+      ${comparisonDesignerHtml(state, disabled)}
       <details id="analyticsRefinement" ${(state.refinementOpen ?? Boolean(state.query.groupId || state.query.conditionId || state.query.comparisonId || state.query.blockId || state.query.stimulusId || state.query.aoiId || state.query.dateFrom || state.query.dateTo || state.query.includeIncompleteSessions || state.query.qcMode !== defaultDraft.qcMode || state.query.qcChannels.join(',') !== defaultDraft.qcChannels.join(','))) ? 'open' : ''} style="border-top:1px solid var(--stroke);padding-top:10px;">
         <summary style="cursor:pointer;font-size:11px;font-weight:700;color:var(--text);">${tr('Уточнить выборку','Refine selection')}</summary>
         <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:11px;">
-          ${state.query.mode === 'group' && state.groupLevel === 'level-2' ? simpleSelectHtml('analyticsComparisonFilter', tr('Сравнение','Comparison'), comparisons, state.query.comparisonId, disabled, tr('Выберите сравнение','Select a comparison')) : ''}
+
           ${state.query.mode === 'group' && state.groupLevel === 'level-1' ? simpleSelectHtml('analyticsGroupFilter', tr('Группа','Group'), groups, state.query.groupId, disabled, tr('Все группы','All groups')) : ''}
-          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsConditionFilter', tr('Условие','Condition'), conditions, state.query.conditionId, disabled, tr('Все условия','All conditions')) : ''}
-          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsBlockFilter', tr('Блок / задача','Block / task'), blocks, state.query.blockId, disabled, tr('Все блоки','All blocks')) : ''}
-          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsStimulusFilter', tr('Стимул','Stimulus'), stimuli, state.query.stimulusId, disabled || !state.query.blockId, tr('Все стимулы','All stimuli')) : ''}
-          ${state.query.mode === 'group' ? simpleSelectHtml('analyticsAoiFilter', 'AOI', aois, state.query.aoiId, disabled || !state.query.stimulusId, tr('Все AOI','All AOIs')) : ''}
+          ${state.query.mode === 'group' && state.groupLevel !== 'level-2' ? simpleSelectHtml('analyticsConditionFilter', tr('Условие','Condition'), conditions, state.query.conditionId, disabled, tr('Все условия','All conditions')) : ''}
+          ${state.query.mode === 'group' && state.groupLevel !== 'level-2' ? simpleSelectHtml('analyticsBlockFilter', tr('Блок / задача','Block / task'), blocks, state.query.blockId, disabled, tr('Все блоки','All blocks')) : ''}
+          ${state.query.mode === 'group' && state.groupLevel !== 'level-2' ? simpleSelectHtml('analyticsStimulusFilter', tr('Стимул','Stimulus'), stimuli, state.query.stimulusId, disabled || !state.query.blockId, tr('Все стимулы','All stimuli')) : ''}
+          ${state.query.mode === 'group' && state.groupLevel !== 'level-2' ? simpleSelectHtml('analyticsAoiFilter', 'AOI', aois, state.query.aoiId, disabled || !state.query.stimulusId, tr('Все AOI','All AOIs')) : ''}
           ${state.query.mode === 'session'
             ? `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><input value="${tr('Выбранная сессия · любой QC','Selected session · any QC')}" disabled style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);color:var(--muted);font-size:12px;"></label>`
             : `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><select id="analyticsQcMode" style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);color:var(--text);font-size:12px;"><option value="valid_only" ${state.query.qcMode === 'valid_only' ? 'selected' : ''}>${tr('Только валидные','Valid only')}</option><option value="valid_and_borderline" ${state.query.qcMode === 'valid_and_borderline' ? 'selected' : ''}>${tr('Валидные + пограничные','Valid + borderline')}</option><option value="all" ${state.query.qcMode === 'all' ? 'selected' : ''}>${tr('Все, включая невалидные','All, including invalid')}</option></select></label>`}
         </div>
         <div style="display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin-top:11px;">
           <fieldset style="border:0;padding:0;margin:0;min-width:220px;"><legend style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">${tr('QC-каналы','QC channels')}</legend><div style="display:flex;gap:10px;flex-wrap:wrap;">${channels.map(channel => `<label style="font-size:11px;color:var(--text);display:flex;gap:5px;align-items:center;"><input class="analytics-qc-channel" type="checkbox" value="${escapeHtml(channel)}" ${state.query.qcChannels.includes(channel) ? 'checked' : ''}>${escapeHtml(channelLabel(channel))}</label>`).join('')}</div></fieldset>
-          <label style="font-size:10px;color:var(--muted);">${tr('С','From')}<input id="analyticsDateFrom" type="date" value="${escapeHtml(state.query.dateFrom)}" min="${escapeHtml(state.filterOptions.dateMin)}" max="${escapeHtml(state.filterOptions.dateMax)}" style="display:block;margin-top:5px;padding:8px;border:1px solid var(--stroke);border-radius:9px;background:var(--card-bg);color:var(--text);"></label>
-          <label style="font-size:10px;color:var(--muted);">${tr('По','To')}<input id="analyticsDateTo" type="date" value="${escapeHtml(state.query.dateTo)}" min="${escapeHtml(state.filterOptions.dateMin)}" max="${escapeHtml(state.filterOptions.dateMax)}" style="display:block;margin-top:5px;padding:8px;border:1px solid var(--stroke);border-radius:9px;background:var(--card-bg);color:var(--text);"></label>
+          ${state.query.mode === 'group' ? `<label style="font-size:10px;color:var(--muted);">${tr('С','From')}<input id="analyticsDateFrom" type="date" value="${escapeHtml(state.query.dateFrom)}" style="display:block;margin-top:5px;padding:8px;border:1px solid var(--stroke);border-radius:9px;"></label>
+          <label style="font-size:10px;color:var(--muted);">${tr('По','To')}<input id="analyticsDateTo" type="date" value="${escapeHtml(state.query.dateTo)}" style="display:block;margin-top:5px;padding:8px;border:1px solid var(--stroke);border-radius:9px;"></label>` : `<div style="font-size:10px;color:var(--muted);">${tr('Показана выбранная сессия; даты и фильтр участника не исключают её из отчёта.', 'The selected session is shown; dates and participant filters do not exclude it from the report.')}</div>`}
           <label style="font-size:11px;color:var(--text);display:flex;gap:6px;align-items:center;padding-bottom:8px;"><input id="analyticsIncludeIncomplete" type="checkbox" ${state.query.includeIncompleteSessions ? 'checked' : ''}>${tr('Включить незавершённые','Include incomplete')}</label>
         </div>
       </details>
       ${state.filterOptionsError ? `<div style="font-size:9px;color:var(--warn);">${tr('Backend пока не отдал варианты block/stimulus/AOI. Основные фильтры доступны.','Backend has not returned block/stimulus/AOI options yet. Core filters remain available.')}</div>` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">${state.groupLevel === 'level-2' && state.query.mode === 'group' && !state.query.comparisonId ? `<div style="font-size:10px;color:var(--warn);">${tr('Выберите заранее настроенное сравнение. Факторы и модель задаёт backend.','Select a predefined comparison. Factors and model are configured by the backend.')}</div>` : snapshotStateHtml(state)}<div style="display:flex;gap:7px;flex-wrap:wrap;">${state.snapshot && !state.dirty ? `<button id="analyticsOpenExport" type="button" class="quick-btn">${tr('Экспорт выборки','Export selection')}</button>` : ''}<button id="analyticsResetFilters" type="button" class="quick-btn">${tr('Сбросить','Reset')}</button><button id="analyticsApplyFilters" type="button" class="quick-btn" ${state.snapshotStatus === 'creating' || (state.query.mode === 'session' && !state.query.sessionId) || (state.query.mode === 'group' && state.groupLevel === 'level-2' && !state.query.comparisonId) ? 'disabled' : ''} style="background:var(--accent);border-color:var(--accent);color:white;">${tr('Применить','Apply')}</button></div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">${comparisonIssue(state) ? `<div style="font-size:10px;color:var(--warn);">${escapeHtml(comparisonIssue(state))}</div>` : snapshotStateHtml(state)}<div style="display:flex;gap:7px;flex-wrap:wrap;">${state.snapshot && !state.dirty ? `<button id="analyticsOpenExport" type="button" class="quick-btn">${tr('Экспорт выборки','Export selection')}</button>` : ''}<button id="analyticsResetFilters" type="button" class="quick-btn">${tr('Сбросить','Reset')}</button><button id="analyticsApplyFilters" type="button" class="quick-btn" ${state.snapshotStatus === 'creating' || (state.query.mode === 'session' && !state.query.sessionId) || comparisonIssue(state) ? 'disabled' : ''} style="background:var(--accent);border-color:var(--accent);color:white;">${tr('Применить','Apply')}</button></div></div>
     </div>${appliedChipsHtml(state)}`;
   }
 
@@ -1964,10 +2073,10 @@
       : '16/9';
     const contentUrl = stimulusContentUrl(stimulus.contentUrl);
     return `<article style="padding:14px 0;border-top:${index ? '1px solid var(--stroke)' : '0'};">
+      ${heatmap.reason ? `<p role="status" style="color:var(--warn);font-size:11px;">${escapeHtml(reasonLabel(heatmap.reason))}</p>` : ''}
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:9px;"><div><div style="font-size:12px;font-weight:750;color:var(--text);">${escapeHtml(stimulus.name || stimulus.id || tr('Стимул','Stimulus'))}</div><div style="font-size:9px;color:var(--muted);margin-top:3px;">${escapeHtml(context.blockName || context.blockId || '—')} · v${escapeHtml(stimulus.version || '1')} · ${escapeHtml(context.presentationId || tr('показ не найден','presentation unavailable'))}</div></div><span style="font-size:9px;color:${context.status === 'computed' ? 'var(--good)' : 'var(--muted)'};">${context.status === 'computed' ? tr('Данные рассчитаны','Computed') : tr('Нет данных показа','No presentation data')}</span></div>
       <div style="max-width:920px;margin:0 auto;position:relative;box-sizing:content-box;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">
-        <div class="analytics-stimulus-fallback" style="position:absolute;inset:0;display:${contentUrl ? 'none' : 'flex'};align-items:center;justify-content:center;color:var(--muted);font-size:11px;">${tr('Изображение стимула недоступно','Stimulus image is unavailable')}</div>
-        ${(contentUrl || stimulus.contentError) ? stimulusMediaHtml({ ...stimulus, contentUrl }, 'analytics-stimulus-image') : ''}
+        ${stimulusMediaHtml({ ...stimulus, contentUrl }, 'analytics-stimulus-image')}
         ${state.layers.heatmap && heatmapHasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="session-list" data-visual-index="${index}" role="img" aria-label="${escapeHtml(tr('Тепловая карта фиксаций участника','Participant fixation heatmap'))}" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.66;"></canvas>` : ''}
         ${state.layers.heatmap && !heatmapHasData ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.78);color:var(--muted);font-size:11px;">${tr('Нет валидных фиксаций для тепловой карты','No valid fixations for the heatmap')}</div>` : ''}
         ${aoiOverlayHtml(rows, points, state.layers)}
@@ -1984,7 +2093,7 @@
     const contexts = Array.isArray(data?.contexts) ? data.contexts : [];
     if (!contexts.length) return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')}</div><div style="font-size:10px;color:var(--muted);margin-top:6px;">${tr('В протоколе нет стимулов с размеченными AOI.','The protocol has no stimuli with AOI annotations.')}</div></section>`;
     const participant = data.participantAlias || selectedSession(state)?.participant_id || '—';
-    return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><details open><summary style="cursor:pointer;font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')} ${escapeHtml(participant)} · ${contexts.length}</summary><div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''}> ${tr('Фиксации','Fixations')}</label></div>${contexts.map((context, index) => visualContextHtml(context, state, index)).join('')}</details></section>`;
+    return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><details open><summary style="cursor:pointer;font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')} ${escapeHtml(participant)} · ${contexts.length}</summary><div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''}> ${tr('Фиксации','Fixations')}</label></div>${data.reason ? `<p role="status" style="color:var(--warn);font-size:11px;">${escapeHtml(reasonLabel(data.reason))}</p>` : ''}${contexts.map((context, index) => visualContextHtml(context, state, index)).join('')}</details></section>`;
   }
 
   function resolutionLabel(value) {
@@ -2020,6 +2129,34 @@
 
   function exclusionRowsHtml(exclusions) {
     return exclusions.map((item, index) => `<div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;"><span style="font-weight:700;color:var(--text);">${tr('Проба','Trial')} ${index + 1}</span><span style="color:var(--muted);line-height:1.45;">${escapeHtml(reasonLabel(item.reasonCode))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
+  }
+
+  function passiveAnalyticsHtml(data, group = false) {
+    const definitions = global.EmocogPassiveMetrics?.definitions || [];
+    const metrics = Array.isArray(data?.metrics) ? data.metrics : [];
+    const cards = definitions.map(definition => {
+      const metric = metrics.find(item => item.metricId === definition.id);
+      const observed = metric?.status === 'computed' && Number.isFinite(group ? metric.median : metric.value);
+      const value = observed ? formatMetricNumber(group ? metric.median : metric.value) : tr('Нет данных','No data');
+      const count = group ? metric?.nParticipants : metric?.denominator;
+      const unit = { pct: '%', bpm: tr('уд/мин','bpm'), 'breaths/min': tr('дых/мин','breaths/min'),
+        count: tr('шт.','count'), 'blinks/min': tr('морганий/мин','blinks/min'),
+        'torso/s': tr('длины корпуса/с','torso/s'), index: tr('индекс','index') }[definition.unit] || definition.unit;
+      return `<article data-passive-metric="${escapeHtml(definition.id)}" style="padding:13px;border:1px solid var(--stroke);border-radius:12px;min-width:0;overflow-wrap:anywhere;">
+        <h3 style="font-size:12px;margin:0 0 8px;color:var(--text);">${escapeHtml(definition.label[isEnglish() ? 'en' : 'ru'])}</h3>
+        <div style="font-size:23px;font-weight:750;color:var(--text);">${escapeHtml(value)}${observed ? ` <small style="font-size:11px;">${escapeHtml(unit)}</small>` : ''}</div>
+        <p style="font-size:10px;color:var(--muted);">${group ? tr('Участников','Participants') : tr('Наблюдений','Observations')}: ${count == null ? tr('неизвестно','unknown') : escapeHtml(count)} · ${definition.id === 'body.velocity_p95' ? tr('сохранённое окно','retained window') : tr('вся измеренная сессия','whole measured session')}</p>
+        ${!group && observed ? `<p style="font-size:10px;color:var(--muted);">${tr('Метод','Method')}: ${escapeHtml(metric.algorithm?.version || tr('неизвестно','unknown'))}</p>` : ''}
+        ${!observed ? `<p style="font-size:10px;">${escapeHtml(reasonLabel(metric?.reason || 'signal_data_missing'))}</p>` : ''}
+      </article>`;
+    }).join('');
+    return `<section id="analyticsPassiveSignals" style="padding:16px 18px;border-bottom:1px solid var(--stroke);">
+      <h2 style="font-size:16px;color:var(--text);">${tr('Фоновые показатели','Background signals')}</h2>
+      <p style="font-size:12px;color:var(--muted);">${tr('Собираются без отдельного теста, пока активен анализ камеры; доступность зависит от согласий, настроек и качества сигнала.','Collected without a separate test while camera analysis is active; availability depends on consent, settings and signal quality.')}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:10px;">${cards}</div>
+      <p style="font-size:11px;color:var(--muted);">${group ? tr('Сначала среднее по сессиям каждого участника, затем медиана с равным весом участников.','First average sessions within each participant, then take the median with equal participant weight.') : tr('ЧСС и дыхание — скользящие оценки, не мгновенный ответ на стимул. Удержанные значения не считаются новыми измерениями.','Heart rate and respiration are rolling estimates, not an instantaneous stimulus response. Held values are not fresh measurements.')} ${tr('Число наблюдений не равно числу независимых участников. Мимика — proxy, не настроение; PERCLOS не доказывает микросон. HRV, стресс и диагнозы здесь не вычисляются.','Observation counts are not counts of independent participants. Facial expression is a proxy, not mood; PERCLOS does not prove microsleep. HRV, stress and diagnoses are not computed here.')}</p>
+      <a href="#/analytics/connectedness">${tr('Открыть связанность с RT и деталями проб','Open RT connectedness and trial details')}</a>
+    </section>`;
   }
 
   function audioAnalyticsHtml(audio) {
@@ -2088,7 +2225,7 @@
 
   function sessionShellHtml(state) {
     if (state.summaryStatus === 'loading' || state.summaryStatus === 'idle') return stateCard('loading', tr('Загружаем карточку сессии','Loading session dashboard'), tr('Получаем task metrics и channel QC для зафиксированного snapshot.','Fetching task metrics and channel QC for the fixed snapshot.'));
-    if (state.summaryStatus === 'error') return `<div class="card" style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div style="max-width:520px;"><h2 style="font-size:16px;color:var(--text);margin:0;">${tr('Карточка сессии недоступна','Session dashboard is unavailable')}</h2><button id="analyticsSummaryRetry" class="quick-btn" type="button" style="margin:14px auto 0;background:rgba(92,102,189,.12);color:var(--accent);">${tr('Повторить загрузку','Retry loading')}</button></div></div>`;
+    if (state.summaryStatus === 'error') return `<div class="card" style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;"><div style="max-width:520px;"><h2 style="font-size:16px;color:var(--text);margin:0;">${tr('Карточка сессии недоступна','Session dashboard is unavailable')}</h2><p style="font-size:12px;line-height:1.6;color:var(--muted);">${state.snapshot?.includedSessionIds?.length === 0 ? escapeHtml(tr('Сессия не вошла в выбранную версию или выборку. Выберите её версию публикации и примените выборку заново.', 'The session is outside this publication version or selection. Select its publication version and apply again.')) : escapeHtml(tr('Не удалось получить данные. Попробуйте повторную загрузку; если ошибка повторится, обновите выборку.', 'Unable to fetch data. Retry loading; if the error persists, reapply the selection.'))}</p><button id="analyticsSummaryRetry" class="quick-btn" type="button" style="margin:14px auto 0;background:rgba(92,102,189,.12);color:var(--accent);">${tr('Повторить загрузку','Retry loading')}</button></div></div>`;
     const response = state.summaryResponse;
     const data = response && response.data;
     if (!data || !data.session) return stateCard('empty', tr('Нет данных карточки сессии','No session dashboard data'), tr('Backend вернул snapshot без session summary. Это не нулевой результат.','Backend returned a snapshot without a session summary. This is not a zero result.'));
@@ -2104,11 +2241,12 @@
     const algorithms = [...new Set(metrics.map(metric => metric.algorithm && metric.algorithm.version).filter(Boolean))].join(', ') || '—';
     return `<div class="card" style="padding:0;overflow:hidden;">
       <header style="padding:16px 18px;border-bottom:1px solid var(--stroke);display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;">
-        <div><div style="font-size:10px;color:var(--muted);">${tr('Участник','Participant')} ${escapeHtml(session.participantAlias)}</div><h2 style="font-size:17px;margin:4px 0 0;color:var(--text);">${tr('Сессия','Session')} ${escapeHtml(session.sessionId)}</h2><div style="font-size:10px;color:var(--muted);margin-top:5px;">${escapeHtml(localizedName(protocol, protocol && protocol.name || session.protocolId))} · v${escapeHtml(session.protocolVersion)}</div></div>
+        <div><div style="font-size:10px;color:var(--muted);">${tr('Участник','Participant')} ${escapeHtml(session.participantAlias)}</div><h2 style="font-size:17px;margin:4px 0 0;color:var(--text);">${tr('Сессия','Session')} ${escapeHtml(session.sessionId)}</h2><div style="font-size:10px;color:var(--muted);margin-top:5px;">${escapeHtml(localizedName(protocol, protocol && protocol.name || session.protocolId))} · ${escapeHtml(protocolVersionLabel(session.protocolVersion))}</div></div>
         <div style="text-align:right;"><span style="display:inline-block;padding:5px 9px;border-radius:999px;background:rgba(92,102,189,.09);color:var(--accent);font-size:10px;font-weight:700;">${escapeHtml(statusLabel(session.completionStatus))}</span><div style="font-size:9px;color:var(--muted);margin-top:6px;">${escapeHtml(formatDateTime(session.startedAt))}</div></div>
       </header>
       <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}<div style="font-size:8px;opacity:.75;margin-top:5px;">${escapeHtml(channel.ruleVersion || '—')}</div></article>`; }).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Выполнение задачи','Task performance')}</div>${taskMetrics.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${taskMetrics.map(metricCardHtml).join('')}</div>` : `<div style="font-size:11px;color:var(--muted);">${tr('Метрики задачи не настроены для этого протокола.','Task metrics are not configured for this protocol.')}</div>`}</section>
+      ${passiveAnalyticsHtml(data)}
       ${audioAnalyticsHtml(data.audio)}
       ${qcMetrics.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Показатели качества данных','Data quality metrics')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${qcMetrics.map(metricCardHtml).join('')}</div></section>` : ''}
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${trialValid && trialValid.status === 'computed' ? escapeHtml(trialValid.value) : '—'}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${trialExcluded && trialExcluded.status === 'computed' ? escapeHtml(trialExcluded.value) : exclusions.length}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
@@ -2178,6 +2316,7 @@
     const aoiMetrics = metrics.filter(metric => String(metric.metricId).startsWith('aoi.'));
     const snapshot = response.snapshot;
     return `<div>
+      ${passiveAnalyticsHtml(data, true)}
       <section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Состав выборки','Sample composition')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;margin-top:10px;">${[[tr('Участники','Participants'),data.nParticipants],[tr('Сессии','Sessions'),data.nSessions],[tr('Наблюдения','Observations'),data.nObservations],[tr('Исключённые сессии','Excluded sessions'),(snapshot.excludedSessions||[]).length]].map(([label,value],index)=>`<div style="padding:12px;border:1px solid var(--stroke);border-radius:11px;background:${index===0?'rgba(92,102,189,.08)':'rgba(255,255,255,.3)'};"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;">${label}</div><div style="font-size:${index===0?'25':'20'}px;font-weight:780;color:var(--text);margin-top:5px;">${escapeHtml(value)}</div></div>`).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('QC по каналам','QC by channel')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">${(data.qcByChannel||[]).map(channel=>`<article style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="font-size:10px;font-weight:700;color:var(--text);">${escapeHtml(channelLabel(channel.channel))}</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:9px;"><span style="color:var(--good);">${statusLabel('valid')}: ${channel.valid}</span><span style="color:var(--warn);">${statusLabel('borderline')}: ${channel.borderline}</span><span style="color:var(--bad);">${statusLabel('invalid')}: ${channel.invalid}</span><span style="color:var(--muted);">${statusLabel('not_computed')}: ${channel.notComputed}</span></div></article>`).join('')}</div><details style="margin-top:10px;"><summary style="font-size:10px;font-weight:700;cursor:pointer;">${tr('Missingness и причины исключения','Missingness and exclusion reasons')}</summary><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;">${(data.missingness||[]).map(item=>`<span style="padding:6px 8px;border-radius:8px;background:rgba(100,116,139,.08);font-size:9px;color:var(--muted);">${escapeHtml(reasonLabel(item.reasonCode))}: ${escapeHtml(item.count)}</span>`).join('')}</div>${(snapshot.excludedSessions||[]).map(item=>`<div style="font-size:9px;color:var(--muted);margin-top:6px;">${tr('Сессия','Session')} ${escapeHtml(item.sessionId)} · ${escapeHtml(reasonLabel(item.reasonCode))} · ${escapeHtml(item.channel?channelLabel(item.channel):'—')}</div>`).join('')}</details></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Описательные групповые показатели','Group descriptive metrics')}</div><div style="font-size:9px;color:var(--muted);margin:-5px 0 10px;">${tr('Точки — значения участников; рамка — IQR; тёмная линия — медиана.','Dots are participant values; the box is IQR; the dark line is the median.')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;">${metrics.map(groupMetricCardHtml).join('')}</div></section>
@@ -2207,14 +2346,37 @@
     return { color: 'var(--muted)', bg: 'rgba(100,116,139,.07)', border: 'var(--stroke)' };
   }
 
+  function descriptiveComparisonHtml(response) {
+    const data = response.data;
+    const spec = response.snapshot?.queryEcho?.comparison || {};
+    const unit = data.effectUnit === 'pct' ? tr('п.п.', 'pp') : tr('мс', 'ms');
+    const number = value => value == null ? tr('Нет данных', 'No data') : `${formatMetricNumber(value)} ${unit}`;
+    return `<article id="analyticsDescriptiveComparison" style="padding:18px;">
+      <h2 style="font-size:18px;margin:0;">${tr('Описательное сравнение', 'Descriptive comparison')} · ${escapeHtml(metricLabel(data.metricId))}</h2>
+      <p style="font-size:12px;color:var(--muted);">${data.design === 'paired' ? tr('Одни и те же участники · только полные пары', 'Same participants · complete pairs only') : tr('Две независимые группы участников', 'Two independent participant groups')}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">${[
+        [`A · ${spec.referenceId || tr('группа', 'group')}`, `${number(data.reference.mean)} · N=${data.reference.nParticipants}`],
+        [`B · ${spec.comparisonId || tr('группа', 'group')}`, `${number(data.comparison.mean)} · N=${data.comparison.nParticipants}`],
+        ['B − A', number(data.effect)]
+      ].map(([title, value]) => `<div style="padding:14px;border:1px solid var(--stroke);border-radius:10px;"><div style="font-size:12px;color:var(--muted);">${escapeHtml(title)}</div><strong style="font-size:19px;display:block;margin-top:8px;">${escapeHtml(value)}</strong></div>`).join('')}</div>
+      <p style="font-size:12px;line-height:1.6;">${tr('Каждый участник имеет равный вес. Это не проверка статистической значимости: p-value и доверительные интервалы не рассчитывались.', 'Each participant has equal weight. This is not a significance test: p-values and confidence intervals were not computed.')}</p>
+      ${data.readiness !== 'available' ? `<p role="status">${tr('Недостаточно данных для обеих сторон. Отсутствующие результаты не заменяются нулями.', 'Insufficient data for both sides. Missing results are not replaced with zeros.')}</p>` : ''}
+      <p style="font-size:11px;color:var(--muted);">N ${tr('участников', 'participants')}=${data.nParticipants} · ${tr('ответов', 'responses')}=${data.nObservations} · ${tr('исключено участников с неполными данными', 'participants excluded for missing data')}: ${data.excludedParticipants.length}</p>
+      ${data.unidentifiedSessionCount ? `<p role="status">${tr('Исключено сессий без идентификатора участника', 'Sessions excluded for missing participant ID')}: ${data.unidentifiedSessionCount}</p>` : ''}
+      ${data.pairs.length ? `<div style="overflow:auto;"><table style="width:100%;font-size:12px;"><thead><tr><th>${tr('Участник', 'Participant')}</th><th>A</th><th>B</th><th>B − A</th></tr></thead><tbody>${data.pairs.map(pair => `<tr><td>${escapeHtml(pair.participantId)}</td><td>${escapeHtml(number(pair.reference))}</td><td>${escapeHtml(number(pair.comparison))}</td><td>${escapeHtml(number(pair.difference))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      <footer style="font-size:10px;color:var(--muted);margin-top:15px;overflow-wrap:anywhere;">${escapeHtml(data.formula)} · snapshot ${escapeHtml(response.snapshot?.id)} · ${escapeHtml(response.snapshot?.datasetHash)}</footer>
+    </article>`;
+  }
+
   function comparisonDashboardHtml(state) {
-    if (!state.query.comparisonId) return stateCard('empty', tr('Выберите сравнение','Select a comparison'), tr('На уровне 2 доступны только заранее настроенные сравнения с утверждённой моделью.','Level 2 only offers predefined comparisons with an approved model.'));
+    if (!state.query.comparisonId) return stateCard('empty', tr('Настройте сравнение','Configure a comparison'), tr('Выберите дизайн и две сравниваемые стороны выше.', 'Choose the design and two comparison sides above.'));
     if (!state.snapshot || state.dirty) return stateCard('empty', tr('Примените выборку','Apply the selection'), tr('После применения backend зафиксирует snapshot и проверит готовность сравнения.','After applying, the backend will fix the snapshot and check comparison readiness.'));
     if (state.comparisonStatus === 'loading' || state.comparisonStatus === 'idle') return stateCard('loading', tr('Проверяем готовность сравнения','Checking comparison readiness'), tr('Backend проверяет выборку, совместимость данных и техническое смешение факторов.','The backend is checking the sample, data compatibility, and technical confounding.'));
     if (state.comparisonStatus === 'error') return `<div style="min-height:260px;display:flex;align-items:center;justify-content:center;text-align:center;padding:25px;"><div><div style="font-size:12px;color:var(--bad);">${escapeHtml(state.comparisonError && state.comparisonError.message || '')}</div><button id="analyticsComparisonRetry" class="quick-btn" type="button" style="margin-top:9px;">${tr('Повторить','Retry')}</button></div></div>`;
     const response = state.comparisonResponse;
     const data = response && response.data;
     if (!data) return stateCard('empty', tr('Нет результата сравнения','No comparison result'), tr('Backend не вернул данные. Это состояние не отображается как нулевой эффект.','The backend returned no data. This state is not shown as a zero effect.'));
+    if (data.modelId === 'descriptive-participant-difference') return descriptiveComparisonHtml(response);
     const tone = readinessTone(data.readiness);
     const checks = Array.isArray(data.readinessChecks) ? data.readinessChecks : [];
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
@@ -2353,14 +2515,33 @@
   }
 
   function bindHeatmapCanvases(root) {
+    root.querySelectorAll('.analytics-stimulus-retry').forEach(button => button.addEventListener('click', () => {
+      if (store.state.query.mode === 'group') store.loadGroupHeatmap();
+      else store.loadVisualAnalytics();
+    }));
     root.querySelectorAll('.analytics-stimulus-media').forEach(image => {
+      let readinessTimeout;
       const showFallback = () => {
+        clearTimeout(readinessTimeout);
+        if (!image.isConnected) return;
+        const objectUrl = image.currentSrc || image.src;
+        const source = stimulusMediaSources.get(objectUrl);
+        if (source) {
+          stimulusMediaCache.delete(source);
+          stimulusMediaSources.delete(objectUrl);
+          URL.revokeObjectURL(objectUrl);
+        }
         image.style.display = 'none';
         const fallback = image.parentElement?.querySelector('.analytics-stimulus-fallback');
         if (fallback) fallback.style.display = 'flex';
       };
       image.addEventListener('error', showFallback, { once: true });
       if (image.tagName === 'IMG' && image.complete && !image.naturalWidth) showFallback();
+      if (image.tagName === 'VIDEO' && image.readyState < 2) {
+        image.addEventListener('loadeddata', () => clearTimeout(readinessTimeout), { once: true });
+        readinessTimeout = setTimeout(showFallback, 15000);
+        image.load();
+      }
     });
     root.querySelectorAll('.analytics-heatmap-canvas').forEach(canvas => {
       drawHeatmapCanvas(canvas);
@@ -2396,6 +2577,7 @@
     wrapper.innerHTML = `<nav class="analytics-tabs" aria-label="${tr('Разделы аналитики','Analytics sections')}" role="tablist">${TABS.map(tab => `<button type="button" role="tab" aria-selected="${tab.id === activeTab}" class="analytics-tab ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}" style="border:0;background:transparent;">${tr(tab.ru, tab.en)}</button>`).join('')}</nav><main id="analyticsProductionBody" class="analytics-view-body" style="display:flex;flex-direction:column;gap:12px;"></main>`;
     const body = wrapper.querySelector('#analyticsProductionBody');
     let unsubscribe = null;
+    let pdfInProgress = false;
 
     function renderState(state) {
       if (!body.isConnected) {
@@ -2446,11 +2628,59 @@
           }
         }
       }
+      if (state.status === 'ready' && state.snapshot && !state.dirty) {
+        const requiredStatus = activeTab === 'group-comparison'
+          ? (state.groupLevel === 'level-2' ? state.comparisonStatus : state.groupStatus)
+          : state.summaryStatus;
+        const graphicsBusy = activeTab === 'session-card' ? state.visualStatus === 'loading'
+          : activeTab === 'group-comparison' && (state.groupHeatmapStatus === 'loading' || state.comparisonStatus === 'loading');
+        const ready = requiredStatus === 'ready' && !graphicsBusy;
+        body.firstElementChild?.insertAdjacentHTML('beforeend', `<div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><button id="analyticsPdfDownload" type="button" class="quick-btn" ${!ready || pdfInProgress ? 'disabled' : ''}>${tr('Скачать PDF','Download PDF')}</button><span id="analyticsPdfStatus" role="status" style="font-size:12px;color:var(--muted);"></span></div>`);
+      }
       bindBodyEvents();
       global.requestAnimationFrame(() => bindHeatmapCanvases(body));
     }
 
     function bindBodyEvents() {
+      body.querySelector('#analyticsPdfDownload')?.addEventListener('click', async event => {
+        if (pdfInProgress) return;
+        const state = store.state;
+        const snapshot = state.snapshot;
+        const generation = stimulusMediaGeneration;
+        const snapshotId = snapshot?.id;
+        const button = event.currentTarget;
+        const status = body.querySelector('#analyticsPdfStatus');
+        const en = isEnglish();
+        const controls = JSON.stringify(global.EmocogAnalyticsPdf.selection(body));
+        pdfInProgress = true;
+        button.disabled = true;
+        status.textContent = tr('Формируем текущий отчёт…', 'Preparing the current report…');
+        try {
+          await new Promise(resolve => global.requestAnimationFrame(resolve));
+          const capture = global.EmocogAnalyticsPdf.capture(body);
+          // Reauthorize export on the backend; viewing analytics does not grant export rights.
+          const result = await api.exportSnapshot(state, 'json', 'both');
+          const bundle = JSON.parse(await result.blob.text());
+          validateExportBundle(bundle, state);
+          const assertCurrent = () => {
+            if (!body.isConnected || state.dirty || generation !== stimulusMediaGeneration || store.state.snapshot?.id !== snapshotId
+              || store.state.snapshot?.datasetHash !== snapshot.datasetHash || controls !== JSON.stringify(global.EmocogAnalyticsPdf.selection(body))) throw new Error(tr('Выборка или аккаунт изменились. Сформируйте отчёт заново.', 'Selection or account changed. Generate the report again.'));
+          };
+          assertCurrent();
+          const tab = TABS.find(item => item.id === activeTab);
+          const blob = await global.EmocogAnalyticsPdf.create({ capture, title: en ? tab.en : tab.ru,
+            snapshot: bundle.snapshot, counts: bundle.counts, generatedAt: bundle.generatedAt,
+            en, preview: !!global.EmocogAnalyticsPreviewFixture });
+          assertCurrent();
+          triggerDownload(blob, exportFilename(state, 'pdf').replace('.pdf', `-${activeTab}.pdf`));
+          status.textContent = tr('PDF скачан: текущий отчёт и применённая выборка.', 'PDF downloaded: current report and applied selection.');
+        } catch (error) {
+          if (status.isConnected) status.textContent = tr('Не удалось скачать PDF: ', 'PDF download failed: ') + error.message;
+        } finally {
+          pdfInProgress = false;
+          if (button.isConnected) button.disabled = false;
+        }
+      });
       const refinement = body.querySelector('#analyticsRefinement');
       refinement?.addEventListener('toggle', () => {
         if (refinement.isConnected) store.state.refinementOpen = refinement.open;
@@ -2462,6 +2692,8 @@
       body.querySelector('#analyticsSessionFilter')?.addEventListener('change', event => store.setSession(event.target.value));
       body.querySelector('#analyticsGroupFilter')?.addEventListener('change', event => store.setFilter('groupId', event.target.value));
       body.querySelector('#analyticsConditionFilter')?.addEventListener('change', event => store.setFilter('conditionId', event.target.value));
+      [['analyticsComparisonDesign','comparisonDesign'],['analyticsComparisonMetric','comparisonMetric'],['analyticsComparisonAxis','comparisonAxis'],['analyticsReferenceLevel','referenceLevel'],['analyticsComparisonLevel','comparisonLevel']].forEach(([id, field]) => body.querySelector('#' + id)?.addEventListener('change', event => store.setFilter(field, event.target.value)));
+      [['analyticsReferenceParticipants','referenceParticipants'],['analyticsComparisonParticipants','comparisonParticipants']].forEach(([id, field]) => body.querySelector('#' + id)?.addEventListener('change', event => store.setFilter(field, [...event.target.selectedOptions].map(option => option.value))));
       body.querySelector('#analyticsComparisonFilter')?.addEventListener('change', event => store.setFilter('comparisonId', event.target.value));
       body.querySelector('#analyticsBlockFilter')?.addEventListener('change', event => store.setFilter('blockId', event.target.value));
       body.querySelector('#analyticsStimulusFilter')?.addEventListener('change', event => store.setFilter('stimulusId', event.target.value));
@@ -2505,6 +2737,7 @@
     if (store.listeners.size) store.initialize(true);
   });
   global.addEventListener?.('wecog:researcherauthenticated', clearStimulusMediaCache);
+  global.addEventListener?.('wecog:staffsessionblocked', clearStimulusMediaCache);
   global.AnalyticsView = AnalyticsProductionView;
   global.SessionCardView = function () { return AnalyticsProductionView('session-card'); };
 })(typeof window !== 'undefined' ? window : globalThis);

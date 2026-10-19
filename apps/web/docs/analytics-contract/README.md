@@ -29,7 +29,7 @@
 | `examples/model-result-response.json` | Level 2 readiness/result; пример блокировки confounded-анализа |
 | `examples/analytics-export-both.json` | Export summary + long-format с `null + status/reason` |
 
-Каталог содержит 30 записей, но это не означает 30 карточек на экране. В него входят визуализация heatmap, пользовательские outcomes, дополнительные export-показатели и обязательный технический QC-контекст. Конструктор по умолчанию показывает четыре компактных пакета, а не весь каталог.
+Каталог версии 1.1 содержит 39 записей, но это не означает 39 карточек на экране. В него входят визуализация heatmap, пользовательские outcomes, дополнительные export-показатели и обязательный технический QC-контекст. Конструктор группирует показатели в компактные пакеты; фоновым сигналам соответствует пакет continuous_signals.
 
 ## RT Connectedness Extension (2026-10-08)
 
@@ -38,6 +38,84 @@ Session summaries optionally include `data.connectedness`, with the bounded
 Generic JSON selection exports include this report per session; the Connectedness
 tab also exports snapshot-bound long-format CSV/JSON. Existing metrics retain
 their IDs. This extension does not add group inference or raw video replay.
+
+### Interactive Selection And Background Signals (2026-10-19)
+
+The timeline, scatter points and table select the same trial. Previous/next,
+keyboard activation, an explicit trial selector and 5 s / 30 s zoom are available.
+The detail panel shows all recorded channels before the stimulus, until response
+and after the trial, with valid/total sample counts and maximum signal gaps.
+
+Catalog 1.1 adds nine `continuous_signals` metrics, defined in the shared registry
+`apps/shared/passive-metrics.js`: heart rate, respiration, blink count/rate,
+60 s PERCLOS, body mean/retained-sample P95 velocity and facial valence/arousal
+proxies. Session/group cards and snapshot exports include these metrics even
+for a historical analytics plan which did not select this new package.
+The session PDF includes the currently displayed background-signal section.
+
+Unknown/missing data remains `null + status/reason`. A measured zero is retained;
+unknown sample counts remain unknown, not one. PERCLOS60 requires at least 60 s
+of recorded eye-series time; incomplete recovered eye histories abstain. This
+duration check alone is not independent signal validation. Body P95 refers only
+to retained observations. Legacy physiology method versions are labelled.
+
+Whole-session summaries return `session_summary_not_interval` when a block,
+condition, stimulus or AOI filter is selected. Group aggregation averages sessions
+within each participant before computing the participant-level distribution;
+frames or numbers of sessions do not increase a participant's weight. This is
+descriptive analysis, not inferential comparison of physiological conditions.
+
+`event-windows-1.1.0` optionally adds respiration while retaining compatibility
+with 1.0.0 reports. Respiration requires fresh, non-held published estimates,
+confidence >=0.20 and the existing 6-24/min range. Short RT windows around rolling
+BPM/respiration are contextual only; correlations for these channels are disabled.
+No ECG/RR intervals, HRV, clinical mood or microsleep diagnosis is produced.
+
+Scientific and product rationale:
+
+- [iMotions official analysis documentation](https://imotions.com/products/imotions-lab/features/analysis/): synchronized event context, interactive visualization and timeline zoom as UX reference, not evidence of this product's accuracy.
+- [A linear model for event-related respiration responses](https://discovery.ucl.ac.uk/1522233/1/1-s2.0-S0165027016301224-main.pdf): event-related respiration requires an explicit signal model and design. Our short-window rolling-rate context is not an implementation or validation of that model.
+
+## Publication Versions And Descriptive Comparisons (2026-10-16)
+
+`protocolVersion` identifies an immutable publication, not the JSON format:
+`publication:2`, historical `invitation:123`, or `legacy` for sessions without
+an invitation binding. GET `/protocols` lists `versions`; GET `/sessions` accepts
+`protocol_version` and `include_incomplete`. Filter options, snapshots, images,
+AOIs and exports use the selected publication definition. A format tag such as
+`v2.0_universal` is rejected with 409 when published definitions differ.
+Unverified imports retain session/task metrics but never borrow current AOIs or
+media. Existing snapshots using the previous fingerprint must be recreated.
+
+Group level-2 supports custom **descriptive** comparisons via the canonical
+query `comparison` object, without configuring a backend preset:
+
+```json
+{
+  "design": "paired",
+  "axis": "condition",
+  "metricId": "task.rt_mean_ms",
+  "referenceId": "A",
+  "comparisonId": "B"
+}
+```
+
+The independent design replaces `axis` and level IDs with nonempty disjoint
+`referenceParticipantIds` and `comparisonParticipantIds` (up to 500 each).
+Participant IDs must belong to the selected protocol publication and project.
+Trial-level selection filters are incompatible with this custom design; common
+QC/date filters remain active. GET `/comparisons/custom?snapshot_id=...` returns
+the snapshot-bound result. JSON/CSV exports include the same result and query.
+
+Supported outcomes: mean correct-valid RT, median correct-valid RT, and accuracy
+among quality-valid trials with a boolean correctness result. Trials are pooled across sessions per participant;
+participant estimates then receive equal weight. Paired comparisons retain only
+complete pairs; independent groups cannot overlap. Difference is B minus A;
+accuracy differences are percentage points, not relative percentage changes.
+Missingness, participant N and trial counts are explicit. Confidence intervals
+and p-values remain null: no significance claim or approved inferential model
+is implied. The implementation rejects datasets above 2000 sessions rather than
+silently truncating the analysis. Paginated analysis is a separate follow-up.
 The ingest schema is `packages/shared/contracts/rt-alignment.v1.schema.json`;
 the API exposes it at `/contracts/rt-alignment.v1.schema.json`.
 See `docs/research/rt-connectedness-methods.md` for timing, missingness and

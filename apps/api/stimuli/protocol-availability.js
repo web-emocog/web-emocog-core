@@ -14,6 +14,9 @@ const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
 
 async function inspectProtocolStimuli(queryable, projectId, definition, options = {}) {
   const ids = referencedDatabaseStimulusIds(definition);
+  const visualIds = new Set((definition?.blocks || [])
+    .filter(block => ['cognitive_task', 'stimuli', 'passive'].includes(block?.type))
+    .flatMap(block => referencedDatabaseStimulusIds({ blocks: [block] })));
   const unavailable = referencedStimulusIds(definition)
     .filter(id => !/^[1-9]\d*$/.test(id) && !resolveStandardStimulus(id))
     .map(id => ({ id, code: 'stimulus_not_saved_on_server', name: null }));
@@ -32,6 +35,10 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
     const row = rowsById.get(id);
     if (!row || (options.user && !mayReadStimulus(row, options.user))) {
       unavailable.push({ id, code: 'stimulus_record_missing', name: null });
+      continue;
+    }
+    if (visualIds.has(id) && row.mime_type && !/^(image|video)\//.test(row.mime_type)) {
+      unavailable.push({ id, code: 'stimulus_media_type_unsupported', name: row.name || null });
       continue;
     }
     const resolved = await resolveReadableServerOwnedUploadPath(
@@ -63,7 +70,9 @@ function rejectUnavailableProtocolStimuli(res, report) {
     .join(', ');
   res.status(422).json({
     error: 'Protocol references unavailable stimulus files',
-    message: `Недоступны файлы стимулов: ${labels}. Восстановите их в библиотеке перед публикацией протокола.`,
+    message: report.unavailable.some(item => item.code === 'stimulus_media_type_unsupported')
+      ? `Визуальные блоки поддерживают изображения и видео, но не выбранный тип файла: ${labels}. Замените стимул перед публикацией.`
+      : `Недоступны файлы стимулов: ${labels}. Восстановите их в библиотеке перед публикацией протокола.`,
     code: 'protocol_stimulus_unavailable',
     details: report.unavailable,
   });

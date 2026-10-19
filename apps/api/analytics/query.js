@@ -10,7 +10,7 @@ const FILTER_KEYS = new Set([
   'minSignalConfidence', 'dateFrom', 'dateTo', 'deviceClasses',
   'includeIncompleteSessions',
 ]);
-const COMPARISON_KEYS = new Set(['factorIds', 'contrastIds']);
+const COMPARISON_KEYS = new Set(['factorIds', 'contrastIds', 'design', 'axis', 'metricId', 'referenceId', 'comparisonId', 'referenceParticipantIds', 'comparisonParticipantIds']);
 const ID_ARRAY_KEYS = [
   'participantIds', 'sessionIds', 'groupIds', 'conditionIds', 'blockIds',
   'stimulusIds', 'aoiIds', 'deviceClasses',
@@ -32,7 +32,7 @@ function normalizeDatabaseId(value, field, errors) {
   const normalized = typeof value === 'string' && /^\d+$/.test(value)
     ? Number.parseInt(value, 10)
     : value;
-  if (!Number.isInteger(normalized) || normalized < 1) {
+  if (!Number.isSafeInteger(normalized) || normalized < 1 || normalized > 2147483647) {
     errors.push(`${field} must be a positive integer`);
     return null;
   }
@@ -165,12 +165,42 @@ function validateAnalyticsQuery(input) {
     } else {
       const extraComparison = unknownKeys(input.comparison, COMPARISON_KEYS);
       if (extraComparison.length) errors.push(`unknown comparison fields: ${extraComparison.join(', ')}`);
-      comparison = {
-        factorIds: uniqueArray(input.comparison.factorIds, 'comparison.factorIds', errors, 20).map(String),
-        contrastIds: uniqueArray(input.comparison.contrastIds, 'comparison.contrastIds', errors, 20).map(String),
-      };
-      if (!comparison.factorIds.length || !comparison.contrastIds.length) {
-        errors.push('comparison requires factorIds and contrastIds');
+      if (input.comparison.design != null) {
+        const spec = input.comparison;
+        if (input.mode !== 'group' || input.analysisLevel !== 'level_2') errors.push('descriptive comparisons require group mode and level_2');
+        if (['groupIds', 'conditionIds', 'blockIds', 'stimulusIds', 'aoiIds'].some(key => filters[key].length)) {
+          errors.push('descriptive comparisons use their own levels, not trial-level filters');
+        }
+        const allowed = new Set(spec.design === 'paired'
+          ? ['design', 'metricId', 'axis', 'referenceId', 'comparisonId']
+          : ['design', 'metricId', 'referenceParticipantIds', 'comparisonParticipantIds']);
+        if (unknownKeys(spec, allowed).length) errors.push('comparison contains fields for a different design');
+        if (!['paired', 'independent'].includes(spec.design)) errors.push('comparison.design is invalid');
+        if (!['task.rt_mean_ms', 'task.rt_median_ms', 'task.accuracy_pct'].includes(spec.metricId)) errors.push('comparison.metricId is unsupported');
+        if (!metricIds.includes(spec.metricId)) errors.push('comparison.metricId must be selected');
+        comparison = { design: spec.design, metricId: spec.metricId };
+        if (spec.design === 'paired') {
+          if (!['block', 'condition'].includes(spec.axis)) errors.push('comparison.axis is invalid');
+          comparison.axis = spec.axis;
+          comparison.referenceId = normalizeId(spec.referenceId, 'comparison.referenceId', errors);
+          comparison.comparisonId = normalizeId(spec.comparisonId, 'comparison.comparisonId', errors);
+          if (String(spec.referenceId) === String(spec.comparisonId)) errors.push('comparison levels must differ');
+          comparison.referenceId = String(comparison.referenceId);
+          comparison.comparisonId = String(comparison.comparisonId);
+        } else {
+          comparison.referenceParticipantIds = uniqueArray(spec.referenceParticipantIds, 'comparison.referenceParticipantIds', errors).map(String);
+          comparison.comparisonParticipantIds = uniqueArray(spec.comparisonParticipantIds, 'comparison.comparisonParticipantIds', errors).map(String);
+          if (!comparison.referenceParticipantIds.length || !comparison.comparisonParticipantIds.length) errors.push('comparison requires two nonempty groups');
+          if (comparison.referenceParticipantIds.some(id => comparison.comparisonParticipantIds.includes(id))) errors.push('independent groups must not overlap');
+        }
+      } else {
+        comparison = {
+          factorIds: uniqueArray(input.comparison.factorIds, 'comparison.factorIds', errors, 20).map(String),
+          contrastIds: uniqueArray(input.comparison.contrastIds, 'comparison.contrastIds', errors, 20).map(String),
+        };
+        if (!comparison.factorIds.length || !comparison.contrastIds.length) {
+          errors.push('comparison requires factorIds and contrastIds');
+        }
       }
     }
   }

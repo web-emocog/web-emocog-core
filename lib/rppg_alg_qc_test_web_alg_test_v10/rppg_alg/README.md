@@ -21,8 +21,30 @@ const out = engine.update({
   landmarks,   // landmarks лица от MediaPipe FaceLandmarker
 });
 
-if (out?.valid) console.log(out.bpm, out.confidence, out.weights);
+if (out?.published) console.log(out.bpmPublished, out.confidence, out.weights);
 ```
+
+## Техническая ревизия 2026-10-19
+
+Canonical participant collector использует `continuous_signals.v2`. Hold
+отображается отдельно, но не входит в fresh measurement counts/mean.
+Для дыхания проверяются `respPublished`, `respHeld` и `respConf`; `respRateRaw`
+предназначен только для диагностики. Confidence эвристический, не вероятность
+клинической корректности. Качество на людях без contact reference не подтверждено.
+
+- `_resampleLinear` не дополняет недостаточную историю константами, отклоняет
+  нечисловые/повторные timestamps и длительные пропуски. Для отдельно
+  дискретизированной BPM series (около 2 Hz) явно разрешена её собственная
+  частота, независимо от frame rate камеры.
+- FFT/ACF fusion устраняет integer-lag period aliases с опорой на spectral
+  candidate и параболической интерполяцией ACF; flat/nonfinite input не даёт
+  pulse estimate. Это изменение алгоритма требует paired real-recording
+  regression against previous code до научных выводов.
+- SessionReporter может быть ограничен `maxSamples`; его диапазон помечается
+  `range_scope=retained_samples`. Полносессионные fresh summaries считает
+  participant collector онлайн и переносит через checkpoint.
+- Локальные synthetic tests не валидируют реальную камеру, skin tone,
+  освещение, движение или физиологическое состояние человека.
 
 ## Корректность формул
 - **CHROM**: X = 3R - 2G, Y = 1.5R + G - 1.5B, alpha = std(X)/std(Y), S = X - alpha*Y (streaming last-sample).

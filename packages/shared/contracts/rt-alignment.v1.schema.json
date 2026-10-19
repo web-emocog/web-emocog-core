@@ -10,7 +10,10 @@
     },
     "algorithmVersion": {
       "type": "string",
-      "const": "event-windows-1.0.0"
+      "enum": [
+        "event-windows-1.0.0",
+        "event-windows-1.1.0"
+      ]
     },
     "clock": {
       "type": "string",
@@ -404,6 +407,58 @@
                           "status"
                         ],
                         "additionalProperties": false
+                      },
+                      "respiration": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000000
+                          },
+                          "nValid": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000000
+                          },
+                          "validFraction": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "maxGapMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "minimum": 0
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "observed",
+                              "no_data"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "n",
+                          "nValid",
+                          "validFraction",
+                          "maxGapMs",
+                          "status"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -702,6 +757,58 @@
                           "status"
                         ],
                         "additionalProperties": false
+                      },
+                      "respiration": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000000
+                          },
+                          "nValid": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000000
+                          },
+                          "validFraction": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "maxGapMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "minimum": 0
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "observed",
+                              "no_data"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "n",
+                          "nValid",
+                          "validFraction",
+                          "maxGapMs",
+                          "status"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -950,6 +1057,58 @@
                         "additionalProperties": false
                       },
                       "bpm": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000000
+                          },
+                          "nValid": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000000
+                          },
+                          "validFraction": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "maxGapMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "minimum": 0
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "observed",
+                              "no_data"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "n",
+                          "nValid",
+                          "validFraction",
+                          "maxGapMs",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "respiration": {
                         "type": "object",
                         "properties": {
                           "value": {

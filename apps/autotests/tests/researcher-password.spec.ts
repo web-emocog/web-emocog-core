@@ -58,6 +58,29 @@ test('login preserves the exact password and ignores a stored API redirect', asy
   expect(attempts).toEqual([{ email: 'synthetic@example.test', password: newPassword }]);
 });
 
+test('an unavailable login server is explained separately from rejected credentials and allows retry', async ({ page }) => {
+  let attempts = 0;
+  await page.route('http://127.0.0.1:3000/auth/login', async route => {
+    const headers = { 'Access-Control-Allow-Origin': web, 'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Headers': 'Content-Type,X-Auth-Transport', 'Access-Control-Allow-Methods': 'POST,OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (++attempts === 1) return route.abort('failed');
+    return route.fulfill({ status: 401, headers, json: { error: 'Synthetic credential rejection' } });
+  });
+  await page.goto(`${web}/apps/web/developer/login.html?portal=researcher`);
+  await page.locator('#login').fill('synthetic@example.test');
+  await page.locator('#password').fill(initialPassword);
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось связаться с локальным сервером');
+  await expect(page.getByRole('alert')).not.toContainText('Load failed');
+  await expect(page.locator('#password')).toHaveValue(initialPassword);
+  expect(await page.evaluate(() => localStorage.getItem('emocog_developer_auth'))).toBeNull();
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Synthetic credential rejection');
+  await expect(page.getByRole('alert')).not.toContainText('локальным сервером');
+  expect(attempts).toBe(2);
+});
+
 test('settings submit once, wait for API acceptance, rotate CSRF and clear credentials', async ({ page }, testInfo) => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });

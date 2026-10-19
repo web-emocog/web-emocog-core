@@ -9,7 +9,10 @@ const { HttpError } = require('../security/http-error');
 const { protectSpreadsheetCell, escapeCsv } = require('../security/csv');
 const { loadPinnedStimuli } = require('../stimuli/versions');
 const { buildConnectedness } = require('./connectedness');
+const { standardStimulusPreview, resolveStandardStimulus } = require('../../shared/standard-stimuli');
 const { validateAnalyticsQuery } = require('./query');
+const { resolveProtocolVersion } = require('./protocol-versions');
+const { buildDescriptiveComparison } = require('./comparisons');
 const {
   collectProtocolOptions,
   createSnapshot,
@@ -113,10 +116,16 @@ async function loadLibraryStimuli(projectId, stimulusIds, definition) {
   return new Map(result.rows.map(row => [String(row.id), row]));
 }
 
-function enrichStimulusDescriptor(stimulus, catalog) {
+function enrichStimulusDescriptor(stimulus, catalog, language) {
   if (!stimulus) return null;
   const id = String(stimulus.id == null ? '' : stimulus.id).replace(/^api:/, '');
-  if (!/^\d+$/.test(id)) return stimulus;
+  if (!/^\d+$/.test(id)) {
+    // Never substitute the researcher's current language for a recorded text stimulus.
+    if (resolveStandardStimulus(id)?.type === 'text' && !['ru', 'en'].includes(language)) return stimulus;
+    const preview = standardStimulusPreview(id, { ...stimulus, lang: language });
+    return preview ? { ...stimulus, contentUrl: preview.src, type: 'image',
+      intrinsicWidth: preview.width, intrinsicHeight: preview.height } : stimulus;
+  }
   const library = catalog.get(id);
   if (!library) return { ...stimulus, id, contentUrl: null };
   const metadata = library.metadata && typeof library.metadata === 'object' ? library.metadata : {};
@@ -125,22 +134,27 @@ function enrichStimulusDescriptor(stimulus, catalog) {
     ...stimulus,
     id,
     name: library.name || stimulus.name || id,
-    type: library.mime_type || stimulus.type || 'image',
+    type: String(library.mime_type || '').startsWith('video/') ? 'video'
+      : String(library.mime_type || '').startsWith('image/') ? 'image' : 'other',
     version: library.current_version_id || stimulus.version || 'legacy',
     sha256: library.sha256 || null,
     contentUrl: `/stimuli/${id}/content${library.current_version_id ? '?version=' + library.current_version_id : ''}`,
-    intrinsicWidth: stimulus.intrinsicWidth ?? optionalFiniteNumber(
+    intrinsicWidth: positiveDimension(stimulus.intrinsicWidth ?? optionalFiniteNumber(
       metadata.intrinsic_width ?? metadata.intrinsicWidth ?? metadata.width
-    ) ?? null,
-    intrinsicHeight: stimulus.intrinsicHeight ?? optionalFiniteNumber(
+    )),
+    intrinsicHeight: positiveDimension(stimulus.intrinsicHeight ?? optionalFiniteNumber(
       metadata.intrinsic_height ?? metadata.intrinsicHeight ?? metadata.height
-    ) ?? null,
+    )),
   };
 }
 
-async function enrichSingleStimulus(projectId, data, definition) {
+function positiveDimension(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.max(1, Math.round(value)) : null;
+}
+
+async function enrichSingleStimulus(projectId, data, definition, language) {
   const catalog = await loadLibraryStimuli(projectId, [data?.stimulus?.id], definition);
-  return { ...data, stimulus: enrichStimulusDescriptor(data?.stimulus, catalog) };
+  return { ...data, stimulus: enrichStimulusDescriptor(data?.stimulus, catalog, language) };
 }
 
 function sessionTechnicalDetails(row) {
@@ -385,12 +399,11 @@ router.get('/filter-options', async (req, res) => {
     if (!(await hasProjectMembership(pool, projectId, req.user))) {
       return res.status(404).json({ error: 'Protocol not found', code: 'analytics_protocol_not_found' });
     }
-    const protocol = await loadProtocol(pool, projectId, protocolId);
-    if (!protocol) return res.status(404).json({ error: 'Protocol not found', code: 'analytics_protocol_not_found' });
-    if (req.query.protocol_version && String(req.query.protocol_version) !== protocolVersion(protocol.definition)) {
-      return res.status(409).json({ error: 'Protocol version does not match', code: 'analytics_protocol_version_mismatch' });
-    }
+    const current = await loadProtocol(pool, projectId, protocolId);
+    if (!current) return res.status(404).json({ error: 'Protocol not found', code: 'analytics_protocol_not_found' });
+    const protocol = await resolveProtocolVersion(pool, current, String(req.query.protocol_version || protocolVersion(current.definition)));
     const options = collectProtocolOptions(protocol.definition);
+    options.selectedMetricIds = protocol.definition?.analyticsPlan?.selectedMetricIds || [];
     const catalog = await loadLibraryStimuli(projectId, options.stimuli.map(stimulus => stimulus.id), protocol.definition);
     options.stimuli = options.stimuli.map(stimulus => {
       const library = catalog.get(String(stimulus.id).replace(/^api:/, ''));
@@ -435,7 +448,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
         participantAlias: row.participant_id || null,
         startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
         completedAt: row.stopped_at ? new Date(row.stopped_at).toISOString() : null,
-        completionStatus: row.stopped_at ? 'completed' : 'in_progress',
+        completionStatus: row.features_payload?.experimentMeta?.protocolTermination ? 'aborted' : row.stopped_at ? 'completed' : 'in_progress',
         protocolId: Number(row.protocol_id),
         protocolVersion: hydrated.snapshot.queryEcho.protocolVersion,
         ...technical,
@@ -490,7 +503,7 @@ router.get('/sessions/:sessionRef/aoi', async (req, res) => {
     return res.json(envelope(
       'session_aoi',
       hydrated.snapshot,
-      await enrichSingleStimulus(hydrated.protocol.project_id, data, row.protocol_definition || hydrated.protocol.definition)
+      await enrichSingleStimulus(hydrated.protocol.project_id, data, row.protocol_definition || hydrated.protocol.definition, row.features_payload?.meta?.user?.interfaceLanguage)
     ));
   } catch (error) {
     return responseError(res, error);
@@ -505,7 +518,7 @@ router.get('/sessions/:sessionRef/heatmap', async (req, res) => {
     return res.json(envelope(
       'heatmap',
       hydrated.snapshot,
-      await enrichSingleStimulus(hydrated.protocol.project_id, data, row.protocol_definition || hydrated.protocol.definition)
+      await enrichSingleStimulus(hydrated.protocol.project_id, data, row.protocol_definition || hydrated.protocol.definition, row.features_payload?.meta?.user?.interfaceLanguage)
     ));
   } catch (error) {
     return responseError(res, error);
@@ -527,7 +540,7 @@ router.get('/sessions/:sessionRef/visuals', async (req, res) => {
       row.protocol_definition || hydrated.protocol.definition
     );
     const enriched = contexts.map(context => {
-      const stimulus = enrichStimulusDescriptor(context.stimulus, catalog);
+      const stimulus = enrichStimulusDescriptor(context.stimulus, catalog, row.features_payload?.meta?.user?.interfaceLanguage);
       return {
         ...context,
         stimulus,
@@ -536,7 +549,8 @@ router.get('/sessions/:sessionRef/visuals', async (req, res) => {
     });
     return res.json(envelope('session_visuals', hydrated.snapshot, {
       status: enriched.length ? 'computed' : 'no_data',
-      reason: enriched.length ? null : 'aoi_not_configured',
+      reason: row.features_payload?.gaze_analytics?.summary?.presentationsTruncated
+        ? 'gaze_presentations_truncated' : (enriched.length ? null : 'aoi_not_configured'),
       sessionId: Number(row.id),
       participantAlias: row.participant_id || null,
       contexts: enriched,
@@ -591,6 +605,9 @@ router.get('/groups/heatmap', async (req, res) => {
 router.get('/comparisons/:comparisonId', async (req, res) => {
   try {
     const hydrated = await requireSnapshot(req);
+    if (req.params.comparisonId === 'custom' && hydrated.snapshot.queryEcho.comparison?.design) {
+      return res.json(envelope('model_result', hydrated.snapshot, buildDescriptiveComparison(hydrated.sessionRows, hydrated.snapshot.queryEcho)));
+    }
     const options = collectProtocolOptions(hydrated.protocol.definition);
     const comparison = options.comparisons.find(item => item.id === String(req.params.comparisonId));
     const configured = Boolean(comparison);
@@ -672,6 +689,12 @@ function exportCsv(bundle) {
     metric.nObservations,
     { algorithm: metric.algorithm, scope: metric.scope, sourceKind: metric.sourceKind, statistic: metric.statistic },
   ]));
+  if (bundle.comparison) rows.push([
+    'comparison', bundle.snapshot.id, bundle.snapshot.datasetHash, '', '', '',
+    bundle.comparison.metricId, bundle.comparison.effect, bundle.comparison.effectUnit,
+    bundle.comparison.readiness, bundle.comparison.reason, '', '', bundle.comparison.nParticipants,
+    bundle.counts.sessions, bundle.comparison.nObservations, bundle.comparison,
+  ]);
   return [header, ...rows].map(row => row.map(escapeCsv).join(',')).join('\r\n');
 }
 
@@ -684,6 +707,10 @@ router.get('/exports', requireOperation(OPERATIONS.EXPORT_READ), async (req, res
     }
     const hydrated = await requireSnapshot(req);
     const bundle = buildExportBundle(hydrated, content);
+    if (hydrated.snapshot.queryEcho.comparison?.design) {
+      bundle.comparison = buildDescriptiveComparison(hydrated.sessionRows, hydrated.snapshot.queryEcho);
+      if (bundle.summary) bundle.summary.modelResult = bundle.comparison;
+    }
     const protocolVersionValue = String(bundle.snapshot.queryEcho.protocolVersion).replace(/[^a-zA-Z0-9_.-]/g, '-');
     const filename = `emocog-analytics-v${protocolVersionValue}-${bundle.snapshot.id}.${format}`;
     res.setHeader('X-Analysis-Snapshot-Id', bundle.snapshot.id);
