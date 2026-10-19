@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261019-4';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261019-5';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261019-4';
+} from './ui-updated.js?v=20261019-5';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20261019-4';
+} from './precheck-updated.js?v=20261019-5';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20261019-4';
+} from './tests-updated.js?v=20261019-5';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,15 +34,15 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261019-4';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261019-5';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
-import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261019-4';
-import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261019-4';
-import { mediaContentRect } from './stimulus-geometry.mjs?v=20261019-4';
+import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261019-5';
+import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261019-5';
+import { mediaContentRect } from './stimulus-geometry.mjs?v=20261019-5';
 import {
     captureAudioConsent,
     configureAudioConsentUI

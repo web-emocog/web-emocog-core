@@ -1,6 +1,6 @@
 import { getEmotionSummary } from './emotion-stub-new.js';
-import '../../shared/rt-alignment.js?v=20261019-4';
-import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261019-4';
+import '../../shared/rt-alignment.js?v=20261019-5';
+import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261019-5';
 
 /**
  * Формирование payload агрегатов для отправки на сервер (Фаза 0.1).

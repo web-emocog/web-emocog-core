@@ -4,15 +4,15 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
-import { state, recordSessionEvent } from './state.js?v=20261019-4';
-import { translations } from '../../translations.js?v=20261019-4';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261019-4';
-import { measureRenderFPS } from './camera.js?v=20261019-4';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-4';
+import { state, recordSessionEvent } from './state.js?v=20261019-5';
+import { translations } from '../../translations.js?v=20261019-5';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261019-5';
+import { measureRenderFPS } from './camera.js?v=20261019-5';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-5';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
-import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261019-4';
-import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-4';
+import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261019-5';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-5';
 
 const MVP_STEP = {
     INTRO: 1,
@@ -73,7 +73,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261019-4');
+        const mod = await import('./tests-updated.js?v=20261019-5');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;

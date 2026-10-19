@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 
 const participant = 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
-const moduleVersion = '20261019-4';
+const moduleVersion = '20261019-5';
 const code = 'recovery-invitation';
 const definition = { version: 'v2.0_universal', participantShell: { consent: true, questionnaire: true, precheck: true, calibration: true },
   blocks: [

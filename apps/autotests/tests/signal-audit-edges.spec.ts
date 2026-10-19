@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 const participant = 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
-const version = '20261019-4';
+const version = '20261019-5';
 
 test('cumulative physiology survives reload and repeated snapshots cannot duplicate measurements', async ({ page }) => {
   await page.route('http://127.0.0.1:3000/**', route => route.fulfill({ status: 401, json: {} }));

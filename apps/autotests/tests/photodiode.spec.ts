@@ -32,7 +32,7 @@ async function loadTask(page: Page, fixation = false, media = false) {
         fixationDisplay: document.getElementById('cogFixation')?.style.display });
       return signal(kind);
     };
-    const task = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-4', location.href).href);
+    const task = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-5', location.href).href);
     await task.loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
       version: 'v2-photodiode-regression', blocks: [{ id: 'photodiode-task', type: 'cognitive_task', taskType: 'simple_rt',
         blockConfig: { useFixation: fixation, fixation: { duration: 650 }, stimulusDuration: 5000, responseMode: 'keypress' },

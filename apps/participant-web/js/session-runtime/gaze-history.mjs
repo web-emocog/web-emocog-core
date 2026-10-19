@@ -1,4 +1,4 @@
-import { buildHeatmaps, createHeatmapAccumulator } from '../web-page/heatmap.js?v=20261019-4';
+import { buildHeatmaps, createHeatmapAccumulator } from '../web-page/heatmap.js?v=20261019-5';
 
 export function validateGazeHistory(sessionData) {
     if (sessionData?.heatmapState) createHeatmapAccumulator({}, sessionData.heatmapState);

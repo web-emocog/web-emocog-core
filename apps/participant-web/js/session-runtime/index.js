@@ -1,25 +1,25 @@
-import { state, recordSessionEvent } from '../web-page/state.js?v=20261019-4';
+import { state, recordSessionEvent } from '../web-page/state.js?v=20261019-5';
 import {
     ERROR_KINDS,
     EVENT_CATEGORIES,
     SESSION_STATES
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
-import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261019-4';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261019-4';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261019-4';
+import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261019-5';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261019-5';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261019-5';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs';
 import { SessionAudioCollector } from '../audio/session-audio.js?v=20260915-1';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
-import { SessionDelivery } from './delivery.mjs?v=20261019-4';
-import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261019-4';
-import { combineSignalSummaries } from './signal-history.mjs?v=20261019-4';
-import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261019-4';
-import { showPersistenceNotice } from './persistence-ui.mjs?v=20261019-4';
-import { sendSessionFeature } from './ingest-transport.mjs?v=20261019-4';
-import '../../../shared/protocol-quality.js?v=20261019-4';
+import { SessionDelivery } from './delivery.mjs?v=20261019-5';
+import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261019-5';
+import { combineSignalSummaries } from './signal-history.mjs?v=20261019-5';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261019-5';
+import { showPersistenceNotice } from './persistence-ui.mjs?v=20261019-5';
+import { sendSessionFeature } from './ingest-transport.mjs?v=20261019-5';
+import '../../../shared/protocol-quality.js?v=20261019-5';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
 
@@ -226,7 +226,7 @@ class ParticipantSessionRuntime {
     _scheduleFinalUploadRetry() {
         this.restoringFinal = true;
         const retry = () => {
-            import('../web-page/tests-updated.js?v=20261019-4')
+            import('../web-page/tests-updated.js?v=20261019-5')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };

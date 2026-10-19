@@ -76,6 +76,7 @@ test('active physiology reaches the aggregate worker once, before and after fina
   await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.sessionRuntime);
   const result = await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__, runtime = shared.runtime.sessionRuntime;
+    shared.sessionData.ids = { session: 'synthetic-active-physiology', participant: 'synthetic-participant' };
     shared.sessionData.events = [
       { type: 'stimulus_on', timestamp: 1000, blockId: 'b', trialId: 't', response_mode: 'keyboard' },
       { type: 'response', timestamp: 1400, blockId: 'b', trialId: 't', responded: true, rtMs: 400 },

@@ -1,8 +1,8 @@
 import { extractEyeSignalSample } from '../web-page/eye-signal.js';
 import { updateFromMetrics as updateQcOverlay } from '../qc-pause-overlay-new.js';
-import { SessionQualityDetector } from './quality-detector.mjs?v=20261019-4';
+import { SessionQualityDetector } from './quality-detector.mjs?v=20261019-5';
 import { ERROR_KINDS } from './contracts.mjs';
-import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261019-4';
+import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261019-5';
 import {
     appendEmotionSample,
     endEmotionSession,
@@ -10,9 +10,9 @@ import {
     getEmotionSummary,
     startEmotionSession
 } from '../emotion-stub-new.js';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261019-4';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261019-5';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
-import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261019-4';
+import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
 
 const TARGET_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;

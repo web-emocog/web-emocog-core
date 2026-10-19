@@ -4,32 +4,32 @@ import {
     recordSessionEvent,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20261019-4';
-import { translations } from '../../translations.js?v=20261019-4';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261019-4';
-import { stopPreCheck } from './precheck-updated.js?v=20261019-4';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261019-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261019-4';
+} from './state.js?v=20261019-5';
+import { translations } from '../../translations.js?v=20261019-5';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261019-5';
+import { stopPreCheck } from './precheck-updated.js?v=20261019-5';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261019-5';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261019-5';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
 } from './protocol-invite-utils.js?v=20260915-1';
-import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261019-4';
-import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261019-4';
+import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261019-5';
+import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261019-5';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261019-4';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261019-5';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-4';
-import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261019-4';
-import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-4';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-5';
+import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261019-5';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-5';
 import {
     getContentViewport,
     targetCenterInContentViewport
@@ -45,12 +45,12 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261019-4';
+} from '../session-runtime/index.js?v=20261019-5';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
     showCalibrationHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20261019-4';
+} from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
 
 function participantMessage(key, replacements = {}) {
     const pack = translations[state.currentLang] || translations.en;

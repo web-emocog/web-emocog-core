@@ -1,5 +1,5 @@
-import { state, clearTaskContext, setSessionPhase, recordSessionEvent } from '../../web-page/state.js?v=20261019-4';
-import { translations } from '../../../translations.js?v=20261019-4';
+import { state, clearTaskContext, setSessionPhase, recordSessionEvent } from '../../web-page/state.js?v=20261019-5';
+import { translations } from '../../../translations.js?v=20261019-5';
 import { getEmotionSample } from '../../emotion-stub-new.js';
 import { TEST_IDS, TEST_PHASES } from './constants.js';
 import {
@@ -7,14 +7,14 @@ import {
     pushHubSelection,
     pushHubRun
 } from './session-schema.js';
-import { runVPCTest } from './vpc/runner.js?v=20261019-4';
-import { runVisuospatialDrawingTest } from './visuospatial/runner.js?v=20261019-4';
+import { runVPCTest } from './vpc/runner.js?v=20261019-5';
+import { runVisuospatialDrawingTest } from './visuospatial/runner.js?v=20261019-5';
 import {
     startGazeTestsAnalysisLoop,
     stopGazeTestsAnalysisLoop,
     isGazeTestsAnalysisLoopRunning
-} from './common/analysis-loop.js?v=20261019-4';
-import { getSessionRuntime } from '../../session-runtime/index.js?v=20261019-4';
+} from './common/analysis-loop.js?v=20261019-5';
+import { getSessionRuntime } from '../../session-runtime/index.js?v=20261019-5';
 
 let hubBusy = false;
 let hubEmotionTimer = null;

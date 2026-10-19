@@ -17,7 +17,7 @@ export function publishedRespiration(features = {}) {
 }
 
 const MODULE_URL = new URL(
-    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261019-4',
+    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261019-5',
     import.meta.url
 );
 

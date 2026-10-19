@@ -1,8 +1,8 @@
 /**
  * Compatibility facade. Transport logic lives only in ingest-transport.mjs.
  */
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-4';
-import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261019-4';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-5';
+import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261019-5';
 
 export async function sendSessionData(sessionData, options = {}) {
     const payload = sessionData?.schemaVersion === 'session_feature.v1'

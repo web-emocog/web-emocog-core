@@ -732,6 +732,11 @@ S2_TEST_DATABASE_URL=postgres://... \
 
 Дополнительно перед передачей:
 
+PostgreSQL release gate запускает отдельный disposable-контейнер через
+`scripts/start-ci-postgres.sh`: оба registry-источника закреплены одним digest,
+проверка готовности обязательна, порты доступны только на loopback. Скрипт
+не заменяет существующий контейнер и вне CI требует явного разрешения local test.
+
 ```bash
 git diff --check
 git status --short

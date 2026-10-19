@@ -1,6 +1,6 @@
 import { ERROR_KINDS, SESSION_STATES } from './contracts.mjs';
-import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20261019-4';
-import { translations } from '../../translations.js?v=20261019-4';
+import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
+import { translations } from '../../translations.js?v=20261019-5';
 
 const POLICY_TEXT = {
     ru: {

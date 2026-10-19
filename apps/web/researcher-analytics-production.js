@@ -151,7 +151,7 @@
       )) : source.events };
     }
     const moduleUrl = new URL(
-      '../participant-web/js/unified-aggregates-new.js?v=20261019-4',
+      '../participant-web/js/unified-aggregates-new.js?v=20261019-5',
       global.location.href
     );
     const aggregates = await import(moduleUrl.href);
@@ -220,8 +220,8 @@
       project_id: projectId,
       protocol_id: protocolId,
     });
-    const { fetchWithDeadline } = await import('../participant-web/js/session-runtime/http.mjs?v=20261019-4');
-    const { validIngestAcknowledgement } = await import('../participant-web/js/session-runtime/ingest-transport.mjs?v=20261019-4');
+    const { fetchWithDeadline } = await import('../participant-web/js/session-runtime/http.mjs?v=20261019-5');
+    const { validIngestAcknowledgement } = await import('../participant-web/js/session-runtime/ingest-transport.mjs?v=20261019-5');
     const { response, result } = await fetchWithDeadline(importApiUrl('/ingest'), {
       method: 'POST',
       headers: resultImportHeaders(idempotencyKey),
