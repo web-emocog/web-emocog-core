@@ -11,11 +11,17 @@ The normal release trigger is a merged pull request that updates `main`.
 4. It pushes both images to Yandex Container Registry under the full commit SHA.
 5. Through a short-lived OS Login certificate it asks the VM's root-owned release controller to prepare the release.
 6. The VM reads production values from Lockbox using its attached runtime service account, pulls the images, creates and validates a PostgreSQL dump and uploads archive, then uploads checksums and a completion manifest to Object Storage. Empty uploads are recorded in the manifest without uploading an empty archive.
-7. GitHub creates a boot-disk snapshot only after the logical database backup has completed.
+7. Snapshot inventory access is checked before image builds or VM changes. Only
+   after the logical database/media backup completes, GitHub rotates expired
+   owned snapshots to reserve a slot and creates a verified `READY` boot-disk
+   snapshot. Listing, cleanup or snapshot verification failures block deployment.
 8. The VM applies forward migrations, starts the images, and checks database readiness and web health.
 9. If health checks fail, the controller starts the previously recorded application images again. It does not automatically reverse database migrations.
 10. GitHub verifies `/` and `/api/ready` through public HTTPS.
-11. Only after the public checks pass, GitHub removes old snapshots carrying both `app=wecog` and `reason=predeploy`, retaining the newest five.
+11. The snapshot helper targets five automatic snapshots including the new
+    pre-deploy copy. It preserves the previous recovery copy and all manual,
+    baseline, foreign-folder/disk and non-READY snapshots. It never deploys
+    without the new snapshot, even when cloud quota is exhausted.
 
 A separate systemd timer creates a validated PostgreSQL dump every day at 00:30 UTC, with a random delay of up to 15 minutes. This protects the database even during periods without deployments.
 
@@ -218,6 +224,45 @@ The retention policy is intentionally bounded:
 The VM also retains only the current and previous local `wecog-api` and `wecog-web` image tags after a healthy deployment or rollback. This cleanup matches those two exact registry repository names and does not prune unrelated Docker images or containers.
 
 The manually created baseline snapshot and the manually uploaded baseline archives are protected because automated cleanup selects only labelled snapshots and objects under the `postgresql/` prefix. Successful backup files are deleted from the VM after the entire set and completion manifest reach Object Storage.
+
+Disk rotation is implemented by `deploy/production/prepare-disk-snapshot.cjs`.
+`--check-only` performs a read-only inventory/access preflight. Normal mode runs
+after the validated logical backup and before migrations/container changes.
+Only `READY` snapshots in the exact folder, from the exact disk, with both
+automation labels, a release commit label and the `wecog-predeploy-...` name
+are eligible. Inventory is rechecked before each deletion. CLI errors and
+malformed JSON cannot be swallowed by a shell process substitution.
+
+`YC_AUTOMATED_SNAPSHOTS_TO_KEEP=5` is the target including the new snapshot.
+`YC_MIN_AUTOMATED_SNAPSHOTS_TO_KEEP` reads the repository Actions variable
+`PRODUCTION_MIN_SNAPSHOTS_TO_KEEP` (default `5`). When explicitly approved and configured, it
+permits an adaptive lower target only on an actual snapshot size/count quota
+error. Without it, the minimum equals five; quota pressure cannot silently
+reduce the policy. A minimum of two preserves the latest previous automatic
+copy until the new one is verified READY. Manual/baseline snapshots and logical
+database/media backups are never used as deletion candidates. A bounded retry
+allows for delayed quota accounting after deletion. Other failures do not
+authorize additional cleanup. If the approved floor is reached, the release
+fails and the operator must review cloud quota/unrelated snapshots.
+
+For an approved two-copy minimum an authorized maintainer can set
+`gh variable set PRODUCTION_MIN_SNAPSHOTS_TO_KEEP --body 2`. Do not set this
+without the owner's approval; an unset variable preserves the five-copy policy.
+Deleting the variable restores that default for subsequent runs. It does not
+restore copies already removed by an approved rotation.
+
+An October 19 deployment failed with `ResourceExhausted` during snapshot create.
+The October 9 job had also logged `PermissionDenied` on snapshot listing while
+returning success from a Bash process substitution. A green historical workflow
+therefore does not prove that retention ran. Verify the deploy service account's
+actual folder binding to `compute.snapshotSchedules.editor` (list/create/delete),
+rather than granting broad `editor`/`admin`. Current IAM bindings/quota must be
+checked by an authenticated cloud operator if preflight fails; workflow code
+does not grant roles or increase cloud limits.
+
+Official references: [snapshot CLI](https://yandex.cloud/en/docs/cli/cli-ref/compute/cli-ref/snapshot/),
+[Compute roles](https://yandex.cloud/en/docs/compute/security/),
+[snapshot quotas](https://yandex.cloud/en/docs/compute/concepts/limits#snapshot-quotas).
 
 ### Configure Object Storage lifecycle once
 

@@ -23,6 +23,7 @@ env:
   YC_VM_DISK_ID: fv4naqkghr1orqdh6fl3
   YC_VM_HOST_KEY_SHA256: SHA256:SNEvnvsNL+F+wJ+qXf77r3f8fCBlHRoyhZov+o6z5N0
   YC_AUTOMATED_SNAPSHOTS_TO_KEEP: "5"
+  YC_MIN_AUTOMATED_SNAPSHOTS_TO_KEEP: ${{ vars.PRODUCTION_MIN_SNAPSHOTS_TO_KEEP || '5' }}
 
 jobs:
   deploy:
@@ -88,6 +89,9 @@ jobs:
           yc config set folder-id "${YC_FOLDER_ID}" >/dev/null
           printf '%s' "${YC_IAM_TOKEN}" \
             | docker login --username iam --password-stdin cr.yandex
+
+      - name: Verify snapshot inventory access before deployment side effects
+        run: node deploy/production/prepare-disk-snapshot.cjs --check-only
 
       - name: Set up Docker Buildx
         uses: ./.github/actions/setup-container-builder
@@ -161,14 +165,7 @@ jobs:
             sudo -n /usr/local/sbin/wecog-release prepare "${GITHUB_SHA}"
 
       - name: Create pre-deploy disk snapshot
-        run: |
-          snapshot_name="wecog-predeploy-$(date --utc +'%Y%m%d-%H%M%S')-${GITHUB_SHA:0:8}"
-          yc compute snapshot create \
-            --folder-id "${YC_FOLDER_ID}" \
-            --name "${snapshot_name}" \
-            --description "Wecog automatic pre-deploy snapshot for ${GITHUB_SHA}" \
-            --labels "app=wecog,reason=predeploy,commit=${GITHUB_SHA:0:12}" \
-            --disk-id "${YC_VM_DISK_ID}"
+        run: node deploy/production/prepare-disk-snapshot.cjs
 
       - name: Deploy the prepared release
         run: |
@@ -188,28 +185,3 @@ jobs:
           curl --fail --silent --show-error \
             --retry 10 --retry-delay 3 --retry-all-errors \
             https://wecog.ru/api/ready >/dev/null
-
-      - name: Keep only the latest automated pre-deploy snapshots
-        run: |
-          mapfile -t stale_snapshot_ids < <(
-            yc compute snapshot list \
-              --folder-id "${YC_FOLDER_ID}" \
-              --format json \
-              | jq --raw-output \
-                  --arg disk_id "${YC_VM_DISK_ID}" \
-                  --argjson keep "${YC_AUTOMATED_SNAPSHOTS_TO_KEEP}" '
-                    [
-                      .[]
-                      | select(.source_disk_id == $disk_id)
-                      | select(.labels.app == "wecog")
-                      | select(.labels.reason == "predeploy")
-                    ]
-                    | sort_by(.created_at)
-                    | reverse
-                    | .[$keep:][]?.id
-                  '
-          )
-
-          for snapshot_id in "${stale_snapshot_ids[@]}"; do
-            yc compute snapshot delete --id "${snapshot_id}"
-          done
