@@ -219,11 +219,26 @@ jobs:
           retention-days: 7
 
   frame-pipeline-regression:
-    name: Frame pipeline and FPS diagnostics (three engines)
-    runs-on: ubuntu-24.04
+    name: Frame pipeline and FPS diagnostics (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            browsers: chromium firefox
+            engines: chromium,firefox
+            projects: --project=chromium --project=firefox
+            headed: '1'
+          - os: macos-15
+            browsers: webkit
+            engines: webkit
+            projects: --project=webkit
+            headed: '0'
     env:
-      WECOG_TEST_HEADED: '1'
+      WECOG_TEST_HEADED: ${{ matrix.headed }}
+      WECOG_TEST_ENGINES: ${{ matrix.engines }}
       LIBGL_ALWAYS_SOFTWARE: 'true'
       GALLIUM_DRIVER: llvmpipe
     steps:
@@ -238,25 +253,38 @@ jobs:
       - name: Install browser test dependencies
         working-directory: apps/autotests
         run: npm ci
-      - name: Install the three regression engines
+      - name: Install regression engines for this platform
         working-directory: apps/autotests
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: npx playwright install --with-deps ${{ matrix.browsers }}
       - name: Install software OpenGL for the virtual display
+        if: runner.os == 'Linux'
         run: sudo apt-get install --yes --no-install-recommends libgl1-mesa-dri libegl-mesa0 mesa-utils
       - name: Verify window and Worker WebGL2 in every engine
         working-directory: apps/autotests
-        run: xvfb-run --auto-servernum npm run test:vision-gl
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run --auto-servernum npm run test:vision-gl
+          else
+            npm run test:vision-gl
+          fi
       - name: Run isolated frame pipeline regression
         working-directory: apps/autotests
-        run: xvfb-run --auto-servernum npm run test:frame-workers
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run --auto-servernum npm run test:frame-workers -- ${{ matrix.projects }}
+          else
+            npm run test:frame-workers -- ${{ matrix.projects }}
+          fi
       - name: Run isolated FPS and quality diagnostics
         working-directory: apps/autotests
-        run: npm run test:fps
+        run: npm run test:fps -- ${{ matrix.projects }}
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: frame-pipeline-failure-${{ github.run_id }}
+          name: frame-pipeline-failure-${{ matrix.os }}-${{ github.run_id }}
           path: |
             apps/autotests/test-results
           retention-days: 7

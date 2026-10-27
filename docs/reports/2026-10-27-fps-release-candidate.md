@@ -129,6 +129,18 @@ The first Linux workflow's general Chromium/Firefox job, API, PostgreSQL,
 CodeQL and container builds all completed successfully; only the new GL/model
 job failed. Its rerun remains a separate verification, not a retroactive pass.
 
+The second Linux preflight confirmed real window and Worker GL for Chromium and
+Firefox under Xvfb/llvmpipe. Linux WebKit had window GL but no Worker GL; it failed
+early as intended, without skipping model assertions. This is distinct from the
+tested macOS WebKit port. The required job is therefore a two-platform matrix:
+Chromium/Firefox model and FPS checks on Linux, the same WebKit checks on macOS 15.
+Every engine retains its full assertions, zero retries and a required preflight;
+failure of either platform fails the aggregate release gate. No Linux WebKit
+Worker support is claimed. The pending hardware/installed-browser acceptance
+and Firefox throughput limitation remain unchanged. Playwright itself recommends
+macOS WebKit for the closest Safari behavior, rather than treating all ports as
+identical: [browser platforms](https://playwright.dev/docs/browsers).
+
 References: [Playwright CI / headed execution](https://playwright.dev/docs/ci)
 and [Mesa software rendering variables](https://docs.mesa3d.org/envvars.html).
 This software CI configuration must not be used as a hardware performance claim.

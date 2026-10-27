@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { chromium, firefox, webkit } from 'playwright';
 
+const engines = { chromium, firefox, webkit };
+const selected = (process.env.WECOG_TEST_ENGINES || 'chromium,firefox,webkit').split(',');
+assert.ok(selected.length > 0 && selected.every(name => Object.hasOwn(engines, name))
+  && new Set(selected).size === selected.length, 'invalid CI engine selection');
+
 const workerSource = `
   try {
     const gl = new OffscreenCanvas(1, 1).getContext('webgl2');
@@ -26,7 +31,8 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 // Functional CI requires a real WebGL implementation, including in Workers.
 // Software rendering is valid here, but cannot establish hardware FPS acceptance.
 try {
-for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
+for (const name of selected) {
+  const engine = engines[name];
   const browser = await engine.launch({
     headless: process.env.WECOG_TEST_HEADED !== '1',
     ...(name === 'chromium' ? { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {}),
