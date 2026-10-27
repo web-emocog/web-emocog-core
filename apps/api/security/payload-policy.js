@@ -600,6 +600,7 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   validateLifecycle(payload.lifecycle, errors);
   validateEvents(payload.events, limits, errors);
   validateResearchExtensions(payload, errors);
+  errors.push(...require('./gaze-validation').validateGazeValidation(payload.gazeValidation));
   if (payload.rt_alignment !== undefined) {
     errors.push(...require('../analytics/connectedness').validateAlignment(payload.rt_alignment));
   }

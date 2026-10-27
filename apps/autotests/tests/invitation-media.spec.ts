@@ -87,7 +87,7 @@ test.describe('Large invitation media hotfix', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const url = new URL('js/web-page/experimental_task-updated.js?v=20261019-5', window.location.href).href;
+        const url = new URL('js/web-page/experimental_task-updated.js?v=20261025-1', window.location.href).href;
         const { loadAndStartCognitiveTask } = await import(url);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });

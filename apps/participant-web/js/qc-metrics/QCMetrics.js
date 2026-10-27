@@ -9,11 +9,11 @@
  */
 
 import { createThresholds, VIDEO_ELEMENT_IDS } from './constants.js';
-import { VideoFpsMonitor } from './fps-monitor.js';
+import { VideoFpsMonitor } from './fps-monitor.js?v=20261025-1';
 import { createGazeState, addGazePoint, accumulateGazeTime } from './gaze-tracking.js';
-import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261019-5';
+import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261025-1';
 import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
-import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261019-5';
+import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261025-1';
 
 class QCMetrics {
     constructor(options = {}) {
@@ -178,9 +178,9 @@ class QCMetrics {
     /**
      * Установка реального FPS камеры. Совместимо с обёрткой.
      */
-    setCameraFps(fps) {
+    setCameraFps(fps, details) {
         if (typeof fps !== 'number' || fps < 0) return;
-        this._fpsMonitor.setCameraFps(fps);
+        this._fpsMonitor.setCameraFps(fps, details);
     }
 
     /**

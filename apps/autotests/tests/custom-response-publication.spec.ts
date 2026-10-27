@@ -92,7 +92,7 @@ for (const [code, ru] of [['KeyD', 'в'], ['KeyC', 'с'], ['KeyV', 'м'], ['KeyB
         const shared = (window as any).__WECOG_STATE__;
         shared.currentLang = 'en';
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-5', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261025-1', location.href).href);
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'custom-keys-test', blocks: [
           { id: 'instructions', type: 'instruction', content: { titleEn: 'Custom response', textEn: 'When the stimulus appears, press Space quickly. Keep looking at the center.' } },
           { id: 'keys', type: 'cognitive_task', taskType: 'simple_rt', blockConfig: { responseMode: 'keypress', useFixation: false },

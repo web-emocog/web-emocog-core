@@ -17,7 +17,7 @@ export function publishedRespiration(features = {}) {
 }
 
 const MODULE_URL = new URL(
-    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261019-5',
+    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261025-1',
     import.meta.url
 );
 
@@ -125,21 +125,25 @@ export class ContinuousBpmCollector {
         return false;
     }
 
-    process(video, landmarks, timestampMs = performance.now()) {
+    process(video, landmarks, timestampMs = performance.now(), sharedPixels = null, captureWallTime = null) {
         if (this.finalized || !this.ready || !this.engine || !this.context || !Array.isArray(landmarks)) return null;
         if (!Number.isFinite(timestampMs) || (this.lastFrameTimestamp !== null && timestampMs <= this.lastFrameTimestamp)) return null;
-        const width = video?.videoWidth || 0;
-        const height = video?.videoHeight || 0;
+        const wallTime = Number.isFinite(captureWallTime) ? captureWallTime : Date.now();
+        const width = sharedPixels?.width || video?.videoWidth || 0;
+        const height = sharedPixels?.height || video?.videoHeight || 0;
         if (!width || !height || landmarks.length < 468) return null;
         this.lastFrameTimestamp = timestampMs;
 
         try {
-            if (this.canvas.width !== width || this.canvas.height !== height) {
-                this.canvas.width = width;
-                this.canvas.height = height;
+            let imageData = sharedPixels;
+            if (!imageData || imageData.width !== width || imageData.height !== height) {
+                if (this.canvas.width !== width || this.canvas.height !== height) {
+                    this.canvas.width = width;
+                    this.canvas.height = height;
+                }
+                this.context.drawImage(video, 0, 0, width, height);
+                imageData = this.context.getImageData(0, 0, width, height);
             }
-            this.context.drawImage(video, 0, 0, width, height);
-            const imageData = this.context.getImageData(0, 0, width, height);
             // MediaPipe may expose immutable landmark objects (notably in WebKit).
             // rPPG receives an owned plain-data snapshot so downstream processing
             // cannot trip over readonly host objects.
@@ -174,7 +178,7 @@ export class ContinuousBpmCollector {
                 }, timestampMs);
             }
             const sample = {
-                t: Date.now(),
+                t: wallTime,
                 monotonicMs: performance.timeOrigin + timestampMs,
                 bpm: publication.bpm,
                 published: measuredBpm,

@@ -4,32 +4,33 @@ import {
     recordSessionEvent,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20261019-5';
-import { translations } from '../../translations.js?v=20261019-5';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261019-5';
-import { stopPreCheck } from './precheck-updated.js?v=20261019-5';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261019-5';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261019-5';
+} from './state.js?v=20261025-1';
+import { translations } from '../../translations.js?v=20261025-1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261025-1';
+import { stopPreCheck } from './precheck-updated.js?v=20261025-1';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261025-1';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261025-1';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
 } from './protocol-invite-utils.js?v=20260915-1';
-import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261019-5';
-import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261019-5';
+import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261025-1';
+import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261025-2';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261019-5';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261025-1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
+import { createValidationSamplingWindow, validationTargetCoverage } from '../gaze-tracker/validation-sampling.mjs';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261019-5';
-import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261019-5';
-import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261019-5';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261025-1';
+import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261025-1';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261025-1';
 import {
     getContentViewport,
     targetCenterInContentViewport
@@ -45,12 +46,12 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261019-5';
+} from '../session-runtime/index.js?v=20261025-1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
     showCalibrationHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
+} from '../gaze-tracker/head-pose-guide.js?v=20261025-1';
 
 function participantMessage(key, replacements = {}) {
     const pack = translations[state.currentLang] || translations.en;
@@ -918,7 +919,7 @@ export function startGazeValidation() {
     state.flags.isValidating = true;
     state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
     
-    const SAMPLES_PER_POINT = 60; // ~2 секунды при 30 FPS
+    const POLLS_PER_POINT = 60; // ~2 seconds; only unique capture predictions become samples.
     const SAMPLE_INTERVAL = 33; // ~30 FPS
     const SETTLE_DELAY_MS = 1000;
     let currentSamples = [];
@@ -1028,6 +1029,9 @@ export function startGazeValidation() {
         samplingDelayTimeout = setTimeout(() => {
             samplingDelayTimeout = null;
             if (!state.flags.isValidating) return;
+            const samplingWindow = createValidationSamplingWindow({
+                monotonicStart: performance.now(), wallStart: Date.now()
+            });
             // Начинаем сбор семплов
             samplingInterval = setInterval(() => {
                 const prediction = state.runtime.currentGazePrediction;
@@ -1041,6 +1045,7 @@ export function startGazeValidation() {
                     prediction?.valid !== false
                     && Number.isFinite(signalX)
                     && Number.isFinite(signalY)
+                    && samplingWindow.accept(prediction)
                 ) {
                     currentSamples.push({
                         gazeX: signalX,
@@ -1055,12 +1060,13 @@ export function startGazeValidation() {
                         ood: prediction.ood || null,
                         targetX: targetX,
                         targetY: targetY,
-                        t: Date.now()
+                        frameTimestamp: Number.isFinite(prediction.frameTimestamp) ? prediction.frameTimestamp : null,
+                        t: Number.isFinite(prediction.timestamp) ? prediction.timestamp : null
                     });
                 }
                 sampleCount++;
                 
-                if (sampleCount >= SAMPLES_PER_POINT) {
+                if (sampleCount >= POLLS_PER_POINT) {
                     clearInterval(samplingInterval);
                     state.runtime.validationSamplingInterval = null;
                     
@@ -1074,6 +1080,7 @@ export function startGazeValidation() {
                         targetX: targetX,
                         targetY: targetY,
                         samples: currentSamples,
+                        sampling: samplingWindow.summary(),
                         timestamp: Date.now()
                     });
                     
@@ -1317,6 +1324,7 @@ export function startGazeValidation() {
         const useCorrected = postCalibrationCorrection.applied && independentDecision.accepted;
         const selectedPoints = useCorrected ? correctedCandidatePoints : baselinePoints;
         const metrics = useCorrected ? correctedCandidateMetrics : rawMetrics;
+        const coverage = validationTargetCoverage(selectedPoints, benchmarkPositions.length);
         const qcValidationSamples = flattenValidationSamples(selectedPoints);
         if (postCalibrationCorrection.applied && !useCorrected) {
             state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
@@ -1364,6 +1372,10 @@ export function startGazeValidation() {
         };
 
         state.sessionData.gazeValidation = {
+            samplingVersion: 'unique_capture.v1',
+            sampling: [...state.runtime.validationPoints, ...state.runtime.validationBenchmarkPoints]
+                .map(({ stage, pointIndex, sampling }) => ({ stage, pointIndex, ...sampling })),
+            coverage,
             timestamp: Date.now(),
             coordinateSpace: 'content_viewport',
             targetBlindPrediction: true,
@@ -1377,13 +1389,16 @@ export function startGazeValidation() {
             baselineVsNew,
             postCalibrationCorrection,
             passed:
-                Number.isFinite(metrics.accuracyPct)
+                coverage.complete
+                && Number.isFinite(metrics.accuracyPct)
                 && Number.isFinite(metrics.precisionPct)
                 && metrics.accuracyPct <= DEFAULT_THRESHOLDS.gaze_accuracy_pct_max
                 && metrics.precisionPct <= DEFAULT_THRESHOLDS.gaze_precision_pct_max
         };
         recordSessionEvent('validation_complete', {
             validationSampleCount: qcValidationSamples.length,
+            validationSamplingVersion: 'unique_capture.v1',
+            missingTargetCount: coverage.missingTargetIndices.length,
             accuracyPct: metrics.accuracyPct,
             precisionPct: metrics.precisionPct,
             biasXPct: metrics.biasXPct,
@@ -1433,7 +1448,8 @@ export function startGazeValidation() {
         }
         if (validationResultAdvice) {
             validationResultAdvice.textContent = participantMessage(
-                validationPassed ? 'validation_result_passed_advice' : 'validation_result_failed_advice'
+                !coverage.complete ? 'validation_result_missing_targets_advice'
+                    : validationPassed ? 'validation_result_passed_advice' : 'validation_result_failed_advice'
             );
         }
         progressText.innerText = '';
@@ -1456,7 +1472,7 @@ export function startGazeValidation() {
             continueInvitationSessionAfterShell();
         };
 
-        const worstTargets = getWorstValidationTargets(selectedPoints, validationViewport, 4);
+        const worstTargets = coverage.complete ? getWorstValidationTargets(selectedPoints, validationViewport, 4) : [];
         if (recalibrateButton) {
             recalibrateButton.textContent = participantMessage('runtime_recalibrate');
             recalibrateButton.onclick = () => {

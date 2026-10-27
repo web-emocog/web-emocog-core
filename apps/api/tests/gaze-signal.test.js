@@ -298,7 +298,9 @@ describe('gaze signal semantics', () => {
     ];
     for (const analyzerPath of analyzers) {
       const source = fs.readFileSync(analyzerPath, 'utf8');
-      assert.match(source, /timestamp,\s*wallTimestamp:\s*Date\.now\(\)/);
+      assert.match(source, /timestamp,\s*wallTimestamp,/);
+      assert.match(source, /const wallTimestamp = capture\.wallTimestamp \?\? Date\.now\(\)/);
+      assert.ok(source.indexOf('const wallTimestamp =') < source.indexOf('const mpResults = this.faceLandmarker.detectForVideo'));
       assert.match(source, /timestamp:\s*performance\.now\(\),\s*wallTimestamp:\s*Date\.now\(\)/);
       assert.doesNotMatch(source, /landmarks,\s*blendShapes,\s*timestamp:\s*Date\.now\(\)/);
     }

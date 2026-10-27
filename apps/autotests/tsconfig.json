@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["tests/**/*", "playwright.config.ts", "playwright.analytics.config.ts"],
+  "include": ["tests/**/*", "playwright.config.ts", "playwright.analytics.config.ts", "playwright.workers.config.ts", "playwright.fps.config.ts"],
   "exclude": ["node_modules"]
 }

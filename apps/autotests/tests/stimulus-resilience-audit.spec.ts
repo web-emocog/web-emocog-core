@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 const participant = 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
-const version = '20261019-5';
+const version = '20261025-1';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 async function invitation(page: Page, media = false) {

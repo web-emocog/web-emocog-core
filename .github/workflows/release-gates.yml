@@ -218,12 +218,46 @@ jobs:
             apps/autotests/playwright-report
           retention-days: 7
 
+  frame-pipeline-regression:
+    name: Frame pipeline and FPS diagnostics (three engines)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/autotests/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: apps/autotests
+        run: npm ci
+      - name: Install the three regression engines
+        working-directory: apps/autotests
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run isolated frame pipeline regression
+        working-directory: apps/autotests
+        run: npm run test:frame-workers
+      - name: Run isolated FPS and quality diagnostics
+        working-directory: apps/autotests
+        run: npm run test:fps
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frame-pipeline-failure-${{ github.run_id }}
+          path: |
+            apps/autotests/test-results
+          retention-days: 7
+
   release-gate:
     name: Required release gate
     # Superseded runs are cancelled by the workflow concurrency policy. Do not
     # relabel those stale runs as failures, while still evaluating real failures.
     if: ${{ always() && !cancelled() }}
-    needs: [api-security, postgres-release, browser-regression]
+    needs: [api-security, postgres-release, browser-regression, frame-pipeline-regression]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every release job
@@ -231,7 +265,9 @@ jobs:
           API_RESULT: ${{ needs.api-security.result }}
           POSTGRES_RESULT: ${{ needs.postgres-release.result }}
           BROWSER_RESULT: ${{ needs.browser-regression.result }}
+          FRAME_PIPELINE_RESULT: ${{ needs.frame-pipeline-regression.result }}
         run: |
           [[ "$API_RESULT" == "success" ]]
           [[ "$POSTGRES_RESULT" == "success" ]]
           [[ "$BROWSER_RESULT" == "success" ]]
+          [[ "$FRAME_PIPELINE_RESULT" == "success" ]]

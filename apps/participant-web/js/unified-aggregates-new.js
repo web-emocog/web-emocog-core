@@ -1,6 +1,6 @@
 import { getEmotionSummary } from './emotion-stub-new.js';
-import '../../shared/rt-alignment.js?v=20261019-5';
-import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261019-5';
+import '../../shared/rt-alignment.js?v=20261025-1';
+import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261025-1';
 
 /**
  * Формирование payload агрегатов для отправки на сервер (Фаза 0.1).
@@ -108,9 +108,17 @@ function compactPerclosSummary(summary) {
 }
 
 function compactGazeValidation(validation) {
-    return validation && typeof validation === 'object'
-        ? compactMetricObject(validation)
-        : null;
+    if (!validation || typeof validation !== 'object') return null;
+    const summary = compactMetricObject(validation);
+    if (validation.samplingVersion === 'unique_capture.v1'
+        && Array.isArray(validation.sampling) && validation.sampling.length <= 14) {
+        summary.sampling = validation.sampling.map(row => Object.fromEntries([
+            'stage', 'pointIndex', 'version', 'clock', 'attempted', 'accepted', 'duplicate',
+            'beforeWindow', 'missingTimestamp', 'clockChanged'
+        ].map(key => [key, row?.[key]])));
+        delete summary.samplingCount;
+    }
+    return summary;
 }
 
 function compactAudioSummary(summary) {

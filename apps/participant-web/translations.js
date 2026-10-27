@@ -262,6 +262,7 @@ export const translations = {
         issue_low_eyes_open_pct: "Глаза часто закрыты",
         issue_high_occlusion_pct: "Лицо часто закрыто",
         issue_low_fps_time: "Низкий FPS камеры",
+        issue_camera_frames_stalled: "Камера перестала передавать новые кадры. Проверьте камеру.",
         
         // QC status messages
         qc_passed_full: "✅ Данные прошли проверку качества",
@@ -539,6 +540,7 @@ export const translations = {
         issue_low_eyes_open_pct: "Eyes often closed",
         issue_high_occlusion_pct: "Face often occluded",
         issue_low_fps_time: "Low camera FPS",
+        issue_camera_frames_stalled: "The camera stopped delivering new frames. Check the camera.",
         
         // QC status messages
         qc_passed_full: "✅ Data Valid (QC Passed)",
@@ -1160,6 +1162,22 @@ Object.entries(participantFinalLocaleAdditions).forEach(([locale, additions]) =>
 });
 
 export const participantLocales = ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur'];
+
+const validationMissingTargets = {
+    ru: 'Для части точек нет измерений взгляда. Проверьте камеру и повторите калибровку.',
+    en: 'Some targets have no gaze measurements. Check the camera and repeat calibration.',
+    zh: '部分目标没有视线测量数据。请检查摄像头并重新校准。',
+    es: 'Faltan mediciones de mirada para algunos puntos. Compruebe la cámara y repita la calibración.',
+    hi: 'कुछ बिंदुओं के लिए नज़र का माप नहीं मिला। कैमरा जाँचें और कैलिब्रेशन दोहराएँ।',
+    ar: 'لا توجد قياسات للنظر لبعض النقاط. تحقق من الكاميرا وأعد المعايرة.',
+    fr: 'Certains points ne disposent pas de mesures du regard. Vérifiez la caméra et répétez le calibrage.',
+    bn: 'কিছু বিন্দুর জন্য দৃষ্টির পরিমাপ নেই। ক্যামেরা পরীক্ষা করুন এবং ক্যালিব্রেশন আবার করুন।',
+    pt: 'Alguns pontos não têm medições do olhar. Verifique a câmara e repita a calibração.',
+    ur: 'کچھ نقاط کے لیے نگاہ کی پیمائش موجود نہیں۔ کیمرا چیک کریں اور کیلیبریشن دہرائیں۔'
+};
+Object.entries(validationMissingTargets).forEach(([locale, text]) => {
+    translations[locale].validation_result_missing_targets_advice = text;
+});
 
 // Physical key labels share the same layout-independent action phrase in all locales.
 const participantKeypressLabels = {

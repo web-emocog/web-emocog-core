@@ -1,6 +1,6 @@
 import { ERROR_KINDS, SESSION_STATES } from './contracts.mjs';
-import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
-import { translations } from '../../translations.js?v=20261019-5';
+import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20261025-1';
+import { translations } from '../../translations.js?v=20261025-1';
 
 const POLICY_TEXT = {
     ru: {
@@ -86,6 +86,7 @@ const ISSUE_TRANSLATION_KEYS = Object.freeze({
     head_pose: 'tip_pose_unstable',
     face_occluded: 'tip_face_occluded',
     low_fps: 'issue_low_fps_time',
+    camera_frames_stalled: 'issue_camera_frames_stalled',
     page_reloaded: 'runtime_recovery_body'
 });
 

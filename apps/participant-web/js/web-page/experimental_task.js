@@ -5,11 +5,12 @@ import {
     recordSessionEvent,
     setTaskContext,
     clearTaskContext
-} from './state.js?v=20261019-5';
+} from './state.js?v=20261025-1';
 console.warn('[DEPRECATED] js/web-page/experimental_task.js — use experimental_task-updated.js');
 
-import { finishSession } from './tests.js?v=20261019-5';
+import { finishSession } from './tests.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
+import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -274,10 +275,10 @@ export async function loadAndStartCognitiveTask(options = {}) {
     clearTaskContext();
 
     try {
-        const response = await fetch('./experiment.json');
-        if (!response.ok) throw new Error('Файл experiment.json не найден');
-
-        experimentProtocol = await response.json();
+        experimentProtocol = await fetchWithDeadline('./experiment.json', {}, response => {
+            if (!response.ok) throw new Error('Файл experiment.json не найден');
+            return response.json();
+        });
         state.sessionData.cognitiveResults = [];
         state.sessionData.experimentMeta = {
             ...(state.sessionData.experimentMeta || {}),

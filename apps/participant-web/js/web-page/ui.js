@@ -1,7 +1,7 @@
-import { state } from './state.js?v=20261019-5';
+import { state } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js';
-import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js?v=20261019-5';
-import { measureRenderFPS } from './camera.js?v=20261019-5';
+import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js?v=20261025-1';
+import { measureRenderFPS } from './camera.js?v=20261025-1';
 
 export function setLanguage(lang) {
     const nextLang = Object.prototype.hasOwnProperty.call(translations, lang) ? lang : 'ru';
@@ -56,9 +56,30 @@ export function toggleConsent() {
     document.getElementById('consentBtn').disabled = !chk.checked;
 }
 
+export function generateUniqueId() {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+    if (!globalThis.crypto?.getRandomValues) {
+        throw new Error('Secure random ID generation is unavailable');
+    }
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0'));
+    return [
+        hex.slice(0, 4).join(''),
+        hex.slice(4, 6).join(''),
+        hex.slice(6, 8).join(''),
+        hex.slice(8, 10).join(''),
+        hex.slice(10, 16).join('')
+    ].join('-');
+}
+
 export function generateIdsAndProceed() {
-    const sessionId = 'S-' + Math.random().toString(36).substr(2, 6).toUpperCase();
-    const participantId = 'P-' + Math.random().toString(36).substr(2, 5).toUpperCase();
+    const sessionId = 'S-' + generateUniqueId();
+    const participantId = 'P-' + generateUniqueId();
     
     state.sessionData.ids.session = sessionId;
     state.sessionData.ids.participant = participantId;
