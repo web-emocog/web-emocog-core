@@ -87,6 +87,7 @@ function selectedSession(hydrated, sessionRef) {
 
 function finiteNumber(...values) {
   for (const value of values) {
+    if (typeof value !== 'number' && (typeof value !== 'string' || value.trim() === '')) continue;
     const number = typeof value === 'number' ? value : Number(value);
     if (Number.isFinite(number)) return number;
   }

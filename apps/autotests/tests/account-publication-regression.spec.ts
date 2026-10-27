@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const web = 'http://127.0.0.1:4173';
+const web = process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173';
 const api = 'http://127.0.0.1:3000';
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 

@@ -3,8 +3,9 @@ import path from 'path';
 
 export default defineConfig({
   testDir: './tests',
-  // These run in the required, isolated three-engine frame-pipeline CI job.
-  testIgnore: ['**/vision-workers.spec.ts', '**/fps-diagnostics.spec.ts'],
+  // These run with their own loopback servers in the required matrix job.
+  testIgnore: ['**/vision-workers.spec.ts', '**/fps-diagnostics.spec.ts',
+    '**/security-performance.spec.ts', '**/staff-http.spec.ts', '**/html-data-boundaries.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

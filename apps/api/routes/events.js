@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Приём батчей событий (Фаза 2.4). POST /events/batch.
  */
@@ -117,7 +118,7 @@ router.post(
       return res.status(201).json({ session_id, inserted: outcome.inserted });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ error: err.message });
-      console.error(err);
+      logUnexpectedError(err, 'events');
       return res.status(500).json({ error: 'Events batch failed' });
     }
   }

@@ -52,8 +52,12 @@ async function generateDocumentHash(documentText) {
  * @returns {Promise<Object>} - { text, hash, version }
  */
 async function loadDocumentAndHash(documentUrl) {
+    const controller = new AbortController();
+    // Cover response.text(), not only response headers: a stalled document
+    // must not leave the consent screen pending indefinitely.
+    const deadline = setTimeout(() => controller.abort(), 15000);
     try {
-        const response = await fetch(documentUrl);
+        const response = await fetch(documentUrl, { signal: controller.signal });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -76,6 +80,8 @@ async function loadDocumentAndHash(documentUrl) {
     } catch (error) {
         console.error('[ConsentSignature] Document load error:', error);
         return null;
+    } finally {
+        clearTimeout(deadline);
     }
 }
 

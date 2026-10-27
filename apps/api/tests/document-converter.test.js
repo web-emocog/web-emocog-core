@@ -9,6 +9,9 @@ const {
   parsePdfInfo,
   validateDocument,
   zipEntryNames,
+  runCommand,
+  convertDocument,
+  cleanupConversion,
 } = require('../stimuli/document-converter');
 
 function centralDirectoryEntry(name) {
@@ -58,4 +61,77 @@ test('document conversion boundary', async t => {
     releaseAgain();
     assert.equal(limiter.active(), 0);
   });
+
+  await t.test('rejects symlinks and directories and returns exactly the validated bytes', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wecog-convert-fd-'));
+    try {
+      const file = path.join(root, 'upload');
+      const bytes = Buffer.from('%PDF-1.4\nsynthetic');
+      fs.writeFileSync(file, bytes);
+      fs.symlinkSync(file, path.join(root, 'link'));
+      await assert.rejects(validateDocument(path.join(root, 'link'), 'file.pdf', 'application/pdf', 1024),
+        e => e.code === 'document_file_invalid');
+      await assert.rejects(validateDocument(root, 'file.pdf', 'application/pdf', 1024),
+        e => e.code === 'document_size_invalid');
+      await assert.rejects(validateDocument(file, 'file.pdf', 'application/pdf', 8),
+        e => e.code === 'document_size_invalid');
+      const validated = await validateDocument(file, 'file.pdf', 'application/pdf', 1024);
+      fs.writeFileSync(file, 'replaced after validation');
+      assert.deepEqual(validated.bytes, bytes);
+      assert.equal(validated.size, bytes.length);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+test('all PDF pages have bounded raster cost at the configured DPI', () => {
+  for (const text of ['Pages: 1\n', 'Pages: 1\nPage size: 0 x 0 pts\n',
+    'Pages: 1\nPage size: 20000 x 20000 pts\n']) {
+    assert.throws(() => parsePdfInfo(text, 100), e => e.code === 'document_page_dimensions_invalid');
+  }
+  assert.throws(() => parsePdfInfo('Pages: 2\nPage 1 size: 595 x 842 pts\nPage 2 size: 20000 x 20000 pts\n', 100,
+    { requireAllPages: true }), e => e.code === 'document_page_dimensions_invalid');
+  assert.throws(() => parsePdfInfo('Pages: 2\nPage size: 595 x 842 pts\n', 100,
+    { requireAllPages: true }), e => e.code === 'document_page_dimensions_invalid');
+  const hundredA4 = 'Pages: 100\n' + Array.from({ length: 100 }, (_, i) => `Page ${i + 1} size: 595 x 842 pts\n`).join('');
+  assert.equal(parsePdfInfo(hundredA4, 100, { requireAllPages: true }), 100);
+  assert.throws(() => parsePdfInfo(hundredA4, 100, { requireAllPages: true, dpi: 300 }), e => e.code === 'document_pixel_limit');
+});
+
+test('native converters do not inherit signing keys and time out cleanly', async () => {
+  process.env.WECOG_TEST_SECRET = 'must-not-reach-child';
+  try {
+    const result = await runCommand(process.execPath, ['-e', 'process.stdout.write(process.env.WECOG_TEST_SECRET || "absent")']);
+    assert.equal(result.stdout, 'absent');
+    await assert.rejects(runCommand(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 100 }),
+      e => e.code === 'document_conversion_timeout');
+  } finally { delete process.env.WECOG_TEST_SECRET; }
+});
+
+// Opt-in real Poppler smoke; never uses a participant document.
+test('real PDF conversion preserves ordinary page dimensions and cleans up', { skip: process.env.RUN_POPPLER_SMOKE !== '1' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wecog-poppler-'));
+  let converted;
+  try {
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R >>',
+      '<< /Length 0 >>\nstream\n\nendstream'];
+    let pdf = '%PDF-1.4\n'; const offsets = [0];
+    objects.forEach((object, i) => { offsets.push(Buffer.byteLength(pdf)); pdf += `${i + 1} 0 obj\n${object}\nendobj\n`; });
+    const xref = Buffer.byteLength(pdf);
+    pdf += 'xref\n0 5\n0000000000 65535 f \n' + offsets.slice(1).map(n => `${String(n).padStart(10, '0')} 00000 n \n`).join('');
+    pdf += `trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    const inputPath = path.join(root, 'sample.pdf'); fs.writeFileSync(inputPath, pdf);
+    converted = await convertDocument({ inputPath, originalName: 'sample.pdf', declaredMime: 'application/pdf',
+      uploadsRoot: root, maxBytes: 1024 * 1024, maxPages: 10, timeoutMs: 10_000, dpi: 150, maxConcurrent: 1,
+      pdfInfoBin: process.env.PDFINFO_BIN || 'pdfinfo', pdfToPpmBin: process.env.PDFTOPPM_BIN || 'pdftoppm' });
+    assert.equal(converted.pageCount, 1);
+    assert.ok(fs.statSync(converted.pages[0]).size > 100);
+    await cleanupConversion(converted);
+    assert.equal(fs.existsSync(converted.tempDir), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('release converter smoke processes multiple pages at the requested DPI', { skip: process.env.RUN_POPPLER_SMOKE !== '1' }, async () => {
+  const { runSmoke } = require('../scripts/smoke-document-converter');
+  assert.deepEqual(await runSmoke(), { pages: 3, width: 1275, height: 1650, linuxLimitsChecked: process.platform === 'linux' });
 });

@@ -210,6 +210,8 @@ instruction -> finishing -> completed
 | `session-state-machine.mjs` | состояния, issue, repeat queue, finish guards |
 | `index.js` | оркестрация lifecycle, checkpoint и модулей |
 | `frame-pipeline.js` | один анализирующий цикл для face-derived modules |
+| `vision-worker-client.mjs`, `vision-worker.js` | single-flight face/segment/pose inference, timeout и fallback |
+| `frame-pixels.mjs` | transient WeakMap пикселей одного кадра, без checkpoint/ingest |
 | `quality-detector.mjs` | sustained quality/technical issue thresholds |
 | `checkpoint-store.mjs` | IndexedDB snapshots и delta chunks |
 | `contracts.mjs` | typed event/lifecycle builders |
@@ -217,6 +219,42 @@ instruction -> finishing -> completed
 | `runtime-ui.js` | instructions, pause/lock, repeat и notification UI |
 
 Правила изменения runtime:
+
+Face/segment/pose используют same-origin classic Workers с закреплёнными
+MediaPipe assets; инициализация включает пустой warmup, не измерительный sample.
+Сохранять исходные capture timestamps и task context, не время ответа Worker.
+Primary face/gaze не ждёт auxiliary pose/segment; их очередь ограничена одной
+задачей. Strides 3/6/6 не адаптируются скрыто; фактические counts/backend/timing
+сохраняются в `tech.framePipeline` (`frame_pipeline.v2`). Маска старше 1000 ms не
+переиспользуется как свежая. Pixels передаются только между локальными потоками.
+При недоступности Worker действует прежний main-thread backend; fallback имеет
+явную причину в диагностике. Нельзя менять scientific/QC thresholds ради FPS.
+MaskReader читает GPU MPMask через публичный texture API и RGBA/FLOAT: это
+обходит RED/FLOAT несовместимость Firefox и обращение vendor к `self.document`
+на Mac. Не создавать фиктивный DOM и не патчить vendor. В Chromium/Mac Worker
+остаётся CPU как консервативная compatibility policy. Прежняя регрессия совместных
+GPU-задач получена в headless shell/SwiftShader, не на измеренном Metal. Три
+повторения полного Chromium/new-headless на Metal проходят FPS gate с прежней
+CPU policy; одиночный GPU-segmentation эксперимент тоже проходит, но не меняет
+production policy без matched-frame/real-device приёмки.
+Firefox/WebKit используют GPU, при ошибке есть однократный CPU fallback в Worker.
+`segmentDelegate`, policy и причина fallback сохраняются в `tech.framePipeline`.
+Проверять также Chromium с `WECOG_NATIVE_GPU=1`: full Chromium channel и явная
+проверка WebGL renderer, не просто отсутствие SwiftShader flags. См. новый backlog audit 26.10:
+общий целевой FPS не закрыт, даже после устранения задержки сегментации.
+Браузерные проверки: `apps/autotests/playwright.workers.config.ts`; измерения на
+пустом или синтетическом кадре не доказывают точность и FPS с реальным лицом.
+Функциональный replay не равен FPS acceptance: использовать
+`WECOG_REFERENCE_REQUIRE_PERFORMANCE=1` и отдельный `performanceAssessment`.
+Результаты трёх движков и ограничения: `docs/reports/2026-10-26-cross-browser-fps-audit.md`.
+Успешный Worker с ответом медленнее 1000 ms не доказывает свежесть сегментации.
+
+Поздний ответ/ошибка Worker после reset/stop не изменяет новую generation.
+Привязка rPPG к pixels, landmarks и capture wall time должна оставаться общей,
+даже если inference завершился позже или размер live video изменился.
+Отсутствие новых кадров дольше существующего `low_fps.holdMs` сообщает
+`camera_frames_stalled`: один frame-based QC без новых кадров не сработает.
+Нельзя считать повторный start доказательством восстановления камеры.
 
 - не создавать второй `requestAnimationFrame`/MediaPipe loop;
 - не ставить trial timer на скрытую паузу из-за QC;
@@ -362,6 +400,16 @@ Body movement использует torso/shoulder/hip landmarks и являет�
 Код: `apps/participant-web/js/rt-input/`, `apps/shared/rt-registry.js`,
 `rt_component-/`.
 
+Серверный RT выполняется асинхронно через `apps/api/rt/scheduler.js`: один
+активный Python batch и до восьми ожидающих заданий на API-процесс, deadline
+60 секунд с учётом очереди. Не удерживать DB connection/transaction/lock во время
+расчёта. Перед commit повторять token/role/membership, participant, immutable
+snapshot, delivery и idempotency проверки. Ошибка расчёта не завершает сессию
+и не удаляет checkpoint; `503` требует повтора того же final/key. Adapter v2
+не создаёт пробы из пустого блока и не заимствует данные соседнего блока.
+Исходные RT-формулы и historical features не пересчитываются. Native stdin
+и каждый output stream ограничены 10 MiB; это не лимит веса протокола.
+
 Поддерживаются click/keyboard и явно выбранный `pointer-intent`. Pointer-intent
 нельзя включать глобально: он зависит от task semantics. Защита от mouse
 micro-tremor должна включать amplitude threshold, dwell/debounce, trusted event
@@ -485,15 +533,31 @@ Browser staff должен использовать `HttpOnly`, `Secure` в prod
 `SameSite=Lax` cookie и CSRF header. Bearer JWT предназначен для внешнего API
 client. Канонический permission module: `apps/api/security/permissions.js`.
 
-Researcher tab фиксирует staff identity через `staff-session.js`. При смене
+Researcher/developer tabs фиксируют staff identity через `staff-session.js`. При смене
 cookie-аккаунта в другой вкладке старый UI блокируется; workspace reads/writes
 и ответы in-flight запросов не переходят к новому владельцу. `X-Staff-User-ID`
 проверяется сервером до CSRF и tenant operations, но не выдаёт доступ сам по себе.
 CSRF можно обновить и повторить запрос только при явном `csrf_token_invalid`
 и совпадении staff identity. Для одновременных аккаунтов нужны отдельные
 browser profiles/contexts. Язык researcher сохраняется в account workspace.
-Каждая публикация создаёт новое invitation с immutable protocol/media snapshot;
-старые коды не перепривязываются к отредактированному протоколу. Checkpoint
+
+Staff HTTP выполняется через `apps/web/http-client.js` (`WecogHttp`), с deadline
+на headers и body: обычные запросы 30 с, media/upload/export 10 мин, auth probe
+15 с. Порядок классических scripts: api-base, http-client, account-storage,
+staff-session, auth-guard; login намеренно без staff-session для смены аккаунта.
+`page` отменяется при смене SPA route/project; `workspace` сохраняется между
+разделами одного проекта, но не между проектами/аккаунтами; `document` нужен
+общему списку проектов и auth/password, а не проектным данным. Все scopes
+проверяют account/API context и отменяются на pagehide. Decode/validate внутри
+reader callback, UI/cache side effects после подтверждённого завершения.
+Не повторять неизвестный результат мутации автоматически; abort не откатывает
+server commit. Недоступный auth не очищает черновики, неподтверждённый logout
+не выдаётся за успешный. Мигрировать consumer и HTML dependency/cache version
+вместе; не подменять глобальные Response/body readers.
+
+Повторная публикация сохраняет публичную ссылку протокола и создаёт новую
+immutable protocol/media publication. Допущенная сессия остаётся привязана к
+своему snapshot; новые участники получают актуальную публикацию. Checkpoint
 другого invitation не восстанавливается при открытии нового кода из URL.
 
 Self-service `PATCH /auth/me/password` проверяет текущий пароль и атомарно
@@ -539,6 +603,12 @@ pages, timeout и concurrency. LibreOffice/Poppler запускаются тол
 server-owned temporary paths. Проверять path traversal, symlink escape,
 archive/document bombs, cleanup при исключении и MIME ответа.
 
+`security/native-process.js` используется как документными конвертерами, так
+и FFmpeg/ffprobe: environment allowlist, byte limits для обоих output streams,
+POSIX process-group kill и Linux resource wrapper. Это не отдельный
+filesystem/network sandbox. Исключение `resourceLimits: false` допустимо в
+тестовых Node CLI fixtures, не в production-настройках декодеров.
+
 ### 10.5 Browser security
 
 API security headers не заменяют CSP для static frontend, которую должен
@@ -548,6 +618,12 @@ API/import/localStorage данных. Не использовать `innerHTML` 
 значениями без явной sanitizer/escaping стратегии.
 
 ### 10.6 Логи
+
+Неожиданные ошибки канонических API handlers передаются в
+`security/error-log.js`: новый allowlisted diagnostic с component/errorId и
+известным системным/SQLSTATE-кодом. Не передавать в console исходный Error,
+его message/detail/query/stack или произвольный code. Логи reverse proxy,
+startup и native tools требуют отдельной проверки и не покрываются этим helper.
 
 Не логировать:
 
@@ -586,6 +662,16 @@ Researcher UI может быть насыщенным, participant UI долж�
 organization -> project -> protocol -> publish -> invitation -> monitoring
              -> session/results -> analytics snapshot -> export
 ```
+
+Текст из API/импортов/названий выводить через `textContent`/DOM nodes или
+context-appropriate escaping, не как HTML/inline JavaScript. Особые JSON-ключи
+(`__proto__`, `constructor`) не дают права писать в унаследованные объекты:
+legacy bridge merge использует own data properties. `null`, пустая строка,
+boolean/array не считаются измеренным нулём в числовых адаптерах аналитики.
+HTML-эвристика сама по себе не доказывает XSS; вести source-to-sink evidence.
+Regression: `playwright.html-security.config.ts`, `html-data-boundaries.test.js`.
+После загрузки прав direct admin route обновляется на основании server
+permissions, а кешированные admin/role не разрешают управление доступами.
 
 Цель доступности — WCAG 2.2 AA, но автоматические проверки не заменяют
 keyboard/screen-reader и human review. Изменения participant UX требуют
@@ -721,6 +807,11 @@ npm ci
 npm run typecheck
 npx playwright test tests/session-runtime.spec.ts
 npx playwright test --config=playwright.analytics.config.ts
+npx playwright test --config=playwright.staff-http.config.ts
+npx playwright test --config=playwright.staff-regression.config.ts
+npm run test:html-security
+npm run test:frame-workers
+npm run test:fps
 ```
 
 PostgreSQL integration запускать только с отдельной БД:
@@ -728,8 +819,14 @@ PostgreSQL integration запускать только с отдельной Б�
 ```bash
 cd apps/api
 S2_TEST_DATABASE_URL=postgres://... \
-  node --test tests/s2-postgres.integration.test.js
+  npm run test:postgres
 ```
+
+`test:postgres` последовательно выполняет security/concurrency и protocol
+persistence suites. Матрица обязательного frame-pipeline job также выполняет
+изолированные staff HTTP, HTML/data и staff regression tests: Chromium/Firefox
+на Linux, WebKit на macOS. Не переносить модельные Worker tests обратно в
+Linux headless WebKit без подтверждённого Worker WebGL2 и отдельной приёмки.
 
 Дополнительно перед передачей:
 

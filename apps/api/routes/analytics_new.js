@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Analytics API (Фаза 3): групповой дашборд, QC дашборд, сырые фичи для связанности.
  * Новый файл — исходные routes не удаляем.
@@ -210,7 +211,7 @@ router.get(
         protocols,
       });
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'analytics-new');
       res.status(500).json({ error: 'Analytics group failed' });
     }
   }
@@ -324,7 +325,7 @@ router.get(
         },
       });
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'analytics-new');
       res.status(500).json({ error: 'Analytics QC failed' });
     }
   }
@@ -402,7 +403,7 @@ router.get(
 
       res.json({ sessions, count: sessions.length });
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'analytics-new');
       res.status(500).json({ error: 'Analytics features failed' });
     }
   }

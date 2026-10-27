@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Invitations CRUD (Фаза 4.3). protocol_id, code, max_runs, expires_at. Публичный GET по коду для участника.
  * Файл новый — исходные не удаляем.
@@ -150,7 +151,7 @@ router.get(
         },
       });
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -182,7 +183,7 @@ router.get(
         };
       }));
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       return res.status(500).json({ error: 'Failed to load participant stimuli' });
     }
   }
@@ -226,7 +227,7 @@ router.get(
       );
       return res.sendFile(resolved.absolutePath);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       return res.status(500).json({ error: 'Failed to serve participant stimulus' });
     }
   }
@@ -346,7 +347,7 @@ router.post(
           code: 'session_admission_conflict',
         });
       }
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       return res.status(500).json({ error: 'Failed to issue ingest token' });
     }
   }
@@ -386,7 +387,7 @@ router.get(
       const r = await pool.query(sql, params);
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -482,7 +483,7 @@ router.post(
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       if (err.code === '23503') return res.status(400).json({ error: 'Protocol not found' });
       if (err.code === '23505') return res.status(409).json({ error: 'Invitation code already exists' });
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       res.status(500).json({ error: 'Create failed' });
     }
   }
@@ -519,7 +520,7 @@ router.get(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(r.rows[0]);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -547,7 +548,7 @@ router.delete(
       res.status(204).send();
     } catch (err) {
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
-      console.error(err);
+      logUnexpectedError(err, 'invitations-new');
       res.status(500).json({ error: 'Delete failed' });
     }
   }

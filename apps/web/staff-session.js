@@ -7,6 +7,7 @@
       storage: root.localStorage,
       sessionStorage: root.sessionStorage,
       fetch: root.fetch.bind(root),
+      http: root.WecogHttp,
       apiBase: function () { return root.EmocogApiBase.resolve(); },
       onBlocked: function () {
         var show = function () {
@@ -82,6 +83,8 @@
   var storage = options.storage;
   var tabStorage = options.sessionStorage;
   var nativeFetch = options.fetch;
+  var http = options.http || (typeof require === 'function'
+    ? require('./http-client').createHttpClient({ fetch: nativeFetch }) : null);
   var ownerKey = 'emocog_workspace_owner_v1';
   var accountId = storage.getItem(ownerKey) || '';
   var blocked = false;
@@ -117,11 +120,9 @@
     if (csrfRefresh) return csrfRefresh;
     csrfRefresh = (async function () {
       assertCurrent();
-      var response = await nativeFetch(currentApiBase() + '/auth/me', {
+      var payload = await http.json(currentApiBase() + '/auth/me', {
         credentials: 'include', headers: { 'X-Staff-User-ID': accountId }
-      });
-      if (!response.ok) throw accountChanged();
-      var payload = await response.json();
+      }, { scope: 'document', timeoutMs: 15000 });
       assertCurrent();
       if (String(payload.user?.id ?? payload.id) !== accountId || !payload.csrf_token) throw accountChanged();
       tabStorage.setItem('emocog_csrf_token', payload.csrf_token);
@@ -137,26 +138,36 @@
     if (!accountId || !(url === base || url.startsWith(base + '/'))) return nativeFetch(input, init);
     assertCurrent();
     var request = new Request(input, init);
+    function assertRequestActive() {
+      assertCurrent();
+      if (request.signal.aborted) {
+        var error = new Error('Request cancelled'); error.code = 'request_cancelled'; throw error;
+      }
+    }
     var headers = new Headers(request.headers);
     headers.set('X-Staff-User-ID', accountId);
     var first = new Request(request, { headers });
     // Keep an unread body only for a CSRF rejection issued before any route runs.
     var retry = first.clone();
+    assertRequestActive();
     var response = await nativeFetch(first);
-    assertCurrent();
+    assertRequestActive();
     if (response.status === 409) {
       var conflict = await response.clone().json().catch(function () { return {}; });
+      assertRequestActive();
       if (conflict.code === 'staff_account_changed') throw accountChanged();
     }
     if (response.status === 403 && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       var failure = await response.clone().json().catch(function () { return {}; });
+      assertRequestActive();
       if (failure.code === 'csrf_token_invalid') {
         headers.set('X-CSRF-Token', await refreshCsrf());
-        assertCurrent();
+        assertRequestActive();
         response = await nativeFetch(new Request(retry, { headers }));
-        assertCurrent();
+        assertRequestActive();
         if (response.status === 409) {
           var retryFailure = await response.clone().json().catch(function () { return {}; });
+          assertRequestActive();
           if (retryFailure.code === 'staff_account_changed') throw accountChanged();
         }
       }

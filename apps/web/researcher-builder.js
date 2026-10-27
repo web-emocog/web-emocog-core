@@ -584,7 +584,7 @@ function ExperimentBuilderView(options = {}) {
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Задание участнику', 'Participant prompt')}</label>
           <textarea class="proto-field" data-field="prompt" rows="4" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;line-height:1.5;resize:vertical;">${previewEscape(c.prompt || selectedAudioPreset.prompt)}</textarea>
           <label style="font-size:11px;font-weight:600;color:var(--muted);">${trb('Длительность (сек)', 'Duration (sec)')}</label>
-          <input class="proto-field" data-field="duration" type="number" min="5" max="120" value="${c.duration || selectedAudioPreset.duration}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
+          <input class="proto-field" data-field="duration" type="number" min="5" max="120" value="${previewEscape(c.duration || selectedAudioPreset.duration)}" style="padding:6px 8px;border-radius:8px;border:1px solid var(--stroke);font-size:12px;width:100px;" />
           <div style="font-size:11px;line-height:1.5;color:var(--muted);padding:9px 10px;border-radius:8px;background:rgba(15,118,110,.08);border:1px solid rgba(15,118,110,.18);">${trb('Участник увидит задание и обратный отсчёт. В аналитику попадут только рассчитанные акустические признаки и качество записи; исходный голос не сохраняется.', 'The participant sees the prompt and countdown. Only derived acoustic features and recording quality are sent to analytics; raw voice is not stored.')}</div>
         </div>`;
     }
@@ -1137,7 +1137,7 @@ function ExperimentBuilderView(options = {}) {
     const stimuliOptions = stimuliList.map(s => `<option value="${previewEscape(s.id)}">${previewEscape(s.name)}</option>`).join('');
     const standardFolderId = typeof getStandardFolderId === 'function' ? getStandardFolderId() : 'folder_standard';
     const autoGenDefault = block.content?.stimuliFolder || standardFolderId;
-    const folderOptions = folders.map(f => `<option value="${f.id}" ${f.id === autoGenDefault ? 'selected' : ''}>${typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name}</option>`).join('');
+    const folderOptions = folders.map(f => `<option value="${escapeBuilderHtml(f.id)}" ${f.id === autoGenDefault ? 'selected' : ''}>${escapeBuilderHtml(typeof localizedFolderName === 'function' ? localizedFolderName(f) : f.name)}</option>`).join('');
     const rtBounds = resolveRtBounds(block.content || {});
     const rtMinVal = block.content?.rtMin != null && block.content.rtMin !== '' ? block.content.rtMin : '';
     const rtMaxVal = block.content?.rtWindow != null && block.content.rtWindow !== '' ? block.content.rtWindow : '';
@@ -1150,7 +1150,7 @@ function ExperimentBuilderView(options = {}) {
         <div>
           <div style="font-size:11px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">${trb('Таблица проб', 'Trial table')}</div>
           <div style="font-size:18px;font-weight:700;color:var(--text);">
-            ${block.label}
+            ${previewEscape(block.label)}
             <span id="trialCountBadge" style="display:inline-block;margin-left:8px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(92,102,189,.12);color:var(--accent);vertical-align:middle;">0</span>
           </div>
         </div>
@@ -1168,9 +1168,9 @@ function ExperimentBuilderView(options = {}) {
             <span style="flex:1;">
               <span style="font-weight:600;display:block;">${trb('Время реакции', 'Reaction time')}</span>
               <span style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;">
-                <input type="number" id="rtMinInput" min="1" placeholder="${rtBounds.rtMin}" value="${rtMinVal}" title="${trb('Мин. (мс)', 'Min (ms)')}" style="width:64px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
+                <input type="number" id="rtMinInput" min="1" placeholder="${rtBounds.rtMin}" value="${previewEscape(rtMinVal)}" title="${trb('Мин. (мс)', 'Min (ms)')}" style="width:64px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
                 <span style="font-size:11px;color:var(--muted);">—</span>
-                <input type="number" id="rtWindowInput" min="1" placeholder="${rtBounds.rtWindow}" value="${rtMaxVal}" title="${trb('Макс. (мс)', 'Max (ms)')}" style="width:64px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
+                <input type="number" id="rtWindowInput" min="1" placeholder="${rtBounds.rtWindow}" value="${previewEscape(rtMaxVal)}" title="${trb('Макс. (мс)', 'Max (ms)')}" style="width:64px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${(block.content.useRT !== false) ? '' : 'disabled'}>
                 <span style="font-size:11px;color:var(--muted);">${trb('мс', 'ms')}</span>
               </span>
             </span>
@@ -1198,7 +1198,7 @@ function ExperimentBuilderView(options = {}) {
             <span style="flex:1;">
               <span style="font-weight:600;display:block;">${trb('Фиксация (+)', 'Fixation (+)')}</span>
               <span style="display:flex;align-items:center;gap:6px;margin-top:6px;">
-                <input type="number" id="fixationDuration" value="${block.content.fixationDuration || 500}" style="width:72px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.useFixation ? '' : 'disabled'}>
+                <input type="number" id="fixationDuration" value="${previewEscape(block.content.fixationDuration || 500)}" style="width:72px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.useFixation ? '' : 'disabled'}>
                 <span style="font-size:11px;color:var(--muted);">${trb('мс', 'ms')}</span>
               </span>
             </span>
@@ -1212,9 +1212,9 @@ function ExperimentBuilderView(options = {}) {
             <span style="flex:1;">
               <span style="font-weight:600;display:block;">${trb('Случайная пауза перед стимулом', 'Random pre-stimulus interval')}</span>
               <span style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;">
-                <input type="number" id="randomIsiMin" min="0" value="${block.content.interStimulusMinMs ?? 300}" style="width:68px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.randomInterStimulus ? '' : 'disabled'}>
+                <input type="number" id="randomIsiMin" min="0" value="${previewEscape(block.content.interStimulusMinMs ?? 300)}" style="width:68px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.randomInterStimulus ? '' : 'disabled'}>
                 <span style="font-size:11px;color:var(--muted);">—</span>
-                <input type="number" id="randomIsiMax" min="0" value="${block.content.interStimulusMaxMs ?? 900}" style="width:68px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.randomInterStimulus ? '' : 'disabled'}>
+                <input type="number" id="randomIsiMax" min="0" value="${previewEscape(block.content.interStimulusMaxMs ?? 900)}" style="width:68px;padding:5px 6px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.randomInterStimulus ? '' : 'disabled'}>
                 <span style="font-size:11px;color:var(--muted);">${trb('мс', 'ms')}</span>
               </span>
             </span>
@@ -1235,11 +1235,11 @@ function ExperimentBuilderView(options = {}) {
           <div style="display:flex;flex-direction:column;gap:8px;min-width:0;">
             <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);min-width:0;">
               <span>${trb('Верный ответ', 'Correct response')}</span>
-              <input type="text" id="fbCorr" data-auto-i18n-value value="${block.content.feedbackCorrect || trb('Верно!','Correct!')}" placeholder="${trb('Например: Верно!', 'e.g. Correct!')}" style="width:100%;box-sizing:border-box;min-width:0;padding:6px 8px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.showFeedback ? '' : 'disabled'}>
+              <input type="text" id="fbCorr" data-auto-i18n-value value="${previewEscape(block.content.feedbackCorrect || trb('Верно!','Correct!'))}" placeholder="${trb('Например: Верно!', 'e.g. Correct!')}" style="width:100%;box-sizing:border-box;min-width:0;padding:6px 8px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.showFeedback ? '' : 'disabled'}>
             </label>
             <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);min-width:0;">
               <span>${trb('Неверный ответ', 'Incorrect response')}</span>
-              <input type="text" id="fbInc" data-auto-i18n-value value="${block.content.feedbackIncorrect || trb('Ошибка!','Error!')}" placeholder="${trb('Например: Ошибка!', 'e.g. Error!')}" style="width:100%;box-sizing:border-box;min-width:0;padding:6px 8px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.showFeedback ? '' : 'disabled'}>
+              <input type="text" id="fbInc" data-auto-i18n-value value="${previewEscape(block.content.feedbackIncorrect || trb('Ошибка!','Error!'))}" placeholder="${trb('Например: Ошибка!', 'e.g. Error!')}" style="width:100%;box-sizing:border-box;min-width:0;padding:6px 8px;font-size:11px;border:1px solid var(--stroke);border-radius:6px;" ${block.content.showFeedback ? '' : 'disabled'}>
             </label>
           </div>
         </div>
@@ -1425,10 +1425,10 @@ function ExperimentBuilderView(options = {}) {
             </select>
           </td>
           <td style="padding:8px;">
-            <input type="number" class="t-input t-duration" min="1" value="${trial.duration || 1000}" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
+            <input type="number" class="t-input t-duration" min="1" value="${escapeBuilderHtml(trial.duration || 1000)}" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
           </td>
           <td style="padding:8px;">
-            <input type="number" class="t-input t-reps" value="${trial.repetitions || 1}" min="1" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
+            <input type="number" class="t-input t-reps" value="${escapeBuilderHtml(trial.repetitions || 1)}" min="1" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
           </td>
           <td style="padding:8px;text-align:center;">
             <button class="del-row-btn" data-index="${index}" title="${trb('Удалить', 'Delete')}" style="background:none;border:none;color:var(--bad);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:4px;border-radius:6px;">
@@ -1628,7 +1628,8 @@ function ExperimentBuilderView(options = {}) {
         toast('Добавьте хотя бы одну пробу со стимулом');
         return;
       }
-      const invalidIdx = currentTrials.findIndex(t => !t.stimulusId || (parseInt(t.duration) || 0) <= 0 || (parseInt(t.repetitions) || 0) <= 0);
+      const positiveInteger = value => Number.isSafeInteger(Number(value)) && Number(value) > 0;
+      const invalidIdx = currentTrials.findIndex(t => !t.stimulusId || !positiveInteger(t.duration) || !positiveInteger(t.repetitions));
       if (invalidIdx !== -1) {
         highlightInvalidRows();
       toast(`${trb('Проверьте строку','Check row')} ${invalidIdx + 1}: ${trb('обязательны "Стимул", "Длит.(мс)" > 0 и "Повторы" > 0','required: "Stimulus", "Dur.(ms)" > 0 and "Repetitions" > 0')}`);
@@ -1652,7 +1653,9 @@ function ExperimentBuilderView(options = {}) {
         return;
       }
 
-      block.content.trials = currentTrials.map(({ feedbackCorrect, feedbackIncorrect, correctFeedback, incorrectFeedback, feedbackText, feedbackError, ...trial }) => trial);
+      block.content.trials = currentTrials.map(({ feedbackCorrect, feedbackIncorrect, correctFeedback, incorrectFeedback, feedbackText, feedbackError, ...trial }) => ({
+        ...trial, duration: Number(trial.duration), repetitions: Number(trial.repetitions)
+      }));
       if (block.type === 'passive') block.content.slides = JSON.parse(JSON.stringify(block.content.trials));
       block.content.randomize = modal.querySelector('#trialRandomizeCb').checked;
       block.content.useAOI = modal.querySelector('#trialAoiCb').checked;
@@ -3283,7 +3286,7 @@ function ExperimentBuilderView(options = {}) {
             <input id="participantLinkInput" readonly value="${previewEscape(link)}" placeholder="${trb('Ссылка появится после публикации','The link will appear after publishing')}" style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.62);font-size:12px;color:var(--text);font-family:var(--mono);">
             <button class="quick-btn" id="copyParticipantLinkBtn" style="font-size:12px;" ${link ? '' : 'disabled'}>${trb('Скопировать','Copy')}</button>
           </div>
-          <div id="protocolSaveStatus" role="status" aria-live="polite" style="font-size:11px;color:${link ? 'var(--good)' : 'var(--muted)'};font-weight:${link ? '700' : '400'};">${link ? trb('Протокол опубликован, постоянная ссылка готова к отправке участникам.','Protocol published; the stable participant link is ready to share.') : trb('После успешной публикации здесь появится рабочая ссылка.','A working link will appear here after successful publishing.')}${editingExp?.publicationVersion ? ` ${trb('Версия публикации:', 'Publication version:')} ${editingExp.publicationVersion}.` : ''}</div>
+          <div id="protocolSaveStatus" role="status" aria-live="polite" style="font-size:11px;color:${link ? 'var(--good)' : 'var(--muted)'};font-weight:${link ? '700' : '400'};">${link ? trb('Протокол опубликован, постоянная ссылка готова к отправке участникам.','Protocol published; the stable participant link is ready to share.') : trb('После успешной публикации здесь появится рабочая ссылка.','A working link will appear here after successful publishing.')}${editingExp?.publicationVersion ? ` ${trb('Версия публикации:', 'Publication version:')} ${previewEscape(editingExp.publicationVersion)}.` : ''}</div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:1px solid var(--stroke);">
           <button class="quick-btn" id="finishBackBtn" style="font-size:12px;">← Назад</button>
@@ -3864,8 +3867,8 @@ function ExperimentBuilderView(options = {}) {
             <div style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);">
               <div style="width:24px;height:24px;border-radius:50%;background:rgba(92,102,189,.12);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">${i+1}</div>
               <div>
-                <div style="font-size:13px;font-weight:800;color:var(--text);">${b.label || b.type}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:3px;">${previewBlockSummary(b)}</div>
+                <div style="font-size:13px;font-weight:800;color:var(--text);">${previewEscape(b.label || b.type)}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:3px;">${previewEscape(previewBlockSummary(b))}</div>
                 ${previewBlockStimuliStrip(b)}
               </div>
             </div>
@@ -3991,10 +3994,10 @@ function ExperimentBuilderView(options = {}) {
             <div style="display:flex;align-items:center;gap:12px;">
               <span style="font-size:11px;color:var(--muted);min-width:60px;">${trb('Порог:','Threshold:')}</span>
               <input type="range" class="qc-range" data-key="${param.key}" min="${param.min}" max="${param.max}" step="1"
-                value="${qc[param.key].threshold}"
+                value="${previewEscape(qc[param.key].threshold)}"
                 style="flex:1;--qc-track:linear-gradient(90deg,#ef4444 0%, #ef4444 ${(((param.yellowFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #f59e0b ${(((param.yellowFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #f59e0b ${(((param.greenFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #22c55e ${(((param.greenFrom - param.min) / (param.max - param.min)) * 100).toFixed(2)}%, #22c55e 100%);"
                 oninput="this.nextElementSibling.textContent=this.value+'${param.unit}'">
-              <span style="font-size:13px;font-weight:700;color:var(--accent);min-width:48px;">${qc[param.key].threshold}${param.unit}</span>
+              <span style="font-size:13px;font-weight:700;color:var(--accent);min-width:48px;">${previewEscape(qc[param.key].threshold)}${param.unit}</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
               <input type="checkbox" class="qc-hardstop" data-key="${param.key}" ${qc[param.key].hardStop?'checked':''} style="width:auto;">
@@ -4048,6 +4051,10 @@ function ExperimentBuilderView(options = {}) {
     function persistPlan() {
       plan = analyticsApi.save(builderKey, plan, experimentBlocks);
       return plan;
+    }
+
+    function getBlockOverride(blockId) {
+      return Object.hasOwn(plan.blockOverrides, blockId) ? plan.blockOverrides[blockId] : null;
     }
 
     function selectedPackageCount() {
@@ -4153,7 +4160,7 @@ function ExperimentBuilderView(options = {}) {
       }
       return analyzableBlocks.map(block => {
         const blockId = String(block.id);
-        const override = plan.blockOverrides[blockId] || null;
+        const override = getBlockOverride(blockId);
         const capabilities = analyticsApi.blockCapabilities(block);
         const blockName = localizedBlockLabel(block, block.label || block.type || blockId);
         const inheritedLabels = plan.defaultPackages.map(id => labelFor(analyticsApi.packages.find(pkg => pkg.id === id))).join(' · ');
@@ -4266,10 +4273,10 @@ function ExperimentBuilderView(options = {}) {
             const caps = analyticsApi.blockCapabilities(block);
             const packagesForBlock = plan.defaultPackages.filter(id => analyticsApi.isPackageAvailable(id, caps));
             if (!packagesForBlock.includes('data_quality')) packagesForBlock.push('data_quality');
-            plan.blockOverrides[blockId] = {
+            Object.defineProperty(plan.blockOverrides, blockId, { enumerable: true, configurable: true, writable: true, value: {
               packages: packagesForBlock,
               selectedMetricIds: plan.selectedMetricIds.slice()
-            };
+            } });
           } else {
             delete plan.blockOverrides[blockId];
           }
@@ -4282,7 +4289,7 @@ function ExperimentBuilderView(options = {}) {
         input.addEventListener('change', () => {
           const blockId = input.dataset.blockId;
           const packageId = input.dataset.packageId;
-          const override = plan.blockOverrides[blockId];
+          const override = getBlockOverride(blockId);
           if (!override) return;
           if (input.checked) {
             if (!override.packages.includes(packageId)) override.packages.push(packageId);
@@ -4303,7 +4310,7 @@ function ExperimentBuilderView(options = {}) {
 
       content.querySelectorAll('.an-block-metric-cb').forEach(input => {
         input.addEventListener('change', () => {
-          const override = plan.blockOverrides[input.dataset.blockId];
+          const override = getBlockOverride(input.dataset.blockId);
           const metricId = input.dataset.metricId;
           if (!override) return;
           if (input.checked) {

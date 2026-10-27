@@ -195,14 +195,17 @@
     Object.keys(rawOverrides).forEach((blockId) => {
       const block = blockById.get(String(blockId));
       if (!block) return;
+      const rawOverride = rawOverrides[blockId];
+      if (!rawOverride || typeof rawOverride !== 'object' || Array.isArray(rawOverride)) return;
       const caps = blockCapabilities(block);
-      const overridePackages = normalizePackages(rawOverrides[blockId].packages, caps);
-      overrides[blockId] = {
+      const overridePackages = normalizePackages(rawOverride.packages, caps);
+      // Imported block IDs are data, including the special __proto__ key.
+      Object.defineProperty(overrides, blockId, { enumerable: true, configurable: true, writable: true, value: {
         packages: overridePackages,
-        selectedMetricIds: Array.isArray(rawOverrides[blockId].selectedMetricIds)
-          ? normalizeMetricIds(rawOverrides[blockId].selectedMetricIds, overridePackages)
+        selectedMetricIds: Array.isArray(rawOverride.selectedMetricIds)
+          ? normalizeMetricIds(rawOverride.selectedMetricIds, overridePackages)
           : defaultMetricIds(overridePackages)
-      };
+      } });
     });
     return {
       schemaVersion: SCHEMA_VERSION,

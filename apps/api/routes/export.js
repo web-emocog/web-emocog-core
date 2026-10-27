@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Export Service (Фаза 2.7): фильтры, CSV.
  */
@@ -255,7 +256,7 @@ router.get(
         })),
       });
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'export');
       res.status(500).json({ error: 'Export failed' });
     }
   }

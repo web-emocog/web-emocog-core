@@ -5,8 +5,8 @@ const path = require('path');
 const { getRtAnalyzerHealth, computeSessionRtFeatures } = require('../rt/compute');
 
 describe('RT analyzer health', () => {
-  it('getRtAnalyzerHealth returns structured status', () => {
-    const h = getRtAnalyzerHealth();
+  it('getRtAnalyzerHealth returns structured status', async () => {
+    const h = await getRtAnalyzerHealth();
     assert.equal(typeof h.available, 'boolean');
     assert.equal(typeof h.script_exists, 'boolean');
     assert.equal(typeof h.config_exists, 'boolean');
@@ -15,8 +15,8 @@ describe('RT analyzer health', () => {
 });
 
 describe('RT ingest compute (no DB)', () => {
-  it('computes rt_features for minimal payload when Python available', () => {
-    const h = getRtAnalyzerHealth();
+  it('computes rt_features for minimal payload when Python available', async () => {
+    const h = await getRtAnalyzerHealth();
     const payload = {
       ids: { session: 'S-test-1' },
       events: [
@@ -45,7 +45,7 @@ describe('RT ingest compute (no DB)', () => {
         trials: [],
       }],
     };
-    const rt = computeSessionRtFeatures(payload, protocol);
+    const rt = await computeSessionRtFeatures(payload, protocol);
     assert.equal(rt.schema_version, 'rt_features.v1');
     if (h.available) {
       assert.equal(rt.blocks[0].status, 'ok');
@@ -56,7 +56,7 @@ describe('RT ingest compute (no DB)', () => {
     }
   });
 
-  it('backward compat: protocol without selected_metrics uses defaults', () => {
+  it('backward compat: protocol without selected_metrics uses defaults', async () => {
     const payload = {
       events: [],
       cognitiveResults: [],
@@ -71,13 +71,13 @@ describe('RT ingest compute (no DB)', () => {
         trials: [],
       }],
     };
-    const rt = computeSessionRtFeatures(payload, protocol);
+    const rt = await computeSessionRtFeatures(payload, protocol);
     assert.ok(Array.isArray(rt.blocks));
   });
 
-  it('malformed payload does not throw', () => {
-    assert.doesNotThrow(() => computeSessionRtFeatures(null, null));
-    assert.doesNotThrow(() => computeSessionRtFeatures({}, undefined));
+  it('malformed payload does not throw', async () => {
+    await assert.doesNotReject(() => computeSessionRtFeatures(null, null));
+    await assert.doesNotReject(() => computeSessionRtFeatures({}, undefined));
   });
 });
 

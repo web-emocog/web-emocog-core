@@ -84,7 +84,10 @@
 </head>
 <body>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script src="../http-client.js?v=20261027-1"></script>
+  <script src="../account-storage.js?v=20261019-5"></script>
+  <script src="../staff-session.js?v=20261027-1"></script>
+  <script src="../auth-guard.js?v=20261027-1"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -203,14 +206,13 @@
 
         if (isInviteSlug(raw)) {
           try {
-            var pub = await fetch(apiBase + '/invitations/by-code/' + encodeURIComponent(raw), { credentials: 'include' });
-            if (pub.ok) {
-              var found = await pub.json();
+            var found = await WecogHttp.json(apiBase + '/invitations/by-code/' + encodeURIComponent(raw), { credentials: 'include' });
+            if (found) {
               if (found && found.protocol_id) {
                 return { protocol_id: parseInt(String(found.protocol_id), 10), invite_code: raw };
               }
             }
-          } catch (_) {}
+          } catch (error) { if (error.status !== 404) throw error; }
 
           var protocols = protocolsCache;
           if (!Array.isArray(protocols) || !protocols.length) {
@@ -254,30 +256,23 @@
 
       function loadInvites() {
         var apiBase = getApiBase();
-        fetch(apiBase + '/invitations', {
+        WecogHttp.json(apiBase + '/invitations', {
           headers: authHeaders(false),
           credentials: 'include'
         })
-          .then(function (r) {
-            if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
-            return r.json();
-          })
           .then(renderInvites)
-          .catch(function () {
-            renderInvites([]);
+          .catch(function (error) {
+            if (['staff_account_changed', 'request_cancelled', 'request_context_changed'].includes(error.code)) return;
+            invitesBody.innerHTML = '<tr><td colspan="6">Ошибка загрузки. Повторите запрос.</td></tr>';
           });
       }
 
       function loadProtocols() {
         var apiBase = getApiBase();
-        return fetch(apiBase + '/protocols', {
+        return WecogHttp.json(apiBase + '/protocols', {
           headers: authHeaders(false),
           credentials: 'include'
         })
-          .then(function (r) {
-            if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
-            return r.json();
-          })
           .then(function (rows) {
             protocolsCache = Array.isArray(rows) ? rows : [];
             if (!protocolIdInput.value && protocolsCache[0] && protocolsCache[0].id) {
@@ -285,8 +280,10 @@
             }
             return protocolsCache;
           })
-          .catch(function () {
-            protocolsCache = [];
+          .catch(function (error) {
+            if (!['staff_account_changed', 'request_cancelled', 'request_context_changed'].includes(error.code)) {
+              copyFeedback.style.display = 'inline'; copyFeedback.textContent = 'Ошибка загрузки протоколов: ' + error.message;
+            }
             return [];
           });
       }
@@ -294,111 +291,35 @@
       if (apiBaseInput) apiBaseInput.value = getApiBase();
 
       btnGenerate.addEventListener('click', async function () {
-        var apiBase = getApiBase();
-        var maxRunsRaw = (maxRunsInput.value || '').trim();
-        var expiresAtRaw = (expiresAtInput.value || '').trim();
-
-        var rawProtocolInput = (protocolIdInput.value || '').trim();
-        var resolved = await resolveProtocolRef(rawProtocolInput, apiBase, null);
-        if (!resolved || !Number.isFinite(resolved.protocol_id) || resolved.protocol_id <= 0) {
-          if (isInviteSlug(rawProtocolInput)) {
-            copyFeedback.style.display = 'inline';
-            copyFeedback.style.color = 'var(--muted)';
-            copyFeedback.textContent =
-              'Код «' + rawProtocolInput + '» не найден в API. Сначала опубликуйте протокол в конструкторе (кнопка «Сохранить протокол» после входа), затем создайте ссылку снова.';
-            return;
-          }
-          var loaded = protocolsCache;
-          if (!Array.isArray(loaded) || loaded.length === 0) {
-            loaded = await loadProtocols();
-          }
-          var fallbackProtocolId = loaded && loaded[0] && loaded[0].id ? parseInt(String(loaded[0].id), 10) : null;
-          if (Number.isFinite(fallbackProtocolId) && fallbackProtocolId > 0) {
-            resolved = { protocol_id: fallbackProtocolId, invite_code: null };
-            protocolIdInput.value = String(fallbackProtocolId);
-          } else {
-            copyFeedback.style.display = 'inline';
-            copyFeedback.style.color = 'var(--muted)';
-            copyFeedback.textContent =
-              'Не удалось определить протокол. Создайте протокол в конструкторе или укажите числовой id из GET /protocols (например 1).';
-            return;
-          }
-        } else {
-          protocolIdInput.value = resolved.invite_code || String(resolved.protocol_id);
-        }
-
-        var protocolId = resolved.protocol_id;
-        var payload = { protocol_id: protocolId };
-        if (maxRunsRaw) {
-          var maxRuns = parseInt(maxRunsRaw, 10);
-          if (Number.isFinite(maxRuns) && maxRuns > 0) payload.max_runs = maxRuns;
-        }
-        if (expiresAtRaw) payload.expires_at = expiresAtRaw;
-
-        btnGenerate.disabled = true;
-        copyFeedback.style.display = 'none';
+        if (btnGenerate.disabled) return;
+        btnGenerate.disabled = true; btnCopy.disabled = true;
+        linkOutput.value = ''; copyFeedback.style.display = 'none';
         try {
-          var postInvite = async function (p) {
-            var resp = await fetch(apiBase + '/invitations', {
-              method: 'POST',
-              headers: authHeaders(true),
-              credentials: 'include',
-              body: JSON.stringify(p)
-            });
-            if (!resp.ok) {
-              var j = await resp.json().catch(function(){ return {}; });
-              throw new Error(j.error || (resp.status + ' ' + resp.statusText));
-            }
-            return resp.json();
-          };
-
-          var inv;
-          try {
-            inv = await postInvite(payload);
-          } catch (e) {
-            var message0 = String(e && e.message ? e.message : e);
-            var isProtoMissing0 =
-              message0.indexOf('Protocol not found or access denied') >= 0 ||
-              message0.indexOf('Protocol not found') >= 0;
-            if (!isProtoMissing0) throw e;
-            var loadedProtocols = await loadProtocols();
-            var firstAccessible = loadedProtocols && loadedProtocols[0] && loadedProtocols[0].id
-              ? parseInt(String(loadedProtocols[0].id), 10)
-              : null;
-            var requestedInList = Array.isArray(loadedProtocols) && loadedProtocols.some(function (x) {
-              return String(x && x.id) === String(payload.protocol_id);
-            });
-            if (!requestedInList && Number.isFinite(firstAccessible) && firstAccessible > 0) {
-              payload.protocol_id = firstAccessible;
-              protocolIdInput.value = String(firstAccessible);
-              inv = await postInvite(payload);
-            } else {
-              throw e;
-            }
+          var apiBase = getApiBase();
+          var rawProtocolInput = (protocolIdInput.value || '').trim();
+          var resolved = await resolveProtocolRef(rawProtocolInput, apiBase, null);
+          if (!resolved || !Number.isFinite(resolved.protocol_id) || resolved.protocol_id <= 0) {
+            throw new Error('Не удалось определить выбранный протокол. Укажите его ID или код опубликованного приглашения.');
           }
-          linkOutput.value = buildLink(inv.code);
+          var payload = { protocol_id: resolved.protocol_id };
+          var maxRuns = parseInt(maxRunsInput.value, 10);
+          if (Number.isFinite(maxRuns) && maxRuns > 0) payload.max_runs = maxRuns;
+          if (expiresAtInput.value.trim()) payload.expires_at = expiresAtInput.value.trim();
+          // Never substitute the first accessible protocol or retry an uncertain POST.
+          var inv = await WecogHttp.json(apiBase + '/invitations', {
+            method: 'POST', headers: authHeaders(true), credentials: 'include', body: JSON.stringify(payload)
+          });
+          linkOutput.value = buildLink(inv.public_code || inv.code);
           btnCopy.disabled = false;
-          copyFeedback.style.display = 'inline';
-          copyFeedback.style.color = 'var(--good)';
+          copyFeedback.style.display = 'inline'; copyFeedback.style.color = 'var(--good)';
           copyFeedback.textContent = 'Ссылка создана';
-        } catch (e) {
-          var message = String(e && e.message ? e.message : e);
-          var isProtoMissing =
-            message.indexOf('Protocol not found or access denied') >= 0 ||
-            message.indexOf('Protocol not found') >= 0;
-          if (isProtoMissing) {
-            copyFeedback.style.display = 'inline';
-            copyFeedback.style.color = 'var(--muted)';
-            copyFeedback.textContent =
-              'Для текущего аккаунта недоступен указанный протокол. Выберите Protocol ID из доступного списка /protocols или войдите под ролью с доступом к нужной организации.';
-          } else {
-            copyFeedback.style.color = 'var(--good)';
-            copyFeedback.style.display = 'inline';
-            copyFeedback.textContent = 'Ошибка: ' + message;
+        } catch (error) {
+          if (!['staff_account_changed', 'request_cancelled', 'request_context_changed'].includes(error.code)) {
+            copyFeedback.style.display = 'inline'; copyFeedback.style.color = 'var(--muted)';
+            copyFeedback.textContent = 'Ошибка: ' + error.message;
           }
         } finally {
-          btnGenerate.disabled = false;
-          loadInvites();
+          btnGenerate.disabled = false; loadInvites();
         }
       });
 

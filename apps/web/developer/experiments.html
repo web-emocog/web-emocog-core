@@ -34,7 +34,10 @@
 </head>
 <body>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script src="../http-client.js?v=20261027-1"></script>
+  <script src="../account-storage.js?v=20261019-5"></script>
+  <script src="../staff-session.js?v=20261027-1"></script>
+  <script src="../auth-guard.js?v=20261027-1"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -200,12 +203,7 @@
         setStatus(overviewStatus, '');
         var q = filtersToQuery();
         try {
-          var r = await fetch(base + '/experiments?' + q.toString(), { headers: headers(), credentials: 'include' });
-          if (!r.ok) {
-            var errPayload = await r.json().catch(function () { return {}; });
-            throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
-          }
-          var rows = await r.json();
+          var rows = await WecogHttp.json(base + '/experiments?' + q.toString(), { headers: headers(), credentials: 'include' });
           rows = Array.isArray(rows) ? rows : [];
           renderOverview(rows);
           setStatus(overviewStatus, 'Загружено сводок: ' + rows.length);
@@ -218,12 +216,7 @@
       async function loadRecent() {
         setStatus(recentStatus, '');
         try {
-          var r = await fetch(base + '/experiments/recent?limit=50', { headers: headers(), credentials: 'include' });
-          if (!r.ok) {
-            var errPayload = await r.json().catch(function () { return {}; });
-            throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
-          }
-          var rows = await r.json();
+          var rows = await WecogHttp.json(base + '/experiments/recent?limit=50', { headers: headers(), credentials: 'include' });
           rows = Array.isArray(rows) ? rows : [];
           renderRecent(rows);
           setStatus(recentStatus, 'Загружено сессий: ' + rows.length);

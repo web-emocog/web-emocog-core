@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 
-const web = 'http://127.0.0.1:4173';
+const web = process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173';
 const initialPassword = 'InitialSynthetic2026!';
 const newPassword = ' НовыйПароль2026! ';
 

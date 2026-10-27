@@ -134,6 +134,7 @@ jobs:
         working-directory: apps/api
         env:
           AUTH_RATE_LIMIT_PER_MINUTE: '1000'
+          INGEST_RATE_LIMIT_PER_MINUTE: '1000'
         run: npm run test:postgres
       - name: Start canonical API
         working-directory: apps/api
@@ -280,6 +281,12 @@ jobs:
       - name: Run isolated FPS and quality diagnostics
         working-directory: apps/autotests
         run: npm run test:fps -- ${{ matrix.projects }}
+      - name: Run isolated staff HTTP resilience and data boundary checks
+        working-directory: apps/autotests
+        run: |
+          npm run test:staff-http -- ${{ matrix.projects }}
+          npm run test:html-security -- ${{ matrix.projects }}
+          npm run test:staff-regression -- ${{ matrix.projects }}
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

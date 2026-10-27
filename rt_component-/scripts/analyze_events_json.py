@@ -14,23 +14,23 @@ from rt_mvp.analyzer import build_trials_from_events, compute_metrics
 from rt_mvp.config import ProjectConfig
 
 
-def main() -> int:
-    data = json.load(sys.stdin)
+def analyze(data: dict, cfg: ProjectConfig) -> dict:
     events = data.get("events") or []
     task = data.get("task") or "simple"
-    config_path = data.get("config_path")
-    cfg = ProjectConfig.load(config_path)
     trials, meta = build_trials_from_events(events, task, cfg)
     metrics = compute_metrics(trials, task, cfg)
-    json.dump(
-        {
-            "meta": meta,
-            "metrics": metrics,
-            "n_trials": len(trials),
-        },
-        sys.stdout,
-        ensure_ascii=False,
-    )
+    return {"meta": meta, "metrics": metrics, "n_trials": len(trials)}
+
+
+def main() -> int:
+    data = json.load(sys.stdin)
+    cfg = ProjectConfig.load(data.get("config_path"))
+    # Preserve the single-job CLI contract for existing integrations and tests.
+    if "jobs" in data:
+        result = {"jobs": [analyze(job, cfg) for job in data["jobs"]]}
+    else:
+        result = analyze(data, cfg)
+    json.dump(result, sys.stdout, ensure_ascii=False, allow_nan=False)
     return 0
 
 

@@ -23,6 +23,7 @@
   }
 
   function toFinite(v) {
+    if ((typeof v !== 'number' && typeof v !== 'string') || (typeof v === 'string' && !v.trim())) return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   }
@@ -184,13 +185,16 @@
   }
 
   function applySessionData(target, data) {
-    if (!target || !data) return;
+    if (!target || typeof target !== 'object' || !data || typeof data !== 'object') return;
     Object.keys(data).forEach((k) => {
+      // Keep special JSON keys as own data; never traverse inherited prototypes/setters.
       if (data[k] && typeof data[k] === 'object' && !Array.isArray(data[k])) {
-        target[k] = target[k] || {};
-        applySessionData(target[k], data[k]);
+        const previous = Object.getOwnPropertyDescriptor(target, k)?.value;
+        const nested = previous && typeof previous === 'object' && !Array.isArray(previous) ? previous : {};
+        Object.defineProperty(target, k, { value: nested, writable: true, configurable: true, enumerable: true });
+        applySessionData(nested, data[k]);
       } else {
-        target[k] = data[k];
+        Object.defineProperty(target, k, { value: data[k], writable: true, configurable: true, enumerable: true });
       }
     });
   }
@@ -325,6 +329,7 @@
         global.state.project = cur.name;
         if (cur.organization_name) global.state.org = cur.organization_name;
       }
+      global.refreshOverviewProjects?.();
       return true;
     } catch (e) {
       global.invalidateProjectStimuli?.();
@@ -460,12 +465,10 @@
       try {
         const base = (global.API_BASE || '').replace(/\/$/, '');
         const url = `${base}/export?${params.toString()}`;
-        const r = await fetch(url, {
+        const blob = await global.WecogHttp.blob(url, {
           headers: global.apiHeaders ? global.apiHeaders() : {},
           credentials: 'include'
-        });
-        if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
-        const blob = await r.blob();
+        }, { scope: 'workspace', transfer: true });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `emocog-export.${fmt === 'json' ? 'json' : 'csv'}`;

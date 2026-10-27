@@ -111,6 +111,7 @@
     <a href="../index.html" class="back">← На главную</a>
   </div>
   <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../http-client.js?v=20261027-1"></script>
   <script src="../account-storage.js?v=20261019-5"></script>
   <script>
     (function () {
@@ -177,10 +178,10 @@
           localStorage.removeItem('emocog_api_user');
           localStorage.removeItem('emocog_selected_portal');
         } catch (_) {}
-        return fetch(base + '/auth/logout', {
+        return WecogHttp.discard(base + '/auth/logout', {
           method: 'POST',
           credentials: 'include'
-        }).catch(function () {}).then(function () {
+        }, { timeoutMs: 10000, scope: 'document' }).catch(function () {}).then(function () {
           throw new Error(message);
         });
       }
@@ -207,8 +208,10 @@
         }
       });
 
+      var loginPending = false;
       document.getElementById('form').addEventListener('submit', function (e) {
         e.preventDefault();
+        if (loginPending) return;
         var login = (document.getElementById('login').value || '').trim().toLowerCase();
         var password = document.getElementById('password').value || '';
         var errEl = document.getElementById('error');
@@ -222,24 +225,20 @@
         }
 
         var base = (getApiBase() || '').replace(/\/$/, '');
-        fetch(base + '/auth/login', {
+        loginPending = true;
+        var submitButton = document.querySelector('#form button[type="submit"]');
+        if (submitButton) submitButton.disabled = true;
+        WecogHttp.json(base + '/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Auth-Transport': 'cookie' },
           credentials: 'include',
           body: JSON.stringify({ email: login, password: password })
-        })
-          .catch(function () {
+        }, { scope: 'document' })
+          .catch(function (original) {
+            if (original.status || !['request_timeout', 'request_network_error'].includes(original.code)) throw original;
             var error = new Error('Login server unavailable');
             error.code = 'login_network_unavailable';
             throw error;
-          })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().catch(function () { return {}; }).then(function (j) {
-                throw new Error(j.error || (r.status + ' ' + r.statusText));
-              });
-            }
-            return r.json();
           })
           .then(function (result) {
             if (!result || !result.user || result.user.role === 'respondent') {
@@ -278,6 +277,9 @@
               errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
             }
             errEl.classList.add('visible');
+          }).finally(function () {
+            loginPending = false;
+            if (submitButton) submitButton.disabled = false;
           });
       });
 
