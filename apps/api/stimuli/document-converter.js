@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { runNativeProcess } = require('../security/native-process');
+const { resolveReadableServerOwnedUploadPath } = require('../security/upload-paths');
 
 const DOCUMENT_MIME_TYPES = new Set([
   'application/pdf',
@@ -175,9 +176,14 @@ async function convertDocument(options) {
     return { cwd: tempDir, timeoutMs: remaining, resourceLimits: true };
   };
   try {
+    const source = await resolveReadableServerOwnedUploadPath(uploadsRoot,
+      path.relative(path.resolve(uploadsRoot), path.resolve(inputPath)));
+    if (!source.ok) {
+      throw new ConversionError(415, 'Document must be a server-owned regular upload', 'document_file_invalid');
+    }
     await fs.promises.mkdir(tempRoot, { recursive: true, mode: 0o700 });
     tempDir = await fs.promises.mkdtemp(path.join(tempRoot, 'job-'));
-    const document = await validateDocument(inputPath, originalName, declaredMime, maxBytes);
+    const document = await validateDocument(source.absolutePath, originalName, declaredMime, maxBytes);
     const sourcePath = path.join(tempDir, `source${document.extension}`);
     // Convert the exact validated bytes, never reopen the upload pathname.
     await fs.promises.writeFile(sourcePath, document.bytes, { flag: 'wx', mode: 0o600 });

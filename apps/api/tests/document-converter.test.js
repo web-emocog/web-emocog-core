@@ -97,6 +97,24 @@ test('all PDF pages have bounded raster cost at the configured DPI', () => {
   assert.throws(() => parsePdfInfo(hundredA4, 100, { requireAllPages: true, dpi: 300 }), e => e.code === 'document_pixel_limit');
 });
 
+test('conversion confines documents to the owned upload root and rejects linked parent paths', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wecog-convert-root-'));
+  try {
+    const uploads = path.join(root, 'uploads'), outside = path.join(root, 'outside');
+    fs.mkdirSync(uploads); fs.mkdirSync(outside);
+    const external = path.join(outside, 'sample.pdf');
+    fs.writeFileSync(external, '%PDF-1.4\nsynthetic');
+    fs.symlinkSync(outside, path.join(uploads, 'linked-parent'));
+    fs.linkSync(external, path.join(uploads, 'hardlink.pdf'));
+    for (const inputPath of [external, path.join(uploads, 'linked-parent/sample.pdf'), path.join(uploads, 'hardlink.pdf')]) {
+      await assert.rejects(convertDocument({ inputPath, originalName: 'sample.pdf',
+        declaredMime: 'application/pdf', uploadsRoot: uploads, maxBytes: 1024, maxPages: 10,
+        timeoutMs: 1000, dpi: 150, maxConcurrent: 1 }), { code: 'document_file_invalid' });
+    }
+    assert.equal(fs.existsSync(path.join(uploads, '.conversion')), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('native converters do not inherit signing keys and time out cleanly', async () => {
   process.env.WECOG_TEST_SECRET = 'must-not-reach-child';
   try {

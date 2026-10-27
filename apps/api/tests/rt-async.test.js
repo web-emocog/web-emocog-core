@@ -160,3 +160,18 @@ test('missing/foreign block data never fabricate RT trials; legacy unscoped rows
   const adapted = eventsToRtJsonl([{ type: 'response', blockId: 'main', rtMs: 350 }], [], { blockId: 'main' });
   assert.deepEqual(adapted.events, []);
 });
+
+test('special protocol block IDs survive RT projection and JSON round trips as own data', async () => {
+  const ids = ['__proto__', 'constructor', 'toString', 'normal'];
+  const result = await computeSessionRtFeatures({ cognitiveResults: ids.map((blockId, index) => ({
+    blockId, rt: 300 + index * 100, response: 'Space', expectedResponse: 'Space', correct: true,
+  })) }, { blocks: ids.map(id => ({ id, type: 'cognitive_task', taskType: 'simple_rt' })) });
+  const projected = result.session_metrics.rt_mean.blocks;
+  assert.equal(Object.getPrototypeOf(projected), Object.prototype);
+  const restored = JSON.parse(JSON.stringify(result));
+  for (const [index, id] of ids.entries()) {
+    assert.equal(Object.hasOwn(projected, id), true);
+    assert.equal(projected[id], 300 + index * 100);
+    assert.equal(restored.session_metrics.rt_mean.blocks[id], 300 + index * 100);
+  }
+});

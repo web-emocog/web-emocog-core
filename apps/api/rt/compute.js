@@ -212,7 +212,11 @@ async function computeSessionRtFeatures(payload, protocolDefinition, options = {
     for (const block of blockFeatures) {
       for (const [metricId, entry] of Object.entries(block.computed_metrics)) {
         if (!session_metrics[metricId]) session_metrics[metricId] = { value: null, blocks: {} };
-        if (entry && entry.value != null) session_metrics[metricId].blocks[block.block_id] = entry.value;
+        if (entry && entry.value != null) {
+          Object.defineProperty(session_metrics[metricId].blocks, String(block.block_id), {
+            value: entry.value, enumerable: true, writable: true, configurable: true,
+          });
+        }
       }
     }
     return { schema_version: 'rt_features.v1', adapter_version: 'rt_event_adapter.v2', blocks: blockFeatures, session_metrics,
