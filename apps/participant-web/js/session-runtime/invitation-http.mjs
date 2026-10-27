@@ -1,4 +1,4 @@
-import { fetchWithDeadline } from './http.mjs?v=20261019-5';
+import { fetchWithDeadline } from './http.mjs?v=20261025-1';
 
 // One bounded pool for invitation metadata and binaries. A 429 pauses the whole
 // pool, not just one file, so queued files cannot amplify a rate-limit burst.

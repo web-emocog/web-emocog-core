@@ -17,7 +17,7 @@ import { CLASS_INDICES, CLASS_NAMES } from './constants.js';
  * @param {Array|null} faceLandmarks - лэндмарки лица (опционально)
  * @returns {Object} результат анализа масок
  */
-export function analyzeMasks(segmentationResult, width, height, faceLandmarks) {
+export function analyzeMasks(segmentationResult, width, height, faceLandmarks, maskReader = null) {
     const result = {
         hasData: false,
         classDistribution: {},
@@ -37,7 +37,7 @@ export function analyzeMasks(segmentationResult, width, height, faceLandmarks) {
     result.hasData = true;
 
     // Получаем данные маски
-    const maskData = categoryMask.getAsUint8Array();
+    const maskData = maskReader ? maskReader.bytes(categoryMask) : categoryMask.getAsUint8Array();
     const maskWidth = categoryMask.width;
     const maskHeight = categoryMask.height;
 
@@ -72,7 +72,7 @@ export function analyzeMasks(segmentationResult, width, height, faceLandmarks) {
         const faceSkinMask = segmentationResult.confidenceMasks[CLASS_INDICES.FACE_SKIN];
         if (faceSkinMask) {
             result.confidenceMap = {
-                faceSkin: extractConfidenceStats(faceSkinMask, faceLandmarks, width, height)
+                faceSkin: extractConfidenceStats(faceSkinMask, faceLandmarks, width, height, 0.5, maskReader)
             };
         }
     }
@@ -109,12 +109,11 @@ export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks
         const padX = (maxX - minX) * 0.1;
         const padY = (maxY - minY) * 0.1;
         
-        faceBox = {
-            x: Math.max(0, minX - padX),
-            y: Math.max(0, minY - padY),
-            width: Math.min(1, maxX - minX + 2 * padX),
-            height: Math.min(1, maxY - minY + 2 * padY)
-        };
+        const left = Math.max(0, Math.min(1, minX - padX));
+        const top = Math.max(0, Math.min(1, minY - padY));
+        faceBox = { x: left, y: top,
+            width: Math.max(0, Math.min(1, maxX + padX) - left),
+            height: Math.max(0, Math.min(1, maxY + padY) - top) };
     } else {
         // Используем центральную область кадра
         faceBox = { x: 0.2, y: 0.1, width: 0.6, height: 0.8 };
@@ -198,8 +197,8 @@ export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks
  * @param {number} threshold - порог уверенности
  * @returns {Object} статистика уверенности
  */
-export function extractConfidenceStats(confidenceMask, faceLandmarks, frameWidth, frameHeight, threshold = 0.5) {
-    const data = confidenceMask.getAsFloat32Array();
+export function extractConfidenceStats(confidenceMask, faceLandmarks, frameWidth, frameHeight, threshold = 0.5, maskReader = null) {
+    const data = maskReader ? maskReader.floats(confidenceMask) : confidenceMask.getAsFloat32Array();
     const width = confidenceMask.width;
     const height = confidenceMask.height;
 
@@ -214,7 +213,8 @@ export function extractConfidenceStats(confidenceMask, faceLandmarks, frameWidth
             const y = Math.floor(point.y * height);
             const idx = y * width + x;
             
-            if (idx >= 0 && idx < data.length) {
+            // An out-of-frame x must not wrap into an adjacent mask row.
+            if (x >= 0 && x < width && y >= 0 && y < height && idx < data.length) {
                 const confidence = data[idx];
                 sum += confidence;
                 count++;

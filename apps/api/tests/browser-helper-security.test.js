@@ -85,5 +85,10 @@ describe('browser helper and legacy HTML security', () => {
     const builder = fs.readFileSync(path.join(root, 'apps/web/researcher-builder.js'), 'utf8');
     assert.match(builder, /escapeBuilderHtml\(s\)/);
     assert.match(builder, /escapeBuilderHtml\(editingExp \? editingExp\.title : ''\)/);
+    assert.match(builder, /value="\$\{escapeBuilderHtml\(trial\.duration \|\| 1000\)\}"/);
+    assert.match(builder, /value="\$\{escapeBuilderHtml\(trial\.repetitions \|\| 1\)\}"/);
+    assert.match(builder, /value="\$\{escapeBuilderHtml\(f\.id\)\}"/);
+    assert.doesNotMatch(builder, /\$\{b\.label \|\| b\.type\}/);
+    assert.doesNotMatch(builder, /\$\{previewBlockSummary\(b\)\}/);
   });
 });

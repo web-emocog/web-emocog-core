@@ -124,7 +124,45 @@
     "respiration_summary": { "type": ["object", "null"] },
     "experimentMeta": { "type": ["object", "null"] },
     "cognitiveResults": { "type": "array", "maxItems": 5000, "items": { "type": "object" } },
-    "gazeValidation": { "type": ["object", "null"] },
+    "gazeValidation": {
+      "type": ["object", "null"],
+      "properties": {
+        "samplingVersion": { "const": "unique_capture.v1" },
+        "sampling": {
+          "type": "array", "maxItems": 14,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["stage", "pointIndex", "version", "clock", "attempted", "accepted", "duplicate", "beforeWindow", "missingTimestamp", "clockChanged"],
+            "properties": {
+              "stage": { "enum": ["correction", "benchmark"] },
+              "pointIndex": { "type": "integer", "minimum": 0, "maximum": 8 },
+              "version": { "const": "unique_capture.v1" },
+              "clock": { "enum": [null, "monotonic", "wall"] },
+              "attempted": { "type": "integer", "minimum": 0, "maximum": 60 },
+              "accepted": { "type": "integer", "minimum": 0, "maximum": 60 },
+              "duplicate": { "type": "integer", "minimum": 0, "maximum": 60 },
+              "beforeWindow": { "type": "integer", "minimum": 0, "maximum": 60 },
+              "missingTimestamp": { "type": "integer", "minimum": 0, "maximum": 60 },
+              "clockChanged": { "type": "integer", "minimum": 0, "maximum": 60 }
+            },
+            "allOf": [{ "if": { "properties": { "stage": { "const": "benchmark" } } },
+              "then": { "properties": { "pointIndex": { "maximum": 4 } } } }]
+          }
+        },
+        "coverage": {
+          "type": "object", "additionalProperties": false,
+          "required": ["version", "expectedTargets", "observedTargets", "missingTargetIndices", "complete"],
+          "properties": {
+            "version": { "const": "target_coverage.v1" },
+            "expectedTargets": { "const": 5 },
+            "observedTargets": { "type": "integer", "minimum": 0, "maximum": 5 },
+            "missingTargetIndices": { "type": "array", "maxItems": 5, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 4 } },
+            "complete": { "type": "boolean" }
+          }
+        }
+      },
+      "dependentRequired": { "samplingVersion": ["sampling", "coverage"], "sampling": ["samplingVersion", "coverage"] }
+    },
     "gaze_analytics": {
       "type": ["object", "null"],
       "properties": {

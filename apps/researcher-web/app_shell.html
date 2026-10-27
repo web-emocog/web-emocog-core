@@ -8436,22 +8436,22 @@ function ExperimentBuilderView(options = {}) {
     const c = block.content || {};
 
     const folderOpts = (folders||[]).map(f =>
-      `<option value="${f.id}" ${c.stimuliFolder===f.id?'selected':''}>${f.name}</option>`).join('');
+      `<option value="${escapeLegacyResearcherHtml(f.id)}" ${c.stimuliFolder===f.id?'selected':''}>${escapeLegacyResearcherHtml(f.name)}</option>`).join('');
 
     let typeFields = '';
     if (block.type === 'instruction') {
       typeFields = `
         <div class="insp-field">
           <label>Заголовок</label>
-          <input data-field="title" value="${c.title||''}" />
+          <input data-field="title" value="${escapeLegacyResearcherHtml(c.title||'')}" />
         </div>
         <div class="insp-field">
           <label>Текст</label>
-          <textarea data-field="text" rows="4">${c.text||''}</textarea>
+          <textarea data-field="text" rows="4">${escapeLegacyResearcherHtml(c.text||'')}</textarea>
         </div>
         <div class="insp-field">
           <label>Кнопка</label>
-          <input data-field="buttonText" value="${c.buttonText||'Далее'}" />
+          <input data-field="buttonText" value="${escapeLegacyResearcherHtml(c.buttonText||'Далее')}" />
         </div>`;
     } else if (block.type === 'cognitive_task' || block.type === 'passive') {
       typeFields = `
@@ -8463,7 +8463,7 @@ function ExperimentBuilderView(options = {}) {
             <option value="folder" ${c.stimuliSource==='folder'?'selected':''}>Конкретная папка</option>
           </select>
         </div>
-        <div class="insp-field" id="folderField_${blockId}" style="${c.stimuliSource==='folder'?'':'display:none;'}">
+        <div class="insp-field" id="folderField_${escapeLegacyResearcherHtml(blockId)}" style="${c.stimuliSource==='folder'?'':'display:none;'}">
           <label>Папка со стимулами</label>
           <select data-field="stimuliFolder">
             <option value="">— выберите папку —</option>
@@ -8475,21 +8475,21 @@ function ExperimentBuilderView(options = {}) {
       typeFields = `
         <div class="insp-field">
           <label>Текст для участника</label>
-          <textarea data-field="text" rows="3">${c.text||'Сделайте небольшой перерыв'}</textarea>
+          <textarea data-field="text" rows="3">${escapeLegacyResearcherHtml(c.text||'Сделайте небольшой перерыв')}</textarea>
         </div>
         <div class="insp-field">
           <label>Длительность (сек)</label>
-          <input data-field="duration" type="number" value="${c.duration||30}" />
+          <input data-field="duration" type="number" value="${escapeLegacyResearcherHtml(c.duration||30)}" />
         </div>`;
     } else if (block.type === 'finish') {
       typeFields = `
         <div class="insp-field">
           <label>Заголовок</label>
-          <input data-field="title" value="${c.title||'Эксперимент завершён'}" />
+          <input data-field="title" value="${escapeLegacyResearcherHtml(c.title||'Эксперимент завершён')}" />
         </div>
         <div class="insp-field">
           <label>Текст</label>
-          <textarea data-field="text" rows="3">${c.text||'Спасибо за участие!'}</textarea>
+          <textarea data-field="text" rows="3">${escapeLegacyResearcherHtml(c.text||'Спасибо за участие!')}</textarea>
         </div>`;
     }
 
@@ -8502,7 +8502,7 @@ function ExperimentBuilderView(options = {}) {
       </div>
       <div class="insp-field">
         <label>Название блока</label>
-        <input id="insp_label" value="${block.label||meta.label}" />
+        <input id="insp_label" value="${escapeLegacyResearcherHtml(block.label||meta.label)}" />
       </div>
       ${typeFields}
       <button id="inspSaveBtn" class="quick-btn" style="width:100%;margin-top:8px;background:rgba(92,102,189,.12);border-color:rgba(92,102,189,.3);color:var(--accent);font-weight:600;font-size:12px;">
@@ -8540,7 +8540,7 @@ function ExperimentBuilderView(options = {}) {
         });
       }
 
-      const trialsBtn = insp.querySelector(`#btn_edit_trials_${blockId}`);
+      const trialsBtn = insp.querySelector(`#btn_edit_trials_${CSS.escape(String(blockId))}`);
       if (trialsBtn) {
         trialsBtn.addEventListener('click', () => {
           showTrialTableModal(block);
@@ -8576,15 +8576,15 @@ function ExperimentBuilderView(options = {}) {
     const modal = document.createElement('div');
     modal.style.cssText = 'background:rgba(255,255,255,0.97);border:1px solid rgba(92,102,189,0.22);border-radius:20px;padding:26px 24px 20px;width:950px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 28px 72px rgba(10,15,35,0.30);';
 
-    const stimuliOptions = stimuliList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    const stimuliOptions = stimuliList.map(s => `<option value="${escapeLegacyResearcherHtml(s.id)}">${escapeLegacyResearcherHtml(s.name)}</option>`).join('');
     const selectedFolderId = block.content.stimuliFolder || '';
-    const folderOptions = folders.map(f => `<option value="${f.id}" ${f.id === selectedFolderId ? 'selected' : ''}>${f.name}</option>`).join('');
+    const folderOptions = folders.map(f => `<option value="${escapeLegacyResearcherHtml(f.id)}" ${f.id === selectedFolderId ? 'selected' : ''}>${escapeLegacyResearcherHtml(f.name)}</option>`).join('');
 
     modal.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
         <div>
           <div style="font-size:18px;font-weight:700;color:var(--text);">
-            <span>Настройка логики:</span> <span style="color:var(--accent);">${block.label}</span>
+            <span>Настройка логики:</span> <span style="color:var(--accent);">${escapeLegacyResearcherHtml(block.label)}</span>
           </div>
         </div>
         <button id="trialCloseBtn" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;">
@@ -8597,7 +8597,7 @@ function ExperimentBuilderView(options = {}) {
         <div style="display:flex; flex-direction:column; gap:6px;">
           <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Окно ответа (RT)</label>
           <div style="display:flex; align-items:center; gap:8px;">
-            <input type="number" id="rtWindowInput" value="${block.content.rtWindow || 1000}" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;">
+            <input type="number" id="rtWindowInput" value="${escapeLegacyResearcherHtml(block.content.rtWindow || 1000)}" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;">
             <span style="font-size:12px; color:var(--muted);">мс</span>
           </div>
         </div>
@@ -8608,7 +8608,7 @@ function ExperimentBuilderView(options = {}) {
           <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Фиксация (+)</label>
           <div style="display:flex; align-items:center; gap:8px;">
             <input type="checkbox" id="useFixationCb" ${block.content.useFixation ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);">
-            <input type="number" id="fixationDuration" value="${block.content.fixationDuration || 500}" placeholder="мс" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.useFixation ? '' : 'disabled'}>
+            <input type="number" id="fixationDuration" value="${escapeLegacyResearcherHtml(block.content.fixationDuration || 500)}" placeholder="мс" style="width:70px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.useFixation ? '' : 'disabled'}>
             <span style="font-size:12px; color:var(--muted);">мс</span>
           </div>
         </div>
@@ -8620,8 +8620,8 @@ function ExperimentBuilderView(options = {}) {
             <label style="font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:.05em;">Обратная связь</label>
             <div style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="fbCb" ${block.content.showFeedback ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="Показывать">
-              <input type="text" id="fbCorr" value="${block.content.feedbackCorrect || 'Верно!'}" placeholder="Успех" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
-              <input type="text" id="fbInc" value="${block.content.feedbackIncorrect || 'Ошибка!'}" placeholder="Ошибка" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
+              <input type="text" id="fbCorr" value="${escapeLegacyResearcherHtml(block.content.feedbackCorrect || 'Верно!')}" placeholder="Успех" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
+              <input type="text" id="fbInc" value="${escapeLegacyResearcherHtml(block.content.feedbackIncorrect || 'Ошибка!')}" placeholder="Ошибка" style="width:80px; padding:6px; font-size:12px; border:1px solid var(--stroke); border-radius:6px; outline:none;" ${block.content.showFeedback ? '' : 'disabled'}>
             </div>
           </div>
 
@@ -8707,10 +8707,10 @@ function ExperimentBuilderView(options = {}) {
             ${stimuliOptions}
           </select>
           
-          <input type="text" class="t-input t-condition" value="${trial.condition || ''}" placeholder="target" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
-          <input type="text" class="t-input t-correct" value="${trial.correctResponse || ''}" placeholder="Space" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
-          <input type="number" class="t-input t-duration" value="${trial.duration || 1000}" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
-          <input type="number" class="t-input t-reps" value="${trial.repetitions || 1}" min="1" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
+          <input type="text" class="t-input t-condition" value="${escapeLegacyResearcherHtml(trial.condition || '')}" placeholder="target" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          <input type="text" class="t-input t-correct" value="${escapeLegacyResearcherHtml(trial.correctResponse || '')}" placeholder="Space" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          <input type="number" class="t-input t-duration" value="${escapeLegacyResearcherHtml(trial.duration || 1000)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;" />
+          <input type="number" class="t-input t-reps" value="${escapeLegacyResearcherHtml(trial.repetitions || 1)}" min="1" style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--stroke);font-size:12px;text-align:center;" />
           
           <button class="del-row-btn" data-index="${index}" style="background:none;border:none;color:var(--bad);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;border-radius:6px;">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -8943,13 +8943,13 @@ function ExperimentBuilderView(options = {}) {
       const meta = getMeta(b.type);
       const sel = b.id === selectedBlockId;
       return `
-        <div class="proto-card ${sel?'proto-card-sel':''}" data-id="${b.id}" data-idx="${i}" draggable="true"
+        <div class="proto-card ${sel?'proto-card-sel':''}" data-id="${escapeLegacyResearcherHtml(b.id)}" data-idx="${i}" draggable="true"
           style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:11px;border:1px solid ${sel?'var(--accent)':'var(--stroke)'};background:${sel?'rgba(92,102,189,.07)':'var(--card-bg)'};cursor:pointer;margin-bottom:6px;position:relative;">
           <div style="width:28px;height:28px;border-radius:8px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
             <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
           </div>
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${b.label||meta.label}</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeLegacyResearcherHtml(b.label||meta.label)}</div>
             <div style="font-size:10px;color:var(--muted);">${meta.label}${(b.content?.trials?.length)?(' · '+b.content.trials.length+' проб'):''}</div>
           </div>
           <div style="display:flex;gap:2px;flex-shrink:0;">
@@ -8959,7 +8959,7 @@ function ExperimentBuilderView(options = {}) {
             <button class="pcbtn dn-btn" data-idx="${i}" title="Вниз" ${i===experimentBlocks.length-1?'disabled':''} style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
               <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <button class="pcbtn del-btn" data-id="${b.id}" title="Удалить" style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
+            <button class="pcbtn del-btn" data-id="${escapeLegacyResearcherHtml(b.id)}" title="Удалить" style="background:none;border:none;cursor:pointer;color:var(--muted2);padding:3px;border-radius:5px;">
               <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -9067,7 +9067,7 @@ function ExperimentBuilderView(options = {}) {
       reader.onload = ev => {
         uploadedPsychoPyFile = ev.target.result;
         infoEl.style.display = 'block';
-        infoEl.innerHTML = `<svg fill="none" stroke="var(--good)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+        infoEl.innerHTML = `<svg fill="none" stroke="var(--good)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${escapeLegacyResearcherHtml(file.name)} (${(file.size/1024).toFixed(1)} KB)`;
         if (importedType === 'psyexp') resSec.style.display = 'block';
         startBtn.style.opacity='1'; startBtn.style.pointerEvents='auto';
       };
@@ -9085,7 +9085,7 @@ function ExperimentBuilderView(options = {}) {
       uploadedResources = {};
       resListEl.innerHTML = '';
       Array.from(e.target.files).forEach(f => {
-        resListEl.innerHTML += `<div>📄 ${f.name}</div>`;
+        const row = document.createElement('div'); row.textContent = `📄 ${f.name}`; resListEl.appendChild(row);
         const r = new FileReader(); r.onload = ev => { uploadedResources[f.name] = ev.target.result; }; r.readAsText(f);
       });
     });
@@ -9130,7 +9130,7 @@ function ExperimentBuilderView(options = {}) {
               <div style="width:20px;height:20px;border-radius:5px;background:${meta.color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
                 <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
               </div>
-              <div style="font-size:11px;"><b>${b.id}</b> <span style="color:var(--muted);">${b.type}${b.trials?' · '+b.trials.length+' проб':''}</span></div>
+              <div style="font-size:11px;"><b>${escapeLegacyResearcherHtml(b.id)}</b> <span style="color:var(--muted);">${escapeLegacyResearcherHtml(b.type)}${b.trials?' · '+b.trials.length+' проб':''}</span></div>
             </div>`;
           }).join('')}
         `;
@@ -9178,7 +9178,7 @@ function ExperimentBuilderView(options = {}) {
         
         const folderName = folders.find(f => f.id === block.content.stimuliFolder)?.name || '<span>Не выбрана</span>';
         const sourceHtml = block.content?.stimuliSource === 'folder' 
-          ? `<span>Папка:</span> <span style="color:var(--text);">${folderName}</span>` 
+          ? `<span>Папка:</span> <span style="color:var(--text);">${escapeLegacyResearcherHtml(folderName)}</span>`
           : `<span>Вся библиотека</span>`;
 
         const section = document.createElement('div');
@@ -9190,7 +9190,7 @@ function ExperimentBuilderView(options = {}) {
               <div style="width:26px;height:26px;border-radius:7px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
                 <svg fill="none" stroke="${meta.color}" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="${meta.icon}"/></svg>
               </div>
-              <div style="font-size:15px;font-weight:700;color:var(--text);">${block.label}</div>
+              <div style="font-size:15px;font-weight:700;color:var(--text);">${escapeLegacyResearcherHtml(block.label)}</div>
             </div>
             <div style="font-size:12px;color:var(--muted);display:flex;gap:12px;align-items:center;">
               <span><b style="color:var(--text);">${trialsCount}</b> <span>проб</span></span>
@@ -9311,10 +9311,10 @@ function ExperimentBuilderView(options = {}) {
             <div style="display:flex;align-items:center;gap:12px;">
               <span style="font-size:11px;color:var(--muted);min-width:60px;">Порог:</span>
               <input type="range" class="qc-range" data-key="${param.key}" min="${param.min}" max="${param.max}" step="1"
-                value="${qc[param.key].threshold}"
+                value="${escapeLegacyResearcherHtml(qc[param.key].threshold)}"
                 style="flex:1;accent-color:var(--accent);height:4px;cursor:pointer;"
                 oninput="this.nextElementSibling.textContent=this.value+'${param.unit}'">
-              <span style="font-size:13px;font-weight:700;color:var(--accent);min-width:48px;">${qc[param.key].threshold}${param.unit}</span>
+              <span style="font-size:13px;font-weight:700;color:var(--accent);min-width:48px;">${escapeLegacyResearcherHtml(qc[param.key].threshold)}${param.unit}</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
               <input type="checkbox" class="qc-hardstop" data-key="${param.key}" ${qc[param.key].hardStop?'checked':''} style="width:auto;">
@@ -9625,7 +9625,7 @@ function StimuliAOIView() {
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13" style="flex-shrink:0;opacity:.7;">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>`;
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeLegacyResearcherHtml(f.name)}</span>`;
       leftTabs.appendChild(folderTab);
     });
 
@@ -9815,13 +9815,13 @@ function StimuliAOIView() {
       content.innerHTML = `<div style="grid-column:1/-1; color:var(--muted); font-size:13px; padding:24px 0;">${t('folderEmpty')}</div>`;
     } else {
       content.innerHTML = folderStimuli.map(s => `
-        <div class="stimulus-card" data-id="${s.id}" style="position:relative;">
+        <div class="stimulus-card" data-id="${escapeLegacyResearcherHtml(s.id)}" style="position:relative;">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
             ${getIconForType(s.type)}
           </svg>
-          <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s.name}</div>
-          <div style="font-size:10px; color:var(--muted2);">${s.info}</div>
-          <button class="remove-from-folder-btn" data-id="${s.id}" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;" title="Remove">
+          <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeLegacyResearcherHtml(s.name)}</div>
+          <div style="font-size:10px; color:var(--muted2);">${escapeLegacyResearcherHtml(s.info)}</div>
+          <button class="remove-from-folder-btn" data-id="${escapeLegacyResearcherHtml(s.id)}" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;" title="Remove">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
@@ -9855,16 +9855,16 @@ function StimuliAOIView() {
       : available.map(s => {
           const thumb = (s.type === 'image' && s.url)
             ? `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#eee;">
-                <img src="${s.url}" style="width:100%;height:100%;object-fit:cover;display:block;">
+                <img src="${escapeLegacyResearcherHtml(s.url)}" style="width:100%;height:100%;object-fit:cover;display:block;">
               </div>`
             : `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:rgba(92,102,189,.07);display:flex;align-items:center;justify-content:center;">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="color:var(--muted);">${getIconForType(s.type)}</svg>
               </div>`;
 
           return `
-            <div class="stimulus-card modal-pick" data-id="${s.id}" style="position:relative;padding:8px;box-sizing:border-box;border:1px solid var(--stroke);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;height:100%;transition:all 0.2s;">
+            <div class="stimulus-card modal-pick" data-id="${escapeLegacyResearcherHtml(s.id)}" style="position:relative;padding:8px;box-sizing:border-box;border:1px solid var(--stroke);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;height:100%;transition:all 0.2s;">
               ${thumb}
-              <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;">${s.name}</div>
+              <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;">${escapeLegacyResearcherHtml(s.name)}</div>
             </div>
           `;
         }).join('');
@@ -10058,11 +10058,11 @@ function updateStimuliSubnav() {
   const container = document.getElementById('stimuli-folders-subnav');
   if (!container) return;
   container.innerHTML = folders.map(f => `
-    <a href="#" class="stimuli-folder-nav-item ${selectedFolder === f.id ? 'active' : ''}" data-folder-id="${f.id}" style="display:flex;align-items:center;gap:6px;">
+    <a href="#" class="stimuli-folder-nav-item ${selectedFolder === f.id ? 'active' : ''}" data-folder-id="${escapeLegacyResearcherHtml(f.id)}" style="display:flex;align-items:center;gap:6px;">
       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13" style="flex-shrink:0;">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
       </svg>
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeLegacyResearcherHtml(f.name)}</span>
     </a>
   `).join('');
   container.querySelectorAll('.stimuli-folder-nav-item').forEach(item => {
@@ -10086,18 +10086,24 @@ function renderStimuliGallery(container) {
   container.innerHTML = filtered.length === 0
     ? `<div style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:24px 0;">Нет стимулов. Загрузите файлы через вкладку «Загрузка».</div>`
     : filtered.map(s => `
-    <div class="stimulus-card ${String(s.id) === String(selectedStimulusId) ? 'selected' : ''}" data-id="${s.id}" style="position:relative;">
-      <button class="stim-delete-btn" data-id="${s.id}" title="Удалить" onclick="event.stopPropagation();deleteStimulusFromLibrary('${s.id}')">
+    <div class="stimulus-card ${String(s.id) === String(selectedStimulusId) ? 'selected' : ''}" data-id="${escapeLegacyResearcherHtml(s.id)}" style="position:relative;">
+      <button class="stim-delete-btn" data-id="${escapeLegacyResearcherHtml(s.id)}" title="Удалить">
         <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="margin-bottom:6px; color:var(--muted);">
         ${getIconForType(s.type)}
       </svg>
-      <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">${s.name}</div>
-      <div style="font-size:10px; color:var(--muted2);">${s.info}</div>
+      <div style="font-size:11px;font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">${escapeLegacyResearcherHtml(s.name)}</div>
+      <div style="font-size:10px; color:var(--muted2);">${escapeLegacyResearcherHtml(s.info)}</div>
     </div>
   `).join('');
 
+  container.querySelectorAll('.stim-delete-btn').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      deleteStimulusFromLibrary(button.dataset.id);
+    });
+  });
   container.querySelectorAll('.stimulus-card').forEach(card => {
     card.addEventListener('click', () => selectStimulus(card.dataset.id));
   });
@@ -10139,19 +10145,19 @@ function selectStimulus(id) {
 
   const aoiHtml = `
     <div class="insp-section">
-      <h4 style="margin-bottom:10px;">${stimulus.name}</h4>
+      <h4 style="margin-bottom:10px;">${escapeLegacyResearcherHtml(stimulus.name)}</h4>
       <div style="margin-bottom:12px;">
         ${stimulus.type === 'image' && stimulus.url
-          ? `<img src="${stimulus.url}" style="max-width:100%; border-radius:8px; border:1px solid var(--stroke);">`
-          : `<div style="background:var(--card-bg2,#f0f0f0);border-radius:8px;padding:24px;text-align:center;color:var(--muted);font-size:12px;">${stimulus.type}</div>`}
+          ? `<img src="${escapeLegacyResearcherHtml(stimulus.url)}" style="max-width:100%; border-radius:8px; border:1px solid var(--stroke);">`
+          : `<div style="background:var(--card-bg2,#f0f0f0);border-radius:8px;padding:24px;text-align:center;color:var(--muted);font-size:12px;">${escapeLegacyResearcherHtml(stimulus.type)}</div>`}
       </div>
       <div class="insp-row" style="margin-bottom:8px;">
         <span class="label" style="font-size:11px;color:var(--muted);">Тип</span>
-        <span class="value" style="font-size:11px;">${stimulus.type}</span>
+        <span class="value" style="font-size:11px;">${escapeLegacyResearcherHtml(stimulus.type)}</span>
       </div>
       <div class="insp-row" style="margin-bottom:12px;">
         <span class="label" style="font-size:11px;color:var(--muted);">Размер</span>
-        <span class="value" style="font-size:11px;">${stimulus.info}</span>
+        <span class="value" style="font-size:11px;">${escapeLegacyResearcherHtml(stimulus.info)}</span>
       </div>
       <button class="quick-btn" onclick="toast('AOI editor coming soon')" style="width:100%;">${t('createAoiTemplate')}</button>
     </div>

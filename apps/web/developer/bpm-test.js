@@ -241,12 +241,12 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
 
     async function loadEngine() {
       async function probeEngineUrl(url) {
-        var res = await fetch(url, {
+        return WecogHttp.request(url, {
           method: 'GET',
           cache: 'no-store',
           credentials: 'same-origin',
           redirect: 'follow'
-        });
+        }, async function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var ct = (res.headers.get('content-type') || '').toLowerCase();
         if (ct.indexOf('text/html') >= 0) {
@@ -262,6 +262,7 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
           throw new Error('Unexpected module payload');
         }
         return true;
+        }, { scope: 'document' });
       }
       var pathsToTry = buildRppgCandidateUrls();
       var lastErr = null;

@@ -52,6 +52,12 @@ Model cards for Face Mesh and MediaPipe segmentation specify Apache-2.0.
 Runtime and model files are served from the application origin. The canonical
 participant path does not contact a MediaPipe CDN or model host.
 
+`apps/api/tests/face-regions.test.js` contains selected x/y coordinates adapted
+from Google's Apache-2.0 [canonical face model](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/modules/face_geometry/data/canonical_face_model.obj)
+to test regional bounds, not as participant data. Source file SHA256 inspected
+2026-10-25: `8bac80443397e113f41a8b565ea72c59390bc031d9defab289dba7bc0c54e618`.
+Copyright The MediaPipe Authors; coordinates are normalized in the fixture.
+
 ```text
 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff  face_landmarker.task
 59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a  pose_landmarker_lite.task
@@ -120,6 +126,29 @@ license/source/integrity and zero-vulnerability npm audit were verified on
 2026-10-08. This is test tooling, not a new physiological model.
 
 ## Update policy
+
+Local diagnostic tooling on 2026-10-27 additionally used Playwright **1.64.1**,
+Apache-2.0, from the official npm registry and
+https://github.com/microsoft/playwright/releases/tag/v1.64.1, with its matching
+official Firefox 157 binary. Installed only in a temporary external prefix;
+the repository's Playwright dependency remains 1.57.0. The diagnostic package
+archive integrity was checked against the npm registry and temporary lockfile:
+`sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==`.
+No new model, runtime or browser binary is bundled with the product.
+
+Security maintenance on 2026-10-25 also updates the existing API dependency
+`express-validator` to **7.3.2** (MIT), source
+https://github.com/express-validator/express-validator. The exact archive
+integrity and transitive versions are recorded in `apps/api/package-lock.json`.
+This applies the compatible patch from Dependabot PR #50, not the unrelated
+Express 5 migration. No upstream source or scientific model is vendored.
+
+Security maintenance on 2026-10-27 pins the existing transitive **qs 6.16.1**
+(BSD-3-Clause), source https://github.com/ljharb/qs, to address
+https://github.com/advisories/GHSA-6pq8-jhm2-2vcw. No major Express upgrade or
+new runtime package is introduced. Official npm archive integrity:
+`sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==`.
+The exact dependency tree is recorded in `apps/api/package-lock.json`.
 
 Before updating a runtime or model:
 

@@ -1,14 +1,14 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
-import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261019-5';
-import { translations } from '../../translations.js?v=20261019-5';
-import { measureCameraFPS } from './camera.js?v=20261019-5';
+import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
+import { translations } from '../../translations.js?v=20261025-1';
+import { measureCameraFPS } from './camera.js?v=20261025-1';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
     captureHeadPoseReference,
     resetHeadPoseReference,
     setHeadPoseGuideMode,
     updateHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20261019-5';
+} from '../gaze-tracker/head-pose-guide.js?v=20261025-1';
 
 function dbg(scope, event, data) {
     try {

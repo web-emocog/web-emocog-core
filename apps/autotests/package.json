@@ -7,6 +7,12 @@
     "typecheck": "tsc --noEmit",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
+    "test:frame-workers": "RUN_WORKER_REGRESSION=1 playwright test --config=playwright.workers.config.ts",
+    "test:fps": "playwright test --config=playwright.fps.config.ts",
+    "test:vision-gl": "node scripts/check-vision-gl.mjs",
+    "test:staff-http": "playwright test --config=playwright.staff-http.config.ts",
+    "test:staff-regression": "playwright test --config=playwright.staff-regression.config.ts",
+    "test:html-security": "playwright test --config=playwright.html-security.config.ts",
     "test:api": "RUN_API_CONTRACT=1 playwright test tests/api-contract.spec.ts",
     "test:researcher": "RUN_RESEARCHER_CONTRACT=1 playwright test tests/researcher-regression.spec.ts"
   },

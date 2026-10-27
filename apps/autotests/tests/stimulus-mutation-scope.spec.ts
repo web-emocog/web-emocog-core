@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 declare const stimuliList: any[];
 declare const folders: any[];
-const base = 'http://127.0.0.1:4173';
+const base = process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 for (const boundary of ['project', 'account', 'origin']) {

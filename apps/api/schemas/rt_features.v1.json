@@ -6,6 +6,7 @@
   "required": ["schema_version", "blocks"],
   "properties": {
     "schema_version": { "const": "rt_features.v1" },
+    "adapter_version": { "type": "string", "pattern": "^rt_event_adapter\\.v[0-9]+$", "description": "Server adapter provenance; missing on legacy results" },
     "python_available": { "type": "boolean" },
     "blocks": {
       "type": "array",

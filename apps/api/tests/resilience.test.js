@@ -45,6 +45,21 @@ test('backup notifications can be muted without disabling persistence or QC', ()
   }
 });
 
+test('protocol QC explains the measured value and threshold without changing acceptance or echoing arbitrary input', () => {
+  const definition = policy({ fpsStable: rule(25) });
+  const check = quality.evaluate(definition, { analysisFps: 14.25 }).checks.fpsStable;
+  assert.equal(check.status, 'failed');
+  assert.equal(check.hardStop, false, 'hardStop false does not disable QC');
+  assert.match(quality.describeCheck('fpsStable', check, 'ru'), /FPS анализа: 14\.3 FPS; требуется не менее 25 FPS/);
+  assert.match(quality.describeCheck('fpsStable', check, 'en'), /Analysis FPS: 14\.3 FPS; required minimum 25 FPS/);
+  for (const key of ['gazeValid', 'faceDetected', 'lighting']) {
+    assert.match(quality.describeCheck(key, { value: 70, threshold: 80 }), /70%; required minimum 80%/);
+  }
+  assert.match(quality.describeCheck('fpsStable', { value: null, threshold: 25 }), /no measurement/);
+  assert.equal(quality.describeCheck('<script>', { value: '<script>', threshold: 25 }), 'Quality metric: no measurement');
+  assert.equal(quality.evaluate(definition, { analysisFps: 25 }).checks.fpsStable.status, 'passed');
+});
+
 test('heatmap enrichment renders virtual stimuli in content coordinates, without a library file', () => {
   const { enrichStimulusDescriptor } = require('../analytics/v1-router');
   const square = enrichStimulusDescriptor({ id: 'std_simple_black_square', version: '1', contentUrl: null }, new Map());

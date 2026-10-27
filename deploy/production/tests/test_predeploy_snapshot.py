@@ -20,6 +20,9 @@ SHA = "a" * 40
 REAL_RUN = subprocess.run
 QUOTA = "ERROR: rpc error: code = ResourceExhausted desc = The limit on total size of snapshots has exceeded."
 DENIED = "ERROR: rpc error: code = PermissionDenied desc = Permission denied"
+REQUEST_ID = "11111111-2222-3333-4444-555555555555"
+TRACE_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+CORRELATION = f"\nclient-request-id: {REQUEST_ID}\nclient-trace-id: {TRACE_ID}\n"
 
 
 def snapshot(number, **overrides):
@@ -88,11 +91,99 @@ class FakeYC:
         return [command[-1] for action, command in self.calls if action == "delete"]
 
 
+class SnapshotDiagnosticTests(unittest.TestCase):
+    def test_cli_error_reports_safe_cause_exit_code_and_support_ids(self):
+        result = subprocess.CompletedProcess([], 1, "", QUOTA + CORRELATION)
+        error = snapshots.CLIError("create", result)
+        self.assertTrue(error.snapshot_quota)
+        self.assertEqual(error.diagnostics["summary"], "Snapshot storage quota exceeded")
+        self.assertEqual(error.diagnostics["exit_code"], 1)
+        self.assertEqual(error.diagnostics["client_request_id"], REQUEST_ID)
+        self.assertEqual(error.diagnostics["client_trace_id"], TRACE_ID)
+        self.assertIn(TRACE_ID, str(error))
+        self.assertTrue(error.diagnostics["quota_cleanup_allowed"])
+        self.assertIsNone(error.diagnostics["quota_cleanup_blocker"])
+
+    def test_recognized_description_in_wrapper_does_not_relax_quota_gate(self):
+        operation_id = "fv4" + "a" * 17
+        stderr = f"ERROR: operation (id={operation_id}) failed: " + QUOTA.removeprefix("ERROR: ") + CORRELATION
+        error = snapshots.CLIError("create", subprocess.CompletedProcess([], 1, "", stderr))
+        self.assertFalse(error.snapshot_quota)
+        self.assertEqual(error.diagnostics["summary"], "Snapshot storage quota exceeded")
+        self.assertEqual(error.diagnostics["operation_id"], operation_id)
+        self.assertEqual(error.diagnostics["quota_cleanup_blocker"], "snapshot_quota_not_confirmed")
+
+    def test_nonempty_stdout_and_noncreate_failures_explain_cleanup_blocker(self):
+        for action, stdout, blocker in (("create", "SENSITIVE-STDOUT", "stdout_not_empty"),
+                                        ("delete", "", "command_not_create")):
+            with self.subTest(action=action):
+                error = snapshots.CLIError(action, subprocess.CompletedProcess([], 7, stdout, QUOTA))
+                self.assertFalse(error.snapshot_quota)
+                self.assertEqual(error.diagnostics["quota_cleanup_blocker"], blocker)
+                self.assertEqual(error.diagnostics["stdout_present"], bool(stdout))
+                self.assertEqual(error.diagnostics["exit_code"], 7)
+                self.assertNotIn("SENSITIVE-STDOUT", str(error))
+
+    def test_other_resource_exhaustion_is_visible_but_cannot_authorize_cleanup(self):
+        stderr = "ERROR: rpc error: code = ResourceExhausted desc = Too many operations" + CORRELATION
+        error = snapshots.CLIError("create", subprocess.CompletedProcess([], 1, "", stderr))
+        self.assertEqual(error.diagnostics["rpc_code"], "ResourceExhausted")
+        self.assertEqual(error.diagnostics["summary"], "Too many cloud operations")
+        self.assertFalse(error.snapshot_quota)
+
+    def test_unknown_descriptions_credentials_pii_paths_and_stdout_stay_private(self):
+        secrets = ("SENSITIVE-IAM-TOKEN", "eyJhbGci.secret.signature", "private@example.org",
+                   "/home/runner/private-trace.txt", "C:\\Users\\private\\trace.txt", "SECRET-INVITATION")
+        stderr = "ERROR: rpc error: code = ResourceExhausted desc = " + " ".join(secrets)
+        stderr += CORRELATION + "\n::warning::SENSITIVE-LOG-COMMAND\n\x1b[31mSENSITIVE-COLOR"
+        with patch.dict(os.environ, {"YC_IAM_TOKEN": secrets[0]}):
+            error = snapshots.CLIError("create", subprocess.CompletedProcess([], 1, "SENSITIVE-STDOUT", stderr))
+        output = str(error)
+        self.assertEqual(error.diagnostics["summary"], "Unrecognized error; raw CLI output withheld")
+        self.assertIn(TRACE_ID, output)
+        for value in (*secrets, "SENSITIVE-STDOUT", "SENSITIVE-LOG-COMMAND", "SENSITIVE-COLOR", "\x1b"):
+            self.assertNotIn(value, output)
+        self.assertNotIn("\n", output)
+
+    def test_allowlisted_summary_never_copies_surrounding_sensitive_text(self):
+        stderr = DENIED + " Authorization: Bearer SENSITIVE-TOKEN /private/trace.txt" + CORRELATION
+        error = snapshots.CLIError("check", subprocess.CompletedProcess([], 1, "", stderr))
+        self.assertEqual(error.diagnostics["summary"], "Cloud access denied")
+        self.assertNotIn("SENSITIVE-TOKEN", str(error))
+        self.assertNotIn("/private/trace.txt", str(error))
+
+    def test_invalid_ids_and_unknown_rpc_codes_are_not_echoed(self):
+        stderr = ("ERROR: rpc error: code = SENSITIVESECRET desc = secret\n"
+                  "client-request-id: SENSITIVE-REQUEST\nclient-trace-id: ../private/file\n"
+                  "ERROR: operation (id=SENSITIVE-OPERATION) failed\n")
+        error = snapshots.CLIError("list", subprocess.CompletedProcess([], 1, "", stderr))
+        self.assertIsNone(error.diagnostics["rpc_code"])
+        self.assertNotIn("client_request_id", error.diagnostics)
+        self.assertNotIn("client_trace_id", error.diagnostics)
+        self.assertNotIn("operation_id", error.diagnostics)
+        self.assertNotIn("SENSITIVE", str(error))
+        for code in ("Canceled", "Cancelled", "DataLoss"):
+            with self.subTest(code=code):
+                result = subprocess.CompletedProcess([], 1, "", f"ERROR: rpc error: code = {code} desc = unknown")
+                self.assertEqual(snapshots.CLIError("list", result).diagnostics["rpc_code"], code)
+
+    def test_large_output_is_bounded_and_plain_network_errors_are_classified(self):
+        stderr = "ERROR: error dialing endpoint 'PRIVATE-HOST:443': context deadline exceeded" + CORRELATION
+        stderr += "SENSITIVE-DETAILS" * 100000
+        error = snapshots.CLIError("list", subprocess.CompletedProcess([], 1, "", stderr))
+        self.assertEqual(error.diagnostics["summary"], "Cloud request deadline exceeded")
+        self.assertIn(TRACE_ID, str(error))
+        self.assertLess(len(str(error)), 1500)
+        self.assertNotIn("PRIVATE-HOST", str(error))
+        self.assertNotIn("SENSITIVE", str(error))
+
+
 class SnapshotRotationTests(unittest.TestCase):
     def setUp(self):
         self.yc = FakeYC()
         self.output = io.StringIO()
         self.enterContext(contextlib.redirect_stdout(self.output))
+        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(patch.object(snapshots.subprocess, "run", self.yc.run))
         self.controller = snapshots.Snapshots("production-folder", "production-disk", 5, SHA)
 
@@ -128,6 +219,16 @@ class SnapshotRotationTests(unittest.TestCase):
         self.assertEqual(self.yc.deleted(), ["snapshot-1", "snapshot-2", "snapshot-3", "snapshot-4"])
         self.assertEqual(self.yc.ids(), {"snapshot-5", "snapshot-new"})
         self.assertEqual(self.yc.actions().count("create"), 4)
+
+    def test_recovered_quota_logs_diagnostics_without_claiming_release_stopped(self):
+        self.yc.create_errors = [QUOTA + CORRELATION]
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.controller.create()
+        self.assertIn(TRACE_ID, stderr.getvalue())
+        self.assertIn('"quota_cleanup_allowed": true', stderr.getvalue())
+        self.assertNotIn("release stopped", stderr.getvalue())
+        self.assertEqual(self.yc.deleted(), ["snapshot-1"])
 
     def test_quota_fails_closed_when_only_last_ready_remains(self):
         self.yc.capacity = 1
@@ -242,10 +343,15 @@ class SnapshotRotationTests(unittest.TestCase):
 
     def test_timeout_never_causes_additional_deletion_or_create_retry(self):
         def timeout(cmd):
-            raise subprocess.TimeoutExpired(cmd, 600)
+            raise subprocess.TimeoutExpired(cmd, 600, output=b"SENSITIVE-STDOUT",
+                                            stderr=(QUOTA + CORRELATION + "SENSITIVE-STDERR").encode())
         self.yc.handlers["create"] = timeout
-        with self.fails("timed out"):
+        with self.fails("timed out") as caught:
             self.controller.create()
+        self.assertIn(TRACE_ID, str(caught.exception))
+        self.assertIn('"timed_out": true', str(caught.exception))
+        self.assertIn('"quota_cleanup_allowed": false', str(caught.exception))
+        self.assertNotIn("SENSITIVE", str(caught.exception))
         self.assertEqual(self.yc.deleted(), [])
         self.assertEqual(self.yc.actions().count("create"), 1)
 
@@ -351,7 +457,7 @@ class SnapshotRotationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="wecog-snapshot-cli-") as directory:
             fake = Path(directory) / "yc"
             fake.write_text(f'#!{sys.executable}\nimport sys\nprint("[]")\n'
-                            f'print({DENIED!r}, file=sys.stderr)\n'
+                            f'print({(DENIED + CORRELATION)!r}, file=sys.stderr)\n'
                             'print("SENSITIVE-CLI-DETAILS", file=sys.stderr)\nsys.exit(1)\n')
             fake.chmod(0o700)
             env = {**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
@@ -361,6 +467,9 @@ class SnapshotRotationTests(unittest.TestCase):
                               capture_output=True, text=True, check=False, env=env, timeout=5)
             self.assertEqual(result.returncode, 1)
             self.assertIn("PermissionDenied", result.stderr)
+            self.assertIn(TRACE_ID, result.stderr)
+            self.assertIn('"summary": "Cloud access denied"', result.stderr)
+            self.assertIn('"quota_cleanup_allowed": false', result.stderr)
             self.assertNotIn("SENSITIVE-CLI-DETAILS", result.stdout + result.stderr)
 
 

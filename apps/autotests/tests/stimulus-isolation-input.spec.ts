@@ -94,7 +94,7 @@ test('project library hides stale files, hydrates late images, retries errors an
   await switchProject(8);
   await expect(loadedImage(43)).toBeVisible();
   releaseSeven.forEach(release => release());
-  await page.evaluate(() => (window as any).__pendingLibraryTest);
+  expect(await page.evaluate(() => (window as any).__pendingLibraryTest)).toBe(false);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('emocog_stimuli') || '[]')
     .filter((row: any) => row.apiStimulusId).map((row: any) => row.projectId))).toEqual([8]);
   await expect(page.locator('.stimulus-card[data-id="42"]')).toHaveCount(0);
@@ -137,7 +137,7 @@ for (const [code, en, ru] of [['KeyZ', 'z', 'я'], ['KeyX', 'x', 'ч'], ['Comma'
       await page.evaluate(async ({ action }) => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-5', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261025-1', location.href).href);
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
           version: 'v2-keyboard-regression', blocks: [{ id: 'key-task', type: 'cognitive_task', taskType: 'simple_rt',
             blockConfig: { useFixation: false, stimulusDuration: 5000, responseMode: 'keypress' },
@@ -167,7 +167,7 @@ for (const [action, key] of [['Space', 'Space'], ['arrow_left', 'ArrowLeft'], ['
     await page.evaluate(async action => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
-      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-5', location.href).href);
+      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261025-1', location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
         version: '1.0.0', blocks: [{ id: 'key-edge', type: 'cognitive_task', taskType: 'simple_rt',
           blockConfig: { useFixation: false, stimulusDuration: 5000, responseMode: 'keypress' },

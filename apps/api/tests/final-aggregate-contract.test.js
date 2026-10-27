@@ -92,7 +92,12 @@ test('participant final aggregates pass ingest policy and remain visible to rese
       blockId: 'rt-1', trialId: 'rt-trial-1', stimulusId: 'go',
       response: 'Space', correct: true, rt: 410, qualityValid: true,
     }],
-    gazeValidation: { passed: true, metrics: { accuracyPct: 5, precisionPct: 2 } },
+    gazeValidation: { passed: true, metrics: { accuracyPct: 5, precisionPct: 2 },
+      samplingVersion: 'unique_capture.v1',
+      sampling: Array.from({ length: 5 }, (_, pointIndex) => ({ version: 'unique_capture.v1', stage: 'benchmark', pointIndex, clock: 'monotonic',
+        attempted: 60, accepted: 30, duplicate: 30, beforeWindow: 0, missingTimestamp: 0, clockChanged: 0 })),
+      coverage: { version: 'target_coverage.v1', expectedTargets: 5, observedTargets: 5,
+        missingTargetIndices: [], complete: true } },
     events: [],
     lifecycle: {
       schemaVersion: 'session_lifecycle.v1',
@@ -111,6 +116,27 @@ test('participant final aggregates pass ingest policy and remain visible to rese
   }, { forIngest: true });
 
   assert.deepEqual(validateSessionFeaturePayload(payload), []);
+  assert.equal(payload.gazeValidation.sampling[0].accepted, 30);
+  assert.equal(payload.gazeValidation.coverage.complete, true);
+  assert.equal(payload.gazeValidation.samplingCount, undefined);
+  const metadata = payload.gazeValidation;
+  for (const invalid of [
+    { ...metadata, samplingVersion: 'unknown' },
+    { ...metadata, coverage: undefined },
+    { ...metadata, sampling: metadata.sampling.slice(0, 4) },
+    { ...metadata, coverage: { ...metadata.coverage, expectedTargets: 4 } },
+    { ...metadata, sampling: Array(15).fill(metadata.sampling[0]) },
+    { ...metadata, sampling: [metadata.sampling[0], metadata.sampling[0]] },
+    { ...metadata, sampling: [{ ...metadata.sampling[0], accepted: 61 }] },
+    { ...metadata, sampling: [{ ...metadata.sampling[0], clock: null }] },
+    { ...metadata, sampling: [{ ...metadata.sampling[0], rawVideo: 'forbidden' }] },
+    { ...metadata, coverage: { ...metadata.coverage, complete: false } },
+    { ...metadata, coverage: { ...metadata.coverage, observedTargets: 4, missingTargetIndices: [4], complete: false } },
+  ]) {
+    assert.ok(validateSessionFeaturePayload({ ...payload, gazeValidation: invalid }).length > 0);
+  }
+  assert.deepEqual(validateSessionFeaturePayload({ ...payload,
+    gazeValidation: { passed: true, metrics: { accuracyPct: 5, precisionPct: 2 } } }), []);
   assert.equal(JSON.stringify(payload).includes('must-not-cross-ingest@example.test'), false);
   assert.equal(payload.gaze_analytics.summary.sampleCountTotal, 3);
   assert.equal(payload.gaze_analytics.summary.sampleCountValid, 2);

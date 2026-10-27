@@ -99,4 +99,8 @@ if [[ ${readiness_status} != 503 ]]; then
   exit 1
 fi
 
+# Exercise the actual Poppler binaries and Linux resource wrapper in the exact
+# image, before any release/backup/deployment side effects.
+docker exec "${CONTAINER_NAME}" node scripts/smoke-document-converter.js
+
 echo "Production API image smoke test passed for ${IMAGE}."

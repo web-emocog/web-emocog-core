@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Data Ingestion для агрегатов (Фаза 2.5).
  * POST /ingest — приём payload из buildAggregatesPayload.
@@ -25,6 +26,7 @@ const {
   mergeRtIntoProxyScalars,
   buildProxyMetricsJson,
 } = require('../rt/compute');
+const { RtAnalysisError } = require('../rt/scheduler');
 const {
   resolveIdempotencyKey,
   getIngestSuccessStatus,
@@ -301,6 +303,7 @@ function extractProxyMetrics(payload, qcSummary, qcComputed) {
         attention_metrics_global: p.attentionMetrics && p.attentionMetrics.global ? p.attentionMetrics.global : null,
         blocks,
         cognitive_results_count: cognitiveRows.length,
+        rt_adapter_version: p.rt_features?.adapter_version || null,
         bpm_summary: p.bpm_summary || null,
         rppg_summary: p.rppg_summary || null,
         respiration_summary: p.respiration_summary || null,
@@ -369,6 +372,203 @@ function requireIngestCredential(req, res, next) {
   });
 }
 
+// Read-only preflight and locked commit use the same authorization/replay checks.
+// No session/quota writes and no Python work belong in this resolver.
+async function resolveIngestContext(client, req, raw, idempotency, locked = false) {
+  const sessionId = String(raw.ids.session);
+  const participantId = raw.ids.participant ? String(raw.ids.participant) : null;
+  const invitationCode = raw.ids.invitationCode ? String(raw.ids.invitationCode) : null;
+  const lifecycle = raw.lifecycle;
+  const staffClaims = invitationCode ? null : (req.ingestStaffClaims || authenticateBearerHeader(req.headers.authorization));
+  const authenticated = Boolean(staffClaims);
+  if (staffClaims) {
+    const principal = await resolveCurrentStaffPrincipal(
+      client,
+      req.headers.authorization,
+      req.cookies?.[config.auth.staffCookieName]
+    );
+    if (!principal) {
+      throw new HttpError(
+        401,
+        'Invalid, expired, or revoked staff token',
+        'staff_token_revoked'
+      );
+    }
+    if (!canRolePerform(principal.role, OPERATIONS.SESSION_WRITE)) {
+      throw new HttpError(403, 'Access denied for session write', 'session_write_denied');
+    }
+    req.user = principal;
+  }
+
+  let invitation = null;
+  if (invitationCode) {
+    invitation = await findInvitationByCode(client, invitationCode, { forUpdate: locked });
+    if (!invitation) {
+      throw new HttpError(404, 'Invitation not found', 'invitation_not_found');
+    }
+    if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
+      throw new HttpError(410, 'Invitation expired', 'invitation_expired');
+    }
+    const tokenCheck = verifyParticipantIngestRequest(req, {
+      sessionId,
+      invitationCode,
+      invitation,
+    });
+    if (!tokenCheck.ok) {
+      throw new HttpError(tokenCheck.status, tokenCheck.error, 'ingest_token_mismatch');
+    }
+  }
+
+  const sessionRow = await client.query(
+    `SELECT s.id, s.participant_id, s.started_at, s.stopped_at, s.project_id,
+            s.protocol_id, s.invitation_id,
+            sf.payload->'lifecycle'->>'finishAttemptId' AS stored_finish_attempt_id,
+            sf.payload->'delivery'->>'sequence' AS stored_delivery_sequence,
+            sf.payload->'experimentMeta'->>'serverDeliveryDigest' AS stored_delivery_digest,
+            sq.validity AS stored_qc_validity,
+            sp.payload->>'proxy_ready' AS stored_proxy_ready
+     FROM sessions s
+     LEFT JOIN session_features sf ON sf.session_id = s.id
+     LEFT JOIN session_qc_summary sq ON sq.session_id = s.id
+     LEFT JOIN session_proxy_metrics sp ON sp.session_id = s.id
+     WHERE s.session_id = $1
+     ${locked ? 'FOR UPDATE OF s' : ''}`,
+    [sessionId]
+  );
+  const storedSession = sessionRow.rows[0] || null;
+  const alreadyCompleted = Boolean(storedSession?.stopped_at);
+  let scope;
+
+  if (storedSession) {
+    const sessionProjectId = storedSession.project_id || null;
+    const sessionProtocolId = storedSession.protocol_id || null;
+    if (invitation) {
+      if (
+        Number(storedSession.invitation_id) !== Number(invitation.id)
+        || Number(sessionProtocolId) !== Number(invitation.protocol_id)
+        || Number(sessionProjectId) !== Number(invitation.project_id)
+      ) {
+        throw new HttpError(
+          409,
+          'Session does not match invitation, project, or protocol',
+          'session_invitation_mismatch'
+        );
+      }
+    } else if (!authenticated) {
+      throw new HttpError(403, 'Invitation required for participant ingest');
+    }
+    if (storedSession.participant_id && participantId
+      && String(storedSession.participant_id) !== participantId) {
+      throw new HttpError(409, 'Session participant does not match', 'session_participant_mismatch');
+    }
+    if (authenticated && !sessionProjectId) {
+      throw new HttpError(
+        409,
+        'Staff ingest requires a session bound to a project',
+        'session_scope_missing'
+      );
+    }
+    if (
+      authenticated
+      && !(await ensureProjectAccess(client, sessionProjectId, req.user))
+    ) {
+      throw new HttpError(403, 'Access denied for project', 'project_access_denied');
+    }
+    if (!alreadyCompleted && lifecycle?.status === 'completed'
+      && Number(storedSession.stored_delivery_sequence) > 0
+      && (!raw.delivery || raw.delivery.sequence <= Number(storedSession.stored_delivery_sequence))) {
+      throw new HttpError(409, 'A newer checkpoint must be included before finalizing', 'final_delivery_stale');
+    }
+    if (!alreadyCompleted && lifecycle?.status !== 'completed' && Number(storedSession.stored_delivery_sequence) > 0) {
+      if (!raw.delivery || raw.delivery.sequence < Number(storedSession.stored_delivery_sequence)) {
+        throw new HttpError(409, 'A newer checkpoint is already saved', 'checkpoint_stale');
+      }
+      if (raw.delivery.sequence === Number(storedSession.stored_delivery_sequence)) {
+        if (storedSession.stored_delivery_digest !== deliveryDigest(raw)) throw new HttpError(409, 'Checkpoint sequence already contains different data', 'checkpoint_sequence_conflict');
+        return { replay: { status: 200, body: { session_id: sessionId, ingested: true, idempotent: true,
+          idempotency_key: null, qc_validity: storedSession.stored_qc_validity || null,
+          proxy_ready: storedSession.stored_proxy_ready === 'true', lifecycle_status: 'in_progress', completed_at: null } } };
+      }
+    }
+    if (alreadyCompleted) {
+      const existingFinish = resolveExistingFinish(
+        storedSession.stored_finish_attempt_id,
+        idempotency.key
+      );
+      if (existingFinish.action === 'conflict') {
+        throw new HttpError(
+          existingFinish.status,
+          existingFinish.error,
+          'idempotency_conflict'
+        );
+      }
+      if (existingFinish.action === 'replay') {
+        return { replay: {
+          status: 200,
+          body: {
+            session_id: sessionId,
+            ingested: true,
+            idempotent: true,
+            idempotency_key: idempotency.key,
+            qc_validity: storedSession.stored_qc_validity || null,
+            proxy_ready: storedSession.stored_proxy_ready === 'true',
+            lifecycle_status: 'completed',
+            completed_at: new Date(storedSession.stopped_at).toISOString(),
+          },
+        } };
+      }
+    }
+    scope = {
+      project_id: sessionProjectId,
+      protocol_id: sessionProtocolId,
+      participant_id: storedSession.participant_id || participantId || null,
+    };
+  } else {
+    if (!invitation) {
+      throw new HttpError(
+        authenticated ? 409 : 403,
+        authenticated
+          ? 'Staff must create a project-scoped session before ingest'
+          : 'Invitation required to create session',
+        'session_must_be_precreated'
+      );
+    }
+    if (invitation.max_runs != null && Number(invitation.used_runs) >= Number(invitation.max_runs)) {
+      throw new HttpError(410, 'Invitation run limit reached', 'invitation_run_limit');
+    }
+    scope = { project_id: invitation.project_id, protocol_id: invitation.protocol_id,
+      participant_id: participantId };
+  }
+  let protocolDefinition = invitation?.protocol_definition || null;
+  if (!protocolDefinition && storedSession?.invitation_id) {
+    protocolDefinition = (await client.query(`SELECT protocol_definition FROM invitations WHERE id = $1 ${locked ? 'FOR SHARE' : ''}`, [storedSession.invitation_id])).rows[0]?.protocol_definition || null;
+  }
+  if (!protocolDefinition && scope.protocol_id) {
+    const protocol = await client.query(
+      `SELECT definition FROM protocols WHERE id = $1 ${locked ? 'FOR SHARE' : ''}`,
+      [scope.protocol_id]
+    );
+    protocolDefinition = protocol.rows[0]?.definition || null;
+    if (typeof protocolDefinition === 'string') {
+      try {
+        protocolDefinition = JSON.parse(protocolDefinition);
+      } catch (_) {
+        protocolDefinition = null;
+      }
+    }
+  }
+
+  return { storedSession, invitation, scope, protocolDefinition };
+}
+
+function analysisContextDigest(context) {
+  return createHash('sha256').update(JSON.stringify({
+    invitation: context.invitation?.id || context.storedSession?.invitation_id || null,
+    project: context.scope.project_id, protocol: context.scope.protocol_id,
+    definition: context.protocolDefinition,
+  })).digest('hex');
+}
+
 router.post(
   '/',
   [
@@ -412,6 +612,9 @@ router.post(
     body('gaze_analytics').optional({ nullable: true }).isObject(),
   ],
   async (req, res) => {
+    const requestAbort = new AbortController();
+    const onClose = () => { if (!res.writableEnded) requestAbort.abort(); };
+    res.once('close', onClose);
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -438,110 +641,26 @@ router.post(
         return res.status(401).json({ error: 'Unauthorized ingest: token or ids.invitationCode required' });
       }
       if (!sessionId) return res.status(400).json({ error: 'ids.session required' });
+      const preflight = await resolveIngestContext(pool, req, raw, idempotency);
+      if (preflight.replay) return res.status(preflight.replay.status).json(preflight.replay.body);
+      let payload = normalizeDerivedPayload(raw);
+      // Queue wait and Python computation never hold a DB connection or transaction.
+      const rtFeatures = raw.delivery?.kind === 'checkpoint' ? null
+        : await computeSessionRtFeatures(payload, preflight.protocolDefinition, { signal: requestAbort.signal });
+      if (requestAbort.signal.aborted) throw new RtAnalysisError('cancelled');
       const result = await withTransaction(pool, async (client) => {
         await lockSessionKey(client, sessionId);
-        if (staffClaims) {
-          const principal = await resolveCurrentStaffPrincipal(
-            client,
-            req.headers.authorization,
-            req.cookies?.[config.auth.staffCookieName]
-          );
-          if (!principal) {
-            throw new HttpError(
-              401,
-              'Invalid, expired, or revoked staff token',
-              'staff_token_revoked'
-            );
-          }
-          req.user = principal;
+        const context = await resolveIngestContext(client, req, raw, idempotency, true);
+        if (context.replay) return context.replay;
+        if (requestAbort.signal.aborted) throw new RtAnalysisError('cancelled');
+        if (analysisContextDigest(context) !== analysisContextDigest(preflight)) {
+          throw new HttpError(409, 'Session or protocol changed during analysis; retry the request', 'rt_analysis_context_changed');
         }
-
-        let invitation = null;
-        if (invitationCode) {
-          invitation = await findInvitationByCode(client, invitationCode, { forUpdate: true });
-          if (!invitation) {
-            throw new HttpError(404, 'Invitation not found', 'invitation_not_found');
-          }
-          if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
-            throw new HttpError(410, 'Invitation expired', 'invitation_expired');
-          }
-          const tokenCheck = verifyParticipantIngestRequest(req, {
-            sessionId,
-            invitationCode,
-            invitation,
-          });
-          if (!tokenCheck.ok) {
-            throw new HttpError(tokenCheck.status, tokenCheck.error, 'ingest_token_mismatch');
-          }
-        }
-
-        let payload = normalizeDerivedPayload(raw);
-        const sessionRow = await client.query(
-          `SELECT s.id, s.participant_id, s.started_at, s.stopped_at, s.project_id,
-                  s.protocol_id, s.invitation_id,
-                  sf.payload->'lifecycle'->>'finishAttemptId' AS stored_finish_attempt_id,
-                  sf.payload->'delivery'->>'sequence' AS stored_delivery_sequence,
-                  sf.payload->'experimentMeta'->>'serverDeliveryDigest' AS stored_delivery_digest,
-                  sq.validity AS stored_qc_validity,
-                  sp.payload->>'proxy_ready' AS stored_proxy_ready
-           FROM sessions s
-           LEFT JOIN session_features sf ON sf.session_id = s.id
-           LEFT JOIN session_qc_summary sq ON sq.session_id = s.id
-           LEFT JOIN session_proxy_metrics sp ON sp.session_id = s.id
-           WHERE s.session_id = $1
-           FOR UPDATE OF s`,
-          [sessionId]
-        );
-        const storedSession = sessionRow.rows[0] || null;
+        const { storedSession, invitation, scope, protocolDefinition } = context;
         const existingSession = Boolean(storedSession);
-        const alreadyCompleted = Boolean(storedSession?.stopped_at);
-        let dbSessionId;
-        let scope;
-
+        let dbSessionId = storedSession?.id;
         if (storedSession) {
-          dbSessionId = storedSession.id;
-          const sessionProjectId = storedSession.project_id || null;
-          const sessionProtocolId = storedSession.protocol_id || null;
-          if (invitation) {
-            if (
-              Number(storedSession.invitation_id) !== Number(invitation.id)
-              || Number(sessionProtocolId) !== Number(invitation.protocol_id)
-              || Number(sessionProjectId) !== Number(invitation.project_id)
-            ) {
-              throw new HttpError(
-                409,
-                'Session does not match invitation, project, or protocol',
-                'session_invitation_mismatch'
-              );
-            }
-            if (
-              storedSession.participant_id
-              && participantId
-              && String(storedSession.participant_id) !== String(participantId)
-            ) {
-              throw new HttpError(
-                409,
-                'Session participant does not match',
-                'session_participant_mismatch'
-              );
-            }
-          } else if (!authenticated) {
-            throw new HttpError(403, 'Invitation required for participant ingest');
-          }
-          if (authenticated && !sessionProjectId) {
-            throw new HttpError(
-              409,
-              'Staff ingest requires a session bound to a project',
-              'session_scope_missing'
-            );
-          }
-          if (
-            authenticated
-            && !(await ensureProjectAccess(client, sessionProjectId, req.user))
-          ) {
-            throw new HttpError(403, 'Access denied for project', 'project_access_denied');
-          }
-          if (invitation && !storedSession.participant_id && participantId) {
+          if (!storedSession.participant_id && participantId) {
             await client.query(
               `UPDATE sessions
                SET participant_id = $1, updated_at = current_timestamp
@@ -549,60 +668,7 @@ router.post(
               [participantId, dbSessionId]
             );
           }
-          if (!alreadyCompleted && lifecycle?.status !== 'completed' && Number(storedSession.stored_delivery_sequence) > 0) {
-            if (!raw.delivery || raw.delivery.sequence < Number(storedSession.stored_delivery_sequence)) {
-              throw new HttpError(409, 'A newer checkpoint is already saved', 'checkpoint_stale');
-            }
-            if (raw.delivery.sequence === Number(storedSession.stored_delivery_sequence)) {
-              if (storedSession.stored_delivery_digest !== deliveryDigest(raw)) throw new HttpError(409, 'Checkpoint sequence already contains different data', 'checkpoint_sequence_conflict');
-              return { status: 200, body: { session_id: sessionId, ingested: true, idempotent: true,
-                idempotency_key: null, qc_validity: storedSession.stored_qc_validity || null,
-                proxy_ready: storedSession.stored_proxy_ready === 'true', lifecycle_status: 'in_progress', completed_at: null } };
-            }
-          }
-          if (alreadyCompleted) {
-            const existingFinish = resolveExistingFinish(
-              storedSession.stored_finish_attempt_id,
-              idempotency.key
-            );
-            if (existingFinish.action === 'conflict') {
-              throw new HttpError(
-                existingFinish.status,
-                existingFinish.error,
-                'idempotency_conflict'
-              );
-            }
-            if (existingFinish.action === 'replay') {
-              return {
-                status: 200,
-                body: {
-                  session_id: sessionId,
-                  ingested: true,
-                  idempotent: true,
-                  idempotency_key: idempotency.key,
-                  qc_validity: storedSession.stored_qc_validity || null,
-                  proxy_ready: storedSession.stored_proxy_ready === 'true',
-                  lifecycle_status: 'completed',
-                  completed_at: new Date(storedSession.stopped_at).toISOString(),
-                },
-              };
-            }
-          }
-          scope = {
-            project_id: sessionProjectId,
-            protocol_id: sessionProtocolId,
-            participant_id: storedSession.participant_id || participantId || null,
-          };
         } else {
-          if (!invitation) {
-            throw new HttpError(
-              authenticated ? 409 : 403,
-              authenticated
-                ? 'Staff must create a project-scoped session before ingest'
-                : 'Invitation required to create session',
-              'session_must_be_precreated'
-            );
-          }
           const reserved = await reserveInvitationRun(client, invitation.id);
           if (!reserved) {
             throw new HttpError(
@@ -631,7 +697,6 @@ router.post(
             ]
           );
           dbSessionId = inserted.rows[0].id;
-          scope = inserted.rows[0];
         }
 
         let completionApplied = false;
@@ -653,27 +718,6 @@ router.post(
           completedAtIso = completedAt.toISOString();
         }
 
-        let protocolDefinition = invitation?.protocol_definition || null;
-        if (!protocolDefinition && storedSession?.invitation_id) {
-          protocolDefinition = (await client.query('SELECT protocol_definition FROM invitations WHERE id = $1', [storedSession.invitation_id])).rows[0]?.protocol_definition || null;
-        }
-        if (!protocolDefinition && scope.protocol_id) {
-          const protocol = await client.query(
-            'SELECT definition FROM protocols WHERE id = $1',
-            [scope.protocol_id]
-          );
-          protocolDefinition = protocol.rows[0]?.definition || null;
-          if (typeof protocolDefinition === 'string') {
-            try {
-              protocolDefinition = JSON.parse(protocolDefinition);
-            } catch (_) {
-              protocolDefinition = null;
-            }
-          }
-        }
-
-        // Backups are provisional; expensive RT inference is final-only.
-        const rtFeatures = raw.delivery?.kind === 'checkpoint' ? null : computeSessionRtFeatures(payload, protocolDefinition);
         if (rtFeatures && rtFeatures.blocks && rtFeatures.blocks.length) {
           payload = { ...payload, rt_features: rtFeatures };
         }
@@ -816,6 +860,15 @@ router.post(
       });
       return res.status(result.status).json(result.body);
     } catch (err) {
+      if (res.destroyed) return;
+      if (err instanceof RtAnalysisError) {
+        const oversized = err.code === 'rt_analyzer_input_limit';
+        if (!oversized) res.set('Retry-After', '5');
+        return res.status(oversized ? 422 : 503).json({
+          error: oversized ? 'RT analysis input is too large' : 'RT analysis did not complete; retry the same request',
+          code: err.code,
+        });
+      }
       if (err instanceof HttpError) {
         return res.status(err.status).json({
           error: err.message,
@@ -829,8 +882,10 @@ router.post(
           code: 'session_conflict',
         });
       }
-      console.error(err);
+      logUnexpectedError(err, 'ingest');
       return res.status(500).json({ error: 'Ingest failed', code: 'ingest_failed' });
+    } finally {
+      res.removeListener('close', onClose);
     }
   }
 );

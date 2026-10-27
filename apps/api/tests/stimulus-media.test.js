@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { mayReadStimulus, mayManageSharing, rejectOwnedFields } = require('../stimuli/access');
-const { runMediaTool, createPreview } = require('../stimuli/media-preview');
+const { runMediaTool, createPreview, ensurePreview } = require('../stimuli/media-preview');
 const { collectMediaInventory } = require('../stimuli/media-inventory');
 const { hashFile } = require('../stimuli/versions');
 
@@ -23,9 +23,11 @@ test('personal ownership is not conferred by membership, sharing is owner-only, 
 });
 
 test('media processes have real time/output limits and report no host paths', async () => {
-  await assert.rejects(runMediaTool(process.execPath, ['-e', 'setInterval(()=>{},1000)'], 50), { code: 'media_preview_timeout' });
-  await assert.rejects(runMediaTool(process.execPath, ['-e', 'process.stdout.write("x".repeat(100000))'], 1000), { code: 'media_metadata_oversized' });
-  const output = await runMediaTool(process.execPath, ['-e', 'process.stdout.write("ok")'], 1000);
+  // Node's V8 virtual address reservation is not representative of FFmpeg.
+  const options = { resourceLimits: false };
+  await assert.rejects(runMediaTool(process.execPath, ['-e', 'setInterval(()=>{},1000)'], 50, options), { code: 'media_preview_timeout' });
+  await assert.rejects(runMediaTool(process.execPath, ['-e', 'process.stdout.write("x".repeat(100000))'], 1000, options), { code: 'media_metadata_oversized' });
+  const output = await runMediaTool(process.execPath, ['-e', 'process.stdout.write("ok")'], 1000, options);
   assert.equal(output, 'ok');
   await assert.rejects(runMediaTool('/nonexistent-private-host-path', [], 1000), error => error.code === 'media_preview_unavailable' && !error.message.includes('/nonexistent'));
 });
@@ -39,13 +41,26 @@ test('preview generation confines inputs, records source geometry and rejects li
   await fs.writeFile(probe, '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({streams:[{codec_type:"video",codec_name:"png",width:1200,height:800}],format:{duration:"1.5"}}));\n', { mode: 0o700 });
   await fs.writeFile(encoder, '#!/usr/bin/env node\nrequire("fs").writeFileSync(process.argv.at(-1),Buffer.from([255,216,255,217]));\n', { mode: 0o700 });
   // Cold fixture processes need startup headroom in the parallel suite; the timeout contract above stays strict.
-  const options = { ffprobeBin: probe, ffmpegBin: encoder, maxConcurrent: 2, maxDimension: 480, timeoutMs: 5000 };
+  const options = { ffprobeBin: probe, ffmpegBin: encoder, maxConcurrent: 2, maxDimension: 480, timeoutMs: 5000, resourceLimits: false };
   const preview = await createPreview({ mime_type: 'image/png', content_path: 'source.png' }, root, options);
   assert.equal(preview.status, 'ready');
   assert.match(preview.path, /^previews\/[a-f0-9-]+\.jpg$/);
   assert.equal(preview.info.intrinsic_width, 1200);
   assert.equal(preview.info.intrinsic_height, 800);
   assert.equal(preview.info.duration_ms, 1500);
+  const config = require('../config');
+  const originalOptions = config.storage.preview;
+  config.storage.preview = options;
+  try {
+    for (const mode of ['failure', 'deleted']) {
+      const before = await fs.readdir(path.join(root, 'previews'));
+      await assert.rejects(ensurePreview({ query: async () => {
+        if (mode === 'failure') throw new Error('synthetic_db_failure');
+        return { rows: [] };
+      } }, { id: mode, mime_type: 'image/png', content_path: 'source.png' }, root));
+      assert.deepEqual(await fs.readdir(path.join(root, 'previews')), before);
+    }
+  } finally { config.storage.preview = originalOptions; }
   await fs.symlink(path.join(root, 'source.png'), path.join(root, 'linked.png'));
   await assert.rejects(createPreview({ mime_type: 'image/png', content_path: 'linked.png' }, root, options));
   await assert.rejects(createPreview({ mime_type: 'image/png', content_path: '../escape.png' }, root, options));

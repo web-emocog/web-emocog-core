@@ -407,10 +407,11 @@ describe('S2-01 route-specific HTTP controls', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     const corsBranch = source.indexOf("err?.code === 'cors_origin_denied'");
     const invalidJsonBranch = source.indexOf('err instanceof SyntaxError');
-    const unexpectedLog = source.indexOf('console.error(err);');
+    const unexpectedLog = source.indexOf("logUnexpectedError(err, 'app');");
     assert.ok(corsBranch >= 0);
     assert.ok(invalidJsonBranch > corsBranch);
     assert.ok(unexpectedLog > invalidJsonBranch);
+    assert.doesNotMatch(source, /console\.error\(err\)/);
   });
 
   it('classifies auth, ingest and default independently', () => {

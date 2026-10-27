@@ -21,7 +21,10 @@
 </head>
 <body>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script src="../http-client.js?v=20261027-1"></script>
+  <script src="../account-storage.js?v=20261019-5"></script>
+  <script src="../staff-session.js?v=20261027-1"></script>
+  <script src="../auth-guard.js?v=20261027-1"></script>
   <script>
     if (!window.EmocogAuthGuard) location.replace('login.html');
     else window.EmocogAuthGuard.ensureProtectedPage({ loginPath:'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied:true, roleDeniedRedirect:'../researcher.html' });

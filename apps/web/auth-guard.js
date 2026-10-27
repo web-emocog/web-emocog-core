@@ -45,16 +45,14 @@
 
   async function fetchCurrentUser() {
     var apiBase = getApiBase();
-    var response = await fetch(apiBase + '/auth/me', {
+    var payload = await global.WecogHttp.json(apiBase + '/auth/me', {
       method: 'GET',
       credentials: 'include'
-    });
-    if (!response.ok) {
-      var e = new Error('Auth check failed: ' + response.status);
-      e.status = response.status;
-      throw e;
+    }, { scope: 'document', timeoutMs: 15000 });
+    var currentUser = payload && (payload.user || payload);
+    if (!currentUser || !/^[A-Za-z0-9_-]{1,64}$/.test(String(currentUser.id || '')) || typeof currentUser.role !== 'string') {
+      var invalid = new Error('Invalid authentication response'); invalid.code = 'invalid_auth_response'; throw invalid;
     }
-    var payload = await response.json();
     if (global.WecogStaffSession) {
       if (!global.WecogStaffSession.getAccountId() && global.WecogAccountStorage) {
         global.WecogAccountStorage.activate(payload?.user?.id ?? payload?.id);
@@ -96,17 +94,39 @@
     } catch (_) {}
   }
 
+  function showUnavailable() {
+    function show() {
+      if (document.getElementById('staffAuthUnavailable')) return;
+      var en = document.documentElement.lang === 'en';
+      var overlay = document.createElement('div');
+      overlay.id = 'staffAuthUnavailable'; overlay.setAttribute('role', 'alert');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:var(--bg,#f5f5ef);color:var(--text,#10211b);display:grid;place-items:center;padding:24px';
+      var panel = document.createElement('div'); panel.style.cssText = 'max-width:560px;line-height:1.6';
+      var title = document.createElement('h2');
+      title.textContent = en ? 'Cannot verify sign-in right now' : 'Сейчас не удалось проверить вход';
+      var message = document.createElement('p');
+      message.textContent = en ? 'The server is unavailable. Your local sign-in and drafts have not been cleared.'
+        : 'Сервер недоступен. Локальное состояние входа и черновики не сброшены.';
+      var retry = document.createElement('button'); retry.type = 'button';
+      retry.textContent = en ? 'Retry' : 'Повторить';
+      retry.addEventListener('click', function () { global.location.reload(); });
+      panel.append(title, message, retry); overlay.append(panel);
+      Array.from(document.body.children).forEach(function (child) {
+        if (child.tagName !== 'SCRIPT') { child.hidden = true; child.inert = true; child.style.setProperty('display', 'none', 'important'); }
+      });
+      document.body.append(overlay); revealPageAfterAuth(); retry.focus();
+    }
+    if (document.body) show(); else document.addEventListener('DOMContentLoaded', show, { once: true });
+  }
+
   async function ensureProtectedPage(options) {
     var opts = options || {};
     var loginPath = opts.loginPath || 'developer/login.html';
     var allowed = opts.allowedRoles || null;
-    var needsRoleGate = Array.isArray(allowed) && allowed.length > 0;
-    if (needsRoleGate) {
-      try {
-        document.documentElement.classList.add('emocog-auth-pending');
-        document.documentElement.style.visibility = 'hidden';
-      } catch (_) {}
-    }
+    try {
+      document.documentElement.classList.add('emocog-auth-pending');
+      document.documentElement.style.visibility = 'hidden';
+    } catch (_) {}
 
     var user = getCachedUser();
     try {
@@ -116,6 +136,11 @@
       persistAuthFlag();
     } catch (err) {
       if (err.code === 'staff_account_changed') return { ok: false, accountChanged: true };
+      if (err.code === 'request_cancelled') return { ok: false, cancelled: true };
+      if (err.status !== 401 && err.status !== 403) {
+        showUnavailable();
+        return { ok: false, retryable: true };
+      }
       clearAuth();
       revealPageAfterAuth();
       redirectToLogin(loginPath);

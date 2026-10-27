@@ -254,6 +254,23 @@ inspect the cloud operations before rerunning. A successful create is checked
 again with `snapshot get`, including the folder/disk/name/commit binding, and
 the retained old recovery points are rechecked before allowing deployment.
 
+CLI failures include a single-line JSON `diagnostics` object: action, exit code,
+allowlisted RPC code/cause summary, whether stdout was present, and whether the
+existing strict snapshot-quota check permits the quota-recovery path. Its
+`quota_cleanup_blocker` distinguishes a non-create command, ambiguous nonempty
+stdout and an unconfirmed snapshot quota. All other deletion guards still apply.
+When present in a supported format, `client_request_id`, `client_trace_id` and
+`operation_id` can be sent to cloud support. Handled quota errors are logged too,
+so their IDs are not lost during recovery. Timeout diagnostics retain safe IDs
+from partial output but never permit replay or additional deletion.
+
+Diagnostic summaries are not the full provider description and do not drive
+rotation decisions. Unknown descriptions are explicitly withheld. Arbitrary
+stderr/stdout, credentials, environment values, local trace paths and PII are
+not printed or uploaded as artifacts; do not enable `--debug` in public job logs.
+If only `ResourceExhausted` is known, inspect current cloud quota usage and use
+the support IDs rather than deleting more copies based on the status code alone.
+
 The access preflight verifies list/get only; it cannot non-destructively prove
 delete/create authorization. An administrator must confirm the deploy service
 account has the intended folder-scoped roles above. Do not compensate with

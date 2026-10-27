@@ -231,6 +231,29 @@ test('analytics v1 contract and computations', async t => {
     assert.ok(group.missingness.some(item => item.reasonCode === 'gaze_qc_invalid'));
   });
 
+  await t.test('keeps absent technical and QC measurements missing instead of coercing them to zero', () => {
+    const source = row();
+    source.features_payload.meta = { tech: { fpsMean: null, measuredFPS: '', renderFPS: '  ', cameraFPS: false,
+      camera: { frameRate: [] }, pixelRatio: true } };
+    source.qc_payload = { analysisFps: null, faceVisiblePct: null, gazeValidPct: false, lowFpsPct: '' };
+    source.qc_score = null;
+    const technical = sessionTechnicalDetails(source), quality = sessionQualityDetails(source);
+    assert.equal(technical.actualFps, null);
+    assert.equal(technical.cameraFps, null);
+    assert.equal(technical.analysisFps, null);
+    assert.equal(technical.pixelRatio, null);
+    assert.equal(quality.score, null);
+    assert.equal(quality.percentages.faceVisible, null);
+    assert.equal(quality.percentages.gazeValid, null);
+    assert.equal(quality.percentages.lowFps, null);
+    source.features_payload.meta.tech.measuredFPS = '29.5';
+    assert.equal(sessionTechnicalDetails(source).actualFps, 29.5, 'database numeric strings remain supported');
+    source.qc_payload.analysisFps = 0;
+    source.qc_payload.faceVisiblePct = 0;
+    assert.equal(sessionTechnicalDetails(source).analysisFps, 0);
+    assert.equal(sessionQualityDetails(source).percentages.faceVisible, 0);
+  });
+
   await t.test('normalizes nested participant technical and QC data for researcher analytics', () => {
     const source = row();
     source.qc_score = 76.9;

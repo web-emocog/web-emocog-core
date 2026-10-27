@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Experiments accounting: aggregated and recent session-level views.
  */
@@ -93,7 +94,7 @@ router.get(
       );
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'experiments');
       res.status(500).json({ error: 'Failed to load experiments overview' });
     }
   }
@@ -155,7 +156,7 @@ router.get(
       );
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'experiments');
       res.status(500).json({ error: 'Failed to load recent sessions' });
     }
   }

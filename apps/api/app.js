@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('./security/error-log');
 /**
  * Express app (Фаза 2). Не удалять исходные файлы; это новый модуль.
  */
@@ -58,16 +59,19 @@ app.use('/stimuli', stimuliRoutes);
 app.use('/proxy-metrics', proxyMetricsRoutes);
 app.use('/contracts', contractsRoutes);
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    phase: 4,
-    node_env: config.nodeEnv,
-    release_version: config.release.version,
-    release_sha: config.release.sha,
-    uptime_sec: Math.round(process.uptime()),
-    rt_analyzer: getRtAnalyzerHealth(),
-  });
+app.get('/health', async (req, res, next) => {
+  try {
+    const rtAnalyzer = await getRtAnalyzerHealth();
+    res.json({
+      status: 'ok',
+      phase: 4,
+      node_env: config.nodeEnv,
+      release_version: config.release.version,
+      release_sha: config.release.sha,
+      uptime_sec: Math.round(process.uptime()),
+      rt_analyzer: rtAnalyzer,
+    });
+  } catch (error) { next(error); }
 });
 
 app.get('/ready', async (req, res) => {
@@ -122,9 +126,9 @@ app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'Invalid JSON', code: 'invalid_json' });
   }
-  // Only unexpected server faults get a stack trace. Client-controlled 4xx
+  // Only unexpected server faults get a sanitized diagnostic. Client-controlled 4xx
   // failures above must not expose request data or provide a log-flood vector.
-  console.error(err);
+  logUnexpectedError(err, 'app');
   res.status(500).json({ error: 'Internal server error' });
 });
 

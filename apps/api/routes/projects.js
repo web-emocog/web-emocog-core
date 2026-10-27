@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Projects CRUD (Фаза 2.3). Привязка к организациям.
  */
@@ -50,7 +51,7 @@ router.get(
       const r = await pool.query(sql, params);
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'projects');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -113,7 +114,7 @@ router.post(
       }
       if (err.code === '23503') return res.status(400).json({ error: 'Organization not found' });
       if (err.code === '23505') return res.status(409).json({ error: 'Project slug already exists in organization' });
-      console.error(err);
+      logUnexpectedError(err, 'projects');
       res.status(500).json({ error: 'Create failed' });
     }
   }
@@ -163,7 +164,7 @@ router.get(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(r.rows[0]);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'projects');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -211,7 +212,7 @@ router.patch(
       res.json(r.rows[0]);
     } catch (err) {
       if (err.code === '23505') return res.status(409).json({ error: 'Slug already exists' });
-      console.error(err);
+      logUnexpectedError(err, 'projects');
       res.status(500).json({ error: 'Update failed' });
     }
   }
@@ -245,7 +246,7 @@ router.delete(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.status(204).send();
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'projects');
       res.status(500).json({ error: 'Delete failed' });
     }
   }

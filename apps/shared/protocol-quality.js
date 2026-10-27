@@ -35,6 +35,18 @@
       failed: Object.keys(checks).filter(key => checks[key].status === 'failed'),
       missing: Object.keys(checks).filter(key => checks[key].status === 'no_data') };
   }
-  return { METRICS, validate, evaluate,
+  function describeCheck(key, check, lang = 'en') {
+    const ru = lang === 'ru';
+    const labels = ru
+      ? { gazeValid: 'Валидный взгляд', faceDetected: 'Обнаружение лица', fpsStable: 'FPS анализа', lighting: 'Допустимое освещение' }
+      : { gazeValid: 'Valid gaze', faceDetected: 'Face detection', fpsStable: 'Analysis FPS', lighting: 'Acceptable lighting' };
+    const label = Object.hasOwn(labels, key) ? labels[key] : (ru ? 'Показатель качества' : 'Quality metric');
+    const unit = key === 'fpsStable' ? ' FPS' : '%';
+    const number = value => typeof value === 'number' && Number.isFinite(value) ? String(Math.round(value * 10) / 10) : null;
+    const value = number(check?.value), threshold = number(check?.threshold);
+    if (value === null || threshold === null) return `${label}: ${ru ? 'нет измерения' : 'no measurement'}`;
+    return `${label}: ${value}${unit}; ${ru ? 'требуется не менее' : 'required minimum'} ${threshold}${unit}`;
+  }
+  return { METRICS, validate, evaluate, describeCheck,
     showBackupNotifications: definition => definition?.settings?.persistence?.showBackupNotifications !== false };
 });

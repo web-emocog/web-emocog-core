@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261019-5';
+import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261025-1';
 import { 
     setLanguage, 
     nextStep, 
@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261019-5';
+} from './ui-updated.js?v=20261025-1';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20261019-5';
+} from './precheck-updated.js?v=20261025-1';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20261019-5';
+} from './tests-updated.js?v=20261025-1';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,15 +34,16 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261019-5';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261025-1';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
 import { createInvitationRequestPool } from '../session-runtime/invitation-http.mjs?v=20261019-hotfix1';
-import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261019-5';
-import { mediaContentRect } from './stimulus-geometry.mjs?v=20261019-5';
+import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
+import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261025-1';
+import { mediaContentRect } from './stimulus-geometry.mjs?v=20261025-1';
 import {
     captureAudioConsent,
     configureAudioConsentUI
@@ -656,14 +657,15 @@ async function fetchParticipantInviteBypass() {
         const token = localStorage.getItem('emocog_api_token');
         const base = resolveParticipantApiBase();
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        const r = await fetch(`${base}/auth/me`, {
+        return await fetchWithDeadline(`${base}/auth/me`, {
             headers,
             credentials: 'include'
-        });
-        if (!r.ok) return false;
-        const me = await r.json();
-        const role = me?.user?.role || me?.role;
-        return role === 'developer' || role === 'admin';
+        }, async r => {
+            if (!r.ok) return false;
+            const me = await r.json();
+            const role = me?.user?.role || me?.role;
+            return role === 'developer' || role === 'admin';
+        }, 10000);
     } catch (_) {
         return false;
     }
