@@ -458,6 +458,25 @@ describe('session checkpoint', () => {
     assert.equal(restored.machineSnapshot.state, 'running');
   });
 
+  it('preserves imported special keys as data without inheriting checkpoint properties', async () => {
+    const { buildCheckpointSessionData, SessionCheckpointStore } = await importRuntimeModule('checkpoint-store.mjs');
+    const source = JSON.parse('{"ids":{"session":"special-keys"},"__proto__":{"leaked":"no"},"metadata":{"__proto__":{"note":"retained","email":"private@example.test"},"constructor":"retained"}}');
+    const safe = buildCheckpointSessionData(source);
+    assert.equal(Object.getPrototypeOf(safe), Object.prototype);
+    assert.equal(safe.leaked, undefined);
+    assert.ok(Object.hasOwn(safe, '__proto__'));
+    assert.equal(safe.metadata.__proto__.note, 'retained');
+    assert.equal(safe.metadata.__proto__.email, undefined);
+    const values = new Map();
+    const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) };
+    const store = new SessionCheckpointStore({ indexedDB: null, sessionStorage: storage });
+    await store.save('special-keys', source, {});
+    const restored = await store.load('special-keys');
+    assert.equal(Object.getPrototypeOf(restored.sessionData), Object.prototype);
+    assert.equal(restored.sessionData.metadata.__proto__.note, 'retained');
+    assert.equal(restored.sessionData.leaked, undefined);
+  });
+
   it('redacts direct identifiers and snapshots by value', async () => {
     const {
       SessionCheckpointStore,

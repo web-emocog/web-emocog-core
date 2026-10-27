@@ -32,7 +32,14 @@ function clearNode(node) {
 function appendSummaryItem(node, label, value) {
     const item = document.createElement('div');
     item.className = 'summary-item';
-    item.innerHTML = `<div class="muted">${label}</div><div><strong>${value}</strong></div>`;
+    const heading = document.createElement('div');
+    heading.className = 'muted';
+    heading.textContent = label;
+    const body = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    body.appendChild(strong);
+    item.append(heading, body);
     node.appendChild(item);
 }
 
@@ -88,11 +95,17 @@ function createHeatmapCard(entry, title) {
     card.className = 'heatmap-card';
 
     const meta = document.createElement('div');
-    meta.innerHTML = `
-        <div><strong>${title}</strong></div>
-        <div class="muted">samples: ${entry.sampleCount || 0}, onScreen: ${n(entry.onScreenPct, 1)}%</div>
-        <div class="muted">range: ${entry.timeRangeMs?.durationMs || 0} ms</div>
-    `;
+    const heading = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = title;
+    heading.appendChild(strong);
+    const samples = document.createElement('div');
+    samples.className = 'muted';
+    samples.textContent = `samples: ${entry.sampleCount || 0}, onScreen: ${n(entry.onScreenPct, 1)}%`;
+    const range = document.createElement('div');
+    range.className = 'muted';
+    range.textContent = `range: ${entry.timeRangeMs?.durationMs || 0} ms`;
+    meta.append(heading, samples, range);
 
     const canvas = document.createElement('canvas');
     canvas.className = 'heatmap';
@@ -320,13 +333,18 @@ function renderTimeline(events) {
         delete details.timestamp;
         delete details.tRelMs;
 
-        row.innerHTML = `
-            <td>${n((ev.tRelMs || 0) / 1000, 3)}</td>
-            <td><span class="badge">${ev.type || 'event'}</span></td>
-            <td>${ev.phase || 'n/a'}</td>
-            <td>${ev.blockId || '-'} / ${ev.trialId || '-'} / ${ev.stimulusId || '-'}</td>
-            <td>${JSON.stringify(details)}</td>
-        `;
+        const values = [n((ev.tRelMs || 0) / 1000, 3), ev.type || 'event', ev.phase || 'n/a',
+            `${ev.blockId || '-'} / ${ev.trialId || '-'} / ${ev.stimulusId || '-'}`, JSON.stringify(details)];
+        values.forEach((value, index) => {
+            const cell = document.createElement('td');
+            if (index === 1) {
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                badge.textContent = value;
+                cell.appendChild(badge);
+            } else cell.textContent = value;
+            row.appendChild(cell);
+        });
         tbody.appendChild(row);
     }
 

@@ -1,4 +1,4 @@
-const ATTENTION_ALGO_VERSION = '2.3.0';
+const ATTENTION_ALGO_VERSION = '2.4.0';
 const TRACKING_START_PHASE = 'tracking_test';
 
 const DEFAULTS = Object.freeze({
@@ -163,15 +163,22 @@ function buildRelativeSignal(samples, valueKey, config) {
     const out = [];
     const windowSamples = [];
     let left = 0;
+    let previousTimestamp = null;
 
     for (const sample of sorted) {
         const t = sample.t;
         const ear = sample[valueKey];
+        if (t === previousTimestamp) continue;
+        if (previousTimestamp !== null && t - previousTimestamp > config.maxEyeIntervalMs) {
+            windowSamples.length = 0; left = 0;
+        }
+        previousTimestamp = t;
 
         windowSamples.push({ t, ear });
         while (left < windowSamples.length && (t - windowSamples[left].t) > config.baselineWindowMs) {
             left++;
         }
+        if (left > 512) { windowSamples.splice(0, left); left = 0; }
 
         const active = windowSamples.slice(left);
         const activeEars = active.map(item => item.ear);
@@ -208,12 +215,22 @@ function detectClosureEvents(relativeSamples, config) {
     let candidatePreOpen = null;
     let minRelative = Infinity;
     let minRelativeTimeMs = null;
+    let previousTimestamp = null;
+    const resetCandidate = () => {
+        state = 'open'; closeStreak = 0; openStreak = 0; previousRelative = null;
+        candidateStartMs = null; candidatePreOpen = null;
+        minRelative = Infinity; minRelativeTimeMs = null;
+    };
 
     for (let i = 0; i < relativeSamples.length; i++) {
         const sample = relativeSamples[i];
         const rel = sample.relativeOpenness;
         const t = sample.t;
-        if (!Number.isFinite(t) || !Number.isFinite(rel)) continue;
+        if (!Number.isFinite(t) || (previousTimestamp !== null && t <= previousTimestamp)) continue;
+        // A missing interval is not evidence of a continuously closed eye.
+        if (previousTimestamp !== null && t - previousTimestamp > config.maxEyeIntervalMs) resetCandidate();
+        previousTimestamp = t;
+        if (!Number.isFinite(rel)) { resetCandidate(); continue; }
 
         if (state === 'open') {
             if (rel <= config.closeThresholdRel) {
@@ -686,14 +703,19 @@ function summarizeBlinks(closureEvents, blinkEvents, eyeDurationMs, config, blin
 }
 
 function getGazePoints(gazeSamples) {
-    return (gazeSamples || [])
-        .map(sample => ({
-            ...sample,
-            x: Number.isFinite(sample?.correctedX) ? sample.correctedX : sample?.x,
-            y: Number.isFinite(sample?.correctedY) ? sample.correctedY : sample?.y
-        }))
-        .filter(s => Number.isFinite(s?.x) && Number.isFinite(s?.y) && Number.isFinite(s?.t))
-        .sort((a, b) => a.t - b.t);
+    const ordered = (gazeSamples || []).filter(sample => Number.isFinite(sample?.t)).sort((a, b) => a.t - b.t);
+    const points = []; let continuity = 0, previousTimestamp = null;
+    for (const sample of ordered) {
+        if (sample.t === previousTimestamp) continue;
+        previousTimestamp = sample.t;
+        const corrected = 'correctedX' in sample || 'correctedY' in sample;
+        const x = corrected ? sample.correctedX : sample.x, y = corrected ? sample.correctedY : sample.y;
+        if (sample.valid === false || sample.onScreen === false || !Number.isFinite(x) || !Number.isFinite(y)) {
+            continuity++; continue;
+        }
+        points.push({ ...sample, x, y, continuity });
+    }
+    return points;
 }
 
 function getNormalizedGaze(sample) {
@@ -728,6 +750,9 @@ function computeSaccadeFixationMetrics(gazeSamples, config) {
         const b = points[i];
         const dtMs = b.t - a.t;
         if (!Number.isFinite(dtMs) || dtMs <= 0 || dtMs > config.maxGazeIntervalMs) continue;
+        if (a.continuity !== b.continuity) continue;
+        if (['blockId', 'trialId', 'stimulusId', 'stimulusVersion', 'attempt', 'phase', 'screenWidth', 'screenHeight']
+            .some(key => (a[key] ?? null) !== (b[key] ?? null))) continue;
 
         const pa = getNormalizedGaze(a);
         const pb = getNormalizedGaze(b);
@@ -755,6 +780,9 @@ function computeSaccadeFixationMetrics(gazeSamples, config) {
     const fixationSegments = [];
     let current = [];
     for (const interval of intervals) {
+        if (current.length > 0 && current.at(-1).endMs !== interval.startMs) {
+            fixationSegments.push(current); current = [];
+        }
         if (interval.isSaccade) {
             if (current.length > 0) fixationSegments.push(current);
             current = [];
@@ -821,6 +849,7 @@ function computeMicroShiftProxy(intervals, gazeDurationMs, config) {
     }
 
     for (const interval of intervals) {
+        if (currentEvent && currentEvent.endMs !== interval.startMs) flushCurrentEvent();
         const amp = interval.distanceNorm;
         const vel = interval.velocity;
         const isCandidate = interval.isSaccade === false
@@ -972,6 +1001,12 @@ function buildSubsetMeta(config, scopeMeta = null) {
         closeThresholdRel: config.closeThresholdRel,
         openThresholdRel: config.openThresholdRel,
         minConfirmFrames: config.minConfirmFrames,
+        maxEyeIntervalMs: config.maxEyeIntervalMs,
+        missingIntervalPolicy: 'reset_baseline_and_closure',
+        duplicateTimestampPolicy: 'first_sample_only',
+        maxGazeIntervalMs: config.maxGazeIntervalMs,
+        gazeMissingIntervalPolicy: 'split_events',
+        gazeSignal: 'valid_corrected_or_explicit_legacy_xy',
         blinkCloseThresholdRel: config.blinkCloseThresholdRel,
         blinkOpenThresholdRel: config.blinkOpenThresholdRel,
         blinkMinConfirmFrames: config.blinkMinConfirmFrames,

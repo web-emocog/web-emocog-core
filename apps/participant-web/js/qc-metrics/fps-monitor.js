@@ -1,324 +1,118 @@
-/**
- * FPS Monitor
- * 
- * Мониторинг реального FPS видеопотока камеры
- * Использует requestVideoFrameCallback для точного измерения (если доступен)
- * 
- * @module qc-metrics/fps-monitor
- */
-
 import { VIDEO_ELEMENT_IDS } from './constants.js';
+import { observeVideoFrames } from '../session-runtime/video-frames.mjs';
 
-/**
- * Класс для мониторинга FPS видео
- */
+// Analysis throughput and camera delivery are independent measurements.
 export class VideoFpsMonitor {
-    constructor() {
-        this._video = null;
-        this._lastFrameTime = 0;
-        this._frameCount = 0;
-        this._fpsHistory = [];
-        this._currentFps = 0;
-        this._cameraFps = 0;
-        this._baselineFps = null;
-        this._warmupComplete = false;
-        this._startTime = 0;
-        
-        // Для requestVideoFrameCallback
-        this._useVideoFrameCallback = false;
-        this._videoFrameCallbackId = null;
-        this._isRunning = false;
-        this._lastVideoTime = 0;
-        this._rafId = null;
-    }
+    constructor() { this._video = null; this.reset(); }
 
-    /**
-     * Поиск видео элемента
-     */
     findVideoElement(candidateIds = VIDEO_ELEMENT_IDS) {
-        for (const id of candidateIds) {
-            const el = document.getElementById(id);
-            if (el && el.tagName === 'VIDEO' && el.srcObject) {
-                this._video = el;
-                return el;
-            }
-        }
-        // Поиск любого video с srcObject
-        const videos = document.querySelectorAll('video');
-        for (const v of videos) {
-            if (v.srcObject) {
-                this._video = v;
-                return v;
-            }
-        }
-        return null;
+        this._video = candidateIds.map(id => document.getElementById(id))
+            .find(v => v?.tagName === 'VIDEO' && v.srcObject)
+            || [...document.querySelectorAll('video')].find(v => v.srcObject) || null;
+        return this._video;
     }
 
-    /**
-     * Установка видео элемента напрямую
-     */
-    setVideoElement(video) {
-        this._video = video;
-    }
+    setVideoElement(video) { this._video = video; }
 
-    /**
-     * Запуск мониторинга
-     * @param {boolean} useRealFps - использовать requestVideoFrameCallback для реального FPS
-     */
     start(useRealFps = false) {
-        this._startTime = performance.now();
-        this._lastFrameTime = this._startTime;
-        this._frameCount = 0;
-        this._fpsHistory = [];
-        this._warmupComplete = false;
-        this._baselineFps = null;
+        this.reset();
         this._isRunning = true;
-        
-        // Если запрошено измерение реального FPS камеры
+        this._startTime = this._lastFrameTime = performance.now();
         if (useRealFps && this._video) {
-            this._useVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
-            
-            if (this._useVideoFrameCallback) {
-                console.log('[FpsMonitor] Using requestVideoFrameCallback for accurate camera FPS');
-                this._startVideoFrameCallback();
-            } else {
-                console.log('[FpsMonitor] Using fallback (currentTime check) for camera FPS');
-                this._lastVideoTime = this._video.currentTime;
-                this._startFallback();
-            }
+            let frames = 0, started = this._startTime;
+            this._observer = observeVideoFrames(this._video, (_now, count) => { frames += count; });
+            this.cameraMethod = this._observer.method;
+            this._cameraTimer = setInterval(() => {
+                const now = performance.now();
+                this.cameraMethod = this._observer.method;
+                this.setCameraFps(frames * 1000 / (now - started), {
+                    frames, durationMs: now - started, method: this.cameraMethod
+                });
+                frames = 0; started = now;
+            }, 1000);
         }
     }
 
-    /**
-     * Запуск через requestVideoFrameCallback
-     * @private
-     */
-    _startVideoFrameCallback() {
-        if (!this._video || !this._isRunning) return;
-        
-        const onFrame = (now, metadata) => {
-            if (!this._isRunning) return;
-            
-            this._frameCount++;
-            
-            // Вычисляем FPS каждую секунду
-            const elapsed = now - this._lastFrameTime;
-            if (elapsed >= 1000) {
-                this._currentFps = Math.round((this._frameCount * 1000) / elapsed);
-                this._fpsHistory.push(this._currentFps);
-                if (this._fpsHistory.length > 60) {
-                    this._fpsHistory.shift();
-                }
-                
-                this._frameCount = 0;
-                this._lastFrameTime = now;
-                
-                // Определение baseline после warmup
-                this._checkWarmup(now);
-            }
-            
-            // Запрашиваем следующий кадр
-            this._videoFrameCallbackId = this._video.requestVideoFrameCallback(onFrame);
-        };
-        
-        this._videoFrameCallbackId = this._video.requestVideoFrameCallback(onFrame);
-    }
-
-    /**
-     * Fallback через проверку currentTime
-     * @private
-     */
-    _startFallback() {
-        if (!this._video || !this._isRunning) return;
-        
-        const checkFrame = () => {
-            if (!this._isRunning) return;
-            
-            const now = performance.now();
-            
-            // Проверяем, изменился ли кадр видео
-            if (this._video.currentTime !== this._lastVideoTime) {
-                this._frameCount++;
-                this._lastVideoTime = this._video.currentTime;
-            }
-            
-            // Вычисляем FPS каждую секунду
-            const elapsed = now - this._lastFrameTime;
-            if (elapsed >= 1000) {
-                this._currentFps = Math.round((this._frameCount * 1000) / elapsed);
-                this._fpsHistory.push(this._currentFps);
-                if (this._fpsHistory.length > 60) {
-                    this._fpsHistory.shift();
-                }
-                
-                this._frameCount = 0;
-                this._lastFrameTime = now;
-                
-                // Определение baseline после warmup
-                this._checkWarmup(now);
-            }
-            
-            this._rafId = requestAnimationFrame(checkFrame);
-        };
-        
-        this._rafId = requestAnimationFrame(checkFrame);
-    }
-
-    /**
-     * Проверка warmup периода
-     * @private
-     */
-    _checkWarmup(now, warmupMs = 2000) {
-        if (!this._warmupComplete && (now - this._startTime) >= warmupMs) {
-            this._warmupComplete = true;
-            if (this._fpsHistory.length >= 2) {
-                const sorted = [...this._fpsHistory].sort((a, b) => b - a);
-                this._baselineFps = sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
-                console.log(`[FpsMonitor] Baseline FPS: ${this._baselineFps}`);
-            }
-        }
-    }
-
-    /**
-     * Остановка мониторинга
-     */
     stop() {
+        if (this._isRunning) this._stoppedAt = performance.now();
         this._isRunning = false;
-        
-        if (this._rafId) {
-            cancelAnimationFrame(this._rafId);
-            this._rafId = null;
-        }
-        
-        if (this._videoFrameCallbackId && this._video && this._video.cancelVideoFrameCallback) {
-            this._video.cancelVideoFrameCallback(this._videoFrameCallbackId);
-            this._videoFrameCallbackId = null;
-        }
+        this._observer?.stop(); this._observer = null;
+        clearInterval(this._cameraTimer); this._cameraTimer = null;
     }
 
-    /**
-     * Обновление FPS (вызывать на каждом кадре) — LEGACY API
-     * Используется когда не запущен реальный мониторинг через start(true)
-     */
     tick(warmupMs = 2000) {
-        // Если используем реальный мониторинг, tick не нужен
-        if (this._useVideoFrameCallback || this._rafId) {
-            return this._currentFps;
-        }
-        
+        if (!this._isRunning) return this._currentFps;
         const now = performance.now();
         this._frameCount++;
-
         const elapsed = now - this._lastFrameTime;
         if (elapsed >= 1000) {
-            this._currentFps = Math.round((this._frameCount * 1000) / elapsed);
+            this._currentFps = Math.round(this._frameCount * 1000 / elapsed);
+            this._analysisWindow = { lastWindowFps: this._currentFps, method: 'completed-analysis-frames',
+                frames: this._frameCount, durationMs: elapsed,
+                startAfterMs: this._lastFrameTime - this._startTime, endAfterMs: now - this._startTime };
             this._fpsHistory.push(this._currentFps);
-            if (this._fpsHistory.length > 60) {
-                this._fpsHistory.shift();
+            if (this._fpsHistory.length > 60) this._fpsHistory.shift();
+            this._frameCount = 0; this._lastFrameTime = now;
+            if (!this._warmupComplete && now - this._startTime >= warmupMs && this._fpsHistory.length >= 2) {
+                this._warmupComplete = true;
+                const sorted = [...this._fpsHistory].sort((a, b) => b - a);
+                this._baselineFps = sorted[Math.floor(sorted.length * .2)];
             }
-            this._frameCount = 0;
-            this._lastFrameTime = now;
-
-            // Определение baseline после warmup
-            this._checkWarmup(now, warmupMs);
         }
-
         return this._currentFps;
     }
 
-    /**
-     * Установка FPS напрямую (для внешнего мониторинга)
-     */
-    setCameraFps(fps) {
+    setCameraFps(fps, details = {}) {
+        if (!Number.isFinite(fps) || fps < 0) return;
         this._cameraFps = fps;
-        this._currentFps = fps;
-        this._fpsHistory.push(fps);
-        if (this._fpsHistory.length > 60) {
-            this._fpsHistory.shift();
-        }
-        
-        // Определение baseline
-        if (!this._warmupComplete && this._fpsHistory.length >= 2) {
-            const sorted = [...this._fpsHistory].sort((a, b) => b - a);
-            this._baselineFps = sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
-            this._warmupComplete = true;
-        }
+        this._cameraUpdatedAt = performance.now();
+        const durationMs = Number.isFinite(details.durationMs) && details.durationMs > 0 ? details.durationMs : null;
+        const method = ['video-frame-callback', 'decoded-frame-counter', 'media-time-estimate'].includes(details.method)
+            ? details.method : 'external-publication';
+        this._cameraWindow = { lastWindowFps: fps, method,
+            frames: Number.isSafeInteger(details.frames) && details.frames >= 0 ? details.frames : null,
+            durationMs, startAfterMs: durationMs === null ? null : this._cameraUpdatedAt - this._startTime - durationMs,
+            endAfterMs: this._cameraUpdatedAt - this._startTime };
     }
 
-    /**
-     * Получение реального FPS камеры (установленного через setCameraFps)
-     */
+    // Legacy numeric getters retain their contract. New consumers can distinguish
+    // an old window or absent measurement from an actual measured zero.
+    getDiagnostics() {
+        const now = this._stoppedAt ?? performance.now();
+        const describe = window => {
+            if (!window) return { status: 'no_data', fps: null, lastWindowFps: null, method: null,
+                frames: null, durationMs: null, startAfterMs: null, endAfterMs: null, ageMs: null };
+            const ageMs = Math.max(0, now - this._startTime - window.endAfterMs);
+            const status = ageMs > 2500 ? 'stale' : 'measured';
+            return { status, fps: status === 'measured' ? window.lastWindowFps : null, ...window, ageMs };
+        };
+        return { schemaVersion: 'fps_diagnostics.v1', scope: 'last_completed_window', running: this._isRunning,
+            analysis: describe(this._analysisWindow), camera: describe(this._cameraWindow) };
+    }
+
     getCameraFps() {
-        return this._cameraFps || 0;
+        return !this._isRunning || performance.now() - this._cameraUpdatedAt <= 2500 ? this._cameraFps : 0;
     }
-
-    /**
-     * Получение текущего FPS
-     */
-    getCurrentFps() {
-        return this._currentFps;
-    }
-
-    /**
-     * Получение baseline FPS
-     */
-    getBaselineFps() {
-        return this._baselineFps;
-    }
-
-    /**
-     * Получение среднего FPS
-     */
+    getCurrentFps() { return this._currentFps; }
+    getBaselineFps() { return this._baselineFps; }
     getAverageFps() {
-        if (this._fpsHistory.length === 0) return 0;
-        return Math.round(this._fpsHistory.reduce((a, b) => a + b, 0) / this._fpsHistory.length);
+        return this._fpsHistory.length ? Math.round(this._fpsHistory.reduce((a, b) => a + b, 0) / this._fpsHistory.length) : 0;
     }
-
-    /**
-     * Проверка низкого FPS.
-     *
-     * Если задан absoluteMin — FPS ниже него всегда считается low,
-     * даже до завершения warmup'а (чтобы не маскировать совсем плохие условия).
-     *
-     * @param {number} factor
-     * @param {number} absCap
-     * @param {number} absFloor
-     * @param {number} [absoluteMin]
-     */
-    isLowFps(factor = 0.5, absCap = 10, absFloor = 6, absoluteMin = 0) {
-        const fps = this._cameraFps > 0 ? this._cameraFps : this._currentFps;
-        if (fps === 0) return false;
-
-        // Абсолютный минимум — если ниже, всегда low.
+    isLowFps(factor = .5, absCap = 10, absFloor = 6, absoluteMin = 0) {
+        const camera = this.getCameraFps();
+        const fps = this._cameraUpdatedAt !== -Infinity && performance.now() - this._cameraUpdatedAt <= 2500
+            ? camera : this._currentFps;
+        if (fps === 0 && this._cameraUpdatedAt === -Infinity) return false;
         if (absoluteMin > 0 && fps < absoluteMin) return true;
-
-        // Без baseline остаёмся только на абсолютном пороге.
-        if (!this._baselineFps) return false;
-
-        const threshold = Math.max(absFloor, Math.min(absCap, this._baselineFps * factor));
-        return fps < threshold;
+        return this._baselineFps !== null && fps < Math.max(absFloor, Math.min(absCap, this._baselineFps * factor));
     }
-
-    /**
-     * Получение истории FPS
-     */
-    getHistory() {
-        return [...this._fpsHistory];
-    }
-
-    /**
-     * Сброс
-     */
+    getHistory() { return [...this._fpsHistory]; }
     reset() {
         this.stop();
-        this._lastFrameTime = 0;
-        this._frameCount = 0;
-        this._fpsHistory = [];
-        this._currentFps = 0;
-        this._cameraFps = 0;
-        this._baselineFps = null;
-        this._warmupComplete = false;
-        this._lastVideoTime = 0;
-        this._useVideoFrameCallback = false;
+        this._lastFrameTime = 0; this._startTime = 0; this._frameCount = 0;
+        this._fpsHistory = []; this._currentFps = 0; this._cameraFps = 0;
+        this._cameraUpdatedAt = -Infinity; this._baselineFps = null; this._warmupComplete = false;
+        this._analysisWindow = null; this._cameraWindow = null; this._stoppedAt = null;
+        this.cameraMethod = null;
     }
 }

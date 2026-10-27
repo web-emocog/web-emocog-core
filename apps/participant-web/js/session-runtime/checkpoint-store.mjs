@@ -31,7 +31,10 @@ function sanitizeCheckpointValue(value, seen = new WeakSet()) {
     const result = {};
     for (const [key, item] of Object.entries(value)) {
         if (OMIT_KEYS.test(key)) continue;
-        result[key] = sanitizeCheckpointValue(item, seen);
+        const safe = sanitizeCheckpointValue(item, seen);
+        if (key === '__proto__') {
+            Object.defineProperty(result, key, { value: safe, enumerable: true, configurable: true, writable: true });
+        } else result[key] = safe;
     }
     seen.delete(value);
     return result;

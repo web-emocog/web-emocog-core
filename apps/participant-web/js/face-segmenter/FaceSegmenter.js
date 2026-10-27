@@ -26,11 +26,15 @@
  * @module face-segmenter/FaceSegmenter
  */
 
-import { CLASS_INDICES, CLASS_NAMES } from './constants.js';
+import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
 import { DEFAULT_THRESHOLDS } from './thresholds.js';
 import { analyzeMasks } from './mask-analyzer.js';
 import { analyzeFaceRegionsVisibility } from './region-analyzer.js';
 import { createVisualizationMask } from './visualization.js';
+import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs';
+import { segmentationDelegate } from './delegate-policy.mjs';
+import { MaskReader } from './mask-reader.mjs';
 
 class FaceSegmenter {
     constructor(options = {}) {
@@ -71,6 +75,13 @@ class FaceSegmenter {
         // Callbacks
         this.onInitialized = options.onInitialized || null;
         this.onError = options.onError || null;
+        this.workerAllowed = options.worker !== false;
+        this.worker = null;
+        this.initializing = null;
+        this.generation = 0;
+        this.backend = 'uninitialized';
+        this.inferenceDelegate = null;
+        this.maskReader = new MaskReader();
     }
 
     /**
@@ -78,7 +89,33 @@ class FaceSegmenter {
      */
     async initialize() {
         if (this.isInitialized) return true;
-        
+        if (this.initializing) return this.initializing;
+        this.initializing = this._initialize().finally(() => { this.initializing = null; });
+        return this.initializing;
+    }
+
+    async _initialize() {
+        const generation = this.generation;
+        if (this.workerAllowed && VisionWorkerClient.supported()) {
+            const worker = new VisionWorkerClient('segment');
+            this.worker = worker;
+            try {
+                const initialized = await worker.start({ ...this.thresholds, segmentationType: this.segmentationType, runningMode: this.runningMode });
+                if (generation !== this.generation) { worker.dispose(); return false; }
+                this.isInitialized = true;
+                this.backend = 'worker';
+                this.inferenceDelegate = ['CPU', 'GPU'].includes(initialized?.inferenceDelegate) ? initialized.inferenceDelegate : null;
+                this.cpuFallbackReason = initialized?.delegateFallbackReason || null;
+                this.onInitialized?.();
+                return true;
+            } catch (_) {
+                worker.dispose();
+                if (generation !== this.generation) return false;
+                this.worker = null; this.workerAllowed = false;
+                this.workerFallbackReason = 'worker_initialization_failed';
+            }
+        }
+        if (generation !== this.generation) return false;
         try {
             console.log('[FaceSegmenter] Инициализация v1.2 (MediaPipe Image Segmenter)...');
             
@@ -103,21 +140,35 @@ class FaceSegmenter {
                 ).href;
             
             // Создаём Image Segmenter
-            this.imageSegmenter = await ImageSegmenter.createFromOptions(vision, {
+            let delegate = this.cpuFallbackReason ? 'CPU' : segmentationDelegate();
+            const create = selected => ImageSegmenter.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: modelPath,
-                    delegate: "GPU"
+                    delegate: selected
                 },
                 runningMode: this.runningMode,
                 outputCategoryMask: true,
-                outputConfidenceMasks: true
+                outputConfidenceMasks: true,
+                ...(typeof document === 'undefined' ? { canvas: createAnalysisCanvas() } : {})
             });
+            let segmenter;
+            try { segmenter = await create(delegate); }
+            catch (error) {
+                if (delegate !== 'GPU' || generation !== this.generation) throw error;
+                delegate = 'CPU';
+                this.cpuFallbackReason = 'gpu_initialization_failed';
+                segmenter = await create(delegate);
+            }
             
+            if (generation !== this.generation) { segmenter.close(); return false; }
+            this.imageSegmenter = segmenter;
+            this.inferenceDelegate = delegate;
             // Создаём canvas для обработки масок
-            this._maskCanvas = document.createElement('canvas');
+            this._maskCanvas = createAnalysisCanvas();
             this._maskCtx = this._maskCanvas.getContext('2d', { willReadFrequently: true });
             
             this.isInitialized = true;
+            this.backend = 'main';
             console.log(`[FaceSegmenter] MediaPipe Image Segmenter готов (${this.segmentationType})`);
             
             if (this.onInitialized) {
@@ -141,27 +192,55 @@ class FaceSegmenter {
      * @param {Object} faceLandmarks - лэндмарки лица от Face Landmarker (опционально)
      * @returns {Object} результат сегментации с анализом видимости областей
      */
-    async segmentFrame(videoElement, faceLandmarks = null) {
-        if (!this.isInitialized) {
-            await this.initialize();
-        }
+    async segmentFrame(videoElement, faceLandmarks = null, captureTimestamp = performance.now()) {
+        const generation = this.generation;
+        while (this.pendingFrame) await this.pendingFrame.catch(() => {});
+        if (generation !== this.generation) return this._createErrorResult('Segmentation interrupted');
+        const pending = this._segmentFrame(videoElement, faceLandmarks, captureTimestamp);
+        this.pendingFrame = pending;
+        try { return await pending; }
+        finally { if (this.pendingFrame === pending) this.pendingFrame = null; }
+    }
 
-        if (!videoElement || videoElement.readyState < 2) {
+    async _segmentFrame(videoElement, faceLandmarks, captureTimestamp) {
+        const generation = this.generation;
+        if (!this.isInitialized && !await this.initialize()) return this._createErrorResult('Segmenter unavailable');
+        if (generation !== this.generation) return this._createErrorResult('Segmentation interrupted');
+
+        if (!videoElement || (videoElement.readyState !== undefined && videoElement.readyState < 2)) {
             return this._createErrorResult('Видео не готово');
+        }
+        if (this.worker) {
+            const generation = this.generation;
+            const worker = this.worker;
+            try {
+                const result = await worker.analyze(videoElement, { landmarks: faceLandmarks, timestamp: captureTimestamp });
+                if (generation !== this.generation) return this._createErrorResult('Segmentation interrupted');
+                this.lastResult = result;
+                if (['CPU', 'GPU'].includes(result.inferenceDelegate)) this.inferenceDelegate = result.inferenceDelegate;
+                this.cpuFallbackReason = result.delegateFallbackReason || null;
+                return result;
+            } catch (_) {
+                if (generation !== this.generation || this.worker !== worker) return this._createErrorResult('Segmentation interrupted');
+                worker.dispose(); this.worker = null; this.workerAllowed = false;
+                this.isInitialized = false; this.workerFallbackReason = 'worker_runtime_failed';
+                this.inferenceDelegate = null;
+                return this._createErrorResult('vision_worker_interrupted');
+            }
         }
 
         const startTime = performance.now();
-        
+        let segmentationResult;
         try {
-            const width = videoElement.videoWidth || 640;
-            const height = videoElement.videoHeight || 480;
+            const width = videoElement.videoWidth || videoElement.width || 640;
+            const height = videoElement.videoHeight || videoElement.height || 480;
             
             // Выполняем сегментацию
-            const timestamp = performance.now();
-            const segmentationResult = this.imageSegmenter.segmentForVideo(videoElement, timestamp);
+            const timestamp = captureTimestamp;
+            segmentationResult = this.imageSegmenter.segmentForVideo(videoElement, timestamp);
             
             // Обрабатываем маски
-            const maskAnalysis = analyzeMasks(segmentationResult, width, height, faceLandmarks);
+            const maskAnalysis = analyzeMasks(segmentationResult, width, height, faceLandmarks, this.maskReader);
             
             // Анализируем видимость областей лица
             const faceVisibility = analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, width, height, this.thresholds);
@@ -179,19 +258,26 @@ class FaceSegmenter {
                 analysisTime: Math.round(analysisTime)
             };
 
-            // Освобождаем ресурсы маски
-            if (segmentationResult.categoryMask) {
-                segmentationResult.categoryMask.close();
-            }
-            if (segmentationResult.confidenceMasks) {
-                segmentationResult.confidenceMasks.forEach(mask => mask.close());
-            }
-
             return this.lastResult;
             
         } catch (error) {
+            if (this.inferenceDelegate === 'GPU' && !this.cpuFallbackReason && generation === this.generation) {
+                // Release every owned mask before closing its GL context. Retry
+                // once on CPU inside the same worker, preserving capture time.
+                segmentationResult?.categoryMask?.close();
+                segmentationResult?.confidenceMasks?.forEach(mask => mask.close());
+                segmentationResult = null;
+                this.maskReader.dispose();
+                this.imageSegmenter.close(); this.imageSegmenter = null;
+                this.isInitialized = false;
+                this.cpuFallbackReason = 'gpu_mask_or_inference_failed';
+                return await this._segmentFrame(videoElement, faceLandmarks, captureTimestamp);
+            }
             console.error('[FaceSegmenter] Ошибка сегментации:', error);
             return this._createErrorResult(error.message);
+        } finally {
+            segmentationResult?.categoryMask?.close();
+            segmentationResult?.confidenceMasks?.forEach(mask => mask.close());
         }
     }
 
@@ -237,6 +323,8 @@ class FaceSegmenter {
      * Сброс состояния
      */
     reset() {
+        this.generation++;
+        this.worker?.reset();
         this.lastResult = null;
     }
 
@@ -244,6 +332,8 @@ class FaceSegmenter {
      * Освобождение ресурсов
      */
     dispose() {
+        this.worker?.dispose(); this.worker = null;
+        this.maskReader.dispose();
         if (this.imageSegmenter) {
             this.imageSegmenter.close();
             this.imageSegmenter = null;
@@ -251,6 +341,7 @@ class FaceSegmenter {
         this._maskCanvas = null;
         this._maskCtx = null;
         this.isInitialized = false;
+        this.inferenceDelegate = null;
         this.reset();
     }
 }

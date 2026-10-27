@@ -817,6 +817,35 @@ flowchart LR
 
 ---
 
+## Проверка FPS И Обработки Кадров
+
+Из `apps/autotests` после `npm ci`:
+
+```bash
+npx playwright install chromium firefox webkit
+npm run typecheck
+npm run test:frame-workers
+npm run test:fps
+```
+
+Эти проверки используют отдельные loopback-серверы и не включают камеру или
+микрофон. Занятый тестовый порт считается ошибкой, чужой сервер не переиспользуется.
+Полный браузерный suite запускается отдельно командой `npm test`; в CI оба
+изолированных набора обязательны для итогового release gate.
+
+Для модельных тестов Chromium/Firefox Linux CI использует Xvfb и программный
+Mesa-рендеринг; тот же WebKit-набор обязателен на macOS-runner.
+`npm run test:vision-gl` предварительно требует WebGL2 и в окне, и в Worker
+каждого движка. `WECOG_TEST_HEADED=1` включает headed-режим только тестовой
+конфигурации. Такой прогон проверяет корректность, а не аппаратный FPS.
+
+Прохождение функциональных тестов не доказывает 25 FPS на любом компьютере.
+Camera publication FPS, analysis FPS и render FPS различаются; счётчик кадров
+браузера не является независимым измерением частоты сенсора. Проверка реального
+видео описана в [руководстве по reference datasets](docs/research/public-reference-datasets.md),
+а состав поставки и ограничения — в [отчёте FPS-кандидата](docs/reports/2026-10-27-fps-release-candidate.md).
+Сырые записи лица и датчиков хранятся вне репозитория и не отправляются в CI.
+
 ## Лицензия
 
 [Apache License 2.0](LICENSE).

@@ -87,7 +87,7 @@ class PrecheckAnalyzerInline {
         }
     }
 
-    async analyzeFrame(videoElement) {
+    async analyzeFrame(videoElement, capture = {}) {
         if (!this.isInitialized) await this.initialize();
         if (!videoElement || videoElement.readyState < 2) {
             return this._createErrorResult('Видео не готово');
@@ -100,15 +100,16 @@ class PrecheckAnalyzerInline {
                 this._canvas = document.createElement('canvas');
                 this._ctx = this._canvas.getContext('2d', { willReadFrequently: true });
             }
-            this._canvas.width = width;
-            this._canvas.height = height;
+            if (this._canvas.width !== width) this._canvas.width = width;
+            if (this._canvas.height !== height) this._canvas.height = height;
             this._ctx.drawImage(videoElement, 0, 0, width, height);
             const imageData = this._ctx.getImageData(0, 0, width, height);
 
             // Сначала MediaPipe — нужны landmarks, чтобы illumination считался
             // по face ROI, а не по всему кадру (тёмный/светлый фон не должен штрафовать
             // пользователя при нормальном освещении лица).
-            const timestamp = performance.now();
+            const timestamp = capture.timestamp ?? performance.now();
+            const wallTimestamp = capture.wallTimestamp ?? Date.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
 
             const faceData = this._parseFaceResults(mpResults, width, height);
@@ -139,7 +140,7 @@ class PrecheckAnalyzerInline {
                 illumination, face: faceData, pose, eyes, mouth,
                 landmarks, blendShapes,
                 timestamp,
-                wallTimestamp: Date.now(),
+                wallTimestamp,
                 frameSize: { width, height }
             };
             return this.lastResult;
@@ -394,7 +395,7 @@ if (typeof window !== 'undefined') {
 
     window.PrecheckAnalyzerReady = (async () => {
         try {
-            const mod = await import('./precheck-analyzer/index.js');
+            const mod = await import('./precheck-analyzer/index.js?v=20261025-1');
             const Cls = mod && (mod.PrecheckAnalyzer || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export PrecheckAnalyzer class');

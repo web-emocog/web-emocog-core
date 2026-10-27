@@ -258,7 +258,7 @@ if (typeof window !== 'undefined') {
 
     window.FaceSegmenterReady = (async () => {
         try {
-            const mod = await import('./face-segmenter/index.js');
+            const mod = await import('./face-segmenter/index.js?v=20261025-1');
             const Cls = mod && (mod.FaceSegmenter || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export FaceSegmenter class');

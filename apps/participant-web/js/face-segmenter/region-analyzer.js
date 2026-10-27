@@ -6,7 +6,7 @@
  * @module face-segmenter/region-analyzer
  */
 
-import { CLASS_INDICES, LANDMARK_INDICES } from './constants.js';
+import { CLASS_INDICES, LANDMARK_INDICES } from './constants.js?v=20261025-1';
 import { getAreaThresholds } from './thresholds.js';
 
 /**
@@ -174,7 +174,7 @@ export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, th
             const py = Math.floor(point.y * maskHeight);
             const pidx = py * maskWidth + px;
             
-            if (pidx >= 0 && pidx < maskData.length) {
+            if (px >= 0 && px < maskWidth && py >= 0 && py < maskHeight && pidx < maskData.length) {
                 pointCounts.total++;
                 const classIdx = maskData[pidx];
                 
@@ -307,7 +307,9 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
             issues.push('hand_on_face');
             // Сильно снижаем score при глобальной детекции руки
             score -= 30;
-            console.log(`[FaceSegmenter] Глобальная детекция руки: body_skin=${(globalBodySkinRatio * 100).toFixed(1)}% (порог ${thresholds.globalHandThreshold * 100}%)`);
+            if (globalThis.WECOG_DEBUG?.enabled) {
+                console.debug(`[FaceSegmenter] body_skin=${(globalBodySkinRatio * 100).toFixed(1)}%`);
+            }
         }
     }
 

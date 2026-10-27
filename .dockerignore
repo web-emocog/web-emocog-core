@@ -11,6 +11,8 @@
 **/__pycache__
 **/*.pyc
 **/*.log
+**/.local-reference-data
+reference-data
 
 Audio_detection/**
 !Audio_detection/browser/

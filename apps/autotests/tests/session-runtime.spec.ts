@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { getPageUrl } from './helpers/testUtils';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 
@@ -31,6 +33,7 @@ test.describe('Participant session runtime', () => {
         'runtime_protocol_start_failure_title',
         'runtime_protocol_start_failure_body',
         'runtime_protocol_retry_action',
+        'validation_result_missing_targets_advice',
       ];
       const failures: Array<{ locale: string; key: string; actual: string; expected: string }> = [];
       for (const locale of participantLocales) {
@@ -62,11 +65,78 @@ test.describe('Participant session runtime', () => {
     expect(mismatches).toEqual([]);
   });
 
+  test('a frozen prediction cannot pass the actual validation flow', async ({ page }) => {
+    await page.goto(PAGE_URL, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+    await page.clock.install();
+    await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      (window as any).setLanguage('en');
+      shared.runtime.currentGazePrediction = { rawX: 100, rawY: 100, correctedX: 100, correctedY: 100,
+        frameTimestamp: performance.now(), timestamp: Date.now(), valid: true };
+      const moduleUrl = new URL('js/web-page/tests-updated.js?v=20261025-1', window.location.href).href;
+      const { startGazeValidation } = await import(moduleUrl);
+      startGazeValidation();
+      document.getElementById('validationIntroStartBtn')!.click();
+    });
+    await page.clock.runFor(46_000);
+    const result = await page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.gazeValidation);
+    expect(result.passed).toBe(false);
+    expect(result.coverage).toMatchObject({ expectedTargets: 5, observedTargets: 0, complete: false });
+    expect(result.sampling).toHaveLength(14);
+    expect(result.sampling.every((row: any) => row.accepted === 0)).toBe(true);
+    await expect(page.locator('#continueAfterValidationBtn')).toBeHidden();
+    await expect(page.locator('#validationResultAdvice')).toContainText('no gaze measurements');
+  });
+
+  for (const missingTarget of [false, true]) {
+    test(`15 Hz validation captures remain unique; missing benchmark target=${missingTarget}`, async ({ page }) => {
+      await page.goto(PAGE_URL, { waitUntil: 'load' });
+      await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+      await page.clock.install();
+      await page.evaluate(async missing => {
+        const shared = (window as any).__WECOG_STATE__;
+        const moduleUrl = new URL('js/web-page/tests-updated.js?v=20261025-1', window.location.href).href;
+        const { startGazeValidation } = await import(moduleUrl);
+        startGazeValidation();
+        document.getElementById('validationIntroStartBtn')!.click();
+        // Synthetic oracle for flow tests only, not a production gaze predictor or accuracy benchmark.
+        (window as any).__syntheticGazeTimer = setInterval(() => {
+          const rect = document.getElementById('fullscreenCalibPoint')!.getBoundingClientRect();
+          const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+          const valid = !(missing && shared.runtime.validationPoints.length === 9
+            && shared.runtime.validationBenchmarkPoints.length === 2);
+          shared.runtime.currentGazePrediction = { rawX: x, rawY: y, correctedX: x, correctedY: y,
+            displayX: x, displayY: y, frameTimestamp: performance.now(), timestamp: Date.now(), valid };
+        }, 67);
+      }, missingTarget);
+      await page.clock.runFor(46_000);
+      const result = await page.evaluate(() => {
+        clearInterval((window as any).__syntheticGazeTimer);
+        return (window as any).__WECOG_STATE__.sessionData.gazeValidation;
+      });
+      expect(result.metrics.accuracyPx).toBeLessThan(1);
+      expect(result.passed).toBe(!missingTarget);
+      expect(result.coverage.complete).toBe(!missingTarget);
+      expect(result.sampling).toHaveLength(14);
+      for (const row of result.sampling.filter((row: any) => row.accepted > 0)) {
+        expect(row.accepted).toBeGreaterThanOrEqual(28);
+        expect(row.accepted).toBeLessThanOrEqual(30);
+      }
+      if (missingTarget) {
+        expect(result.coverage.missingTargetIndices).toEqual([2]);
+        await expect(page.locator('#continueAfterValidationBtn')).toBeHidden();
+      } else {
+        await expect(page.locator('#continueAfterValidationBtn')).toBeVisible();
+      }
+    });
+  }
+
   test('selects the highest-error validation zones for targeted recalibration', async ({ page }) => {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     const targets = await page.evaluate(async () => {
       const moduleUrl = new URL(
-        'js/web-page/tests-updated.js?v=20261019-5',
+        'js/web-page/tests-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { getWorstValidationTargets } = await import(moduleUrl);
@@ -227,7 +297,7 @@ test.describe('Participant session runtime', () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js?v=20261019-5',
+        'js/web-page/experimental_task-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -257,7 +327,7 @@ test.describe('Participant session runtime', () => {
           metadata: { url: `${location.origin}/missing-stimulus.png` }
         }
       };
-      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261019-5', location.href).href;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261025-1', location.href).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
       await loadAndStartCognitiveTask({
         autoFinishSession: false,
@@ -286,38 +356,9 @@ test.describe('Participant session runtime', () => {
   });
 
   test('preloads and presents an uploaded video in a passive block', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load' });
-    const videoBase64 = await page.evaluate(async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 4;
-      canvas.height = 4;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('Canvas context is unavailable');
-      context.fillStyle = '#dc2626';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      const stream = canvas.captureStream(10);
-      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = event => chunks.push(event.data);
-      const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
-      recorder.start();
-      await new Promise(resolve => setTimeout(resolve, 180));
-      context.fillStyle = '#2563eb';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      recorder.stop();
-      await stopped;
-      stream.getTracks().forEach(track => track.stop());
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      return await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1]);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-    });
-
+    // Procedurally generated red frames; independent of headless MediaRecorder scheduling.
+    const videoBytes = readFileSync(path.resolve(__dirname, 'fixtures/passive-video.webm'));
     const invitationCode = 'INV-VIDEO-PRELOAD';
-    const videoBytes = Buffer.from(videoBase64, 'base64');
     await page.route('**/invitations/by-code/**', async route => {
       const url = new URL(route.request().url());
       if (url.pathname.endsWith(`/by-code/${invitationCode}/stimuli/99/content`)) {
@@ -392,7 +433,7 @@ test.describe('Participant session runtime', () => {
     await page.evaluate(async () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
-      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261019-5', window.location.href).href;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261025-1', window.location.href).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
       await loadAndStartCognitiveTask({
         protocol: shared.runtime.invitationProtocolDefinition,
@@ -408,8 +449,8 @@ test.describe('Participant session runtime', () => {
       height: element.videoHeight,
     }))).toMatchObject({
       source: expect.stringMatching(/^blob:/),
-      width: 4,
-      height: 4,
+      width: 64,
+      height: 64,
     });
     await expect(page.locator('body')).not.toHaveClass(/cognitive-stimulus-fullscreen/);
   });
@@ -421,7 +462,7 @@ test.describe('Participant session runtime', () => {
       Math.random = () => 0;
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
-      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261019-5', window.location.href).href;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261025-1', window.location.href).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
       await loadAndStartCognitiveTask({
         autoFinishSession: false,
@@ -479,7 +520,7 @@ test.describe('Participant session runtime', () => {
     await page.evaluate(async () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
-      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261019-5', window.location.href).href;
+      const moduleUrl = new URL('js/web-page/experimental_task-updated.js?v=20261025-1', window.location.href).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
       await loadAndStartCognitiveTask({
         autoFinishSession: false,
@@ -644,7 +685,7 @@ test.describe('Participant session runtime', () => {
         }],
       };
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js?v=20261019-5',
+        'js/web-page/experimental_task-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -696,7 +737,7 @@ test.describe('Participant session runtime', () => {
         }],
       };
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js?v=20261019-5',
+        'js/web-page/experimental_task-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -717,7 +758,7 @@ test.describe('Participant session runtime', () => {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.runtime.invitationProtocolDefinition = null;
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js?v=20261019-5',
+        'js/web-page/experimental_task-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -761,7 +802,7 @@ test.describe('Participant session runtime', () => {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.runtime.invitationProtocolDefinition = null;
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js?v=20261019-5',
+        'js/web-page/experimental_task-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -819,7 +860,7 @@ test.describe('Participant session runtime', () => {
         }],
       };
       const moduleUrl = new URL(
-        'js/web-page/experimental_task-updated.js?v=20261019-5',
+        'js/web-page/experimental_task-updated.js?v=20261025-1',
         window.location.href,
       ).href;
       const { loadAndStartCognitiveTask } = await import(moduleUrl);
@@ -864,7 +905,7 @@ test.describe('Participant session runtime', () => {
         schemaVersion: 'protocol_survey.v1', title: 'Оценка самочувствия', questions: [{ id: 'long', type: 'open', required: true,
           text: 'Насколько вам хотелось спать во время просмотра? Оцените от 0 до 10, где 0 — совсем не хотелось; 10 — с трудом удерживался от засыпания. ' + 'Длинноесловобезпробелов'.repeat(4) }]
       } }] };
-      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261019-5', window.location.href).href);
+      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261025-1', window.location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false });
     });
     await expect(page.locator('.survey-runtime-question')).toBeVisible();
@@ -1051,8 +1092,8 @@ test.describe('Participant session runtime', () => {
     const result = await page.evaluate(async () => {
       document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
       document.getElementById('step5')?.classList.add('active');
-      const precheckUrl = new URL('js/web-page/precheck-updated.js?v=20261019-5', window.location.href).href;
-      const stateUrl = new URL('js/web-page/state.js?v=20261019-5', window.location.href).href;
+      const precheckUrl = new URL('js/web-page/precheck-updated.js?v=20261025-1', window.location.href).href;
+      const stateUrl = new URL('js/web-page/state.js?v=20261025-1', window.location.href).href;
       const [{ checkAllIndicators }, { state, CONSTANTS }] = await Promise.all([
         import(precheckUrl),
         import(stateUrl),
@@ -1166,7 +1207,7 @@ test.describe('Participant session runtime', () => {
 
     await page.evaluate(async () => {
       const stateModule = await import(new URL(
-        'js/web-page/state.js?v=20261019-5',
+        'js/web-page/state.js?v=20261025-1',
         window.location.href,
       ).href);
       stateModule.setSessionPhase('cognitive_instruction', { force: true });
@@ -1184,7 +1225,7 @@ test.describe('Participant session runtime', () => {
 
     await page.evaluate(async () => {
       const stateModule = await import(new URL(
-        'js/web-page/state.js?v=20261019-5',
+        'js/web-page/state.js?v=20261025-1',
         window.location.href,
       ).href);
       stateModule.setSessionPhase('calibration', { force: true });
@@ -1193,7 +1234,7 @@ test.describe('Participant session runtime', () => {
 
     const pauseRejected = await page.evaluate(async () => {
       const stateModule = await import(new URL(
-        'js/web-page/state.js?v=20261019-5',
+        'js/web-page/state.js?v=20261025-1',
         window.location.href,
       ).href);
       stateModule.setSessionPhase('cognitive_stimulus', { force: true });
@@ -1301,7 +1342,7 @@ test.describe('Participant session runtime', () => {
       shared.sessionData.precheck = { pass_fail: true };
       shared.runtime.precheckData = { pass_fail: true };
       shared.runtime.sessionRuntime.startContinuousModules = async () => true;
-      const moduleUrl = new URL('js/web-page/tests-updated.js?v=20261019-5', window.location.href).href;
+      const moduleUrl = new URL('js/web-page/tests-updated.js?v=20261025-1', window.location.href).href;
       const { startCalibration } = await import(moduleUrl);
       void startCalibration();
     });
@@ -1657,7 +1698,7 @@ test.describe('Participant session runtime', () => {
       // Resolved by the browser from the application origin, not the TS project.
       const { finishSession } = await import(
         // @ts-expect-error The production JS module intentionally has no .d.ts file.
-        '/apps/participant-web/js/web-page/tests-updated.js?v=20261019-5'
+        '/apps/participant-web/js/web-page/tests-updated.js?v=20261025-1'
       );
       const first = await finishSession();
       const firstFinishAttemptId = shared.sessionData.lifecycle.finishAttemptId;

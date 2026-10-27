@@ -6,20 +6,21 @@ import {
     setTaskContext,
     clearTaskContext,
     getRelativeSessionTimeMs
-} from './state.js?v=20261019-5';
-import { finishSession } from './tests-updated.js?v=20261019-5';
-import '../../../shared/instruction-responses.js?v=20261019-5';
+} from './state.js?v=20261025-1';
+import { finishSession } from './tests-updated.js?v=20261025-1';
+import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
+import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20261019-5';
+import { translations } from '../../translations.js?v=20261025-1';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261019-5';
+} from '../session-runtime/index.js?v=20261025-1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -29,7 +30,7 @@ import {
     normalizeResponseMode,
     normalizeKeyboardResponse,
     keyboardResponseLabel
-} from '../rt-input/response-policy.mjs?v=20261019-5';
+} from '../rt-input/response-policy.mjs?v=20261025-1';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;
@@ -1376,9 +1377,10 @@ export async function loadAndStartCognitiveTask(options = {}) {
                 ? normalized
                 : ensureSessionQualityInstruction(normalized);
         } else {
-            const response = await fetch('./experiment.json');
-            if (!response.ok) throw new Error('Файл experiment.json не найден');
-            const normalized = await response.json();
+            const normalized = await fetchWithDeadline('./experiment.json', {}, response => {
+                if (!response.ok) throw new Error('Файл experiment.json не найден');
+                return response.json();
+            });
             experimentProtocol = runtime?.policyShown
                 ? normalized
                 : ensureSessionQualityInstruction(normalized);

@@ -99,6 +99,19 @@ export interface RtAlignmentV1 {
   }>;
 }
 
+export interface GazeValidationSummary extends Record<string, unknown> {
+  samplingVersion?: 'unique_capture.v1';
+  sampling?: Array<{
+    version: 'unique_capture.v1'; stage: 'correction' | 'benchmark'; pointIndex: number;
+    clock: 'monotonic' | 'wall' | null; attempted: number; accepted: number;
+    duplicate: number; beforeWindow: number; missingTimestamp: number; clockChanged: number;
+  }>;
+  coverage?: {
+    version: 'target_coverage.v1'; expectedTargets: 5; observedTargets: number;
+    missingTargetIndices: number[]; complete: boolean;
+  };
+}
+
 export interface SessionFeatureV1 {
   delivery?: SessionDeliveryV1;
   schemaVersion: 'session_feature.v1';
@@ -126,7 +139,7 @@ export interface SessionFeatureV1 {
   experimentMeta?: Record<string, unknown> | null;
   blocks?: Array<Record<string, unknown>>;
   cognitiveResults?: Array<Record<string, unknown>>;
-  gazeValidation?: Record<string, unknown> | null;
+  gazeValidation?: GazeValidationSummary | null;
   gaze_analytics?: Record<string, unknown> | null;
   rt_alignment?: RtAlignmentV1;
   startTime?: number | string | null;

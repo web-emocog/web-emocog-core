@@ -128,6 +128,7 @@ export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, th
         analysisFps: fpsMonitor?.getCurrentFps() || 0,
         cameraFps: fpsMonitor?.getCameraFps?.() || 0,
         baselineFps: fpsMonitor?.getBaselineFps() || null,
+        fpsDiagnostics: fpsMonitor?.getDiagnostics?.() || null,
         lowFpsPct: round1(percentages.lowFpsPct),
 
         gazeValidTimeMs: gazeState.validTimeMs,

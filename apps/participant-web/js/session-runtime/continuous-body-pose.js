@@ -4,6 +4,8 @@
  * MediaPipe Tasks Vision and Pose Landmarker are Apache-2.0 licensed. The
  * collector stores normalized kinematics, not video frames.
  */
+import { VisionWorkerClient } from './vision-worker-client.mjs';
+
 const MODEL_URL = new URL(
     '../vendor/mediapipe/models/pose_landmarker_lite.task',
     import.meta.url
@@ -107,6 +109,7 @@ export class ContinuousBodyPoseCollector {
         const { state, onError, enabled, gamerMode, clock } = options;
         this.state = state;
         this.onError = onError || (() => {});
+        this.onRecovered = options.onRecovered || (() => {});
         this.enabled = enabled !== false;
         this.gamerMode = gamerMode === true;
         this.clock = clock || null;
@@ -114,12 +117,16 @@ export class ContinuousBodyPoseCollector {
         this.ready = false;
         this.initializing = null;
         this.closed = false;
+        this.generation = 0;
         this.lastTimestamp = null;
         this.lastTorsoCenter = null;
         this.lastLandmarks = null;
         this.movementBursts = 0;
         this.inBurst = false;
         this.scaleBaseline = { count: 0, shoulderWidthSum: 0, torsoHeightSum: 0 };
+        this.worker = null;
+        this.workerAllowed = options.worker !== false;
+        this.backend = 'uninitialized';
     }
 
     async start() {
@@ -138,12 +145,39 @@ export class ContinuousBodyPoseCollector {
         if (this.ready) return true;
         if (this.initializing) return this.initializing;
         this.closed = false;
-        this.initializing = this._initialize();
+        this._beginInitialization();
         return this.initializing;
     }
 
-    async _initialize() {
+    _beginInitialization(onReady = null) {
+        const pending = this._initialize(this.generation).then(ready => {
+            onReady?.(ready);
+            return ready;
+        }).finally(() => {
+            if (this.initializing === pending) this.initializing = null;
+        });
+        this.initializing = pending;
+        return pending;
+    }
+
+    async _initialize(generation = this.generation) {
         try {
+            if (this.workerAllowed && VisionWorkerClient.supported()) {
+                const worker = new VisionWorkerClient('pose');
+                this.worker = worker;
+                try {
+                    await worker.start();
+                    if (this.closed || generation !== this.generation) { worker.dispose(); return false; }
+                    this.ready = true; this.backend = 'worker';
+                    return true;
+                } catch (_) {
+                    worker.dispose();
+                    if (this.closed || generation !== this.generation) return false;
+                    this.worker = null; this.workerAllowed = false;
+                    this.workerFallbackReason = 'worker_initialization_failed';
+                }
+            }
+            if (this.closed || generation !== this.generation) return false;
             const { FilesetResolver, PoseLandmarker } = await import(
                 '../vendor/mediapipe/vision_bundle.mjs'
             );
@@ -161,26 +195,49 @@ export class ContinuousBodyPoseCollector {
                 minTrackingConfidence: 0.5,
                 outputSegmentationMasks: false
             });
+            let landmarker;
             try {
-                this.landmarker = await PoseLandmarker.createFromOptions(vision, options('GPU'));
+                landmarker = await PoseLandmarker.createFromOptions(vision, options('GPU'));
             } catch (_) {
-                this.landmarker = await PoseLandmarker.createFromOptions(vision, options(null));
+                landmarker = await PoseLandmarker.createFromOptions(vision, options(null));
             }
-            this.ready = !this.closed;
-            if (this.closed) this.landmarker?.close?.();
+            if (this.closed || generation !== this.generation) { landmarker.close(); return false; }
+            this.landmarker = landmarker;
+            this.ready = true;
+            this.backend = 'main';
             return this.ready;
         } catch (error) {
+            if (this.closed || generation !== this.generation) return false;
             this.ready = false;
             this.onError(error);
             return false;
-        } finally {
-            this.initializing = null;
         }
     }
 
-    process(video, timestamp = performance.now()) {
-        if (!this.ready || this.closed || !video || video.readyState < 2) return null;
-        const result = this.landmarker.detectForVideo(video, timestamp);
+    process(video, timestamp = performance.now(), capturedContext = null) {
+        if (!this.ready || this.closed || !video || (video.readyState !== undefined && video.readyState < 2)) return null;
+        const context = { ...(capturedContext || { ...phaseContext(this.state), wallTime: Date.now() }),
+            clockStamp: capturedContext?.clockStamp || this.clock?.now?.({ performanceNowMs: timestamp }) || null };
+        if (this.worker) {
+            const worker = this.worker;
+            const generation = this.generation;
+            return worker.analyze(video, { timestamp }).then(result => this.closed || generation !== this.generation
+                ? null : this.consumeResult(result, timestamp, context))
+                .catch(() => {
+                    if (this.closed || generation !== this.generation || this.worker !== worker) return null;
+                    worker.dispose(); this.worker = null; this.workerAllowed = false;
+                    this.workerFallbackReason = 'worker_runtime_failed'; this.ready = false;
+                    this.onError(new Error('vision_worker_interrupted'));
+                    this._beginInitialization(ready => {
+                        if (ready && !this.closed && generation === this.generation) this.onRecovered();
+                    });
+                    return null;
+                });
+        }
+        return this.consumeResult(this.landmarker.detectForVideo(video, timestamp), timestamp, context);
+    }
+
+    consumeResult(result, timestamp, context) {
         const landmarks = result?.landmarks?.[0];
         if (!Array.isArray(landmarks) || landmarks.length <= LANDMARK.RIGHT_HIP) {
             this.state.runtime.lastBodyPoseSample = null;
@@ -254,15 +311,14 @@ export class ContinuousBodyPoseCollector {
         if (startedMovementBurst) this.movementBursts += 1;
         this.inBurst = isMovementBurst;
 
-        const wallTime = Date.now();
-        const stamp = this.clock?.now?.({ performanceNowMs: timestamp }) || null;
+        const { wallTime, clockStamp: stamp, ...labels } = context;
         const sample = {
             t: wallTime,
             timeOriginMs: stamp?.timeOriginMs ?? null,
             monotonicMs: stamp?.monotonicMs ?? null,
             sessionTimeMs: stamp?.sessionTimeMs ?? null,
             tRelMs: Math.max(0, wallTime - (this.state.sessionData.startTime || wallTime)),
-            ...phaseContext(this.state),
+            ...labels,
             confidence: Math.round(confidence * 1000) / 1000,
             valid: !ood,
             ood,
@@ -366,6 +422,9 @@ export class ContinuousBodyPoseCollector {
 
     stop() {
         this.closed = true;
+        this.generation++;
+        this.initializing = null;
+        this.worker?.dispose(); this.worker = null;
         this.ready = false;
         const summary = this.summary();
         this.state.sessionData.bodyPoseSummary = summary;

@@ -1,0 +1,13 @@
+{
+  "method": "bidmc-impedance-numeric-core.v1",
+  "source": "https://physionet.org/content/bidmc/1.0.0/",
+  "attribution": "Contains information from BIDMC PPG and Respiration Dataset, available under the ODC Attribution License v1.0. Pimentel et al., doi:10.1109/TBME.2016.2613124; PhysioNet.",
+  "signalSha256": "21495169cc36e82352d8e12cc6430927946d02d240b030715088d02396ea2d5c",
+  "annotationSha256": "698846517e27e7789d855875bae9774db3c189900efae8e486c300ed5ce58037",
+  "totalWindows": 24,
+  "eligibleReferenceWindows": 23,
+  "scoredWindows": 8,
+  "maeBpm": 0.3995918927316975,
+  "rmseBpm": 0.43836189785830676,
+  "interpretation": "Frozen implementation baseline, NOT an approved accuracy target. Direct impedance input, one recording; no webcam extraction or clinical claim. Low coverage is explicit."
+}
