@@ -114,6 +114,25 @@ checks this job's success as well as API, PostgreSQL and general browser jobs.
 No benchmark faces or live-camera permission are required in CI. Hardware FPS
 acceptance is distinct from these functional regression jobs.
 
+The first Linux run passed 132 Worker/session checks but failed 15 GL/model
+checks: Firefox and WebKit had no window WebGL2 context (`gl` was null), and real
+models could not initialize. This differs from the successful local macOS run.
+It is retained as failed CI evidence, not counted as a pass. The job now installs
+Mesa software drivers and runs the model tests headed under Xvfb, with an explicit
+window/OffscreenCanvas Worker WebGL2 preflight for every engine. Missing graphics
+support fails the job before the long model run. Playwright's GitHub reporter
+also exposes failures as annotations. Assertions, models, per-frame deadlines,
+scientific thresholds and product launch/delegate policy are unchanged.
+The loopback preflight passed locally for all three engines, and the unchanged
+GL/mask tests passed another 12 executions (two repetitions per engine).
+The first Linux workflow's general Chromium/Firefox job, API, PostgreSQL,
+CodeQL and container builds all completed successfully; only the new GL/model
+job failed. Its rerun remains a separate verification, not a retroactive pass.
+
+References: [Playwright CI / headed execution](https://playwright.dev/docs/ci)
+and [Mesa software rendering variables](https://docs.mesa3d.org/envvars.html).
+This software CI configuration must not be used as a hardware performance claim.
+
 ## Remaining Acceptance And Rollback
 
 Universal FPS acceptance and issue 132 remain open. Earlier 60-second M4 Pro

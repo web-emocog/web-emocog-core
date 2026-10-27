@@ -222,6 +222,10 @@ jobs:
     name: Frame pipeline and FPS diagnostics (three engines)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      WECOG_TEST_HEADED: '1'
+      LIBGL_ALWAYS_SOFTWARE: 'true'
+      GALLIUM_DRIVER: llvmpipe
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
@@ -237,9 +241,14 @@ jobs:
       - name: Install the three regression engines
         working-directory: apps/autotests
         run: npx playwright install --with-deps chromium firefox webkit
+      - name: Install software OpenGL for the virtual display
+        run: sudo apt-get install --yes --no-install-recommends libgl1-mesa-dri libegl-mesa0 mesa-utils
+      - name: Verify window and Worker WebGL2 in every engine
+        working-directory: apps/autotests
+        run: xvfb-run --auto-servernum npm run test:vision-gl
       - name: Run isolated frame pipeline regression
         working-directory: apps/autotests
-        run: npm run test:frame-workers
+        run: xvfb-run --auto-servernum npm run test:frame-workers
       - name: Run isolated FPS and quality diagnostics
         working-directory: apps/autotests
         run: npm run test:fps
