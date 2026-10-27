@@ -40,7 +40,10 @@
 </head>
 <body>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../auth-guard.js?v=20260820-2"></script>
+  <script src="../http-client.js?v=20261027-1"></script>
+  <script src="../account-storage.js?v=20261019-5"></script>
+  <script src="../staff-session.js?v=20261027-1"></script>
+  <script src="../auth-guard.js?v=20261027-1"></script>
   <script>
     (function () {
       if (!window.EmocogAuthGuard) {
@@ -175,12 +178,7 @@
         }
         try {
           var path = '/auth/users';
-          var r = await fetch(base + path, { method: 'POST', headers: jsonHeaders(), credentials: 'include', body: JSON.stringify(payload) });
-          if (!r.ok) {
-            var errorPayload = await r.json().catch(function () { return {}; });
-            throw new Error(errorPayload.error || (r.status + ' ' + r.statusText));
-          }
-          var user = await r.json();
+          var user = await WecogHttp.json(base + path, { method: 'POST', headers: jsonHeaders(), credentials: 'include', body: JSON.stringify(payload) });
           setStatus(createStatus, 'Аккаунт создан: ' + (user.email || payload.email));
           document.getElementById('password').value = '';
           loadUsers();
@@ -198,7 +196,7 @@
           var rowRoles = availableRoles.indexOf(u.role) >= 0 ? availableRoles : availableRoles.concat([u.role]);
           var roleOptions = rowRoles
             .map(function (role) {
-              return '<option value="' + role + '"' + (u.role === role ? ' selected' : '') + '>' + role + '</option>';
+              return '<option value="' + escapeHtml(role) + '"' + (u.role === role ? ' selected' : '') + '>' + escapeHtml(role) + '</option>';
             })
             .join('');
           var orgs = Array.isArray(u.organization_ids) ? u.organization_ids.join(',') : '';
@@ -223,7 +221,7 @@
             var organizationIds = parseOrgIds(tr.querySelector('.user-orgs').value);
             var projectIds = parseOrgIds(tr.querySelector('.user-projects').value);
             try {
-              var membershipResponse = await fetch(base + '/auth/users/' + encodeURIComponent(userId) + '/memberships', {
+              await WecogHttp.json(base + '/auth/users/' + encodeURIComponent(userId) + '/memberships', {
                 method: 'PUT',
                 headers: jsonHeaders(),
                 credentials: 'include',
@@ -233,10 +231,6 @@
                   project_ids: projectIds
                 })
               });
-              if (!membershipResponse.ok) {
-                var membershipError = await membershipResponse.json().catch(function () { return {}; });
-                throw new Error(membershipError.error || (membershipResponse.status + ' ' + membershipResponse.statusText));
-              }
               setStatus(listStatus, 'Роль и доступы обновлены для user #' + userId);
               await loadUsers();
             } catch (err) {
@@ -254,12 +248,7 @@
         if (role) q.set('role', role);
         if (search) q.set('q', search);
         try {
-          var r = await fetch(base + '/auth/users?' + q.toString(), { headers: jsonHeaders(), credentials: 'include' });
-          if (!r.ok) {
-            var errPayload = await r.json().catch(function () { return {}; });
-            throw new Error(errPayload.error || (r.status + ' ' + r.statusText));
-          }
-          var rows = await r.json();
+          var rows = await WecogHttp.json(base + '/auth/users?' + q.toString(), { headers: jsonHeaders(), credentials: 'include' });
           renderUsers(Array.isArray(rows) ? rows : []);
           setStatus(listStatus, 'Загружено: ' + (Array.isArray(rows) ? rows.length : 0));
         } catch (err) {
@@ -272,16 +261,12 @@
         if (gridEl) {
           gridEl.innerHTML =
             '<section class="card" style="grid-column:1/-1"><h2>Нет доступа</h2><p class="hint">' +
-            (message || 'Эта страница доступна только платформенному администратору.') +
+            escapeHtml(message || 'Эта страница доступна только платформенному администратору.') +
             '</p><p class="hint"><a href="../researcher.html" style="color:var(--accent)">← Кабинет исследователя</a></p></section>';
         }
       }
 
-      fetch(base + '/auth/permissions', { headers: jsonHeaders(), credentials: 'include' })
-        .then(function (r) {
-          if (!r.ok) throw new Error('permissions');
-          return r.json();
-        })
+      WecogHttp.json(base + '/auth/permissions', { headers: jsonHeaders(), credentials: 'include' })
         .then(function (perms) {
           if (!perms || !perms.can_open_admin_panel) {
             lockAccountsUi(

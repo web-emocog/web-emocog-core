@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Auth: регистрация, логин, JWT (Фаза 2.2).
  */
@@ -5,7 +6,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { body, param, query, validationResult } = require('express-validator');
+const { body, param, query, validationResult: rawValidationResult } = require('express-validator');
 const { pool } = require('../db');
 const config = require('../config');
 const { withTransaction } = require('../db/transaction');
@@ -32,6 +33,9 @@ const TENANT_SCOPED_STAFF_ROLES = new Set([
 const PASSWORD_MIN_LENGTH = 12;
 const BCRYPT_MAX_PASSWORD_BYTES = 72;
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('invalid-login-password-placeholder', 10);
+const validationResult = rawValidationResult.withDefaults({
+  formatter: ({ type, path, location, msg }) => ({ type, path, location, msg }),
+});
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -225,7 +229,7 @@ router.post(
       res.status(201).json(buildAuthResponse(req, res, user));
     } catch (err) {
       if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Registration failed' });
     }
   }
@@ -255,7 +259,7 @@ router.post(
       }
       res.json(buildAuthResponse(req, res, user));
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Login failed' });
     }
   }
@@ -280,7 +284,7 @@ router.get('/me', requireAuth, async (req, res) => {
         : { auth_transport: 'bearer' }),
     });
   } catch (err) {
-    console.error(err);
+    logUnexpectedError(err, 'auth');
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -350,7 +354,7 @@ router.patch(
         : {};
       res.json({ ok: true, message: 'Password updated', ...auth });
     } catch (err) {
-      console.error('[Auth password change]', { code: err.code || 'password_change_failed' });
+      logUnexpectedError(err, 'auth.password');
       res.status(500).json({ error: 'Failed to update password', code: 'password_change_failed' });
     }
   }
@@ -371,7 +375,7 @@ router.get(
       );
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to load developer access emails' });
     }
   }
@@ -396,7 +400,7 @@ router.post(
       );
       res.status(201).json(r.rows[0]);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to add developer access email' });
     }
   }
@@ -415,7 +419,7 @@ router.delete(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.status(204).send();
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to remove developer access email' });
     }
   }
@@ -467,7 +471,7 @@ router.post(
       if (err.status && err.code) {
         return res.status(err.status).json({ error: err.message, code: err.code });
       }
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to grant developer access' });
     }
   }
@@ -551,7 +555,7 @@ router.get(
       );
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to load users' });
     }
   }
@@ -733,7 +737,7 @@ router.put(
       if (err.code === '40001') {
         return res.status(409).json({ error: 'Memberships changed concurrently; retry', code: 'membership_conflict' });
       }
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to update memberships' });
     }
   }
@@ -905,7 +909,7 @@ router.post(
       }
       if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });
       if (err.code === '23503') return res.status(400).json({ error: 'Organization not found' });
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to create user' });
     }
   }
@@ -1056,7 +1060,7 @@ router.patch(
           code: 'user_update_conflict',
         });
       }
-      console.error(err);
+      logUnexpectedError(err, 'auth');
       res.status(500).json({ error: 'Failed to update user' });
     }
   }

@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Protocols CRUD (Фаза 4.1). StudyProtocol: blocks (instruction, questionnaire, calibration, stimuli, rest, final), order, durations.
  * Файл новый — исходные не удаляем.
@@ -130,7 +131,7 @@ router.get(
       const versions = await listProtocolVersions(pool, r.rows.map(row => row.id));
       res.json(r.rows.map(row => ({ ...publicProtocol(row), versions: versions.get(Number(row.id)) || [] })));
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'protocols-new');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -177,7 +178,7 @@ router.post(
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       if (err.code === '23503') return res.status(400).json({ error: 'Project not found' });
       if (err.code === '23505') return rejectProtocolConflict(res, err);
-      console.error(err);
+      logUnexpectedError(err, 'protocols-new');
       res.status(500).json({ error: 'Create failed' });
     }
   }
@@ -225,7 +226,7 @@ router.get(
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(publicProtocol(r.rows[0]));
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'protocols-new');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -294,7 +295,7 @@ router.delete(
       res.status(204).send();
     } catch (err) {
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
-      console.error(err);
+      logUnexpectedError(err, 'protocols-new');
       res.status(500).json({ error: 'Delete failed' });
     }
   }

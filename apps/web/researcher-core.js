@@ -49,18 +49,17 @@ async function apiFailError(r){
   return error;
 }
 function apiRequestHeaders(json){ const h=json?apiHeaders():authHeaders(); const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
-async function apiGet(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, {headers: apiRequestHeaders(true),credentials:'include'}); if(!r.ok) throw await apiFailError(r); return r.json(); }
+function apiRequestScope(path){ return /^\/auth(?:\/|$)|^\/projects(?:\?|$)/.test(path) ? 'document' : 'workspace'; }
+async function apiGet(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; return WecogHttp.json(url, {headers: apiRequestHeaders(true),credentials:'include'}, {scope:apiRequestScope(path)}); }
 async function apiPost(path, body){
   const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path;
   const isFormData = (typeof FormData !== 'undefined') && body instanceof FormData;
   const headers = apiRequestHeaders(!isFormData);
   const payload = isFormData ? body : JSON.stringify(body || {});
-  const r = await fetch(url, { method: 'POST', headers, body: payload, credentials:'include' });
-  if(!r.ok) throw await apiFailError(r);
-  return r.status === 204 ? null : r.json();
+  return WecogHttp.json(url, { method: 'POST', headers, body: payload, credentials:'include' }, {scope:apiRequestScope(path), transfer:isFormData});
 }
-async function apiPatch(path, body){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'PATCH', headers: apiRequestHeaders(true), body: JSON.stringify(body || {}), credentials:'include' }); if(!r.ok) throw await apiFailError(r); return r.json(); }
-async function apiDelete(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; const r = await fetch(url, { method: 'DELETE', headers: apiRequestHeaders(false), credentials:'include' }); if(!r.ok) throw await apiFailError(r); return r.status === 204 ? null : r.json(); }
+async function apiPatch(path, body){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; return WecogHttp.json(url, { method: 'PATCH', headers: apiRequestHeaders(true), body: JSON.stringify(body || {}), credentials:'include' }, {scope:apiRequestScope(path)}); }
+async function apiDelete(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; return WecogHttp.json(url, { method: 'DELETE', headers: apiRequestHeaders(false), credentials:'include' }, {scope:apiRequestScope(path)}); }
 
 function getParticipantWebBasePath(){
   var pathname = window.location.pathname || '';
@@ -244,18 +243,22 @@ async function bootstrapAdminAccess(){
   }
   applyAdminNavAccess();
   applyProjectDeleteAccess();
+  if ((location.hash || '').replace(/^#\/?/, '') === 'admin') render();
 }
 
 async function logoutResearcher() {
   try {
     const base = getApiBaseForResearcher();
-    await fetch(base + '/auth/logout', {
+    await WecogHttp.discard(base + '/auth/logout', {
       method: 'POST',
       headers: apiRequestHeaders(false),
       credentials: 'include',
       keepalive: true
-    });
-  } catch (_) {}
+    }, {scope:'document', timeoutMs:10000});
+  } catch (error) {
+    if (error.code !== 'staff_account_changed') window.alert(error.message);
+    return;
+  }
   try {
     if (window.EmocogAuthGuard && typeof window.EmocogAuthGuard.clearAuth === 'function') {
       window.EmocogAuthGuard.clearAuth();
@@ -409,7 +412,12 @@ function setActiveNav(route){
 // Chips
 function setChips(arr){
   const c=$('#chips');
-  c.innerHTML=arr.map((x,i)=>`<div class="chip ${i===0?'active':''}">${x}</div>`).join('');
+  c.replaceChildren(...arr.map((value, index) => {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (index === 0 ? ' active' : '');
+    chip.textContent = value == null ? '' : String(value);
+    return chip;
+  }));
   c.style.display = arr.length ? '' : 'none';
 }
 

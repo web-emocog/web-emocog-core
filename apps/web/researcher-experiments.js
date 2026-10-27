@@ -121,19 +121,30 @@ function OverviewView(){
     step.addEventListener('mouseleave', () => { step.style.transform = ''; });
   });
 
-  // ── USER PROJECTS ON OVERVIEW (right side / below) ──
+  refreshOverviewProjects(root);
+  return root;
+}
+
+function refreshOverviewProjects(root = document.getElementById('view')?.firstElementChild) {
+  if (!root?.classList.contains('overview-page')) return;
+  const isEn2 = CURRENT_LANG === 'en';
+  root.querySelector('.overview-projects')?.remove();
   let userProjects = [];
-  try { userProjects = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch(_){}
+  try {
+    const stored = JSON.parse(localStorage.getItem('emocog_ws_projects') || 'null');
+    if (Array.isArray(stored)) userProjects = stored;
+  } catch(_){}
 
   if (userProjects.length > 0) {
     const projSection = document.createElement('div');
+    projSection.className = 'overview-projects';
     projSection.style.cssText = 'margin-top:36px;';
     const projSectionTitle = isEn2 ? 'Your projects' : 'Ваши проекты';
     projSection.innerHTML = `
       <div style="font-size:11px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--muted2);margin-bottom:14px;">${projSectionTitle}</div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;">
         ${userProjects.map(p => {
-          const words = (p.name||'').trim().split(/\s+/);
+          const words = String(p.name || '').trim().split(/\s+/);
           const ini = words.slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'P';
           const d = new Date(p.createdAt);
           const dateStr = isNaN(d) ? '' : d.toLocaleDateString(isEn2?'en-US':'ru-RU',{day:'numeric',month:'short',year:'numeric'});
@@ -161,7 +172,6 @@ function OverviewView(){
     root.appendChild(projSection);
   }
 
-  return root;
 }
 
 //Стимулы и эксперименты (Аня)
@@ -378,7 +388,7 @@ function ExperimentsListView() {
               </span>
       </div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
-              ${(exp.blocks||[]).length} ${CURRENT_LANG === 'en' ? 'blocks' : 'блоков'} · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString(CURRENT_LANG === 'en' ? 'en-US' : 'ru-RU')}
+              ${Array.isArray(exp.blocks) ? exp.blocks.length : 0} ${CURRENT_LANG === 'en' ? 'blocks' : 'блоков'} · ${new Date(exp.updatedAt||Date.now()).toLocaleDateString(CURRENT_LANG === 'en' ? 'en-US' : 'ru-RU')}
     </div>
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;flex-wrap:wrap;">
               <button class="quick-btn edit-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>

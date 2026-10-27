@@ -29,9 +29,7 @@ async function hydrateApiStimulusPreview(stimulus) {
   if (!url) return stimulus;
   stimulus._previewHydrating = true;
   stimulus._previewHydrationPromise = (async () => {
-    const response = await fetch(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' });
-    if (!response.ok) throw typeof apiFailError === 'function' ? await apiFailError(response) : new Error(String(response.status));
-    const blob = await response.blob();
+    const blob = await WecogHttp.blob(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' }, { scope: 'workspace', transfer: true });
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed during loading');
     if (!blob.size) throw new Error(CURRENT_LANG === 'en' ? 'Stimulus file is empty' : 'Файл стимула пуст');
     if ((stimulus.type === 'image' || stimulus.type === 'slides') && blob.type && !blob.type.startsWith('image/')) {
@@ -81,9 +79,7 @@ async function hydrateStimulusThumbnail(stimulus) {
     await takeThumbnailSlot();
     try {
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed');
-    const response = await fetch(absoluteStimulusApiUrl(source), { headers: authHeaders(), credentials: 'include' });
-    if (!response.ok) throw await apiFailError(response);
-    const blob = await response.blob();
+    const blob = await WecogHttp.blob(absoluteStimulusApiUrl(source), { headers: authHeaders(), credentials: 'include' }, { scope: 'workspace', transfer: true });
     if (!blob.size || !blob.type.startsWith('image/')) throw new Error(CURRENT_LANG === 'en' ? 'Preview is not an image' : 'Превью не является изображением');
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed');
     stimulus._thumbnailObjectUrl = URL.createObjectURL(blob);
@@ -255,8 +251,13 @@ async function syncProjectStimuliFromApi() {
   notifyStimulusLibrary();
   let projectId;
   const identity = [localStorage.getItem('emocog_workspace_owner_v1'), getApiBaseForResearcher()].join('|');
+  const selection = localStorage.getItem('emocog_selected_project_id');
   try { projectId = await resolveApiProjectId(); }
-  catch (error) { invalidateProjectStimuli(); throw error; }
+  catch (error) {
+    if (identity !== [localStorage.getItem('emocog_workspace_owner_v1'), getApiBaseForResearcher()].join('|')
+      || selection !== localStorage.getItem('emocog_selected_project_id')) return false;
+    invalidateProjectStimuli(); throw error;
+  }
   if (identity !== [localStorage.getItem('emocog_workspace_owner_v1'), getApiBaseForResearcher()].join('|')) return false;
   if (String(localStorage.getItem('emocog_selected_project_id')) !== String(projectId)) return false;
   // Resolving the first project can itself change the scope.
@@ -330,7 +331,8 @@ async function syncProjectStimuliFromApi() {
     window.dispatchEvent(new CustomEvent('wecog:stimulisynced', { detail: { projectId } }));
     return true;
   } catch (error) {
-    if (activeRequest === stimulusSyncRequest && scope === stimulusLibraryScope()) invalidateProjectStimuli();
+    if (activeRequest !== stimulusSyncRequest || scope !== stimulusLibraryScope()) return false;
+    invalidateProjectStimuli();
     throw error;
   }
 }

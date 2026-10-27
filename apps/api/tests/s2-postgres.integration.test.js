@@ -148,6 +148,255 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     });
   }
 
+  async function rtFixture() {
+    const invitation = await createInvitation(2);
+    const definition = { blocks: [{ id: 'b1', type: 'cognitive_task', taskType: 'simple_rt',
+      blockConfig: { selected_metrics: ['rt_mean', 'omission_rate'] } }] };
+    await pool.query('UPDATE invitations SET protocol_definition=$1::jsonb WHERE id=$2', [JSON.stringify(definition), invitation.id]);
+    const sessionId = randomUUID();
+    const admission = await issueToken(invitation, sessionId);
+    assert.equal(admission.status, 200);
+    return { invitation, sessionId, token: (await admission.json()).token, participantId: 'synthetic-rt',
+      extra: { delivery: { schemaVersion: 'session_delivery.v1', sequence: 2, kind: 'final' },
+        cognitiveResults: [{ blockId: 'b1', trialId: 't1', rt: 420, response: 'Space', expectedResponse: 'Space', correct: true }] } };
+  }
+
+  async function gatedAnalyzer(t, invalidOutput = false) {
+    const fsp = fs.promises;
+    const root = await fsp.mkdtemp(path.join(require('node:os').tmpdir(), 'wecog-rt-ingest-'));
+    const ready = path.join(root, 'ready'), release = path.join(root, 'release');
+    const executable = path.join(root, 'python-fixture');
+    const original = process.env.RT_PYTHON;
+    await fsp.writeFile(executable, `#!/bin/sh\nif [ "$1" = '--version' ]; then printf 'Python 3.11.0\\n'; exit 0; fi\nprintf ready > '${ready}'\nwhile [ ! -f '${release}' ]; do sleep 0.01; done\n${invalidOutput ? "printf 'not-json SECRET /private/path'" : 'exec python3 "$@"'}\n`, { mode: 0o700 });
+    process.env.RT_PYTHON = executable;
+    const restore = () => { if (original === undefined) delete process.env.RT_PYTHON; else process.env.RT_PYTHON = original; };
+    t.after(async () => {
+      restore();
+      await fsp.writeFile(release, 'release');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await fsp.rm(root, { recursive: true, force: true });
+    });
+    return { restore, release: () => fsp.writeFile(release, 'release'), wait: async (pending) => {
+      let early;
+      pending?.then(async response => { early = response.status + ' ' + await response.clone().text(); }).catch(() => {});
+      for (let i = 0; i < 500; i++) {
+        if (early) assert.fail('RT request returned before fixture: ' + early);
+        if (await fsp.access(ready).then(() => true, () => false)) return;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.fail('analyzer did not start');
+    } };
+  }
+
+  it('keeps health/readiness and same-session checkpoints responsive while RT waits outside transactions', async t => {
+    const { invitation, sessionId, participantId, token, extra } = await rtFixture();
+    const gate = await gatedAnalyzer(t);
+    const final = ingest(invitation, sessionId, participantId, token, true, extra);
+    await gate.wait(final);
+    const idle = await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name='wecog-api' AND state='idle in transaction'");
+    assert.equal(idle.rows[0].n, 0);
+    for (const route of ['/health', '/ready']) {
+      const response = await fetch(baseUrl + route, { signal: AbortSignal.timeout(1500) });
+      assert.equal(response.status, 200);
+      if (route === '/health') assert.equal((await response.json()).rt_analyzer.available, true);
+    }
+    const checkpoint = await ingest(invitation, sessionId, participantId, token, false, { ...extra,
+      delivery: { schemaVersion: 'session_delivery.v1', sequence: 1, kind: 'checkpoint' } });
+    assert.equal(checkpoint.status, 200);
+    assert.equal((await pool.query('SELECT stopped_at FROM sessions WHERE session_id=$1', [sessionId])).rows[0].stopped_at, null);
+    await gate.release();
+    const accepted = await final;
+    assert.equal(accepted.status, 200, await accepted.clone().text());
+    const saved = (await pool.query('SELECT sf.payload FROM session_features sf JOIN sessions s ON s.id=sf.session_id WHERE s.session_id=$1', [sessionId])).rows[0].payload;
+    assert.equal(saved.rt_features.blocks[0].computed_metrics.rt_mean.value, 420);
+    assert.equal(saved.rt_features.adapter_version, 'rt_event_adapter.v2');
+    const proxySource = (await pool.query('SELECT sp.source_payload FROM session_proxy_metrics sp JOIN sessions s ON s.id=sp.session_id WHERE s.session_id=$1', [sessionId])).rows[0].source_payload;
+    assert.equal(proxySource.feature_inputs.rt_adapter_version, 'rt_event_adapter.v2');
+    gate.restore();
+    assert.equal((await (await ingest(invitation, sessionId, participantId, token, true, extra)).json()).idempotent, true);
+  });
+
+  it('returns retryable failure without sealing or losing checkpoints when Python output is corrupt', async t => {
+    const { invitation, sessionId, participantId, token, extra } = await rtFixture();
+    const checkpoint = await ingest(invitation, sessionId, participantId, token, false, { ...extra,
+      delivery: { schemaVersion: 'session_delivery.v1', sequence: 1, kind: 'checkpoint' } });
+    assert.equal(checkpoint.status, 200);
+    const before = (await pool.query('SELECT payload FROM session_features WHERE session_id=(SELECT id FROM sessions WHERE session_id=$1)', [sessionId])).rows[0].payload;
+    const gate = await gatedAnalyzer(t, true);
+    const final = ingest(invitation, sessionId, participantId, token, true, extra);
+    await gate.wait(final);
+    await gate.release();
+    const rejected = await final;
+    assert.equal(rejected.status, 503);
+    assert.equal(rejected.headers.get('retry-after'), '5');
+    const error = await rejected.text();
+    assert.ok(error.includes('rt_analyzer_invalid_output'));
+    assert.ok(!error.includes('SECRET') && !error.includes('/private/path'));
+    const row = (await pool.query('SELECT s.stopped_at, sf.payload FROM sessions s JOIN session_features sf ON sf.session_id=s.id WHERE s.session_id=$1', [sessionId])).rows[0];
+    assert.equal(row.stopped_at, null);
+    assert.deepEqual(row.payload, before);
+    gate.restore();
+    assert.equal((await ingest(invitation, sessionId, participantId, token, true, extra)).status, 200);
+  });
+
+  it('rechecks the participant tuple after asynchronous RT', async t => {
+    const { invitation, sessionId, participantId, token, extra } = await rtFixture();
+    const gate = await gatedAnalyzer(t);
+    const final = ingest(invitation, sessionId, participantId, token, true, extra);
+    await gate.wait(final);
+    await pool.query("UPDATE sessions SET participant_id='different-participant' WHERE session_id=$1", [sessionId]);
+    await gate.release();
+    const rejected = await final;
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).code, 'session_participant_mismatch');
+    const state = (await pool.query('SELECT stopped_at, participant_id FROM sessions WHERE session_id=$1', [sessionId])).rows[0];
+    assert.equal(state.stopped_at, null);
+    assert.equal(state.participant_id, 'different-participant');
+    await pool.query('UPDATE sessions SET participant_id=NULL WHERE session_id=$1', [sessionId]);
+    gate.restore();
+    assert.equal((await ingest(invitation, sessionId, participantId, token, true, extra)).status, 200);
+  });
+
+  it('refuses RT computed against a staff protocol changed during analysis', async t => {
+    const fixture = await rtFixture();
+    const user = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES($1,'not-login','researcher') RETURNING *", [`${randomUUID()}@test.invalid`])).rows[0];
+    createdUserIds.push(user.id);
+    await pool.query('INSERT INTO user_organizations(user_id,organization_id) VALUES($1,$2)', [user.id, organizationId]);
+    await pool.query('INSERT INTO user_projects(user_id,project_id) VALUES($1,$2)', [user.id, projectId]);
+    const definition = (await pool.query('SELECT protocol_definition FROM invitations WHERE id=$1', [fixture.invitation.id])).rows[0].protocol_definition;
+    const protocol = (await pool.query('INSERT INTO protocols(project_id,name,definition) VALUES($1,$2,$3::jsonb) RETURNING id', [projectId, 'Mutable RT', JSON.stringify(definition)])).rows[0];
+    const sessionId = randomUUID();
+    await pool.query('INSERT INTO sessions(session_id,project_id,protocol_id,started_at) VALUES($1,$2,$3,current_timestamp)', [sessionId, projectId, protocol.id]);
+    const raw = payload(fixture.invitation, sessionId, fixture.participantId, true, fixture.extra);
+    delete raw.ids.invitationCode;
+    const send = () => fetch(baseUrl + '/ingest', { method: 'POST', headers: { 'content-type': 'application/json',
+      authorization: `Bearer ${issueStaffToken(user)}`, 'idempotency-key': `finish-${sessionId}` }, body: JSON.stringify(raw) });
+    const gate = await gatedAnalyzer(t);
+    const final = send();
+    await gate.wait(final);
+    await pool.query("UPDATE protocols SET definition=jsonb_set(definition,'{title}','\"Changed\"') WHERE id=$1", [protocol.id]);
+    await gate.release();
+    const rejected = await final;
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).code, 'rt_analysis_context_changed');
+    assert.equal((await pool.query('SELECT stopped_at FROM sessions WHERE session_id=$1', [sessionId])).rows[0].stopped_at, null);
+    gate.restore();
+    assert.equal((await send()).status, 200);
+    const participant = (await pool.query('SELECT participant_id FROM sessions WHERE session_id=$1', [sessionId])).rows[0].participant_id;
+    assert.equal(participant, fixture.participantId);
+    raw.ids.participant = 'wrong-participant';
+    const mismatch = await send();
+    assert.equal(mismatch.status, 409);
+    assert.equal((await mismatch.json()).code, 'session_participant_mismatch');
+  });
+
+  it('revalidates staff membership after RT; a revoked project cannot receive the result', async t => {
+    const fixture = await rtFixture();
+    const user = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES($1,'not-login','researcher') RETURNING *", [`${randomUUID()}@test.invalid`])).rows[0];
+    createdUserIds.push(user.id);
+    await pool.query('INSERT INTO user_organizations(user_id,organization_id) VALUES($1,$2)', [user.id, organizationId]);
+    await pool.query('INSERT INTO user_projects(user_id,project_id) VALUES($1,$2)', [user.id, projectId]);
+    const raw = payload(fixture.invitation, fixture.sessionId, fixture.participantId, true, fixture.extra);
+    delete raw.ids.invitationCode;
+    const gate = await gatedAnalyzer(t);
+    const final = fetch(baseUrl + '/ingest', { method: 'POST', headers: { 'content-type': 'application/json',
+      authorization: `Bearer ${issueStaffToken(user)}`, 'idempotency-key': `finish-${fixture.sessionId}` }, body: JSON.stringify(raw) });
+    await gate.wait(final);
+    await pool.query('DELETE FROM user_projects WHERE user_id=$1 AND project_id=$2', [user.id, projectId]);
+    await gate.release();
+    const rejected = await final;
+    assert.equal(rejected.status, 403, await rejected.clone().text());
+    assert.equal((await rejected.json()).code, 'project_access_denied');
+    assert.equal((await pool.query('SELECT stopped_at FROM sessions WHERE session_id=$1', [fixture.sessionId])).rows[0].stopped_at, null);
+  });
+
+  it('cancels disconnected RT without writing a final result, then accepts an identical retry', async t => {
+    const { invitation, sessionId, participantId, token, extra } = await rtFixture();
+    const gate = await gatedAnalyzer(t);
+    const controller = new AbortController();
+    const final = fetch(baseUrl + '/ingest', { method: 'POST', signal: controller.signal,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`,
+        'idempotency-key': `finish-${sessionId}` }, body: JSON.stringify(payload(invitation, sessionId, participantId, true, extra)) });
+    const rejected = assert.rejects(final, { name: 'AbortError' });
+    await gate.wait(final);
+    controller.abort();
+    await rejected;
+    await gate.release();
+    gate.restore();
+    const state = (await pool.query('SELECT stopped_at FROM sessions WHERE session_id=$1', [sessionId])).rows[0];
+    assert.equal(state.stopped_at, null);
+    assert.equal((await ingest(invitation, sessionId, participantId, token, true, extra)).status, 200);
+  });
+
+  it('persists unique validation metadata and rejects a false complete result without replacing the checkpoint', async () => {
+    const { invitation, sessionId, participantId, token } = await rtFixture();
+    const gazeValidation = { samplingVersion: 'unique_capture.v1', passed: false,
+      sampling: [{ version: 'unique_capture.v1', stage: 'benchmark', pointIndex: 0, clock: 'monotonic',
+        attempted: 60, accepted: 30, duplicate: 30, beforeWindow: 0, missingTimestamp: 0, clockChanged: 0 }],
+      coverage: { version: 'target_coverage.v1', expectedTargets: 5, observedTargets: 1,
+        missingTargetIndices: [1, 2, 3, 4], complete: false } };
+    assert.equal((await ingest(invitation, sessionId, participantId, token, false, { gazeValidation })).status, 200);
+    assert.equal((await ingest(invitation, sessionId, participantId, token, true,
+      { gazeValidation: { ...gazeValidation, passed: true } })).status, 422);
+    assert.equal((await ingest(invitation, sessionId, participantId, token, true,
+      { gazeValidation: { ...gazeValidation, passed: true,
+        coverage: { ...gazeValidation.coverage, observedTargets: 5, missingTargetIndices: [], complete: true } } })).status, 422);
+    const state = (await pool.query('SELECT s.stopped_at, sf.payload FROM sessions s JOIN session_features sf ON sf.session_id=s.id WHERE s.session_id=$1', [sessionId])).rows[0];
+    assert.equal(state.stopped_at, null);
+    assert.deepEqual(state.payload.gazeValidation, gazeValidation);
+  });
+
+  it('bounds concurrent final RT requests, keeps checkpoints available and commits one idempotent result', async t => {
+    const { invitation, sessionId, participantId, token, extra } = await rtFixture();
+    const gate = await gatedAnalyzer(t);
+    const first = ingest(invitation, sessionId, participantId, token, true, extra);
+    await gate.wait(first);
+    const rest = Array.from({ length: 9 }, () => ingest(invitation, sessionId, participantId, token, true, extra));
+    const overflow = await Promise.race(rest);
+    assert.equal(overflow.status, 503);
+    assert.equal((await overflow.clone().json()).code, 'rt_analyzer_busy');
+    const checkpoint = await ingest(invitation, sessionId, participantId, token, false, { ...extra,
+      delivery: { schemaVersion: 'session_delivery.v1', sequence: 1, kind: 'checkpoint' } });
+    assert.equal(checkpoint.status, 200);
+    await gate.release();
+    const accepted = await first;
+    assert.equal(accepted.status, 200);
+    const results = await Promise.all(rest);
+    assert.equal(results.filter(response => response.status === 503).length, 1);
+    for (const response of results.filter(response => response.status === 200)) assert.equal((await response.json()).idempotent, true);
+    const state = (await pool.query(`SELECT i.used_runs,
+      (SELECT count(*)::int FROM session_features sf JOIN sessions s ON s.id=sf.session_id WHERE s.session_id=$1) AS features,
+      (SELECT count(*)::int FROM session_qc_summary sq JOIN sessions s ON s.id=sq.session_id WHERE s.session_id=$1) AS qc,
+      (SELECT count(*)::int FROM session_proxy_metrics sp JOIN sessions s ON s.id=sp.session_id WHERE s.session_id=$1) AS proxy
+      FROM invitations i WHERE id=$2`, [sessionId, invitation.id])).rows[0];
+    assert.deepEqual(state, { used_runs: 1, features: 1, qc: 1, proxy: 1 });
+  });
+
+  it('does not replace a newer checkpoint with an older final delivery racing asynchronous RT', async t => {
+    const { invitation, sessionId, participantId, token, extra } = await rtFixture();
+    const gate = await gatedAnalyzer(t);
+    const final = ingest(invitation, sessionId, participantId, token, true, { ...extra,
+      delivery: { schemaVersion: 'session_delivery.v1', sequence: 2, kind: 'final' } });
+    await gate.wait(final);
+    const checkpoint = await ingest(invitation, sessionId, participantId, token, false, { ...extra,
+      delivery: { schemaVersion: 'session_delivery.v1', sequence: 3, kind: 'checkpoint' } });
+    assert.equal(checkpoint.status, 200);
+    await gate.release();
+    const rejected = await final;
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).code, 'final_delivery_stale');
+    const state = (await pool.query('SELECT s.stopped_at, sf.payload FROM sessions s JOIN session_features sf ON sf.session_id=s.id WHERE s.session_id=$1', [sessionId])).rows[0];
+    assert.equal(state.stopped_at, null);
+    assert.equal(state.payload.delivery.sequence, 3);
+    const unsequenced = await ingest(invitation, sessionId, participantId, token, true, { ...extra, delivery: undefined });
+    assert.equal(unsequenced.status, 409);
+    assert.equal((await unsequenced.json()).code, 'final_delivery_stale');
+    gate.restore();
+    const retry = await ingest(invitation, sessionId, participantId, token, true, { ...extra,
+      delivery: { schemaVersion: 'session_delivery.v1', sequence: 4, kind: 'final' } });
+    assert.equal(retry.status, 200);
+  });
+
   it('rejects malformed admission without reserving a run or creating a session', async () => {
     const invitation = await createInvitation(1);
     const response = await fetch(
@@ -171,6 +420,38 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     );
     assert.equal(state.rows[0].used_runs, 0);
     assert.equal(state.rows[0].session_count, 0);
+  });
+
+  it('cannot bypass ingest authentication by selecting or removing invitationCode', async () => {
+    const invitation = await createInvitation();
+    const sessionId = randomUUID();
+    const admission = await issueToken(invitation, sessionId);
+    assert.equal(admission.status, 200);
+    const token = (await admission.json()).token;
+    const base = payload(invitation, sessionId, 'synthetic-auth-boundary');
+    const send = (body, credential) => fetch(`${baseUrl}/ingest`, {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        ...(credential ? { authorization: `Bearer ${credential}` } : {}) }, body: JSON.stringify(body),
+    });
+    for (const [body, credential, expected] of [
+      [base, null, 401], [base, 'not-a-signed-token', 401],
+      [{ ...base, ids: { ...base.ids, session: randomUUID() } }, token, 409],
+      [{ ...base, ids: { ...base.ids, invitationCode: 'OTHER-SYNTHETIC-CODE' } }, token, 409],
+      [{ ...base, ids: { session: sessionId, participant: base.ids.participant } }, token, 401],
+    ]) {
+      const response = await send(body, credential);
+      assert.equal(response.status, expected, await response.clone().text());
+    }
+    const claims = jwt.decode(token);
+    // A valid signature still cannot replace the DB-bound tenant tuple.
+    for (const field of ['project_id', 'protocol_id', 'invitation_id']) {
+      const wrongTuple = jwt.sign({ ...claims, [field]: Number(claims[field]) + 10000 }, config.jwt.secret, { algorithm: 'HS256' });
+      assert.equal((await send(base, wrongTuple)).status, 409, field);
+    }
+    const stored = await pool.query(`SELECT count(*)::int AS n FROM session_features sf
+      JOIN sessions s ON s.id=sf.session_id WHERE s.session_id=$1`, [sessionId]);
+    assert.equal(stored.rows[0].n, 0);
+    assert.equal((await send(base, token)).status, 200);
   });
 
   it('returns 404 for an unknown code without creating an invitation', async () => {

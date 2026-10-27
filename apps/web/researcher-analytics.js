@@ -142,15 +142,15 @@ function renderSessionCardHeader(){
   qcEl.innerHTML = `
     <div class="qc-row">
       <span style="font-size:13px;color:var(--muted);font-weight:600;">QC Score</span>
-      ${qcClass ? `<span class="badge ${data.qc.badge}">${qcClass}</span>` : `<span class="badge neutral">${t('qcNoData')}</span>`}
+      ${qcClass ? `<span class="badge ${['good', 'warn', 'bad', 'neutral'].includes(data.qc.badge) ? data.qc.badge : 'neutral'}">${escapeUiHtml(qcClass)}</span>` : `<span class="badge neutral">${t('qcNoData')}</span>`}
     </div>
-    <div class="qc-score">${qcScore !== null ? qcScore : '<span style="color:var(--muted2);font-size:28px;">—</span>'}</div>
+    <div class="qc-score">${qcScore !== null ? escapeUiHtml(qcScore) : '<span style="color:var(--muted2);font-size:28px;">—</span>'}</div>
     <div class="qc-sub">${qcText}</div>
   `;
   
   const reasons = document.getElementById("reasonList");
   reasons.innerHTML = "";
-  for(const r of data.qc.reasons){
+  for(const r of data.qc.reasons || []){
     const chip = document.createElement("div");
     chip.className = "reason-chip";
     const dot = document.createElement("span");
@@ -158,7 +158,8 @@ function renderSessionCardHeader(){
     dot.style.background = (r.severity === "ok") ? "var(--good)" : (r.severity === "warn") ? "var(--warn)" : "var(--bad)";
     chip.appendChild(dot);
     const txt = document.createElement("span");
-    txt.innerHTML = `<b>${r.label}</b> ${r.value}`;
+    const label = document.createElement('b'); label.textContent = r.label;
+    txt.append(label, document.createTextNode(' ' + (r.value == null ? '' : String(r.value))));
     chip.appendChild(txt);
     reasons.appendChild(chip);
   }
@@ -172,16 +173,20 @@ function renderSessionCardHeader(){
     [t('metaDur'),      data.session.duration_sec != null ? `${data.session.duration_sec} ${t('metaSec')}` : '—'],
     [t('metaDevice'),   data.session.device || '—'],
     [t('metaBrowser'),  data.session.browser || '—'],
-    [t('metaFPS'),      fpsOk ? `${Number(fps).toFixed(1)}` : `<span style="color:var(--muted2);">${t('metaNoFPS')}</span>`],
+    [t('metaFPS'),      fpsOk ? `${Number(fps).toFixed(1)}` : t('metaNoFPS'), fpsOk ? null : 'muted'],
     [t('metaLight'),    data.session.light || '—'],
-    [t('metaProtocol'), data.session.protocol ? `<code>${data.session.protocol}</code>` : '—']
+    [t('metaProtocol'), data.session.protocol || '—', data.session.protocol ? 'code' : null]
   ];
   const metaEl = document.getElementById("sessionMeta");
   metaEl.innerHTML = "";
-  for(const [k,v] of meta){
+  for(const [k,v,format] of meta){
     const kv = document.createElement("div");
     kv.className = "kv";
-    kv.innerHTML = `<div class="k">${k}</div><div class="v">${v}</div>`;
+    const label = document.createElement('div'); label.className = 'k'; label.textContent = k;
+    const body = document.createElement('div'); body.className = 'v';
+    const value = document.createElement(format === 'code' ? 'code' : 'span'); value.textContent = v;
+    if (format === 'muted') value.style.color = 'var(--muted2)';
+    body.appendChild(value); kv.append(label, body);
     metaEl.appendChild(kv);
   }
 }
@@ -336,16 +341,16 @@ function renderBlocks(){
     tr.className = "row-btn";
     tr.title = t('rowClickHint');
     tr.innerHTML = `
-      <td><span class="mono">${b.name}</span></td>
-      <td>${b.duration_sec}s</td>
-      <td class="${cls}"><b>${b.valid_pct}</b></td>
-      <td><b>${b.qc_score}</b></td>
+      <td><span class="mono">${escapeUiHtml(b.name)}</span></td>
+      <td>${escapeUiHtml(b.duration_sec)}s</td>
+      <td class="${cls}"><b>${escapeUiHtml(b.valid_pct)}</b></td>
+      <td><b>${escapeUiHtml(b.qc_score)}</b></td>
       <td>
         <div class="mini-chips">
           ${(b.reasons || []).slice(0,3).map(r => {
             const dot = (r.severity === "ok") ? "var(--good)" :
                         (r.severity === "warn") ? "var(--warn)" : "var(--bad)";
-            return `<span class="reason-chip" style="padding:5px 10px;"><span class="dot" style="background:${dot};"></span><span><b>${r.label}</b> ${r.value}</span></span>`;
+            return `<span class="reason-chip" style="padding:5px 10px;"><span class="dot" style="background:${dot};"></span><span><b>${escapeUiHtml(r.label)}</b> ${escapeUiHtml(r.value)}</span></span>`;
           }).join("")}
         </div>
       </td>

@@ -1,10 +1,14 @@
 
 ## Стек
 
-- **Runtime:** Node.js 18+
+- **Runtime:** Node.js 22+ (как в `package.json` и Docker image)
 - **Framework:** Express
 - **БД:** PostgreSQL
 - **Миграции:** node-pg-migrate
+
+Транзитивный `qs` закреплён override на `6.16.1`: patch для
+`GHSA-6pq8-jhm2-2vcw`, без смены основной версии Express. Установка только через
+согласованный lockfile (`npm ci`), с повторным dependency audit перед выпуском.
 
 ## Установка
 
@@ -12,7 +16,7 @@
 cd apps/api
 cp .env.example .env
 # Отредактировать .env: DATABASE_URL, JWT_SECRET
-npm install
+npm ci
 npm run migrate:up
 npm start
 ```
@@ -176,6 +180,39 @@ headless LibreOffice. Расширение сверяется с сигнату�
 Production host должен иметь `soffice`, `pdfinfo` и `pdftoppm`. Параметры:
 `MAX_DOCUMENT_BYTES`, `MAX_DOCUMENT_PAGES`, `DOCUMENT_CONVERSION_TIMEOUT_MS`,
 `DOCUMENT_CONVERSION_DPI`, `DOCUMENT_CONVERSION_CONCURRENCY`.
+
+До растеризации проверяются размеры всех страниц при выбранном DPI:
+не более 8192 px по стороне, 16 MP на страницу и 256 MP на документ.
+JPEG создаются по одному, общий результат ограничен 256 MiB, тайм-аут общий
+для всей задачи. Это защитные ограничения конвертации, а не новый лимит
+суммарного размера протокола. Обычные 100 страниц A4 при 150 DPI укладываются
+в pixel budget; увеличение DPI может потребовать уменьшить число страниц.
+
+На Linux также нужен `python3` со стандартным `resource` (уже есть в Docker
+образе): `scripts/conversion-runner.py` ограничивает дочерний процесс 1 GiB
+виртуальной памяти, 256 MiB на файл, 128 дескрипторами и CPU-временем.
+При ошибке запуска ограничений нет небезопасного fallback. В macOS эти Linux
+лимиты не включаются; остаются проверки пикселей, объёма и общего тайм-аута.
+Родительский API не передаёт дочерним процессам DB/JWT environment; на timeout
+в POSIX завершается вся группа процессов, включая дочерние LibreOffice.
+Это не заменяет отдельный filesystem/network sandbox для недоверенных документов.
+
+`security/native-process.js` применяет общий allowlist environment, лимит
+64 KiB на каждый из stdout/stderr и завершение группы процессов при timeout
+или переполнении вывода. Те же ограничения, включая Linux resource wrapper,
+используют `ffprobe`/`ffmpeg` для проверки медиа и создания preview. Production
+host также должен иметь эти два бинарника. Linux unit-заглушки на Node запускаются
+без address-space wrapper: резервирование памяти V8 не соответствует FFmpeg;
+это не отключает ограничения настоящих декодеров.
+
+Проверка установленного Poppler: `node scripts/smoke-document-converter.js`.
+Она конвертирует синтетический трёхстраничный PDF, проверяет итоговые размеры,
+а на Linux - установленные process limits. Та же команда входит в smoke
+точного API image до начала выпуска. Проверка LibreOffice/PPTX на целевом
+Linux и проверки с PostgreSQL по-прежнему нужны отдельно.
+
+Повторный локальный аудит, его результаты и оставшиеся ограничения:
+[`2026-10-25-followup-code-audit.md`](../../docs/reports/2026-10-25-followup-code-audit.md).
 
 ## UPLOAD_AGGREGATES_URL
 

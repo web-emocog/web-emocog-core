@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { runNativeProcess } = require('../security/native-process');
+const { resolveReadableServerOwnedUploadPath } = require('../security/upload-paths');
 
 const DOCUMENT_MIME_TYPES = new Set([
   'application/pdf',
@@ -48,11 +49,28 @@ async function validateDocument(inputPath, originalName, declaredMime, maxBytes)
   if (!DOCUMENT_MIME_TYPES.has(String(declaredMime || '').toLowerCase())) {
     throw new ConversionError(415, 'Declared media type is not supported', 'document_mime_unsupported');
   }
-  const stat = await fs.promises.stat(inputPath);
-  if (!stat.isFile() || stat.size < 8 || stat.size > maxBytes) {
-    throw new ConversionError(413, 'Document size is outside the allowed range', 'document_size_invalid');
-  }
-  const bytes = await fs.promises.readFile(inputPath);
+  let handle;
+  let bytes;
+  try {
+    handle = await fs.promises.open(inputPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size < 8 || stat.size > maxBytes) {
+      throw new ConversionError(413, 'Document size is outside the allowed range', 'document_size_invalid');
+    }
+    bytes = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!bytesRead) throw new ConversionError(413, 'Document changed during validation', 'document_size_invalid');
+      offset += bytesRead;
+    }
+    if ((await handle.stat()).size !== bytes.length) {
+      throw new ConversionError(413, 'Document changed during validation', 'document_size_invalid');
+    }
+  } catch (error) {
+    if (error.code === 'ELOOP') throw new ConversionError(415, 'Document must not be a symbolic link', 'document_file_invalid');
+    throw error;
+  } finally { if (handle) await handle.close(); }
   if (extension === '.pdf' && bytes.subarray(0, 5).toString('ascii') !== '%PDF-') {
     throw new ConversionError(415, 'PDF signature does not match its extension', 'document_signature_mismatch');
   }
@@ -68,50 +86,42 @@ async function validateDocument(inputPath, originalName, declaredMime, maxBytes)
       throw new ConversionError(415, 'PPTX package is missing required presentation entries', 'document_signature_mismatch');
     }
   }
-  return { extension, size: stat.size };
+  return { extension, size: bytes.length, bytes };
 }
 
-function runCommand(command, args, options = {}) {
-  const timeoutMs = options.timeoutMs || 45_000;
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: { ...process.env, ...(options.env || {}) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-    });
-    let stdout = '';
-    let stderr = '';
-    const maxOutput = 64 * 1024;
-    child.stdout.on('data', chunk => { if (stdout.length < maxOutput) stdout += chunk.toString(); });
-    child.stderr.on('data', chunk => { if (stderr.length < maxOutput) stderr += chunk.toString(); });
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new ConversionError(504, 'Document conversion timed out', 'document_conversion_timeout'));
-    }, timeoutMs);
-    child.once('error', error => {
-      clearTimeout(timer);
-      if (error.code === 'ENOENT') {
-        reject(new ConversionError(503, `${command} is unavailable`, 'document_converter_unavailable'));
-      } else reject(error);
-    });
-    child.once('close', code => {
-      clearTimeout(timer);
-      if (code === 0) resolve({ stdout, stderr });
-      else reject(new ConversionError(422, 'Document conversion failed', 'document_conversion_failed'));
-    });
-  });
+async function runCommand(command, args, options = {}) {
+  try { return await runNativeProcess(command, args, options); }
+  catch (error) {
+    if (error.code === 'timeout') throw new ConversionError(504, 'Document conversion timed out', 'document_conversion_timeout');
+    if (error.code === 'unavailable') throw new ConversionError(503, 'Document converter is unavailable', 'document_converter_unavailable');
+    if (error.code === 'output_limit') throw new ConversionError(422, 'Document metadata exceeds limits', 'document_metadata_oversized');
+    throw new ConversionError(422, 'Document conversion failed', 'document_conversion_failed');
+  }
 }
 
-function parsePdfInfo(output, maxPages) {
+function parsePdfInfo(output, maxPages, options = {}) {
   const pageMatch = String(output).match(/^Pages:\s+(\d+)\s*$/mi);
-  const sizeMatch = String(output).match(/^Page size:\s+([0-9.]+)\s+x\s+([0-9.]+)\s+pts/m);
   const pages = pageMatch ? Number.parseInt(pageMatch[1], 10) : null;
   if (!Number.isInteger(pages) || pages < 1 || pages > maxPages) {
     throw new ConversionError(422, `Document must contain 1-${maxPages} pages`, 'document_page_limit');
   }
-  if (sizeMatch && (Number(sizeMatch[1]) > 20_000 || Number(sizeMatch[2]) > 20_000)) {
-    throw new ConversionError(422, 'PDF page dimensions are too large', 'document_page_dimensions_invalid');
+  const sizes = [...String(output).matchAll(/^Page(?:\s+\d+)?\s+size:\s+([0-9.]+)\s+x\s+([0-9.]+)\s+pts/gmi)];
+  if (!sizes.length || (options.requireAllPages && sizes.length !== pages)) {
+    throw new ConversionError(422, 'PDF page dimensions are missing', 'document_page_dimensions_invalid');
+  }
+  const dpi = options.dpi || 150;
+  let totalPixels = 0;
+  for (const size of sizes) {
+    const width = Math.ceil(Number(size[1]) * dpi / 72);
+    const height = Math.ceil(Number(size[2]) * dpi / 72);
+    const pixels = width * height;
+    if (!Number.isFinite(pixels) || width < 1 || height < 1 || width > 8192 || height > 8192 || pixels > 16_000_000) {
+      throw new ConversionError(422, 'PDF page dimensions are too large', 'document_page_dimensions_invalid');
+    }
+    totalPixels += pixels;
+  }
+  if (totalPixels > 256_000_000) {
+    throw new ConversionError(422, 'Document raster budget exceeded', 'document_pixel_limit');
   }
   return pages;
 }
@@ -158,19 +168,32 @@ async function convertDocument(options) {
   } = options;
   const release = limiterFor(maxConcurrent).acquire();
   const tempRoot = path.join(uploadsRoot, '.conversion');
-  await fs.promises.mkdir(tempRoot, { recursive: true, mode: 0o700 });
-  const tempDir = await fs.promises.mkdtemp(path.join(tempRoot, 'job-'));
+  let tempDir;
+  const deadline = Date.now() + timeoutMs;
+  const commandOptions = () => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new ConversionError(504, 'Document conversion timed out', 'document_conversion_timeout');
+    return { cwd: tempDir, timeoutMs: remaining, resourceLimits: true };
+  };
   try {
-    const document = await validateDocument(inputPath, originalName, declaredMime, maxBytes);
+    const source = await resolveReadableServerOwnedUploadPath(uploadsRoot,
+      path.relative(path.resolve(uploadsRoot), path.resolve(inputPath)));
+    if (!source.ok) {
+      throw new ConversionError(415, 'Document must be a server-owned regular upload', 'document_file_invalid');
+    }
+    await fs.promises.mkdir(tempRoot, { recursive: true, mode: 0o700 });
+    tempDir = await fs.promises.mkdtemp(path.join(tempRoot, 'job-'));
+    const document = await validateDocument(source.absolutePath, originalName, declaredMime, maxBytes);
     const sourcePath = path.join(tempDir, `source${document.extension}`);
-    await fs.promises.copyFile(inputPath, sourcePath, fs.constants.COPYFILE_EXCL);
+    // Convert the exact validated bytes, never reopen the upload pathname.
+    await fs.promises.writeFile(sourcePath, document.bytes, { flag: 'wx', mode: 0o600 });
     let pdfPath = sourcePath;
     if (document.extension !== '.pdf') {
       await runCommand(libreOfficeBin, [
         '--headless', '--nologo', '--nodefault', '--nolockcheck', '--norestore',
         `-env:UserInstallation=${new URL(`file://${path.join(tempDir, 'lo-profile')}`).href}`,
         '--convert-to', 'pdf', '--outdir', tempDir, sourcePath,
-      ], { cwd: tempDir, timeoutMs });
+      ], commandOptions());
       pdfPath = path.join(tempDir, 'source.pdf');
       try {
         await fs.promises.access(pdfPath, fs.constants.R_OK);
@@ -178,36 +201,47 @@ async function convertDocument(options) {
         throw new ConversionError(422, 'LibreOffice did not produce a PDF', 'document_conversion_failed');
       }
     }
-    const info = await runCommand(pdfInfoBin, [pdfPath], { cwd: tempDir, timeoutMs });
-    const pageCount = parsePdfInfo(info.stdout, maxPages);
-    const outputPrefix = path.join(tempDir, 'page');
-    await runCommand(pdfToPpmBin, [
-      '-jpeg', '-r', String(dpi), '-jpegopt', 'quality=88',
-      '-f', '1', '-l', String(pageCount), pdfPath, outputPrefix,
-    ], { cwd: tempDir, timeoutMs });
-    const entries = await fs.promises.readdir(tempDir);
-    const pages = entries
-      .filter(name => /^page-\d+\.jpg$/i.test(name))
-      .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
-      .map(name => path.join(tempDir, name));
-    if (pages.length !== pageCount) {
-      throw new ConversionError(422, 'Rasterized page count does not match the PDF', 'document_page_count_mismatch');
-    }
-    for (const page of pages) {
-      const stat = await fs.promises.stat(page);
-      if (!stat.isFile() || stat.size < 4 || stat.size > maxBytes) {
-        throw new ConversionError(422, 'Generated page is invalid', 'document_generated_page_invalid');
-      }
+    const info = await runCommand(pdfInfoBin, [pdfPath], commandOptions());
+    const pageCount = parsePdfInfo(info.stdout, maxPages, { dpi });
+    const allPages = await runCommand(pdfInfoBin, ['-f', '1', '-l', String(pageCount), pdfPath], commandOptions());
+    parsePdfInfo(allPages.stdout, maxPages, { dpi, requireAllPages: true });
+    const pages = [];
+    let outputBytes = 0;
+    // Check disk cost between pages instead of rendering the whole document
+    // before discovering that its output exceeds the budget.
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+      const outputPrefix = path.join(tempDir, `page-${pageNumber}`);
+      await runCommand(pdfToPpmBin, [
+        '-jpeg', '-r', String(dpi), '-jpegopt', 'quality=88', '-singlefile',
+        '-f', String(pageNumber), '-l', String(pageNumber), pdfPath, outputPrefix,
+      ], commandOptions());
+      const page = `${outputPrefix}.jpg`;
       const signature = Buffer.alloc(3);
-      const handle = await fs.promises.open(page, 'r');
-      try { await handle.read(signature, 0, signature.length, 0); } finally { await handle.close(); }
+      let handle;
+      try {
+        handle = await fs.promises.open(page, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+        const stat = await handle.stat();
+        outputBytes += stat.size;
+        if (outputBytes > 256 * 1024 * 1024) {
+          throw new ConversionError(422, 'Generated document is too large', 'document_output_limit');
+        }
+        if (!stat.isFile() || stat.size < 4 || stat.size > maxBytes) {
+          throw new ConversionError(422, 'Generated page is invalid', 'document_generated_page_invalid');
+        }
+        await handle.read(signature, 0, signature.length, 0);
+      } catch (error) {
+        if (error.code === 'ENOENT') throw new ConversionError(422, 'Rasterized page is missing', 'document_page_count_mismatch');
+        if (error.code === 'ELOOP') throw new ConversionError(422, 'Generated page is invalid', 'document_generated_page_invalid');
+        throw error;
+      } finally { if (handle) await handle.close(); }
       if (!startsWith(signature, [0xff, 0xd8, 0xff])) {
         throw new ConversionError(422, 'Generated page is not JPEG', 'document_generated_page_invalid');
       }
+      pages.push(page);
     }
     return { tempDir, pages, pageCount, sourceSize: document.size };
   } catch (error) {
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
+    if (tempDir) await fs.promises.rm(tempDir, { recursive: true, force: true });
     throw error;
   } finally {
     release();

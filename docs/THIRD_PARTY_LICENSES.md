@@ -143,6 +143,13 @@ integrity and transitive versions are recorded in `apps/api/package-lock.json`.
 This applies the compatible patch from Dependabot PR #50, not the unrelated
 Express 5 migration. No upstream source or scientific model is vendored.
 
+Security maintenance on 2026-10-27 pins the existing transitive **qs 6.16.1**
+(BSD-3-Clause), source https://github.com/ljharb/qs, to address
+https://github.com/advisories/GHSA-6pq8-jhm2-2vcw. No major Express upgrade or
+new runtime package is introduced. Official npm archive integrity:
+`sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==`.
+The exact dependency tree is recorded in `apps/api/package-lock.json`.
+
 Before updating a runtime or model:
 
 1. Verify an OSI-compatible license and attribution requirements.

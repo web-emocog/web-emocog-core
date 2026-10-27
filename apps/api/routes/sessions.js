@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Experiment Runtime API: старт/стоп сессии (Фаза 2.4).
  */
@@ -147,7 +148,7 @@ router.post(
           code: err.code || 'session_start_rejected',
         });
       }
-      console.error(err);
+      logUnexpectedError(err, 'sessions');
       return res.status(500).json({ error: 'Start session failed' });
     }
   }
@@ -179,7 +180,7 @@ router.post(
         completed_at: row.stopped_at || null
       });
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'sessions');
       res.status(500).json({ error: 'Stop session failed' });
     }
   }
@@ -246,7 +247,7 @@ router.get(
       const r = await pool.query(sql, params);
       res.json(r.rows);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'sessions');
       res.status(500).json({ error: 'Server error' });
     }
   }
@@ -294,7 +295,7 @@ router.get(
       if (session.features?.experimentMeta?.protocolTermination) session.session_status = 'aborted';
       res.json(session);
     } catch (err) {
-      console.error(err);
+      logUnexpectedError(err, 'sessions');
       res.status(500).json({ error: 'Server error' });
     }
   }

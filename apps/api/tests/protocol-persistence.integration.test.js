@@ -47,6 +47,18 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     if (pool) await pool.end();
     if (uploads) await fs.rm(uploads, { recursive: true, force: true });
   });
+  it('updates project metadata with correctly ordered tenant placeholders, never a foreign project', async () => {
+    assert.notEqual(users[1], projectId, 'fixture must distinguish user and project IDs');
+    const slug = randomUUID();
+    const update = await request(`/projects/${projectId}`, 'PATCH', { name: 'Renamed project', slug }, 'peer');
+    assert.equal(update.status, 200, await update.clone().text());
+    const row = await update.json();
+    assert.equal(row.id, projectId); assert.equal(row.name, 'Renamed project'); assert.equal(row.slug, slug);
+    assert.equal((await request(`/projects/${projectId}`, 'PATCH', { name: 'Foreign overwrite' }, 'outsider')).status, 404);
+    assert.equal((await request(`/projects/${projectId}`, 'PATCH', { name: 'Read-only overwrite' }, 'analyst')).status, 403);
+    const stored = (await pool.query('SELECT name, slug FROM projects WHERE id=$1', [projectId])).rows[0];
+    assert.deepEqual(stored, { name: 'Renamed project', slug });
+  });
   it('persists ordered intermediate results, seals final data and evaluates the pinned QC policy server-side', async () => {
     const base = definition('Resilience');
     base.settings = { qualityControl: { schemaVersion: 'protocol_quality.v1', rules: {

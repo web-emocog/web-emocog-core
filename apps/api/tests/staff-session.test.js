@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createStaffSession } = require('../../web/staff-session');
+const { createHttpClient } = require('../../web/http-client');
 
 function storage(seed = {}) {
   const data = new Map(Object.entries(seed));
@@ -104,4 +105,95 @@ test('other permission failures and network failures are not replayed', async ()
   assert.equal(calls, 1);
   const network = fixture(async () => { throw new Error('offline'); });
   await assert.rejects(network.session.fetch('https://api.example.test/stimuli/42', { method: 'PATCH' }), /offline/);
+});
+
+test('a cancelled write cannot replay after its shared CSRF refresh completes', async () => {
+  let release, refreshStarted;
+  const started = new Promise(resolve => { refreshStarted = resolve; });
+  const writes = [];
+  const { session } = fixture(async (input, options) => {
+    const request = input instanceof Request ? input : new Request(input, options);
+    if (request.url.endsWith('/auth/me')) {
+      refreshStarted();
+      return new Promise(resolve => { release = resolve; });
+    }
+    writes.push(request);
+    return Response.json({ code: 'csrf_token_invalid' }, { status: 403 });
+  });
+  const controller = new AbortController();
+  const pending = session.fetch('https://api.example.test/stimuli/42', { method: 'PATCH', signal: controller.signal });
+  const rejected = assert.rejects(pending, { code: 'request_cancelled' });
+  await started;
+  controller.abort();
+  release(Response.json({ id: 1, csrf_token: 'fresh' }));
+  await rejected;
+  assert.equal(writes.length, 1);
+});
+
+test('a write deadline prevents a late CSRF refresh from causing another submission', async () => {
+  let release, writes = 0;
+  const { session } = fixture(async (input, options) => {
+    const request = input instanceof Request ? input : new Request(input, options);
+    if (request.url.endsWith('/auth/me')) return new Promise(resolve => { release = resolve; });
+    writes++;
+    return Response.json({ code: 'csrf_token_invalid' }, { status: 403 });
+  });
+  const client = createHttpClient({ fetch: session.fetch });
+  await assert.rejects(client.json('https://api.example.test/stimuli/42', { method: 'PATCH' }, { timeoutMs: 25 }),
+    { code: 'request_timeout', mutationMayHaveCommitted: true });
+  assert.equal(typeof release, 'function');
+  release(Response.json({ id: 1, csrf_token: 'fresh' }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(writes, 1);
+  assert.equal(client.pendingCount(), 0);
+});
+
+test('cancelling one write does not cancel another write sharing the same CSRF refresh', async () => {
+  let release, refreshStarted, refreshCalls = 0;
+  const started = new Promise(resolve => { refreshStarted = resolve; });
+  const writes = [];
+  const { session } = fixture(async (input, options) => {
+    const request = input instanceof Request ? input : new Request(input, options);
+    if (request.url.endsWith('/auth/me')) {
+      refreshCalls++; refreshStarted();
+      return new Promise(resolve => { release = resolve; });
+    }
+    writes.push(request.url);
+    return request.headers.get('X-CSRF-Token') === 'fresh'
+      ? Response.json({ ok: true }) : Response.json({ code: 'csrf_token_invalid' }, { status: 403 });
+  });
+  const controller = new AbortController();
+  const first = session.fetch('https://api.example.test/stimuli/41', { method: 'PATCH', signal: controller.signal });
+  const rejected = assert.rejects(first, { code: 'request_cancelled' });
+  await started;
+  const second = session.fetch('https://api.example.test/stimuli/42', { method: 'PATCH' });
+  // Let the second pre-route rejection join the pending single-flight refresh.
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  release(Response.json({ id: 1, csrf_token: 'fresh' }));
+  await rejected;
+  assert.equal((await second).status, 200);
+  assert.equal(refreshCalls, 1);
+  assert.deepEqual(writes, ['https://api.example.test/stimuli/41', 'https://api.example.test/stimuli/42', 'https://api.example.test/stimuli/42']);
+});
+
+test('a temporary CSRF refresh failure keeps the tab usable and permits a later explicit attempt', async () => {
+  let refreshCalls = 0, writes = 0;
+  const { session, tab, blocks } = fixture(async (input, options) => {
+    const request = input instanceof Request ? input : new Request(input, options);
+    if (request.url.endsWith('/auth/me')) {
+      return ++refreshCalls === 1 ? Response.json({ error: 'Unavailable' }, { status: 503 })
+        : Response.json({ id: 1, csrf_token: 'fresh' });
+    }
+    writes++;
+    return request.headers.get('X-CSRF-Token') === 'fresh'
+      ? Response.json({ ok: true }) : Response.json({ code: 'csrf_token_invalid' }, { status: 403 });
+  });
+  await assert.rejects(session.fetch('https://api.example.test/stimuli/42', { method: 'PATCH' }), { status: 503 });
+  assert.equal(tab.getItem('emocog_csrf_token'), 'stale');
+  assert.equal(blocks(), 0);
+  session.assertCurrent();
+  assert.equal((await session.fetch('https://api.example.test/stimuli/42', { method: 'PATCH' })).status, 200);
+  assert.equal(refreshCalls, 2);
+  assert.equal(writes, 3);
 });

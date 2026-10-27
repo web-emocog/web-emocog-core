@@ -1,3 +1,4 @@
+const { logUnexpectedError } = require('../security/error-log');
 /**
  * Proxy metrics read API (v1 contract) + optional internal upsert (env-gated).
  */
@@ -107,7 +108,7 @@ async function getSessionProxyMetrics(req, res) {
 
     res.json(rowToProxyMetricsResponse(session, proxyRow, features, qc));
   } catch (err) {
-    console.error('[proxy-metrics] session', err.message);
+    logUnexpectedError(err, 'proxy-metrics');
     res.status(500).json({ error: 'Proxy metrics read failed' });
   }
 }
@@ -144,7 +145,7 @@ async function listProjectProxyMetrics(req, res) {
       items: await buildListResponse(rows, req.user.sub),
     });
   } catch (err) {
-    console.error('[proxy-metrics] project list', err.message);
+    logUnexpectedError(err, 'proxy-metrics');
     res.status(500).json({ error: 'Proxy metrics list failed' });
   }
 }
@@ -182,7 +183,7 @@ async function listProtocolProxyMetrics(req, res) {
       items: await buildListResponse(rows, req.user.sub),
     });
   } catch (err) {
-    console.error('[proxy-metrics] protocol list', err.message);
+    logUnexpectedError(err, 'proxy-metrics');
     res.status(500).json({ error: 'Proxy metrics list failed' });
   }
 }
@@ -253,7 +254,7 @@ router.post(
       const qc = await loadQcBySessionDbId(session.id);
       res.status(200).json(rowToProxyMetricsResponse(session, proxyRow, features, qc));
     } catch (err) {
-      console.error('[proxy-metrics] internal upsert', err.message);
+      logUnexpectedError(err, 'proxy-metrics');
       res.status(500).json({ error: 'Proxy metrics upsert failed' });
     }
   }

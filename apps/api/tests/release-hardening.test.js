@@ -69,7 +69,9 @@ describe('S3-01 release hardening', () => {
     assert.doesNotMatch(workflow, /npm start > \/tmp\/wecog-api\.log 2>&1 &/);
     assert.match(workflow, /kill -TERM "\$\(cat \/tmp\/wecog-api\.pid\)"/);
     assert.match(workflow, /grep -q 'api_shutdown_completed' \/tmp\/wecog-api\.log/);
-    assert.match(workflow, /name: PostgreSQL concurrency and negative security tests\s+working-directory: apps\/api\s+env:\s+AUTH_RATE_LIMIT_PER_MINUTE: '1000'\s+run: npm run test:postgres/);
+    assert.match(workflow, /name: PostgreSQL concurrency and negative security tests\s+working-directory: apps\/api\s+env:\s+AUTH_RATE_LIMIT_PER_MINUTE: '1000'\s+INGEST_RATE_LIMIT_PER_MINUTE: '1000'\s+run: npm run test:postgres/);
+    assert.equal(require('../package.json').scripts['test:postgres'],
+      'node --test --test-concurrency=1 tests/s2-postgres.integration.test.js tests/protocol-persistence.integration.test.js');
   });
 
   it('does not turn a cancelled superseded release run into a failed gate', () => {
@@ -79,6 +81,23 @@ describe('S3-01 release hardening', () => {
     assert.match(workflow, /\[\[ "\$API_RESULT" == "success" \]\]/);
     assert.match(workflow, /\[\[ "\$POSTGRES_RESULT" == "success" \]\]/);
     assert.match(workflow, /\[\[ "\$BROWSER_RESULT" == "success" \]\]/);
+  });
+
+  it('keeps audit regressions in the required isolated browser matrix', () => {
+    const root = path.resolve(apiRoot, '../..');
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-gates.yml'), 'utf8');
+    const frameJob = workflow.split('  frame-pipeline-regression:')[1].split('  release-gate:')[0];
+    const scripts = require('../../autotests/package.json').scripts;
+    for (const [name, config] of [['staff-http', 'staff-http'], ['html-security', 'html-security'],
+      ['staff-regression', 'staff-regression']]) {
+      assert.ok(frameJob.includes(`npm run test:${name} -- \${{ matrix.projects }}`));
+      assert.equal(scripts[`test:${name}`], `playwright test --config=playwright.${config}.config.ts`);
+      const source = fs.readFileSync(path.join(root, `apps/autotests/playwright.${config}.config.ts`), 'utf8');
+      assert.match(source, /retries: 0/);
+      assert.match(source, /reuseExistingServer: false/);
+    }
+    assert.match(workflow, /needs: \[api-security, postgres-release, browser-regression, frame-pipeline-regression\]/);
+    assert.match(workflow, /\[\[ "\$FRAME_PIPELINE_RESULT" == "success" \]\]/);
   });
 
   it('uses identical pinned BuildKit sources and keeps the fallback fail-closed', () => {
@@ -219,6 +238,7 @@ test -n "\${directory}"
       /--tmpfs \/var\/lib\/wecog\/uploads:[^\n]*uid=10001,gid=10001/,
     );
     assert.match(smokeScript, /--env UPLOADS_ROOT=\/var\/lib\/wecog\/uploads/);
+    assert.match(smokeScript, /docker exec "\$\{CONTAINER_NAME\}" node scripts\/smoke-document-converter\.js/);
 
     for (const workflowName of ['ci.yml', 'deploy-production.yml']) {
       const workflow = fs.readFileSync(

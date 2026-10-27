@@ -52,6 +52,13 @@ function eventsToRtJsonl(sessionEvents, cognitiveResults, blockCtx) {
 
   const stimEvents = events.filter((e) => e && e.type === 'stimulus_on' && (blockId == null || String(e.blockId) === String(blockId)));
   const responseEvents = events.filter((e) => e && e.type === 'response' && (blockId == null || String(e.blockId) === String(blockId)));
+  const responseByIndex = new Map();
+  for (const response of responseEvents) {
+    // Match the original Array.find semantics: first exact numeric index wins.
+    if (Number.isInteger(response.trialIndex) && !responseByIndex.has(response.trialIndex)) {
+      responseByIndex.set(response.trialIndex, response);
+    }
+  }
 
   const stimByIndex = new Map();
   stimEvents.forEach((e, i) => {
@@ -62,11 +69,11 @@ function eventsToRtJsonl(sessionEvents, cognitiveResults, blockCtx) {
   const out = [];
   let trialNum = 0;
 
-  const maxLen = Math.max(rows.length, stimEvents.length, 1);
+  const maxLen = Math.max(rows.length, stimEvents.length);
   for (let i = 0; i < maxLen; i++) {
     const row = rows[i] || null;
     const stim = stimByIndex.get(i) || stimEvents[i] || null;
-    const resp = responseEvents.find((r) => r.trialIndex === i) || responseEvents[i] || null;
+    const resp = responseByIndex.get(i) || responseEvents[i] || null;
 
     trialNum += 1;
     const tid = parseTrialIndex(row?.trialId ?? stim?.trialId, trialNum);

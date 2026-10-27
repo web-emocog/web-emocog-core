@@ -1,6 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-const BASE = 'http://127.0.0.1:4173/apps/web/researcher.html?analyticsPreview=1';
+const BASE = (process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173') + '/apps/web/researcher.html?analyticsPreview=1';
+
+test.beforeEach(async ({ page }, info) => {
+  if (info.title.startsWith('real cookie API ')) return;
+  // Preview reports are synthetic and must never contact a user's local API.
+  await page.route('http://127.0.0.1:3000/**', route => route.fulfill({
+    status: route.request().method() === 'OPTIONS' ? 204 : 401,
+    headers: { 'Access-Control-Allow-Origin': new URL(BASE).origin, 'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Headers': 'Content-Type,X-CSRF-Token,X-Staff-User-ID', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' },
+    body: route.request().method() === 'OPTIONS' ? '' : '{"error":"Synthetic unauthenticated preview"}'
+  }));
+});
 
 test('instruction title updates immediately, and draft saves the complete builder state through API', async ({ page }) => {
   await page.goto(`${BASE}#/analytics/session-card`);

@@ -4,8 +4,9 @@
   let fontRequest;
 
   function fontData() {
-    if (!fontRequest) fontRequest = global.fetch(new URL('assets/fonts/DejaVuSans.ttf', scriptUrl))
-      .then(response => { if (!response.ok) throw new Error('PDF font unavailable'); return response.arrayBuffer(); })
+    if (!fontRequest) fontRequest = global.WecogHttp.request(new URL('assets/fonts/DejaVuSans.ttf', scriptUrl), {}, response => {
+      if (!response.ok) throw new Error('PDF font unavailable'); return response.arrayBuffer();
+    }, { scope: 'document' })
       .then(buffer => {
         const bytes = new Uint8Array(buffer);
         let binary = '';

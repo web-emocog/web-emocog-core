@@ -1039,15 +1039,17 @@ const participantViews = {
 
 function render() {
   const route = normalizeRoute();
+  const participantView = Object.hasOwn(participantViews, route) ? participantViews[route] : null;
+  const knownView = Object.hasOwn(views, route) ? views[route] : null;
   document.body.classList.remove("nav-open");
 
   if (route === "/login") {
     app.innerHTML = loginView();
-  } else if (participantViews[route]) {
-    app.innerHTML = participantViews[route]();
+  } else if (participantView) {
+    app.innerHTML = participantView();
   } else {
-    const view = views[route] || views["/overview"];
-    app.innerHTML = shell(view(), views[route] ? route : "/overview");
+    const view = knownView || views["/overview"];
+    app.innerHTML = shell(view(), knownView ? route : "/overview");
   }
 
   document.title = `${routeMeta[route]?.label || "Web EmoCog"} - UX/UI prototype`;

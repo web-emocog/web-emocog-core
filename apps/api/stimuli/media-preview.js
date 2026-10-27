@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { runNativeProcess } = require('../security/native-process');
 const config = require('../config');
 const { resolveReadableServerOwnedUploadPath } = require('../security/upload-paths');
 const { HttpError } = require('../security/http-error');
@@ -9,33 +9,16 @@ const { HttpError } = require('../security/http-error');
 let active = 0;
 const pending = new Map();
 
-function runMediaTool(command, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
-    let output = '';
-    let failure = null;
-    const timer = setTimeout(() => {
-      failure = new HttpError(504, 'Media inspection timed out', 'media_preview_timeout');
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    child.stdout.on('data', chunk => {
-      output += chunk.toString();
-      if (output.length > 64 * 1024) {
-        failure = new HttpError(422, 'Media metadata exceeds limits', 'media_metadata_oversized');
-        child.kill('SIGKILL');
-      }
-    });
-    child.once('error', () => {
-      clearTimeout(timer);
-      reject(new HttpError(503, 'Media preview tool is unavailable', 'media_preview_unavailable'));
-    });
-    child.once('close', code => {
-      clearTimeout(timer);
-      if (failure) reject(failure);
-      else if (code !== 0) reject(new HttpError(422, 'Media cannot be decoded', 'media_decode_failed'));
-      else resolve(output);
-    });
-  });
+async function runMediaTool(command, args, timeoutMs, options = {}) {
+  try {
+    const result = await runNativeProcess(command, args, { timeoutMs, resourceLimits: options.resourceLimits !== false });
+    return result.stdout;
+  } catch (error) {
+    if (error.code === 'timeout') throw new HttpError(504, 'Media inspection timed out', 'media_preview_timeout');
+    if (error.code === 'output_limit') throw new HttpError(422, 'Media metadata exceeds limits', 'media_metadata_oversized');
+    if (error.code === 'unavailable') throw new HttpError(503, 'Media preview tool is unavailable', 'media_preview_unavailable');
+    throw new HttpError(422, 'Media cannot be decoded', 'media_decode_failed');
+  }
 }
 
 async function createPreview(version, uploadsRoot, options = config.storage.preview) {
@@ -47,7 +30,7 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
     const input = await resolveReadableServerOwnedUploadPath(uploadsRoot, version.content_path);
     if (!input.ok) throw new HttpError(422, 'Media is unavailable', input.code);
     const raw = await runMediaTool(options.ffprobeBin, ['-v', 'error', '-protocol_whitelist', 'file,pipe',
-      '-show_entries', 'stream=codec_type,codec_name,width,height:format=duration', '-of', 'json', input.absolutePath], options.timeoutMs);
+      '-show_entries', 'stream=codec_type,codec_name,width,height:format=duration', '-of', 'json', input.absolutePath], options.timeoutMs, options);
     let metadata;
     try { metadata = JSON.parse(raw); } catch (_) { throw new HttpError(422, 'Invalid media metadata', 'media_decode_failed'); }
     if (version.mime_type.startsWith('audio/')) {
@@ -56,7 +39,7 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
       if (!audio || !(duration > 0)) throw new HttpError(422, 'Audio cannot be decoded', 'media_decode_failed');
       await runMediaTool(options.ffmpegBin, ['-nostdin', '-v', 'error', '-xerror', '-max_alloc', '67108864',
         '-protocol_whitelist', 'file,pipe', '-threads', '1', '-i', input.absolutePath,
-        '-map', '0:a:0', '-t', '1', '-f', 'null', '-'], options.timeoutMs);
+        '-map', '0:a:0', '-t', '1', '-f', 'null', '-'], options.timeoutMs, options);
       return { status: 'unsupported', info: { validated_sha256: version.sha256,
         codec: audio.codec_name, duration_ms: Math.round(duration * 1000) } };
     }
@@ -77,7 +60,7 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
       '-protocol_whitelist', 'file,pipe', '-threads', '1', '-i', input.absolutePath,
       '-map', '0:v:0', '-frames:v', '1', '-an', '-sn', '-threads', '1',
       '-vf', `scale=w='min(${options.maxDimension},iw)':h='min(${options.maxDimension},ih)':force_original_aspect_ratio=decrease`,
-      '-q:v', '4', '-f', 'image2', temporary], options.timeoutMs);
+      '-q:v', '4', '-f', 'image2', temporary], options.timeoutMs, options);
     const stat = await fs.promises.stat(temporary);
     if (!stat.size || stat.size > 2 * 1024 * 1024) throw new HttpError(422, 'Preview exceeds limits', 'media_preview_oversized');
     const duration = Number(metadata.format?.duration);
@@ -104,10 +87,16 @@ async function ensurePreview(queryable, version, uploadsRoot) {
       preview = { status: 'failed', info: { preview_error: error.code || 'media_preview_failed' } };
     }
     if (preview.status === 'ready') preview.info.validated_sha256 = version.sha256;
-    const result = await queryable.query(`UPDATE stimulus_versions
-      SET preview_path = $1, preview_status = $2, media_info = $3::jsonb WHERE id = $4 RETURNING *`,
-    [preview.path || null, preview.status, JSON.stringify(preview.info), version.id]);
-    return result.rows[0];
+    try {
+      const result = await queryable.query(`UPDATE stimulus_versions
+        SET preview_path = $1, preview_status = $2, media_info = $3::jsonb WHERE id = $4 RETURNING *`,
+      [preview.path || null, preview.status, JSON.stringify(preview.info), version.id]);
+      if (!result.rows[0]) throw new HttpError(409, 'Stimulus version is no longer available', 'stimulus_version_changed');
+      return result.rows[0];
+    } catch (error) {
+      if (preview.path) await fs.promises.unlink(path.join(uploadsRoot, preview.path)).catch(() => {});
+      throw error;
+    }
   })();
   pending.set(version.id, task);
   try { return await task; } finally { pending.delete(version.id); }

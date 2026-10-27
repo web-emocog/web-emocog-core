@@ -12,7 +12,7 @@
     blockIndex: 0,
     run_log: [],
     started_at: null,
-    answers: {},
+    answers: Object.create(null),
     restStart: null,
     restDuration: 0,
   };
@@ -31,7 +31,9 @@
     var base = (getApiBase() || '').replace(/\/$/, '');
     if (!base) return Promise.reject(new Error('API base is not configured'));
     var url = base + '/invitations/by-code/' + encodeURIComponent(code);
-    return fetch(url).then(function (r) {
+    var controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, 15000);
+    return fetch(url, { signal: controller.signal }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
       return r.json();
     }).then(function (data) {
@@ -40,9 +42,9 @@
       state.blockIndex = 0;
       state.run_log = [];
       state.started_at = new Date().toISOString();
-      state.answers = {};
+      state.answers = Object.create(null);
       return state.definition;
-    });
+    }).finally(function () { clearTimeout(deadline); });
   }
 
   function getCurrentBlock() {
@@ -66,7 +68,7 @@
   }
 
   function recordAnswers(answers) {
-    state.answers = Object.assign({}, state.answers, answers);
+    state.answers = Object.assign(Object.create(null), state.answers, answers);
   }
 
   function getRunLog() {
@@ -114,23 +116,24 @@
     var html = '<div class="protocol-block questionnaire"><h2>Questionnaire</h2><form id="protocolQuestionnaireForm">';
     config.forEach(function (field, i) {
       var id = 'q_' + i;
+      var name = escapeHtml(field.name || id);
       var label = field.label || field.name || 'Q' + (i + 1);
       var required = field.required ? ' required' : '';
       if (field.type === 'text') {
         html += '<div class="form-group"><label for="' + id + '">' + escapeHtml(label) + '</label>' +
-          '<input type="text" id="' + id + '" name="' + (field.name || id) + '"' + required + '></div>';
+          '<input type="text" id="' + id + '" name="' + name + '"' + required + '></div>';
       } else if (field.type === 'number') {
         html += '<div class="form-group"><label for="' + id + '">' + escapeHtml(label) + '</label>' +
-          '<input type="number" id="' + id + '" name="' + (field.name || id) + '"' + required + '></div>';
+          '<input type="number" id="' + id + '" name="' + name + '"' + required + '></div>';
       } else if (field.type === 'scale') {
-        var min = field.min != null ? field.min : 1;
-        var max = field.max != null ? field.max : 10;
+        var min = field.min != null && Number.isFinite(Number(field.min)) ? Number(field.min) : 1;
+        var max = field.max != null && Number.isFinite(Number(field.max)) ? Math.max(min, Number(field.max)) : Math.max(min, 10);
         html += '<div class="form-group"><label for="' + id + '">' + escapeHtml(label) + '</label>' +
-          '<input type="range" id="' + id + '" name="' + (field.name || id) + '" min="' + min + '" max="' + max + '" value="' + min + '">' +
+          '<input type="range" id="' + id + '" name="' + name + '" min="' + min + '" max="' + max + '" value="' + min + '">' +
           '<span class="scale-value" id="' + id + '_val">' + min + '</span></div>';
       } else {
         html += '<div class="form-group"><label for="' + id + '">' + escapeHtml(label) + '</label>' +
-          '<input type="text" id="' + id + '" name="' + (field.name || id) + '"' + required + '></div>';
+          '<input type="text" id="' + id + '" name="' + name + '"' + required + '></div>';
       }
     });
     html += '<button type="submit" class="btn protocol-next">Submit</button></form></div>';
@@ -144,7 +147,7 @@
     container.querySelector('#protocolQuestionnaireForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var form = e.target;
-      var answers = {};
+      var answers = Object.create(null);
       for (var i = 0; i < config.length; i++) {
         var id = 'q_' + i;
         var el = form.querySelector('#' + id);
@@ -256,10 +259,8 @@
   }
 
   function escapeHtml(s) {
-    if (s == null) return '';
-    var div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function showError(container, message) {

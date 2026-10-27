@@ -67,14 +67,10 @@
     }
     let request = stimulusMediaCache.get(url);
     if (!request) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
-      request = global.fetch(url, {
+      request = global.WecogHttp.blob(url, {
         headers: typeof global.apiRequestHeaders === 'function' ? global.apiRequestHeaders(false) : {},
-        credentials: 'include', signal: controller.signal
-      }).then(async response => {
-        if (!response.ok) throw await parseApiError(response, tr('Файл стимула недоступен', 'Stimulus file unavailable'));
-        const blob = await response.blob();
+        credentials: 'include'
+      }, { scope: 'workspace', transfer: true }).then(blob => {
         if (!blob.size) throw new Error(tr('Файл стимула пуст', 'Stimulus file is empty'));
         if (generation !== stimulusMediaGeneration) throw new Error('Stimulus media scope changed');
         const objectUrl = URL.createObjectURL(blob);
@@ -83,7 +79,7 @@
       }).catch(error => {
         if (generation === stimulusMediaGeneration) stimulusMediaCache.delete(url);
         throw error;
-      }).finally(() => clearTimeout(timeout));
+      });
       stimulusMediaCache.set(url, request);
     }
     const media = await request;
@@ -927,13 +923,14 @@
       }
       const params = new URLSearchParams({ snapshot_id: snapshot.id, format, content });
       const base = String(global.API_BASE || '').replace(/\/$/, '');
-      const response = await global.fetch(`${base}/analytics/v1/exports?${params.toString()}`, { headers: global.apiHeaders ? global.apiHeaders() : {}, credentials: 'include' });
+      return global.WecogHttp.request(`${base}/analytics/v1/exports?${params.toString()}`, { headers: global.apiHeaders ? global.apiHeaders() : {}, credentials: 'include' }, async response => {
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const responseSnapshot = response.headers.get('X-Analysis-Snapshot-Id');
       const responseHash = response.headers.get('X-Dataset-Hash');
       if (!responseSnapshot || String(responseSnapshot) !== String(snapshot.id)) throw new Error('409 — export snapshot does not match the screen');
       if (!responseHash || String(responseHash) !== String(snapshot.datasetHash)) throw new Error('409 — export dataset hash does not match the screen');
       return { blob: await response.blob(), filename: exportFilename(state, format), bundle: null };
+      }, { scope: 'workspace', transfer: true });
     }
   };
 
