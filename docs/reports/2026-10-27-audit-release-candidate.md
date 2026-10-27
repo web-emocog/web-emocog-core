@@ -42,6 +42,9 @@ timeout fix. This is the remaining web/API audit, not the observation pilot.
   Existing GL preflight, zero-retry isolated suites, required aggregate gate
   and the 35-minute general browser-job limit are preserved. Both PostgreSQL
   suites run serially against a disposable database.
+- Superseded stimulus-library reads resolve as obsolete after a project or
+  account change, including rejection/cancellation paths. They cannot invalidate
+  the new project's cache. Current-scope errors still fail visibly.
 
 No new DB migration, role grant, physiological model, signal stride or QC
 threshold. The previously published FPS work and its production delegate policy
@@ -111,6 +114,14 @@ that disposable test tmpfs gave 49/49. Production tmpfs/security settings were
 not changed. The first API invocation in the desktop sandbox could not bind
 loopback (EPERM); the permitted local-server rerun passed. Neither failed
 environment run is counted as successful evidence.
+
+The first complete browser run exposed a scope-cancellation regression:
+542 pass, 2 fail, 64 explicit skips. Both failures were the same obsolete
+library read after switching projects, not an authorization bypass. The loader
+now resolves superseded reads as false without invalidating the new scope;
+the strengthened existing test passed 6/6 (three repetitions in both default
+engines, retries=0). Full-suite verification is repeated before merge; the
+initial failures are not relabeled as passes.
 
 ## Reproduction
 

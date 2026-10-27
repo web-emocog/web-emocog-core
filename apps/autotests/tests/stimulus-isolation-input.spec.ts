@@ -94,7 +94,7 @@ test('project library hides stale files, hydrates late images, retries errors an
   await switchProject(8);
   await expect(loadedImage(43)).toBeVisible();
   releaseSeven.forEach(release => release());
-  await page.evaluate(() => (window as any).__pendingLibraryTest);
+  expect(await page.evaluate(() => (window as any).__pendingLibraryTest)).toBe(false);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('emocog_stimuli') || '[]')
     .filter((row: any) => row.apiStimulusId).map((row: any) => row.projectId))).toEqual([8]);
   await expect(page.locator('.stimulus-card[data-id="42"]')).toHaveCount(0);

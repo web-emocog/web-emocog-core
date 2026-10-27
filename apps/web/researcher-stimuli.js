@@ -251,8 +251,13 @@ async function syncProjectStimuliFromApi() {
   notifyStimulusLibrary();
   let projectId;
   const identity = [localStorage.getItem('emocog_workspace_owner_v1'), getApiBaseForResearcher()].join('|');
+  const selection = localStorage.getItem('emocog_selected_project_id');
   try { projectId = await resolveApiProjectId(); }
-  catch (error) { invalidateProjectStimuli(); throw error; }
+  catch (error) {
+    if (identity !== [localStorage.getItem('emocog_workspace_owner_v1'), getApiBaseForResearcher()].join('|')
+      || selection !== localStorage.getItem('emocog_selected_project_id')) return false;
+    invalidateProjectStimuli(); throw error;
+  }
   if (identity !== [localStorage.getItem('emocog_workspace_owner_v1'), getApiBaseForResearcher()].join('|')) return false;
   if (String(localStorage.getItem('emocog_selected_project_id')) !== String(projectId)) return false;
   // Resolving the first project can itself change the scope.
@@ -326,7 +331,8 @@ async function syncProjectStimuliFromApi() {
     window.dispatchEvent(new CustomEvent('wecog:stimulisynced', { detail: { projectId } }));
     return true;
   } catch (error) {
-    if (activeRequest === stimulusSyncRequest && scope === stimulusLibraryScope()) invalidateProjectStimuli();
+    if (activeRequest !== stimulusSyncRequest || scope !== stimulusLibraryScope()) return false;
+    invalidateProjectStimuli();
     throw error;
   }
 }
