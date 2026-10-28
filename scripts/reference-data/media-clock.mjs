@@ -1,5 +1,7 @@
 // Only for finite-file replay, never a replacement for the live capture clock.
-export async function prepareFiniteVideo(video) {
+export async function prepareFiniteVideo(video, {
+  compositorDrain = /Firefox\//.test(globalThis.navigator?.userAgent || '')
+} = {}) {
   const waitFor = (event, action) => new Promise((resolve, reject) => {
     const finish = error => {
       clearTimeout(timer); video.removeEventListener(event, ready); video.removeEventListener('error', failed);
@@ -16,8 +18,24 @@ export async function prepareFiniteVideo(video) {
   if (!Number.isFinite(video.duration) || video.duration <= 0 || video.loop) throw new Error('invalid_reference_finite_video');
   // Reset decoder/preloaded-frame state before admitting callbacks. Never seek
   // or reset a timestamp after a measurement has been accepted.
-  await waitFor('seeked', () => { video.currentTime = 0; });
+  let callback = null, frameTimer = null;
+  try {
+    let frameReady = Promise.resolve();
+    if (compositorDrain && typeof video.requestVideoFrameCallback === 'function') {
+      frameReady = new Promise((resolve, reject) => {
+        frameTimer = setTimeout(() => reject(new Error('reference_video_prepare_frame_deadline')), 10000);
+        callback = video.requestVideoFrameCallback(() => resolve());
+      });
+    }
+    // Drain the seek/preload compositor notification before accepting playback
+    // samples. It is not a measurement and never gets a fabricated timestamp.
+    await Promise.all([waitFor('seeked', () => { video.currentTime = 0; }), frameReady]);
+  } finally {
+    clearTimeout(frameTimer);
+    if (callback !== null) video.cancelVideoFrameCallback?.(callback);
+  }
   if (video.seeking || video.currentTime !== 0) throw new Error('reference_seek_did_not_reset');
+  return { method: callback === null ? 'seek_zero.v1' : 'seek_zero_compositor_ack.v1' };
 }
 
 export function nextMediaTimestamp(previous, metadata, playback) {

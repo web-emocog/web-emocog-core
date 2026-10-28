@@ -256,6 +256,30 @@ Firefox/WebKit используют GPU, при ошибке есть однок
 `camera_frames_stalled`: один frame-based QC без новых кадров не сработает.
 Нельзя считать повторный start доказательством восстановления камеры.
 
+`video-frames.mjs` различает native MediaStream и файловый playback. Для файла
+с native callback driver счётчик `getVideoPlaybackQuality().totalVideoFrames`
+предпочтительнее скачущего `presentedFrames` при loop/replay. Историческое имя
+`decoded-frame-counter` включает и dropped frames: это source cadence, не число
+показанных или проанализированных кадров. `video_cadence.v2` отдельно сообщает
+playback drops/displayed; при reset или недоступном счётчике они `null`.
+Fallback `video-callback-count` считает только полученные уведомления и имеет
+явную причину; это нижняя оценка, не восстановление пропущенных кадров.
+На live MediaStream playback-quality counter не применяется. Не повышать
+analysis FPS значением source FPS и не выдавать synthetic stream за веб-камеру.
+
+Validation oracle tests устанавливают Clock до загрузки страницы и останавливают
+real-time sync до начала точек; только `runFor` исполняет все 33/67 ms callbacks.
+`fastForward` во время сбора недопустим: он пропустит нужные samples. Синтетический
+oracle не проверяет реальную accuracy gaze. Worker responsiveness требует
+visible page, сохраняет duration/gaps/ticks и прежний gate, без автоматических retry.
+
+Finite reference replay перед play делает seek-zero; только Firefox дополнительно
+дожидается compositor-уведомления подготовки с bounded timeout/cancel. Это не
+sample и не ретайминг принятого PTS. WebKit/Chromium не обязаны выдавать callback
+на паузе и сохраняют прежний seek path. В `replay_performance.v2` source totals
+(включая dropped) отделены от confirmed presented; неизвестное остаётся `null`
+и не даёт performance pass. Старые отчёты не пересчитывать автоматически.
+
 - не создавать второй `requestAnimationFrame`/MediaPipe loop;
 - не ставить trial timer на скрытую паузу из-за QC;
 - не удалять failed attempt: он нужен для missingness и аудита;
@@ -271,6 +295,18 @@ Firefox/WebKit используют GPU, при ошибке есть однок
   региональные признаки перекрытия лица. Глобальная skin/hand mask не является
   доказательством перекрытия лица. Не смешивать `faceVisible` и `faceOk`,
   версионировать изменение методики и не пересчитывать старые записи без данных.
+
+Issue 139: `face_oval_regions.v1` отбирает pixels по упорядоченному face oval
+из закреплённого MediaPipe, без padding под подбородком; region rectangles
+обрезаются тем же support. `body_skin` вне лица, включая шею, не является
+hand evidence. Global body ratio диагностический, численные пороги регионов
+не изменены. Нет mesh/raw mask или contour вне кадра: fail closed, не pass
+и не ложное утверждение о руке. Inline fallback использует те же чистые
+mask/region modules. Support в WeakMap не перечисляется/не передаётся через
+Worker, а raw mask по-прежнему удаляется перед ответом на UI. Контракт тестов:
+`issue139-face-visibility.test.js`, `issue139-face-visibility.spec.ts` в
+`test:frame-workers`. Cache tags wrapper/index/class/analysis/helper и Worker
+обновляются согласованно; нельзя плодить вторую копию singleton state/UI modules.
 
 ## 8. Signal modules
 
@@ -336,6 +372,21 @@ dynamics нельзя интерпретировать клинически бе
 
 Код: `lib/rppg_alg_qc_test_web_alg_test_v10/` и
 `apps/participant-web/js/session-runtime/continuous-bpm.js`.
+
+`apps/web/developer/bpm-test.js` является отдельным developer diagnostic,
+не каноническим participant collector. Его `DiagnosticRun` владеет async stages,
+таймерами и late camera/model results; Stop/pagehide/account block не дают
+им возобновить новый run. Native initialization сериализована и late task
+закрывается до следующей; deadline проверяется также после synchronous work,
+но не способен прервать блокирующий main-thread вызов. Loadeddata/error/RAF
+обязаны иметь teardown, включая handle 0. До запроса камеры перепроверяются
+текущая server role/identity и Permissions-Policy; policy не ослабляется.
+Assets разрешаются от import.meta.url в same-origin tree, без guessed ancestors.
+Developer UI использует существующий publishedRespiration и не считает hold BPM
+свежей публикацией; reporter ограничен 7200 retained samples, UI log 200 строками.
+Регрессии: `diagnostic-run.test.js`, `developer-bpm-lifecycle.spec.ts` в
+`test:staff-regression`. Mock camera и init/close настоящей модели не являются
+проверкой physiological accuracy/FPS на человеке.
 
 Метод `continuous_signals.v2` различает свежие публикации и удержанные значения.
 Hold может отображаться, но не увеличивает valid count и не входит в среднее.
@@ -555,6 +606,18 @@ server commit. Недоступный auth не очищает черновик�
 не выдаётся за успешный. Мигрировать consumer и HTML dependency/cache version
 вместе; не подменять глобальные Response/body readers.
 
+В библиотеке стимулов shell следует выбранному проекту, но остаётся привязан
+к staff account и DOM-владельцу. AOI/upload/folder dialogs привязаны также
+к исходным project/API/generation/hash: после ухода или смены контекста
+нельзя открывать их поздним ответом, сохранять через старые controls или
+вызывать builder callbacks. Scoped preview observers и layout callbacks
+освобождаются при unmount; shared workspace media cache не очищается из-за
+обычной навигации. Cancel naming dialog завершает promise и отзывает только
+его собственные preview URLs; после подтверждения их освобождает uploader.
+После persisted pageshow библиотека монтируется заново, без старых dialogs
+и без повторной отправки мутаций. Проверки: `stimulus-ui-lifecycle.test.js`,
+`stimulus-lifecycle.spec.ts`, общий `test:staff-regression`.
+
 Повторная публикация сохраняет публичную ссылку протокола и создаёт новую
 immutable protocol/media publication. Допущенная сессия остаётся привязана к
 своему snapshot; новые участники получают актуальную публикацию. Checkpoint
@@ -635,6 +698,23 @@ startup и native tools требуют отдельной проверки и н
 
 Технический лог может содержать correlation ID, route template, status, safe
 error code, latency, module/channel и redacted session ID.
+
+Participant debug требует одновременно `WECOG_ALLOW_DEBUG === true` в явно
+диагностической сборке и opt-in `wecog_debug=1`/`?debug=1`; URL сам по себе не
+разрешает диагностику. Bundle `technical_only.v2` не должен включать Error
+message/stack, ответы анкет, идентификаторы, URL с credentials или raw media.
+Regex-redaction не гарантирует анонимность произвольного свободного текста.
+Клавиши диагностики: только физический code в измерительных фазах, никогда
+в editable/shadow input, при IME или modifier; не перехватывать RT-ввод.
+`stop/dispose` HUD обязаны снимать owned listeners/RAF; диагностический отказ
+не должен останавливать измерительный runtime. Проверки входят в
+`diagnostics-lifecycle.spec.ts` и обязательный `test:frame-workers`.
+
+Legacy `ProtocolRunner` не является каноническим participant flow. Его
+`stop/dispose` отменяют загрузку и принадлежащие экрану интервалы/обработчики;
+поздний callback не меняет новую generation. После неуспешной загрузки нельзя
+начать прежний протокол вместо запрошенного. Legacy calibration/stimuli
+placeholders не заменяют настоящую калибровку и предъявление стимулов.
 
 ## 11. UX для когнитивных исследований
 

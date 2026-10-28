@@ -10,6 +10,64 @@ test.beforeEach(async ({ page, baseURL }) => {
   });
 });
 
+test('native live-stream FPS retains the camera path and stops without reading a playback counter', async ({ page }) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  test.skip(!await page.evaluate(() => typeof HTMLCanvasElement.prototype.captureStream === 'function'),
+    'No synthetic MediaStream support; never substitute a physical camera.');
+  const result = await page.evaluate(async () => {
+    const modulePath = '/apps/participant-web/js/session-runtime/video-frames.mjs';
+    const { measureVideoFps } = await import(modulePath);
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    const video = document.createElement('video'); video.muted = true; video.playsInline = true;
+    const stream = canvas.captureStream(10); let paints = 0, qualityReads = 0;
+    const timer = setInterval(() => { ctx.fillStyle = paints++ % 2 ? '#fff' : '#000'; ctx.fillRect(0, 0, 64, 64); }, 100);
+    video.srcObject = stream; document.body.append(video);
+    video.getVideoPlaybackQuality = () => { qualityReads++; throw new Error('inert fixture'); };
+    try {
+      await video.play();
+      const measured = await measureVideoFps(video, 2200);
+      return { measured, qualityReads };
+    } finally { clearInterval(timer); video.pause(); stream.getTracks().forEach(track => track.stop()); video.srcObject = null; video.remove(); }
+  });
+  expect(result.qualityReads).toBe(0);
+  expect(result.measured).toMatchObject({ method: 'video-frame-callback', measurementVersion: 'video_cadence.v2', playbackQuality: null });
+  expect(result.measured.fps).toBeGreaterThanOrEqual(7);
+  expect(result.measured.fps).toBeLessThanOrEqual(14);
+});
+
+test('file FPS restart cleans callbacks and unavailable counters are explicitly lower-bound notifications', async ({ page }) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  const result = await page.evaluate(async () => {
+    const modulePath = '/apps/participant-web/js/session-runtime/video-frames.mjs';
+    const { measureVideoFps } = await import(modulePath);
+    const video = document.createElement('video'); video.muted = true; video.loop = true; video.playsInline = true;
+    video.src = '/apps/autotests/tests/fixtures/passive-video.webm'; document.body.append(video);
+    const request = video.requestVideoFrameCallback.bind(video), cancel = video.cancelVideoFrameCallback.bind(video);
+    const pending = new Set<number>();
+    video.requestVideoFrameCallback = callback => {
+      const id = request((now, meta) => { pending.delete(id); callback(now, meta); }); pending.add(id); return id;
+    };
+    video.cancelVideoFrameCallback = id => { pending.delete(id); cancel(id); };
+    try {
+      await video.play();
+      const first = await measureVideoFps(video, 1200); const afterFirst = pending.size;
+      const second = await measureVideoFps(video, 1200); const afterSecond = pending.size;
+      video.getVideoPlaybackQuality = () => { throw new Error('unavailable fixture'); };
+      const fallback = await measureVideoFps(video, 600);
+      return { first, second, fallback, pending: pending.size, afterFirst, afterSecond };
+    } finally { video.pause(); video.remove(); }
+  });
+  for (const measured of [result.first, result.second]) {
+    expect(measured.method).toBe('decoded-frame-counter');
+    expect(measured.fps).toBeGreaterThanOrEqual(7); expect(measured.fps).toBeLessThanOrEqual(14);
+  }
+  expect(result.fallback).toMatchObject({ method: 'video-callback-count', fallbackReason: 'playback_counter_unavailable',
+    playbackQuality: { complete: false, droppedFrames: null, displayedFrames: null } });
+  expect(result.fallback.frames).toBeGreaterThan(0);
+  expect([result.afterFirst, result.afterSecond, result.pending]).toEqual([0, 0, 0]);
+});
+
 test('17 FPS quality failure is not hidden by a 61 FPS camera publication, and recovery clears the next attempt', async ({ page }) => {
   // Characterizes the phase behavior reported in issue 132, not approval of
   // instruction-wide invalidation or a new scientific acceptance threshold.
@@ -81,12 +139,13 @@ test('source-only control counts compositor callbacks without running a model an
   expect(result.paused && result.handlersCleared && result.invalidDuration).toBe(true);
 });
 
-test('source-only control rejects reordered frames and cleans up on failure', async ({ page }) => {
+test('source-only control rejects reordered frames and cleans up on failure', async ({ page, browserName }) => {
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async () => {
     const modulePath = '/scripts/reference-data/source-cadence.mjs';
     const { measureSourceCadence } = await import(modulePath);
     let requests = 0, cancelled = 0, paused = false;
+    const preparationFrames = /Firefox\//.test(navigator.userAgent) ? 1 : 0;
     const video = {
       currentTime: .1, duration: 60, readyState: 2, ended: false, seeking: false,
       onended: null, onerror: null, play: () => Promise.resolve(), pause: () => { paused = true; },
@@ -94,7 +153,8 @@ test('source-only control rejects reordered frames and cleans up on failure', as
       removeEventListener() {},
       requestVideoFrameCallback(callback: Function) {
         const count = ++requests;
-        return setTimeout(() => callback(performance.now(), { mediaTime: count === 1 ? .1 : 0, presentedFrames: count }), 5);
+        // Firefox has one preparation callback. Both measured sequences remain .1 -> 0.
+        return setTimeout(() => callback(performance.now(), { mediaTime: count - preparationFrames === 1 ? .1 : 0, presentedFrames: count }), 5);
       },
       cancelVideoFrameCallback(id: number) { cancelled++; clearTimeout(id); },
     };
@@ -104,8 +164,8 @@ test('source-only control rejects reordered frames and cleans up on failure', as
     return { error, requests, cancelled, paused, handlersCleared: !video.onended && !video.onerror };
   });
   expect(result.error).toBe('non_monotonic_video_pts');
-  expect(result.requests).toBe(2);
-  expect(result.cancelled).toBe(1);
+  expect(result.requests).toBe(browserName === 'firefox' ? 3 : 2);
+  expect(result.cancelled).toBe(browserName === 'firefox' ? 2 : 1);
   expect(result.paused && result.handlersCleared).toBe(true);
 });
 
@@ -159,24 +219,30 @@ test('stream control exposes repeated media clocks instead of presenting them as
   expect(result.mediaClock).toMatchObject({ increasing: 1, repeated: result.callbacks - 1, backwards: 0, missing: 0 });
 });
 
-test('finite replay admits callbacks only after play resolves and keeps a strictly increasing source clock', async ({ page }) => {
+test('finite replay admits callbacks only after play resolves and keeps a strictly increasing source clock', async ({ page }, info) => {
   await page.goto('/apps/participant-web/tools/session-report.html');
+  await page.bringToFront();
   const results = await page.evaluate(async () => {
     const modulePath = '/scripts/reference-data/media-clock.mjs';
     const { nextMediaTimestamp, prepareFiniteVideo } = await import(modulePath);
     const results = [];
     for (let run = 0; run < 3; run++) {
       const video = document.createElement('video'); video.muted = true;
+      video.style.cssText = 'position:fixed;top:0;left:0;width:64px;height:64px;z-index:10000';
       video.src = '/apps/autotests/tests/fixtures/passive-video.webm'; document.body.append(video);
       let callback: number | null = null;
       try {
         await prepareFiniteVideo(video);
         await video.play();
+        const rect = video.getBoundingClientRect();
+        const admittedAt = { currentTime: video.currentTime, duration: video.duration, ended: video.ended, paused: video.paused,
+          readyState: video.readyState, visibility: document.visibilityState,
+          onScreen: rect.top >= 0 && rect.left >= 0 && rect.bottom <= innerHeight && rect.right <= innerWidth };
         results.push(await new Promise(resolve => {
           let previous: number | null = null, accepted = 0, done = false;
           const finish = (error: string | null = null) => {
             if (done) return; done = true; clearTimeout(deadline);
-            resolve({ accepted, error });
+            resolve({ accepted, error, admittedAt, ended: video.ended, currentTime: video.currentTime, run });
           };
           const deadline = setTimeout(() => finish('fixture_deadline'), 10_000);
           video.onended = () => finish(); video.onerror = () => finish('fixture_decode_failed');
@@ -203,14 +269,17 @@ test('finite replay admits callbacks only after play resolves and keeps a strict
     }
     return results;
   });
+  await info.attach('finite-source-admission', { body: JSON.stringify(results), contentType: 'application/json' });
+  console.log(`${info.project.name} finite source admission: ${JSON.stringify(results)}`);
   expect(results).toHaveLength(3);
-  for (const result of results as Array<{ error: string | null; accepted: number }>) {
+  for (const result of results as Array<{ error: string | null; accepted: number; admittedAt: { onScreen: boolean; visibility: string } }>) {
+    expect(result.admittedAt.onScreen).toBe(true); expect(result.admittedAt.visibility).toBe('visible');
     expect(result.error).toBeNull(); expect(result.accepted).toBeGreaterThan(0);
   }
 });
 
 for (const fps of [10, 30]) {
-  test(`measures ${fps} presented video frames per second independently of display refresh`, async ({ page }) => {
+  test(`measures ${fps} source playback frames per second and exposes dropped/displayed counts`, async ({ page }) => {
     await page.goto('/apps/participant-web/tools/session-report.html');
     const result = await page.evaluate(async fps => {
       const modulePath = '/apps/participant-web/js/session-runtime/video-frames.mjs';
@@ -227,7 +296,10 @@ for (const fps of [10, 30]) {
       }
       finally { video.pause(); video.remove(); }
     }, fps);
-    expect(result.method).toBe('video-frame-callback');
+    expect(result.method).toBe('decoded-frame-counter');
+    expect(result.measurementVersion).toBe('video_cadence.v2');
+    expect(result.playbackQuality.complete).toBe(true);
+    expect(result.playbackQuality.displayedFrames + result.playbackQuality.droppedFrames).toBe(result.frames);
     expect(result.playbackRate).toBe(fps / 10);
     expect(result.duration).toBeGreaterThanOrEqual(3);
     expect(result.fps).toBeGreaterThanOrEqual(fps * .75);

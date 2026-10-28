@@ -200,4 +200,104 @@ test('live and final QC retain serializable FPS provenance alongside legacy nume
   assert.deepEqual(validateSessionFeaturePayload({ schemaVersion: 'session_feature.v1',
     ids: { session: 'synthetic-fps' }, events: [],
     lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'running', status: 'in_progress' }, qcSummary: summary }), []);
+  monitor.start();
+  for (const method of ['decoded-frame-counter', 'video-callback-count']) {
+    monitor.setCameraFps(10, { frames: 10, durationMs: 1000, method });
+    const summary = getSummary(counters, gaze, createValidationState(), createTrackingDeviationState(), monitor, Date.now() - 1000);
+    assert.equal(summary.fpsDiagnostics.camera.method, method);
+    assert.deepEqual(validateSessionFeaturePayload({ schemaVersion: 'session_feature.v1',
+      ids: { session: 'synthetic-fps' }, events: [],
+      lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'running', status: 'in_progress' }, qcSummary: summary }), []);
+  }
+  monitor.stop();
+});
+
+test('file cadence counts source frames, reports drops separately and ignores inflated compositor metadata', async () => {
+  const { observeVideoFrames } = await load('session-runtime/video-frames.mjs');
+  let callback, total = 100, dropped = 10; const counts = [];
+  const video = { readyState: 2, currentTime: 0, src: 'fixture.webm', srcObject: null,
+    getVideoPlaybackQuality: () => ({ totalVideoFrames: total, droppedVideoFrames: dropped }),
+    requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {} };
+  const observer = observeVideoFrames(video, (_now, delta) => counts.push(delta));
+  const now = performance.now();
+  callback(now, { presentedFrames: 1000 });
+  total += 3; dropped += 1; callback(now + 100, { presentedFrames: 1010 });
+  callback(now + 200, { presentedFrames: 1110 });
+  total += 3; callback(now + 300, { presentedFrames: 1200 });
+  assert.deepEqual(counts, [3, 3]);
+  assert.deepEqual(observer.playbackQuality, { complete: true, counterResets: 0, droppedFrames: 1, displayedFrames: 5 });
+  assert.equal(observer.method, 'decoded-frame-counter'); assert.equal(observer.fallbackReason, null);
+  observer.stop(); total++; callback(now + 400, { presentedFrames: 1210 }); assert.deepEqual(counts, [3, 3]);
+});
+
+test('file seek/reload counter reset cannot manufacture a cumulative frame burst', async () => {
+  const { observeVideoFrames } = await load('session-runtime/video-frames.mjs');
+  let callback, total = 200; const counts = [];
+  const video = { readyState: 2, currentTime: 5, src: 'fixture.webm',
+    getVideoPlaybackQuality: () => ({ totalVideoFrames: total, droppedVideoFrames: 0 }),
+    requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {} };
+  const observer = observeVideoFrames(video, (_now, delta) => counts.push(delta));
+  total = 201; callback(performance.now(), { presentedFrames: 300 });
+  total = 1; video.currentTime = 0; callback(performance.now(), { presentedFrames: 301 });
+  total = 2; callback(performance.now(), { presentedFrames: 302 });
+  assert.deepEqual(counts, [1, 1, 1]);
+  assert.deepEqual(observer.playbackQuality, { complete: false, counterResets: 1, droppedFrames: null, displayedFrames: null });
+  observer.stop();
+});
+
+test('native live MediaStream never uses a potentially inert playback counter', async () => {
+  const { observeVideoFrames } = await load('session-runtime/video-frames.mjs');
+  let callback, reads = 0; const counts = [];
+  const video = { readyState: 2, currentTime: 0, src: 'old-file.webm', srcObject: {},
+    getVideoPlaybackQuality() { reads++; return { totalVideoFrames: 0, droppedVideoFrames: 0 }; },
+    requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {} };
+  const observer = observeVideoFrames(video, (_now, delta) => counts.push(delta));
+  callback(performance.now(), { presentedFrames: 2 }); callback(performance.now(), { presentedFrames: 5 });
+  assert.deepEqual(counts, [1, 3]); assert.equal(reads, 0); assert.equal(observer.method, 'video-frame-callback'); observer.stop();
+});
+
+for (const failure of ['throws', 'invalid', 'stalled']) test(`file ${failure} counter falls back to callback counts, not inflated presented deltas`, async () => {
+  const { observeVideoFrames } = await load('session-runtime/video-frames.mjs');
+  let callback, total = 1; const counts = [];
+  const video = { readyState: 2, currentTime: 0, src: 'fixture.webm',
+    getVideoPlaybackQuality() {
+      if (failure === 'throws') throw new Error('fixture');
+      return { totalVideoFrames: total, droppedVideoFrames: failure === 'invalid' ? -1 : 0 };
+    }, requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {} };
+  const observer = observeVideoFrames(video, (_now, delta) => counts.push(delta));
+  const now = performance.now();
+  callback(now, { presentedFrames: 10 });
+  assert.equal(observer.method, failure === 'stalled' ? 'decoded-frame-counter' : 'video-callback-count');
+  video.currentTime = .1; callback(now + 1200, { presentedFrames: 200 });
+  callback(now + 1300, { presentedFrames: 400 });
+  const before = counts.length;
+  callback(now + 1400, { presentedFrames: 400 }); callback(now + 1500, {});
+  assert.equal(counts.length, before + 2);
+  assert.ok(counts.every(count => count === 1));
+  assert.equal(observer.method, 'video-callback-count');
+  assert.equal(observer.fallbackReason, failure === 'stalled' ? 'playback_counter_stalled' : 'playback_counter_unavailable');
+  observer.stop();
+});
+
+test('a reset dropped-frame counter cannot report a complete playback-quality window', async () => {
+  const { observeVideoFrames } = await load('session-runtime/video-frames.mjs');
+  let callback, total = 200, dropped = 20;
+  const video = { readyState: 2, currentTime: 0, src: 'fixture.webm',
+    getVideoPlaybackQuality: () => ({ totalVideoFrames: total, droppedVideoFrames: dropped }),
+    requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {} };
+  const observer = observeVideoFrames(video, () => {});
+  total++; dropped = 0; callback(performance.now(), { presentedFrames: 1 });
+  assert.equal(observer.playbackQuality.complete, false);
+  assert.equal(observer.playbackQuality.displayedFrames, null);
+  observer.stop();
+});
+
+test('invalid FPS observation windows reject before scheduling any video callbacks', async () => {
+  const { measureVideoFps } = await load('session-runtime/video-frames.mjs');
+  let callbacks = 0;
+  const video = { requestVideoFrameCallback() { callbacks++; } };
+  for (const duration of [NaN, Infinity, -1, 0, 1.5, 2147483648, '2000']) {
+    await assert.rejects(measureVideoFps(video, duration), /Invalid FPS sampling duration/);
+  }
+  assert.equal(callbacks, 0);
 });

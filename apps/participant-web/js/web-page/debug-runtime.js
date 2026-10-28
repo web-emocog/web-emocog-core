@@ -7,18 +7,36 @@
 (function initWecogDebugRuntime(global) {
     'use strict';
 
+    global.WECOG_DEBUG?.dispose?.();
+    let disposed = false;
+
     const RING_MAX = 2000;
     const TIMELINE_MAX = 600;
     const PAGE_LOAD_MS = (typeof performance !== 'undefined' && performance.timeOrigin)
         ? performance.timeOrigin
         : Date.now();
-    const SENSITIVE_KEYS = /^(landmarks|imageData|video|canvas|srcObject|stream|pixels|frame|buffer|rawPath|samples|rppgSession|email|phone|phoneNumber|ip|ipAddress|userAgent|authorization|accessToken|refreshToken|ingestToken|cookie|invitationCode)$/i;
+    const SENSITIVE_KEYS = /^(landmarks|imageData|image|video|audio|canvas|srcObject|stream|pixels|frame|buffer|raw|rawData|rawMask|mask|waveform|signal|rawPath|samples|rppgSession|email|phone|phoneNumber|ip|ipAddress|userAgent|authorization|accessToken|refreshToken|ingestToken|cookie|invitationCode|code|password|currentPassword|newPassword|confirmPassword|token|secret|csrfToken|sessionId|participantId|participantAlias|alias|displayName|fullName|name|id|key|text|message|stack|answer|answers|response|responses|filename|fileName|className)$/i;
     const LANDMARK_KEYS = /landmark/i;
     const EMAIL_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
     const BEARER_VALUE = /\bBearer\s+[A-Za-z0-9._~-]+/i;
+    const ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError',
+        'AbortError', 'NotAllowedError', 'NotFoundError', 'NotReadableError', 'NotSupportedError',
+        'SecurityError', 'TimeoutError', 'NetworkError', 'QuotaExceededError', 'InvalidStateError', 'DataError']);
+
+    function cleanText(value, limit = 240) {
+        if (typeof value !== 'string') return '[Text omitted]';
+        value = value.slice(0, 4096);
+        if (EMAIL_VALUE.test(value) || BEARER_VALUE.test(value)
+            || /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(value)
+            || /(?:\+?\d[\s().-]*){10,}/.test(value)) return '[Redacted]';
+        return value.replace(/(?:https?:|file:|blob:|data:)[^\s<>"']*/gi, '[URL omitted]')
+            .replace(/(?:[A-Za-z]:[\\/]|\/)[^\s<>"']+/g, '[Path omitted]')
+            .replace(/[?&](?:code|token|key|secret|password)=[^\s&]*/gi, '[Credential omitted]')
+            .slice(0, limit);
+    }
 
     function isEnabled() {
-        if (global.WECOG_ALLOW_DEBUG !== true) return false;
+        if (disposed || global.WECOG_ALLOW_DEBUG !== true) return false;
         try {
             if (global.localStorage && global.localStorage.getItem('wecog_debug') === '1') return true;
         } catch (_) { /* ignore */ }
@@ -31,7 +49,6 @@
 
     const buffer = [];
     let seq = 0;
-    const seen = new WeakSet();
 
     const timelines = {
         qc: [],
@@ -54,6 +71,7 @@
         accuracyPx: null,
         validationRmsPx: null,
         affineStatus: null,
+        biasCorrectionStatus: null,
         calibrationStatus: null
     };
 
@@ -66,120 +84,86 @@
     }
 
     function summarizeLandmarks(v) {
-        if (!v) return { count: 0, finiteCount: 0 };
-        if (Array.isArray(v)) {
-            let finiteCount = 0;
-            let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
-            for (let i = 0; i < v.length; i++) {
-                const p = v[i];
-                if (!p) continue;
-                const x = p.x; const y = p.y;
-                if (Number.isFinite(x) && Number.isFinite(y)) {
-                    finiteCount++;
-                    minX = Math.min(minX, x); minY = Math.min(minY, y);
-                    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
-                }
-            }
-            const bounds = finiteCount > 0
-                ? { minX, minY, maxX, maxY }
-                : null;
-            return { count: v.length, finiteCount, bounds };
-        }
-        if (typeof v === 'object' && typeof v.length === 'number') {
-            return { count: v.length, finiteCount: null, note: 'array-like' };
-        }
-        return { count: 0, finiteCount: 0 };
+        return { count: Array.isArray(v) ? Object.getOwnPropertyDescriptor(v, 'length').value : null };
     }
 
-    function sanitize(value, depth, keyHint) {
-        if (depth > 8) return '[MaxDepth]';
+    function sanitize(value, depth = 0, keyHint = null, budget = { nodes: 400, chars: 8000, seen: new WeakSet() }) {
+        if (--budget.nodes < 0 || budget.chars <= 0) return '[Budget exceeded]';
+        if (depth > 6) return '[MaxDepth]';
         if (value === null || value === undefined) return value;
         if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
-            if (typeof value === 'string' && (EMAIL_VALUE.test(value) || BEARER_VALUE.test(value))) {
-                return '[Redacted]';
-            }
-            if (typeof value === 'string' && value.length > 500) {
-                return value.slice(0, 500) + '…[truncated]';
-            }
-            return value;
+            if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+            if (typeof value !== 'string') return value;
+            const safe = cleanText(value, Math.min(240, budget.chars));
+            budget.chars -= safe.length;
+            return safe;
         }
         if (typeof value === 'function') return '[Function]';
-        if (typeof value === 'bigint') return String(value);
-
-        if (value instanceof Error) {
-            return {
-                name: value.name,
-                message: value.message,
-                stack: typeof value.stack === 'string' ? value.stack.slice(0, 2000) : undefined
-            };
-        }
-
-        if (typeof HTMLVideoElement !== 'undefined' && value instanceof HTMLVideoElement) {
-            return { type: 'HTMLVideoElement', videoWidth: value.videoWidth, videoHeight: value.videoHeight };
-        }
-        if (typeof HTMLCanvasElement !== 'undefined' && value instanceof HTMLCanvasElement) {
-            return { type: 'HTMLCanvasElement', width: value.width, height: value.height };
-        }
-        if (typeof ImageData !== 'undefined' && value instanceof ImageData) {
-            return { type: 'ImageData', width: value.width, height: value.height };
-        }
-        if (typeof MediaStream !== 'undefined' && value instanceof MediaStream) {
-            return { type: 'MediaStream', trackCount: value.getTracks ? value.getTracks().length : null };
-        }
-
-        if (keyHint && LANDMARK_KEYS.test(keyHint)) {
-            return summarizeLandmarks(value);
-        }
-        if (Array.isArray(value) && keyHint && LANDMARK_KEYS.test(keyHint)) {
-            return summarizeLandmarks(value);
-        }
-
-        if (Array.isArray(value)) {
-            if (value.length > 50) {
-                return {
-                    length: value.length,
-                    preview: value.slice(0, 5).map((item, i) => sanitize(item, depth + 1, String(i)))
-                };
-            }
-            return value.map((item, i) => sanitize(item, depth + 1, String(i)));
-        }
-
-        if (typeof value === 'object') {
-            if (seen.has(value)) return '[Circular]';
-            seen.add(value);
-            const out = {};
-            const keys = Object.keys(value).slice(0, 80);
-            for (let i = 0; i < keys.length; i++) {
-                const k = keys[i];
-                if (SENSITIVE_KEYS.test(k)) {
-                    if (LANDMARK_KEYS.test(k) || k === 'landmarks') {
-                        out[k] = summarizeLandmarks(value[k]);
-                    } else if (k === 'samples' && Array.isArray(value[k])) {
-                        out[k] = { length: value[k].length };
-                    } else if (k === 'rawPath' && Array.isArray(value[k])) {
-                        out[k] = { length: value[k].length };
-                    } else {
-                        out[k] = `[Omitted:${k}]`;
-                    }
-                    continue;
-                }
-                try {
-                    out[k] = sanitize(value[k], depth + 1, k);
-                } catch (e) {
-                    out[k] = `[SanitizeError:${e.message}]`;
-                }
-            }
-            if (Object.keys(value).length > keys.length) {
-                out['…'] = `+${Object.keys(value).length - keys.length} keys`;
-            }
-            seen.delete(value);
-            return out;
-        }
+        if (typeof value === 'bigint') return '[BigInt omitted]';
 
         try {
-            return String(value);
+            if (value instanceof Error) {
+                const descriptor = Object.getOwnPropertyDescriptor(value, 'name')
+                    || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(value), 'name');
+                const name = descriptor && 'value' in descriptor ? descriptor.value : 'Error';
+                return { errorType: ERROR_NAMES.has(name) ? name : 'Error' };
+            }
+
+            if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return { bytes: value.byteLength };
+
+            if (typeof HTMLVideoElement !== 'undefined' && value instanceof HTMLVideoElement) {
+                return { type: 'HTMLVideoElement', videoWidth: value.videoWidth, videoHeight: value.videoHeight };
+            }
+            if (typeof HTMLCanvasElement !== 'undefined' && value instanceof HTMLCanvasElement) {
+                return { type: 'HTMLCanvasElement', width: value.width, height: value.height };
+            }
+            if (typeof ImageData !== 'undefined' && value instanceof ImageData) {
+                return { type: 'ImageData', width: value.width, height: value.height };
+            }
+            if (typeof MediaStream !== 'undefined' && value instanceof MediaStream) {
+                return { type: 'MediaStream', trackCount: value.getTracks ? value.getTracks().length : null };
+            }
+
+            if (keyHint && LANDMARK_KEYS.test(keyHint)) {
+                return summarizeLandmarks(value);
+            }
+            if (typeof value === 'object') {
+                if (budget.seen.has(value)) return '[Circular]';
+                budget.seen.add(value);
+                try {
+                    if (Array.isArray(value)) {
+                        const items = [];
+                        const max = Math.min(value.length, value.length > 50 ? 5 : 50);
+                        for (let i = 0; i < max && budget.nodes > 0 && budget.chars > 0; i++) {
+                            const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+                            items.push(descriptor && 'value' in descriptor
+                                ? sanitize(descriptor.value, depth + 1, String(i), budget) : '[Accessor omitted]');
+                        }
+                        return value.length > 50 ? { length: value.length, preview: items } : items;
+                    }
+                    const out = {};
+                    for (const k of Object.keys(value).slice(0, 80)) {
+                        if (budget.nodes <= 0 || budget.chars <= 0) break;
+                        const safeKey = cleanText(k, 80);
+                        budget.chars -= safeKey.length;
+                        const descriptor = Object.getOwnPropertyDescriptor(value, k);
+                        let safe;
+                        if (!descriptor || !('value' in descriptor)) safe = '[Accessor omitted]';
+                        else if (SENSITIVE_KEYS.test(k.replace(/[^a-z0-9]/gi, ''))) safe = '[Omitted]';
+                        else safe = sanitize(descriptor.value, depth + 1, k, budget);
+                        Object.defineProperty(out, safeKey, { value: safe, enumerable: true, configurable: true });
+                    }
+                    return out;
+                } catch (_) {
+                    return '[Uninspectable]';
+                } finally {
+                    budget.seen.delete(value);
+                }
+            }
+
+            return '[Unsupported]';
         } catch (_) {
-            return '[Unserializable]';
+            return '[Uninspectable]';
         }
     }
 
@@ -190,8 +174,8 @@
             level,
             ts: new Date().toISOString(),
             relMs: relMs(),
-            scope: scope || 'app',
-            event: event || 'log',
+            scope: cleanText(typeof scope === 'string' ? scope : 'app', 96),
+            event: cleanText(typeof event === 'string' ? event : 'log', 96),
             data: data === undefined ? undefined : sanitize(data, 0, null)
         };
         buffer.push(entry);
@@ -201,16 +185,9 @@
 
     function consoleOut(level, entry) {
         const tag = `[WECOG_DEBUG:${entry.scope}] ${entry.event}`;
-        const payload = entry.data;
-        if (level === 'error') {
-            console.error(tag, payload !== undefined ? payload : '');
-        } else if (level === 'warn') {
-            console.warn(tag, payload !== undefined ? payload : '');
-        } else if (level === 'mark') {
-            console.info(tag, payload !== undefined ? payload : '');
-        } else {
-            console.log(tag, payload !== undefined ? payload : '');
-        }
+        const method = level === 'mark' ? 'info' : level;
+        try { console[method](tag, entry.data !== undefined ? copy(entry.data) : ''); }
+        catch (_) { /* Optional console transport; the bounded diagnostic ring remains available. */ }
     }
 
     function log(scope, event, data) {
@@ -238,41 +215,45 @@
     }
 
     function dump(filter) {
+        if (!isEnabled()) { clear(); return []; }
         const rows = filter
             ? buffer.filter((e) =>
                 (e.scope && String(e.scope).includes(filter)) ||
                 (e.event && String(e.event).includes(filter)))
             : buffer.slice();
-        console.table(rows.map((e) => ({
-            seq: e.seq,
-            relMs: e.relMs,
-            level: e.level,
-            scope: e.scope,
-            event: e.event,
-            data: e.data
-        })));
-        return rows;
+        try { console.table(copy(rows)); }
+        catch (_) { /* Optional DevTools presentation, not session persistence. */ }
+        return copy(rows);
     }
 
     function find(needle) {
+        if (!isEnabled()) { clear(); return []; }
         const n = String(needle || '').toLowerCase();
-        return buffer.filter((e) =>
+        return copy(buffer.filter((e) =>
             String(e.scope || '').toLowerCase().includes(n) ||
-            String(e.event || '').toLowerCase().includes(n));
+            String(e.event || '').toLowerCase().includes(n)));
     }
 
     function clear() {
         buffer.length = 0;
-        log('debug', 'buffer:cleared');
+        Object.values(timelines).forEach(rows => { rows.length = 0; });
+        lastRuntimeSnapshot = null;
+        Object.keys(gazeDiagnostics).forEach(key => {
+            if (key === 'edgeClips') gazeDiagnostics[key] = { left: 0, right: 0, top: 0, bottom: 0 };
+            else gazeDiagnostics[key] = ['totalSamples', 'onScreenFalseCount', 'clippedCount',
+                'offScreenCorrectedCount'].includes(key) ? 0 : null;
+        });
+        eventLossCount = 0;
     }
 
     function pushTimeline(name, data) {
         if (!isEnabled()) return;
-        const key = timelines[name] ? name : 'events';
+        const key = typeof name === 'string' && Object.hasOwn(timelines, name) ? name : 'events';
+        const safe = sanitize(data);
         const row = {
+            ...(safe && typeof safe === 'object' && !Array.isArray(safe) ? safe : { value: safe }),
             ts: new Date().toISOString(),
-            relMs: relMs(),
-            ...(data && typeof data === 'object' ? data : { value: data })
+            relMs: relMs()
         };
         const arr = timelines[key];
         arr.push(row);
@@ -281,7 +262,7 @@
 
     function recordOverlayTransition(action, reason, extra) {
         if (!isEnabled()) return;
-        const row = { action, reason: reason || null, ...(extra || {}) };
+        const row = { ...sanitize(extra || {}), action: cleanText(action), reason: cleanText(reason || '') };
         pushTimeline('overlay', row);
         mark('qc', 'overlay:' + action, row);
     }
@@ -318,79 +299,90 @@
     }
 
     function setGazeCalibrationDiagnostics(patch) {
-        if (!patch || typeof patch !== 'object') return;
-        Object.assign(gazeDiagnostics, patch);
+        if (!isEnabled() || !patch || typeof patch !== 'object') return;
+        const safe = sanitize(patch);
+        if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return;
+        for (const key of ['postCalibrationApplied', 'loocvPass', 'loocvRejectedReason', 'accuracyPx',
+            'validationRmsPx', 'affineStatus', 'biasCorrectionStatus', 'calibrationStatus']) {
+            if (Object.hasOwn(safe, key)) gazeDiagnostics[key] = safe[key];
+        }
     }
 
     function setRuntimeSnapshot(snapshot) {
-        lastRuntimeSnapshot = snapshot;
+        if (isEnabled()) lastRuntimeSnapshot = sanitize(snapshot);
     }
 
     function incrementEventLoss(n) {
-        eventLossCount += (Number.isFinite(n) ? n : 1);
+        if (isEnabled()) eventLossCount += (Number.isFinite(n) && n >= 0 ? n : 1);
     }
 
     function setActiveListenerCount(n) {
-        if (Number.isFinite(n)) activeListenerCount = n;
+        if (isEnabled() && Number.isFinite(n) && n >= 0) activeListenerCount = n;
     }
 
     function getGazeDiagnostics() {
+        if (!isEnabled()) clear();
         const t = gazeDiagnostics.totalSamples || 1;
-        return {
+        return copy({
             ...gazeDiagnostics,
             onScreenFalsePct: Math.round((gazeDiagnostics.onScreenFalseCount / t) * 1000) / 10,
             clippedPct: Math.round((gazeDiagnostics.clippedCount / t) * 1000) / 10,
             offScreenCorrectedPct: Math.round((gazeDiagnostics.offScreenCorrectedCount / t) * 1000) / 10
-        };
+        });
     }
 
     function exportJson() {
+        if (!isEnabled()) clear();
         return {
             enabled: isEnabled(),
+            privacyVersion: 'technical_only.v2',
             exportedAt: new Date().toISOString(),
             relMs: relMs(),
-            page: typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : null,
+            page: 'participant-web',
             count: buffer.length,
-            events: buffer.slice()
+            events: copy(buffer)
         };
     }
 
     function exportDebugBundle() {
+        if (!isEnabled()) clear();
         const sessionEvents = (() => {
             try {
-                return sanitize(
-                    global.__WECOG_STATE__?.sessionData?.events?.slice(-200) || null,
-                    0,
-                    'sessionEvents'
-                );
+                if (!isEnabled()) return [];
+                return (global.__WECOG_STATE__?.sessionData?.events || []).slice(-200).map(event => {
+                    const out = {};
+                    for (const key of ['type', 'schemaVersion', 'tRelMs', 'rtMs', 'valid', 'confidence']) {
+                        const descriptor = event && Object.getOwnPropertyDescriptor(event, key);
+                        if (descriptor && 'value' in descriptor) out[key] = sanitize(descriptor.value);
+                    }
+                    return out;
+                });
             } catch (_) {
                 return null;
             }
         })();
         return {
             schema: 'wecog-debug-bundle-v1',
+            privacyVersion: 'technical_only.v2',
             exportedAt: new Date().toISOString(),
             relMs: relMs(),
             debug: exportJson(),
             timelines: {
-                qc: timelines.qc.slice(),
-                gaze: timelines.gaze.slice(),
-                bpm: timelines.bpm.slice(),
-                overlay: timelines.overlay.slice(),
-                keys: timelines.keys.slice()
+                qc: copy(timelines.qc),
+                gaze: copy(timelines.gaze),
+                bpm: copy(timelines.bpm),
+                overlay: copy(timelines.overlay),
+                keys: copy(timelines.keys),
+                events: copy(timelines.events)
             },
             gazeDiagnostics: getGazeDiagnostics(),
-            bpmDiagnostics: sanitize(global.__WECOG_BPM_DIAG__ || null, 0, 'bpmDiagnostics'),
-            visuospatialDiagnostics: sanitize(global.__WECOG_VIS_DIAG__ || null, 0, 'visuospatialDiagnostics'),
+            bpmDiagnostics: optionalDiagnostics('__WECOG_BPM_DIAG__'),
+            visuospatialDiagnostics: optionalDiagnostics('__WECOG_VIS_DIAG__'),
             runtime: sanitize(lastRuntimeSnapshot, 0, 'runtime'),
             sessionEvents,
-            overlayTransitions: timelines.overlay.slice(),
+            overlayTransitions: copy(timelines.overlay),
             calibrationMetrics: {
-                gazeValidation: sanitize(
-                    global.__WECOG_STATE__?.sessionData?.gazeValidation || null,
-                    0,
-                    'gazeValidation'
-                )
+                gazeValidation: validationDiagnostics()
             },
             browser: {
                 language: typeof navigator !== 'undefined' ? navigator.language : null,
@@ -409,6 +401,30 @@
                 entrypoint: 'mvp_with_precheck_1-updated.html'
             }
         };
+    }
+
+    function copy(value) {
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function validationDiagnostics() {
+        if (!isEnabled()) return null;
+        try {
+            const value = global.__WECOG_STATE__?.sessionData?.gazeValidation;
+            if (!value || typeof value !== 'object') return null;
+            const selected = {};
+            for (const key of ['passed', 'metrics', 'sampling', 'coverage', 'postCalibrationCorrection']) {
+                const descriptor = Object.getOwnPropertyDescriptor(value, key);
+                if (descriptor && 'value' in descriptor) selected[key] = descriptor.value;
+            }
+            return sanitize(selected);
+        } catch (_) { return { unavailable: true }; }
+    }
+
+    function optionalDiagnostics(key) {
+        if (!isEnabled()) return null;
+        try { return sanitize(global[key] || null); }
+        catch (_) { return { unavailable: true }; }
     }
 
     function downloadDebugBundle(filename) {
@@ -445,7 +461,8 @@
         setActiveListenerCount,
         getEventLossCount: () => eventLossCount,
         getActiveListenerCount: () => activeListenerCount,
-        find
+        find,
+        dispose
     };
 
     Object.defineProperty(api, 'enabled', {
@@ -455,10 +472,6 @@
     });
 
     global.WECOG_DEBUG = api;
-
-    try {
-        console.info('[WECOG_DEBUG] runtime loaded; enabled=%s', isEnabled());
-    } catch (_) { /* ignore */ }
 
     if (isEnabled()) {
         log('debug', 'runtime:enabled', {
@@ -475,24 +488,29 @@
         });
     }
 
-    global.addEventListener('error', function onWindowError(ev) {
+    function onWindowError(ev) {
         if (!isEnabled()) return;
         error('global', 'error', {
-            message: ev.message,
-            source: ev.filename,
+            error: ev.error instanceof Error ? ev.error : new Error(),
             lineno: ev.lineno,
-            colno: ev.colno,
-            stack: ev.error && ev.error.stack ? String(ev.error.stack) : undefined
+            colno: ev.colno
         });
-    });
+    }
 
-    global.addEventListener('unhandledrejection', function onUnhandledRejection(ev) {
+    function onUnhandledRejection(ev) {
         if (!isEnabled()) return;
         const reason = ev.reason;
         error('global', 'unhandledrejection', {
-            message: reason && reason.message ? reason.message : String(reason),
-            stack: reason && reason.stack ? String(reason.stack) : undefined,
-            name: reason && reason.name ? reason.name : undefined
+            error: reason instanceof Error ? reason : new Error()
         });
-    });
+    }
+
+    function dispose() {
+        disposed = true;
+        clear();
+        global.removeEventListener('error', onWindowError);
+        global.removeEventListener('unhandledrejection', onUnhandledRejection);
+    }
+    global.addEventListener('error', onWindowError);
+    global.addEventListener('unhandledrejection', onUnhandledRejection);
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -7,6 +7,7 @@
  */
 
 import { CLASS_INDICES, CLASS_NAMES } from './constants.js';
+import { createFaceSupport, rememberFaceSupport, isFacePixel } from './face-support.mjs?v=20261028-139';
 
 /**
  * Анализ масок сегментации
@@ -34,12 +35,15 @@ export function analyzeMasks(segmentationResult, width, height, faceLandmarks, m
         return result;
     }
 
-    result.hasData = true;
-
     // Получаем данные маски
     const maskData = maskReader ? maskReader.bytes(categoryMask) : categoryMask.getAsUint8Array();
     const maskWidth = categoryMask.width;
     const maskHeight = categoryMask.height;
+    if (!Number.isSafeInteger(maskWidth) || !Number.isSafeInteger(maskHeight) || maskWidth < 1
+        || maskHeight < 1 || maskData.length !== maskWidth * maskHeight) return result;
+    result.hasData = true;
+    const support = createFaceSupport(faceLandmarks, maskWidth, maskHeight);
+    rememberFaceSupport(result, support);
 
     // Сохраняем копию сырых данных для анализа областей
     result._rawMaskData = new Uint8Array(maskData);
@@ -65,7 +69,7 @@ export function analyzeMasks(segmentationResult, width, height, faceLandmarks, m
     }
 
     // Определяем область лица на основе лэндмарок или центра кадра
-    result.faceRegion = extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks, width, height);
+    result.faceRegion = extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks, width, height, support);
 
     // Получаем карту уверенности для кожи лица (если доступна)
     if (segmentationResult.confidenceMasks && segmentationResult.confidenceMasks.length > CLASS_INDICES.FACE_SKIN) {
@@ -91,11 +95,14 @@ export function analyzeMasks(segmentationResult, width, height, faceLandmarks, m
  * @param {number} frameHeight - высота кадра
  * @returns {Object} статистика области лица
  */
-export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks, frameWidth, frameHeight) {
+export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks, frameWidth, frameHeight,
+    support = createFaceSupport(faceLandmarks, maskWidth, maskHeight)) {
     // Определяем bounding box лица
     let faceBox;
     
-    if (faceLandmarks && faceLandmarks.length > 0) {
+    if (support) {
+        faceBox = support.bounds;
+    } else if (faceLandmarks && faceLandmarks.length > 0 && faceLandmarks.every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) {
         // Используем лэндмарки для определения области
         let minX = 1, maxX = 0, minY = 1, maxY = 0;
         for (const point of faceLandmarks) {
@@ -121,9 +128,9 @@ export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks
 
     // Преобразуем координаты в координаты маски
     const startX = Math.floor(faceBox.x * maskWidth);
-    const endX = Math.floor((faceBox.x + faceBox.width) * maskWidth);
+    const endX = (support ? Math.ceil : Math.floor)((faceBox.x + faceBox.width) * maskWidth);
     const startY = Math.floor(faceBox.y * maskHeight);
-    const endY = Math.floor((faceBox.y + faceBox.height) * maskHeight);
+    const endY = (support ? Math.ceil : Math.floor)((faceBox.y + faceBox.height) * maskHeight);
 
     // Анализируем пиксели в области лица
     const regionStats = {
@@ -139,7 +146,8 @@ export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks
     for (let y = startY; y < endY; y++) {
         for (let x = startX; x < endX; x++) {
             const idx = y * maskWidth + x;
-            if (idx >= maskData.length) continue;
+            if (x < 0 || x >= maskWidth || y < 0 || y >= maskHeight || idx >= maskData.length
+                || (support && !isFacePixel(support, x, y))) continue;
             
             const classIdx = maskData[idx];
             regionStats.totalPixels++;
@@ -171,6 +179,8 @@ export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks
     
     return {
         boundingBox: faceBox,
+        sampling: { method: support ? 'face_oval_pixels.v1' : 'unlocalized_rectangle.v1',
+            inFrame: support?.inFrame ?? false },
         stats: regionStats,
         ratios: {
             faceSkin: regionStats.faceSkin / total,

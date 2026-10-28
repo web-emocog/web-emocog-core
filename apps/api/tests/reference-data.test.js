@@ -46,6 +46,7 @@ test('a functional replay is not a performance pass when frames, UI or worker fa
   assert.equal(assessReplayPerformance(valid).status, 'pass');
   assert.equal(assessReplayPerformance({ ...valid, offlinePlaybackRate: .5 }).status, 'not_applicable');
   assert.equal(assessReplayPerformance({ ...valid, performance: {} }).status, 'not_measured');
+  assert.equal(assessReplayPerformance({ ...valid, performance: { ...valid.performance, presentedWallFps: null } }).status, 'not_measured');
   const slow = structuredClone(valid); slow.performance.processedWallFps = 13;
   slow.performance.uiTimerLatenessMs.p95 = 23; slow.performance.maxCaptureGapMs = 635;
   slow.performance.fpsWindows.longestBelow25RunMs = 60000; slow.auxiliary.segmentBackend = 'main';
@@ -54,6 +55,27 @@ test('a functional replay is not a performance pass when frames, UI or worker fa
   assert.equal(assessReplayPerformance(slow).status, 'fail');
   const stale = structuredClone(valid); stale.auxiliary.segmentMeanMs = 4300;
   assert.deepEqual(assessReplayPerformance(stale).reasons, ['segment_mean_exceeds_freshness_budget']);
+});
+
+test('replay provenance separates source totals, confirmed presentations and unknown counters', async () => {
+  const { frameCadencePerformance } = await import(pathToFileURL(path.resolve(__dirname, '../../../scripts/reference-data/performance.mjs')));
+  const input = { sourceFrames: 30, processedFrames: 10, elapsedMs: 1000, method: 'decoded-frame-counter',
+    playbackQuality: { complete: true, counterResets: 0, droppedFrames: 15, displayedFrames: 15 } };
+  const measured = frameCadencePerformance(input);
+  assert.equal(measured.sourceWallFps, 30); assert.equal(measured.presentedWallFps, 15);
+  assert.equal(measured.skippedPresentedFrames, 5);
+  assert.equal(frameCadencePerformance({ ...input, method: 'video-frame-callback', playbackQuality: null }).presentedFrames, 30);
+  for (const quality of [null, { ...input.playbackQuality, complete: false }, { ...input.playbackQuality, counterResets: 1 },
+    { ...input.playbackQuality, displayedFrames: 99 }]) {
+    const unknown = frameCadencePerformance({ ...input, method: 'video-callback-count', playbackQuality: quality });
+    assert.equal(unknown.presentedFrames, null); assert.equal(unknown.presentedWallFps, null);
+  }
+  assert.equal(frameCadencePerformance({ ...input, processedFrames: 20 }).skippedPresentedFrames, null);
+  assert.equal(frameCadencePerformance({ ...input, method: 'video-callback-count' }).presentedFrames, null);
+  assert.equal(frameCadencePerformance({ ...input, fallbackReason: 'fixture' }).presentedFrames, null);
+  for (const patch of [{ sourceFrames: NaN }, { processedFrames: -1 }, { elapsedMs: 0 }]) {
+    assert.throws(() => frameCadencePerformance({ ...input, ...patch }), /invalid_reference_frame_cadence/);
+  }
 });
 
 test('reference replay options cannot select arbitrary browsers, rates or output path fragments', async () => {

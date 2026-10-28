@@ -264,6 +264,7 @@ test('auxiliary main-thread fallback accepts the shared ImageData frame', async 
 });
 
 test('slow inference leaves UI timers responsive in the worker, with unchanged derived values', async ({ page }, info) => {
+  await page.bringToFront();
   const modelStub = `
     export const FilesetResolver = { forVisionTasks: async () => ({}) };
     export const FaceLandmarker = { createFromOptions: async () => ({
@@ -289,20 +290,28 @@ test('slow inference leaves UI timers responsive in the worker, with unchanged d
     const results = [];
     for (const worker of [false, true]) {
       const analyzer = new PrecheckAnalyzer({ worker }); await analyzer.initialize();
-      let ticks = 0; const timer = setInterval(() => { ticks++; }, 10);
+      let ticks = 0, lastTick = performance.now(); const gaps: number[] = [];
+      const timer = setInterval(() => { const now = performance.now(); gaps.push(now - lastTick); lastTick = now; ticks++; }, 10);
       const start = performance.now(); const values = [];
-      for (let i = 0; i < 12; i++) {
-        const frame = await analyzer.analyzeFrame(canvas);
-        values.push({ face: frame.face, lighting: frame.illumination, eyes: frame.eyes,
-          pose: frame.pose, blendShapes: frame.blendShapes, error: frame.error || null });
+      try {
+        for (let i = 0; i < 12; i++) {
+          const frame = await analyzer.analyzeFrame(canvas);
+          values.push({ face: frame.face, lighting: frame.illumination, eyes: frame.eyes,
+            pose: frame.pose, blendShapes: frame.blendShapes, error: frame.error || null });
+        }
+      } finally {
+        clearInterval(timer); analyzer.dispose();
       }
-      clearInterval(timer); analyzer.dispose();
-      results.push({ worker, ticks, elapsedMs: performance.now() - start, values });
+      results.push({ worker, ticks, elapsedMs: performance.now() - start, values,
+        visibility: document.visibilityState, maxGapMs: Math.max(performance.now() - lastTick, ...gaps) });
     }
     return results;
   });
+  const timings = result.map(({ values, ...timing }) => timing);
+  await info.attach('synthetic-responsiveness-timing', { body: JSON.stringify(timings), contentType: 'application/json' });
+  console.log(`${info.project.name} synthetic responsiveness: ${JSON.stringify(timings)}`);
+  expect(result[1].visibility).toBe('visible');
   expect(result[1].values).toEqual(result[0].values);
   expect(result[1].ticks).toBeGreaterThan(result[0].ticks);
   expect(result[1].ticks).toBeGreaterThan(5);
-  console.log(`${info.project.name} synthetic responsiveness: main=${result[0].ticks}, worker=${result[1].ticks} timer ticks`);
 });

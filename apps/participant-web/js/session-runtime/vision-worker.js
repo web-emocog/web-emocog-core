@@ -17,7 +17,7 @@ self.onmessage = async ({ data }) => {
                 if (data.options.thresholds) analyzer.thresholds = data.options.thresholds;
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'segment') {
-                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261025-1');
+                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261028-139');
                 analyzer = new FaceSegmenter({ ...data.options, worker: false });
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'pose') {
