@@ -67,7 +67,8 @@ export class VideoFpsMonitor {
         this._cameraFps = fps;
         this._cameraUpdatedAt = performance.now();
         const durationMs = Number.isFinite(details.durationMs) && details.durationMs > 0 ? details.durationMs : null;
-        const method = ['video-frame-callback', 'decoded-frame-counter', 'media-time-estimate'].includes(details.method)
+        const method = ['video-frame-callback', 'decoded-frame-counter', 'media-time-estimate',
+            'video-callback-count'].includes(details.method)
             ? details.method : 'external-publication';
         this._cameraWindow = { lastWindowFps: fps, method,
             frames: Number.isSafeInteger(details.frames) && details.frames >= 0 ? details.frames : null,

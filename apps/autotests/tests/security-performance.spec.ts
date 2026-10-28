@@ -99,7 +99,11 @@ test('camera FPS measures a 10 FPS video rather than display refresh in every en
     const result = await measureVideoFps(video, 2200);
     video.pause(); video.remove(); return result;
   });
-  expect(result.method).toBe('video-frame-callback');
+  expect(result.method).toBe('decoded-frame-counter');
+  expect(result.measurementVersion).toBe('video_cadence.v2');
+  expect(result.fallbackReason).toBeNull();
+  expect(result.playbackQuality.complete).toBe(true);
+  expect(result.playbackQuality.displayedFrames + result.playbackQuality.droppedFrames).toBe(result.frames);
   expect(result.fps).toBeGreaterThanOrEqual(7);
   expect(result.fps).toBeLessThanOrEqual(14);
 });

@@ -43,6 +43,7 @@ export async function measureSourceCadence(video, durationMs = 20000, sourceType
   let frameId = null, animationId = null, timer = null, playTimer = null;
   let callbacks = 0, presented = 0, animationFrames = 0, previousCount = null;
   let previousPts = null, previousCallback = null, previousAnimation = null;
+  let preparation = null;
   const callbackIntervals = [], animationIntervals = [];
   const mediaClock = { policy: sourceType === 'file' ? 'strict_finite_pts' : 'observe_stream_pts_without_retiming',
     increasing: 0, repeated: 0, backwards: 0, missing: 0 };
@@ -51,7 +52,7 @@ export async function measureSourceCadence(video, durationMs = 20000, sourceType
     values.push(value);
   };
   try {
-    if (sourceType === 'file') await prepareFiniteVideo(video);
+    if (sourceType === 'file') preparation = await prepareFiniteVideo(video);
     await Promise.race([video.play(), new Promise((_, reject) => {
       playTimer = setTimeout(() => reject(new Error('source_probe_play_deadline')), 10000);
     })]);
@@ -114,7 +115,7 @@ export async function measureSourceCadence(video, durationMs = 20000, sourceType
       callbackFps: callbacks * 1000 / elapsedMs, presentedFps: presented * 1000 / elapsedMs,
       animationFps: animationFrames * 1000 / elapsedMs, visibility: document.visibilityState,
       callbackIntervalsMs: distribution(callbackIntervals), animationIntervalsMs: distribution(animationIntervals),
-      mediaClock, terminalFrameReplays, modelsRun: false, accuracyValidated: false,
+      mediaClock, preparation, terminalFrameReplays, modelsRun: false, accuracyValidated: false,
       interpretation: sourceType === 'file' ? 'finite_file_decoder_compositor_control_not_camera_or_analysis_fps'
         : 'stream_delivery_control_not_physical_camera_or_analysis_fps' };
   } finally {

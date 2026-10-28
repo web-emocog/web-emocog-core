@@ -1,10 +1,19 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPageUrl } from './helpers/testUtils';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 
 const PAGE_URL = getPageUrl();
+
+async function openValidationWithPausedClock(page: Page) {
+  await page.clock.install({ time: new Date('2026-10-28T12:00:00Z') });
+  await page.goto(PAGE_URL, { waitUntil: 'load' });
+  await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+  // Stop automatic real-time catch-up before the oracle starts. runFor still
+  // executes every 33/67 ms timer; fastForward would invalidate this test.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+}
 
 test.describe('Participant session runtime', () => {
   test('applies every participant locale to consent and precheck labels', async ({ page }) => {
@@ -66,9 +75,7 @@ test.describe('Participant session runtime', () => {
   });
 
   test('a frozen prediction cannot pass the actual validation flow', async ({ page }) => {
-    await page.goto(PAGE_URL, { waitUntil: 'load' });
-    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
-    await page.clock.install();
+    await openValidationWithPausedClock(page);
     await page.evaluate(async () => {
       const shared = (window as any).__WECOG_STATE__;
       (window as any).setLanguage('en');
@@ -91,9 +98,7 @@ test.describe('Participant session runtime', () => {
 
   for (const missingTarget of [false, true]) {
     test(`15 Hz validation captures remain unique; missing benchmark target=${missingTarget}`, async ({ page }) => {
-      await page.goto(PAGE_URL, { waitUntil: 'load' });
-      await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
-      await page.clock.install();
+      await openValidationWithPausedClock(page);
       await page.evaluate(async missing => {
         const shared = (window as any).__WECOG_STATE__;
         const moduleUrl = new URL('js/web-page/tests-updated.js?v=20261025-1', window.location.href).href;
@@ -101,7 +106,9 @@ test.describe('Participant session runtime', () => {
         startGazeValidation();
         document.getElementById('validationIntroStartBtn')!.click();
         // Synthetic oracle for flow tests only, not a production gaze predictor or accuracy benchmark.
+        (window as any).__syntheticGazeCallbacks = 0;
         (window as any).__syntheticGazeTimer = setInterval(() => {
+          (window as any).__syntheticGazeCallbacks++;
           const rect = document.getElementById('fullscreenCalibPoint')!.getBoundingClientRect();
           const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
           const valid = !(missing && shared.runtime.validationPoints.length === 9
@@ -115,6 +122,7 @@ test.describe('Participant session runtime', () => {
         clearInterval((window as any).__syntheticGazeTimer);
         return (window as any).__WECOG_STATE__.sessionData.gazeValidation;
       });
+      expect(await page.evaluate(() => (window as any).__syntheticGazeCallbacks)).toBe(Math.floor(46_000 / 67));
       expect(result.metrics.accuracyPx).toBeLessThan(1);
       expect(result.passed).toBe(!missingTarget);
       expect(result.coverage.complete).toBe(!missingTarget);

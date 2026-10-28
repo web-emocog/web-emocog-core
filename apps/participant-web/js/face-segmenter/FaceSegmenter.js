@@ -1,5 +1,5 @@
 /**
- * Face Segmenter Module v1.2
+ * Face Segmenter Module v1.3
  * Проверка видимости областей лица через MediaPipe Image Segmenter
  * 
  * Использует модель Selfie Segmenter для точной сегментации:
@@ -11,7 +11,8 @@
  * - Детекция окклюзий (волосы, руки, предметы)
  * - Независимость от точности лэндмарок на закрытых областях
  * 
- * v1.2 - Улучшена детекция руки на лице:
+ * v1.3 - face_oval_regions.v1: neck/background outside the face cannot veto precheck.
+ * Численные пороги v1.2 сохранены:
  * - Снижены пороги handOcclusionThreshold до 0.05 (5%)
  * - Более агрессивная детекция body_skin в областях лица
  * - Добавлен глобальный анализ body_skin по всему лицу
@@ -21,18 +22,18 @@
  * - Более строгие пороги для лба (волосы)
  * - Добавлен анализ аномального присутствия body_skin
  * 
- * @version 1.2.0
+ * @version 1.3.0
  * @requires @mediapipe/tasks-vision
  * @module face-segmenter/FaceSegmenter
  */
 
 import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
 import { DEFAULT_THRESHOLDS } from './thresholds.js';
-import { analyzeMasks } from './mask-analyzer.js';
-import { analyzeFaceRegionsVisibility } from './region-analyzer.js';
+import { analyzeMasks } from './mask-analyzer.js?v=20261028-139';
+import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261028-139';
 import { createVisualizationMask } from './visualization.js';
 import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261028-139';
 import { segmentationDelegate } from './delegate-policy.mjs';
 import { MaskReader } from './mask-reader.mjs';
 
@@ -117,7 +118,7 @@ class FaceSegmenter {
         }
         if (generation !== this.generation) return false;
         try {
-            console.log('[FaceSegmenter] Инициализация v1.2 (MediaPipe Image Segmenter)...');
+            console.log('[FaceSegmenter] Инициализация v1.3 (MediaPipe Image Segmenter)...');
             
             // Проверяем наличие MediaPipe
             if (typeof FilesetResolver === 'undefined' || typeof ImageSegmenter === 'undefined') {

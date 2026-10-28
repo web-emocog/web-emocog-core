@@ -8,6 +8,7 @@
 
 import { CLASS_INDICES, LANDMARK_INDICES } from './constants.js?v=20261025-1';
 import { getAreaThresholds } from './thresholds.js';
+import { createFaceSupport, getFaceSupport, isFacePixel, FACE_VISIBILITY_METHOD } from './face-support.mjs?v=20261028-139';
 
 /**
  * Определение областей лица по лэндмаркам MediaPipe Face Mesh
@@ -60,7 +61,7 @@ export function defineFaceAreas(landmarks) {
  * @param {Object} thresholds - пороговые значения
  * @returns {Object} результат анализа видимости
  */
-export function analyzeAreaVisibility(maskAnalysis, areaBounds, areaName, thresholds) {
+export function analyzeAreaVisibility(maskAnalysis, areaBounds, areaName, thresholds, support = null) {
     if (!areaBounds || !maskAnalysis.hasData) {
         return { isVisible: false, skinRatio: 0, hairRatio: 0, reason: 'no_data' };
     }
@@ -72,7 +73,8 @@ export function analyzeAreaVisibility(maskAnalysis, areaBounds, areaName, thresh
             maskAnalysis._maskDimensions,
             areaBounds,
             areaName,
-            thresholds
+            thresholds,
+            support
         );
     }
 
@@ -114,7 +116,7 @@ export function analyzeAreaVisibility(maskAnalysis, areaBounds, areaName, thresh
  * @param {Object} thresholds - пороговые значения
  * @returns {Object} детальный результат анализа
  */
-export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, thresholds) {
+export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, thresholds, support = null) {
     const { width: maskWidth, height: maskHeight } = dimensions;
     
     // Преобразуем нормализованные координаты в координаты маски
@@ -138,7 +140,7 @@ export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, th
     for (let y = startY; y < endY; y++) {
         for (let x = startX; x < endX; x++) {
             const idx = y * maskWidth + x;
-            if (idx >= maskData.length) continue;
+            if (idx >= maskData.length || (support && !isFacePixel(support, x, y))) continue;
             
             const classIdx = maskData[idx];
             counts.total++;
@@ -174,7 +176,8 @@ export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, th
             const py = Math.floor(point.y * maskHeight);
             const pidx = py * maskWidth + px;
             
-            if (px >= 0 && px < maskWidth && py >= 0 && py < maskHeight && pidx < maskData.length) {
+            if (px >= 0 && px < maskWidth && py >= 0 && py < maskHeight && pidx < maskData.length
+                && (!support || isFacePixel(support, px, py))) {
                 pointCounts.total++;
                 const classIdx = maskData[pidx];
                 
@@ -220,7 +223,7 @@ export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, th
     // 1. Достаточно face_skin
     // 2. Не слишком много волос
     // 3. Не слишком много body_skin (рука)
-    const isVisible = faceSkinRatio >= areaThresholds.minFaceSkin && 
+    const isVisible = counts.total > 0 && faceSkinRatio >= areaThresholds.minFaceSkin &&
                       hairRatio < areaThresholds.maxHair && 
                       bodySkinRatio < areaThresholds.maxHand;
     
@@ -283,6 +286,7 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
     if (!maskAnalysis.hasData) {
         return {
             isComplete: false,
+            method: FACE_VISIBILITY_METHOD,
             score: 0,
             issues: ['no_segmentation_data'],
             regions: {}
@@ -292,25 +296,26 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
     const issues = [];
     let score = 100;
     const regions = {};
+    const dims = maskAnalysis._maskDimensions;
+    const support = getFaceSupport(maskAnalysis) || (dims && createFaceSupport(faceLandmarks, dims.width, dims.height));
+    // A centre/expanded rectangle is diagnostic only: it cannot locate face occlusion.
+    if (!support || !maskAnalysis._rawMaskData) {
+        return { isComplete: false, score: 0, method: FACE_VISIBILITY_METHOD,
+            issues: ['face_region_unavailable'], regions, handDetected: false, thresholds };
+    }
+    if (!support.inFrame) {
+        return { isComplete: false, score: 0, method: FACE_VISIBILITY_METHOD,
+            issues: ['face_out_of_frame'], regions, handDetected: false, thresholds };
+    }
     
     // Флаг для детекции руки на лице
     let handDetectedOnFace = false;
     
-    // v1.2: ГЛОБАЛЬНАЯ ПРОВЕРКА body_skin по всему лицу
-    // Если body_skin > globalHandThreshold в области лица — это точно рука
+    // Aggregate body_skin is a diagnostic, not proof of a hand covering a facial region.
     if (maskAnalysis.faceRegion) {
         const globalBodySkinRatio = maskAnalysis.faceRegion.ratios.bodySkin;
         regions.globalBodySkinRatio = globalBodySkinRatio;
         
-        if (globalBodySkinRatio >= thresholds.globalHandThreshold) {
-            handDetectedOnFace = true;
-            issues.push('hand_on_face');
-            // Сильно снижаем score при глобальной детекции руки
-            score -= 30;
-            if (globalThis.WECOG_DEBUG?.enabled) {
-                console.debug(`[FaceSegmenter] body_skin=${(globalBodySkinRatio * 100).toFixed(1)}%`);
-            }
-        }
     }
 
     // Если есть лэндмарки, анализируем конкретные области
@@ -319,14 +324,9 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
         const faceAreas = defineFaceAreas(faceLandmarks);
         
         // Анализируем каждую область
-        regions.forehead = analyzeAreaVisibility(maskAnalysis, faceAreas.forehead, 'forehead', thresholds);
-        regions.leftCheek = analyzeAreaVisibility(maskAnalysis, faceAreas.leftCheek, 'leftCheek', thresholds);
-        regions.rightCheek = analyzeAreaVisibility(maskAnalysis, faceAreas.rightCheek, 'rightCheek', thresholds);
-        regions.leftEye = analyzeAreaVisibility(maskAnalysis, faceAreas.leftEye, 'leftEye', thresholds);
-        regions.rightEye = analyzeAreaVisibility(maskAnalysis, faceAreas.rightEye, 'rightEye', thresholds);
-        regions.nose = analyzeAreaVisibility(maskAnalysis, faceAreas.nose, 'nose', thresholds);
-        regions.mouth = analyzeAreaVisibility(maskAnalysis, faceAreas.mouth, 'mouth', thresholds);
-        regions.chin = analyzeAreaVisibility(maskAnalysis, faceAreas.chin, 'chin', thresholds);
+        for (const name of ['forehead', 'leftCheek', 'rightCheek', 'leftEye', 'rightEye', 'nose', 'mouth', 'chin']) {
+            regions[name] = analyzeAreaVisibility(maskAnalysis, faceAreas[name], name, thresholds, support);
+        }
 
         // Проверяем наличие руки на любой области лица (если ещё не детектирована глобально)
         if (!handDetectedOnFace) {
@@ -389,6 +389,9 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
             }
             score -= 15;
         }
+        for (const name of ['nose', 'mouth', 'chin']) {
+            if (regions[name].reason === 'hand_occlusion') issues.push(name + '_hand_occluded');
+        }
         
         // Добавляем общий issue для руки на лице (если ещё не добавлен)
         if (handDetectedOnFace && !issues.includes('hand_on_face')) {
@@ -405,40 +408,6 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
         }
         regions.symmetry = asymmetry;
 
-    } else {
-        // Анализируем на основе общей маски без лэндмарок
-        const faceRegion = maskAnalysis.faceRegion;
-        
-        if (faceRegion) {
-            // v1.2: НЕ считаем bodySkin как видимую кожу — это может быть рука!
-            const faceSkinRatio = faceRegion.ratios.faceSkin;
-            const bodySkinRatio = faceRegion.ratios.bodySkin;
-            const hairRatio = faceRegion.ratios.hair;
-            
-            regions.overall = {
-                faceSkinVisibility: faceSkinRatio,
-                bodySkinRatio: bodySkinRatio,
-                hairOcclusion: hairRatio,
-                isVisible: faceSkinRatio >= thresholds.minTotalFaceSkin && 
-                           bodySkinRatio < thresholds.globalHandThreshold
-            };
-
-            if (faceSkinRatio < thresholds.minTotalFaceSkin) {
-                issues.push('insufficient_face_visibility');
-                score -= 30;
-            }
-
-            if (hairRatio > thresholds.hairOcclusionThreshold) {
-                issues.push('hair_occlusion');
-                score -= 15;
-            }
-            
-            // Проверка на руку без лэндмарок
-            if (bodySkinRatio >= thresholds.globalHandThreshold && !handDetectedOnFace) {
-                issues.push('hand_on_face');
-                score -= 25;
-            }
-        }
     }
 
     // Проверяем общую видимость кожи лица из маски
@@ -461,6 +430,7 @@ export function analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, frameW
 
     return {
         isComplete,
+        method: FACE_VISIBILITY_METHOD,
         score: Math.max(0, score),
         issues: uniqueIssues,
         regions,

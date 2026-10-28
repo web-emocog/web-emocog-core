@@ -105,10 +105,11 @@ function refreshThumbnailCells(stimulus) {
 }
 
 function observeStimulusThumbnails(container) {
-  container._thumbnailObserver?.disconnect();
-  container._shapeResizeObserver?.disconnect();
+  container._thumbnailUiScope?.dispose();
+  const lifetime = createStimulusUiScope(container);
+  container._thumbnailUiScope = lifetime;
   const fitShapes = () => {
-    if (!container.isConnected) { container._shapeResizeObserver?.disconnect(); return; }
+    if (!lifetime.current()) { lifetime.dispose(); return; }
     container.querySelectorAll('[data-standard-shape-preview]').forEach(shape => {
       const bounds = shape.parentElement;
       if (!shape.offsetWidth || !shape.offsetHeight) return;
@@ -120,7 +121,7 @@ function observeStimulusThumbnails(container) {
   container._shapeResizeObserver = new ResizeObserver(fitShapes);
   container._shapeResizeObserver.observe(container);
   const observer = new IntersectionObserver(entries => {
-    if (!container.isConnected) { observer.disconnect(); return; }
+    if (!lifetime.current()) { lifetime.dispose(); return; }
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       observer.unobserve(entry.target);
@@ -129,6 +130,13 @@ function observeStimulusThumbnails(container) {
     }
   }, { root: container, rootMargin: '100px' });
   container._thumbnailObserver = observer;
+  lifetime.onDispose(() => {
+    observer.disconnect();
+    container._shapeResizeObserver?.disconnect();
+    delete container._thumbnailObserver;
+    delete container._shapeResizeObserver;
+    delete container._thumbnailUiScope;
+  });
   container.querySelectorAll('[data-stimulus-thumbnail]').forEach(cell => observer.observe(cell));
 }
 
@@ -197,6 +205,77 @@ function requireCurrentStimulusOperation(operation) {
     : 'Рабочая область изменилась. Операция относится к исходной рабочей области.');
 }
 
+// UI ownership is narrower than workspace media caches: even a same-route render retires it.
+function createStimulusUiScope(owner = document.getElementById('view')?.firstElementChild, { workspaceView = false } = {}) {
+  const operation = captureStimulusOperation();
+  const account = localStorage.getItem('emocog_workspace_owner_v1');
+  const hash = location.hash;
+  const cleanups = new Set();
+  let disposed = false;
+  function current() {
+    try {
+      return !disposed && hash === location.hash && (!owner || owner.isConnected)
+        && account === localStorage.getItem('emocog_workspace_owner_v1')
+        && (workspaceView || isCurrentStimulusOperation(operation));
+    } catch (_) { return false; } // A locked staff tab must not resume its old UI.
+  }
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (const cleanup of cleanups) {
+      try { cleanup(); } catch (_) { /* One best-effort teardown cannot prevent the rest. */ }
+    }
+    cleanups.clear();
+  }
+  function onDispose(cleanup) {
+    if (disposed) cleanup();
+    else cleanups.add(cleanup);
+    return () => cleanups.delete(cleanup);
+  }
+  function listen(target, type, callback, options) {
+    const guarded = event => {
+      if (!current()) { dispose(); return; }
+      callback(event);
+    };
+    target.addEventListener(type, guarded, options);
+    onDispose(() => target.removeEventListener(type, guarded, options));
+  }
+  function schedule(request, cancel, callback) {
+    const handle = request(() => {
+      unregister();
+      if (current()) callback(); else dispose();
+    });
+    const unregister = onDispose(() => cancel(handle));
+    return handle;
+  }
+  const check = () => { if (!current()) dispose(); };
+  for (const type of ['hashchange', 'storage', 'wecog:projectchange', 'wecog:researcherauthenticated', 'wecog:stimulisynced']) {
+    window.addEventListener(type, check);
+    onDispose(() => window.removeEventListener(type, check));
+  }
+  for (const type of ['pagehide', 'wecog:staffsessionblocked']) {
+    window.addEventListener(type, dispose);
+    onDispose(() => window.removeEventListener(type, dispose));
+  }
+  const view = document.getElementById('view');
+  if (view && owner) {
+    const observer = new MutationObserver(check);
+    observer.observe(view, { childList: true, subtree: true });
+    onDispose(() => observer.disconnect());
+  }
+  return { current, dispose, onDispose, listen,
+    timeout: callback => schedule(fn => setTimeout(fn, 0), clearTimeout, callback),
+    frame: callback => schedule(requestAnimationFrame, cancelAnimationFrame, callback) };
+}
+
+function stopStimulusUiMedia(container) {
+  container.querySelectorAll('video,audio').forEach(media => {
+    try { media.pause(); } catch (_) { /* Continue releasing even a broken decoder. */ }
+    media.removeAttribute('src');
+    try { media.load(); } catch (_) { /* Detached media cannot block dialog cancellation. */ }
+  });
+}
+
 function notifyStimulusLibrary() {
   window.dispatchEvent(new CustomEvent('wecog:stimulisynced'));
 }
@@ -241,8 +320,24 @@ function invalidateProjectStimuli() {
 }
 
 window.addEventListener('wecog:projectchange', activateStimulusLibraryScope);
-window.addEventListener('wecog:researcherauthenticated', activateStimulusLibraryScope);
+window.addEventListener('wecog:researcherauthenticated', () => {
+  try { window.WecogStaffSession?.assertCurrent(); } catch (_) { return; }
+  activateStimulusLibraryScope();
+  if (!/^#\/stimuli(?:\/|$)/.test(location.hash)) return;
+  const shell = document.getElementById('view')?.firstElementChild?._stimulusLibraryUiScope;
+  if (shell && !shell.current() && typeof render === 'function') {
+    // First authentication retires the anonymous shell; never rebind its old controls.
+    shell.dispose();
+    render();
+  }
+});
 document.addEventListener('DOMContentLoaded', activateStimulusLibraryScope, { once: true });
+window.addEventListener('pageshow', event => {
+  if (!event.persisted || !/^#\/stimuli(?:\/|$)/.test(location.hash)) return;
+  try { window.WecogStaffSession?.assertCurrent(); } catch (_) { return; }
+  // pagehide releases owned resources even for BFCache; restore the shell, not its dialogs.
+  if (typeof render === 'function') render();
+});
 
 async function syncProjectStimuliFromApi() {
   if (typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken()) return false;
@@ -399,6 +494,7 @@ function isConvertibleStimulusDocument(file) {
 }
 
 function showStimulusImportProgress(fileName) {
+  const lifetime = createStimulusUiScope();
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;z-index:10020;background:rgba(10,15,35,.58);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:20px;';
   overlay.innerHTML = `<div style="width:min(460px,94vw);padding:24px;border-radius:18px;background:var(--card-bg);border:1px solid var(--stroke);box-shadow:var(--shadow);color:var(--text);">
@@ -409,10 +505,12 @@ function showStimulusImportProgress(fileName) {
     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px;">${CURRENT_LANG === 'en' ? 'Do not refresh the page until processing is complete.' : 'Не обновляйте страницу до завершения обработки.'}</div>
   </div>`;
   document.body.appendChild(overlay);
+  lifetime.onDispose(() => overlay.remove());
   const label = overlay.querySelector('[data-progress-label]');
   const bar = overlay.querySelector('[data-progress-bar]');
   return {
     update(current, total, phase) {
+      if (!lifetime.current()) { lifetime.dispose(); return; }
       const safeTotal = Math.max(1, Number(total) || 1);
       const safeCurrent = Math.min(safeTotal, Math.max(0, Number(current) || 0));
       bar.style.width = `${Math.max(12, Math.round((safeCurrent / safeTotal) * 100))}%`;
@@ -420,7 +518,7 @@ function showStimulusImportProgress(fileName) {
         ? `Preparing page ${safeCurrent} of ${safeTotal}`
         : `Подготовка страницы ${safeCurrent} из ${safeTotal}`);
     },
-    close() { overlay.remove(); }
+    close() { lifetime.dispose(); }
   };
 }
 
@@ -520,17 +618,24 @@ function readStimulusDataUrl(file) {
 function requestStimulusUploadDetails(files) {
   const sourceFiles = Array.from(files || []);
   if (!sourceFiles.length) return Promise.resolve([]);
-  const entries = sourceFiles.map(file => ({
-    file,
-    name: String(file.name || '').replace(/\.[^.]+$/, '') || (CURRENT_LANG === 'en' ? 'Untitled stimulus' : 'Стимул без названия'),
-    previewObjectUrl: ((String(file.type || '').startsWith('image/')
-      || String(file.type || '').startsWith('video/')
-      || String(file.type || '').startsWith('audio/'))
-      && typeof URL !== 'undefined'
-      && typeof URL.createObjectURL === 'function')
-      ? URL.createObjectURL(file)
-      : ''
-  }));
+  const lifetime = createStimulusUiScope();
+  const entries = [];
+  try {
+    for (const file of sourceFiles) entries.push({
+      file,
+      name: String(file.name || '').replace(/\.[^.]+$/, '') || (CURRENT_LANG === 'en' ? 'Untitled stimulus' : 'Стимул без названия'),
+      previewObjectUrl: (/^(image|video|audio)\//.test(String(file.type || ''))
+        && typeof URL.createObjectURL === 'function') ? URL.createObjectURL(file) : ''
+    });
+  } catch (error) {
+    entries.forEach(entry => { if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl); });
+    lifetime.dispose();
+    return Promise.reject(error);
+  }
+  let accepted = false;
+  lifetime.onDispose(() => {
+    if (!accepted) entries.forEach(entry => { if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl); });
+  });
   return new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:10015;background:rgba(10,15,35,.62);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:20px;';
@@ -561,34 +666,42 @@ function requestStimulusUploadDetails(files) {
     </div>`;
     document.body.appendChild(overlay);
 
+    let settled = false;
+    lifetime.onDispose(() => {
+      stopStimulusUiMedia(overlay);
+      overlay.remove();
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    });
     const close = confirmed => {
+      if (settled) return;
+      if (!lifetime.current()) { lifetime.dispose(); return; }
+      settled = true;
       if (confirmed) {
         overlay.querySelectorAll('[data-upload-row]').forEach(row => {
           const index = Number(row.dataset.uploadRow);
           const value = row.querySelector('[data-upload-name]')?.value?.trim();
           if (entries[index]) entries[index].name = value || entries[index].name;
         });
-      } else {
-        entries.forEach(entry => {
-          if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl);
-        });
       }
-      overlay.remove();
-      document.removeEventListener('keydown', onKeydown);
+      accepted = confirmed;
+      lifetime.dispose();
       resolve(confirmed ? entries : null);
     };
     const onKeydown = event => {
       if (event.key === 'Escape') close(false);
       if (event.key === 'Enter' && event.target?.tagName !== 'TEXTAREA') close(true);
     };
-    overlay.querySelector('[data-upload-cancel]').addEventListener('click', () => close(false));
-    overlay.querySelector('[data-upload-confirm]').addEventListener('click', () => close(true));
-    overlay.addEventListener('click', event => { if (event.target === overlay) close(false); });
-    document.addEventListener('keydown', onKeydown);
+    lifetime.listen(overlay.querySelector('[data-upload-cancel]'), 'click', () => close(false));
+    lifetime.listen(overlay.querySelector('[data-upload-confirm]'), 'click', () => close(true));
+    lifetime.listen(overlay, 'click', event => { if (event.target === overlay) close(false); });
+    lifetime.listen(document, 'keydown', onKeydown);
     const firstInput = overlay.querySelector('[data-upload-name]');
     firstInput?.focus();
     firstInput?.select();
-  });
+  }).catch(error => { lifetime.dispose(); throw error; });
 }
 
 function stimulusPreviewHtml(stimulus) {
@@ -645,6 +758,10 @@ function StimuliAOIView() {
   updateStimuliSubnav();
 
   const root = document.createElement('div');
+  // This shell follows project selection; dialogs and preview observers do not.
+  const lifetime = createStimulusUiScope(root, { workspaceView: true });
+  root._stimulusLibraryUiScope = lifetime;
+  lifetime.onDispose(() => stopStimulusUiMedia(root));
   root.style.cssText = 'display:flex; flex-direction:column; height:calc(100% + 40px); min-height:0; margin:-20px; padding:0;';
   const status = document.createElement('div');
   status.setAttribute('data-stimulus-library-status', '');
@@ -681,6 +798,7 @@ function StimuliAOIView() {
   let currentTab = 'library'; // 'library' | 'upload' | 'folder'
 
   function rebuildTabBar() {
+    if (!lifetime.current()) return;
     leftTabs.innerHTML = '';
 
     const addFolderTab = document.createElement('div');
@@ -808,7 +926,7 @@ function StimuliAOIView() {
   uploadArea.querySelector('#dropzone_docs').onclick = () => uploadArea.querySelector('#input_docs').click();
 
   async function importDocumentFiles(files, folder) {
-    if (!files.length) return;
+    if (!files.length || !lifetime.current()) return;
     const operation = captureStimulusOperation();
     const dropzone = uploadArea.querySelector('#dropzone_docs');
     dropzone.style.pointerEvents = 'none';
@@ -816,6 +934,7 @@ function StimuliAOIView() {
     let convertedCount = 0;
     try {
       for (const file of files) {
+        if (!lifetime.current()) return;
         requireCurrentStimulusOperation(operation);
         const progress = showStimulusImportProgress(file.name);
         let converted;
@@ -837,6 +956,7 @@ function StimuliAOIView() {
         convertedCount += converted.length;
         persistStimuliList();
       }
+      if (!lifetime.current()) return;
       if (folder) renderFolderView();
       else {
         renderStimuliGallery(gallery);
@@ -846,7 +966,7 @@ function StimuliAOIView() {
         ? `${convertedCount} slides added.`
         : `Добавлено слайдов: ${convertedCount}.`);
     } catch (error) {
-      if (!isCurrentStimulusOperation(operation)) return;
+      if (!lifetime.current() || !isCurrentStimulusOperation(operation)) return;
       const unavailable = /\b404\b/.test(String(error?.message || ''));
       const prefix = unavailable
         ? (CURRENT_LANG === 'en' ? 'The server conversion endpoint is not implemented.' : 'Endpoint конвертации на сервере не реализован.')
@@ -859,11 +979,11 @@ function StimuliAOIView() {
   }
 
   async function importMediaFiles(files, folder) {
-    if (!files.length) return;
+    if (!files.length || !lifetime.current()) return;
     const operation = captureStimulusOperation();
     const uploadEntries = await requestStimulusUploadDetails(files);
     if (!uploadEntries) return [];
-    if (!isCurrentStimulusOperation(operation)) {
+    if (!lifetime.current() || !isCurrentStimulusOperation(operation)) {
       uploadEntries.forEach(entry => { if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl); });
       return [];
     }
@@ -882,6 +1002,7 @@ function StimuliAOIView() {
           : `Загрузка файла ${current} из ${total}`);
       }, folder)).map(String);
       requireCurrentStimulusOperation(operation);
+      if (!lifetime.current()) return newIds;
       if (folder) {
         folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...newIds])];
         localStorage.setItem('emocog_folders', JSON.stringify(folders));
@@ -897,7 +1018,7 @@ function StimuliAOIView() {
         const retained = stimuliList.some(stimulus => stimulus?._previewObjectUrl === entry.previewObjectUrl);
         if (entry.previewObjectUrl && !retained) URL.revokeObjectURL(entry.previewObjectUrl);
       });
-      if (isCurrentStimulusOperation(operation)) toast(`${CURRENT_LANG === 'en' ? 'Media upload failed.' : 'Ошибка загрузки медиа.'} ${error?.message || ''}`.trim(), 'error');
+      if (lifetime.current()) toast(`${CURRENT_LANG === 'en' ? 'Media upload failed.' : 'Ошибка загрузки медиа.'} ${error?.message || ''}`.trim(), 'error');
       return [];
     } finally {
       progress.close();
@@ -940,6 +1061,7 @@ function StimuliAOIView() {
 
 
   function showTab(tab) {
+    if (!lifetime.current()) return;
     currentTab = tab;
     gallery.style.display = tab === 'library' ? 'grid' : 'none';
     uploadArea.style.display = tab === 'upload' ? 'flex' : 'none';
@@ -956,7 +1078,7 @@ function StimuliAOIView() {
     if (tab === 'library' && chipEls[0]) chipEls[0].classList.add('active');
     else if (tab === 'upload' && chipEls[1]) chipEls[1].classList.add('active');
 
-    if (tab === 'upload') setTimeout(() => applyAutoI18n(), 0);
+    if (tab === 'upload') lifetime.timeout(() => applyAutoI18n());
   }
 
   function wireStimuliChips() {
@@ -976,6 +1098,7 @@ function StimuliAOIView() {
   }
 
   function renderFolderView() {
+    if (!lifetime.current()) return;
     const folder = folders.find(f => f.id === selectedFolder);
     if (!folder) return;
     const content = folderView.querySelector('#folderViewContent');
@@ -983,6 +1106,7 @@ function StimuliAOIView() {
     if (currentStimuliFilter !== 'all') {
       folderStimuli = folderStimuli.filter(s => s.type === currentStimuliFilter);
     }
+    stopStimulusUiMedia(content);
     if (folderStimuli.length === 0) {
       content.innerHTML = `<div style="grid-column:1/-1; color:var(--muted); font-size:13px; padding:24px 0;">${t('folderEmpty')}</div>`;
     } else {
@@ -1031,9 +1155,11 @@ function StimuliAOIView() {
   }
 
   function showAddFromLibraryModal() {
+    if (!lifetime.current()) return;
     const operation = captureStimulusOperation();
-  const folder = folders.find(f => f.id === selectedFolder);
+    const folder = folders.find(f => f.id === selectedFolder);
     if (!folder) return;
+    const dialogLifetime = createStimulusUiScope(root);
 
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.65);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -1081,6 +1207,7 @@ function StimuliAOIView() {
     `;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
+    dialogLifetime.onDispose(() => { stopStimulusUiMedia(overlay); overlay.remove(); });
 
     let selectedIds = new Set();
     modal.querySelectorAll('.modal-pick').forEach(card => {
@@ -1097,21 +1224,30 @@ function StimuliAOIView() {
       }
       });
     });
-    const close = () => document.body.removeChild(overlay);
+    const close = () => dialogLifetime.dispose();
     modal.querySelector('#modalCloseBtn').addEventListener('click', close);
     modal.querySelector('#modalCancelBtn').addEventListener('click', close);
     modal.querySelector('#modalAddBtn').addEventListener('click', async () => {
+      if (!dialogLifetime.current()) { close(); return; }
+      const button = modal.querySelector('#modalAddBtn');
+      if (button.disabled) return;
+      button.disabled = true;
       try {
         requireCurrentStimulusOperation(operation);
         await ensureServerFolder(folder);
         requireCurrentStimulusOperation(operation);
+        if (!dialogLifetime.current()) { close(); return; }
         await Promise.all(Array.from(selectedIds).map(id => setStimulusFolder(id, folder.apiFolderId || null)));
         requireCurrentStimulusOperation(operation);
+        if (!dialogLifetime.current()) { close(); return; }
       } catch (error) {
-        if (!isCurrentStimulusOperation(operation)) { close(); return; }
+        if (!dialogLifetime.current()) { close(); return; }
         toast(error?.message || String(error), 'error');
-        await syncProjectStimuliFromApi();
+        // Reconcile a possibly committed mutation, but never replay it automatically.
+        syncProjectStimuliFromApi().catch(() => {});
         return;
+      } finally {
+        button.disabled = false;
       }
       folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), ...Array.from(selectedIds)])];
       localStorage.setItem('emocog_folders', JSON.stringify(folders));
@@ -1121,19 +1257,15 @@ function StimuliAOIView() {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   }
 
-  setTimeout(() => {
+  lifetime.timeout(() => {
     rebuildTabBar();
     renderStimuliGallery(gallery);
     if (selectedFolder) showTab('folder');
 
     wireStimuliChips();
-  }, 0);
+  });
 
   const refreshSyncedStimuli = () => {
-    if (!root.isConnected) {
-      window.removeEventListener('wecog:stimulisynced', refreshSyncedStimuli);
-      return;
-    }
     rebuildTabBar();
     updateStatus();
     updateStimuliSubnav();
@@ -1141,7 +1273,7 @@ function StimuliAOIView() {
     else renderStimuliGallery(gallery);
 
   };
-  window.addEventListener('wecog:stimulisynced', refreshSyncedStimuli);
+  lifetime.listen(window, 'wecog:stimulisynced', refreshSyncedStimuli);
 
   filterRow.querySelectorAll('.type-pill').forEach(pill => {
     pill.addEventListener('click', () => {
@@ -1252,6 +1384,7 @@ async function handleFileUpload(files, onProgress, folder = null) {
 
 function showCreateFolderModal(onCreated) {
   const operation = captureStimulusOperation();
+  const lifetime = createStimulusUiScope();
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,0.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;';
   const modal = document.createElement('div');
@@ -1269,23 +1402,30 @@ function showCreateFolderModal(onCreated) {
   `;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+  lifetime.onDispose(() => overlay.remove());
 
   const input = modal.querySelector('#folderNameInput');
   input.focus();
   input.select();
 
-  const close = () => document.body.removeChild(overlay);
+  const close = () => lifetime.dispose();
   modal.querySelector('#modalFolderCancel').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   modal.querySelector('#modalFolderCreate').addEventListener('click', async () => {
+    if (!lifetime.current()) { close(); return; }
+    const button = modal.querySelector('#modalFolderCreate');
+    if (button.disabled) return;
     const name = input.value.trim();
     if (!name) return;
+    button.disabled = true;
     try {
       if (!hasResearcherApiToken()) throw new Error(CURRENT_LANG === 'en' ? 'Sign in to save a folder.' : 'Войдите в кабинет, чтобы сохранить папку.');
       const projectId = await resolveApiProjectId();
       requireCurrentStimulusOperation(operation);
+      if (!lifetime.current()) { close(); return; }
       const row = await apiPost('/stimuli/folders', { project_id: projectId, name });
       requireCurrentStimulusOperation(operation);
+      if (!lifetime.current()) { close(); return; }
       const newFolder = { id: 'folder_' + row.id, apiFolderId: row.id, name: row.name, stimuliIds: [] };
       folders.push(newFolder);
       localStorage.setItem('emocog_folders', JSON.stringify(folders));
@@ -1293,8 +1433,10 @@ function showCreateFolderModal(onCreated) {
       close();
       if (onCreated) onCreated(newFolder);
     } catch (error) {
-      if (!isCurrentStimulusOperation(operation)) { close(); return; }
+      if (!lifetime.current()) { close(); return; }
       toast(error?.message || String(error), 'error');
+    } finally {
+      button.disabled = false;
     }
   });
   input.addEventListener('keydown', (e) => {
@@ -1328,6 +1470,7 @@ function updateStimuliSubnav() {
 
 function renderStimuliGallery(container) {
   if (!container) return;
+  stopStimulusUiMedia(container);
   let filtered = stimuliList.filter(stimulus => currentStimuliScope === 'all' || stimulusOwnership(stimulus) === currentStimuliScope);
   if (currentStimuliFilter !== 'all') {
     filtered = filtered.filter(s => s.type === currentStimuliFilter);
@@ -1594,15 +1737,26 @@ function applyStimuliDefinitionsToLibrary(definitions) {
   if (changed) persistStimuliList();
 }
 
+let activeAoiUiScope = null;
 async function openAoiEditor(stimulusId, options = {}) {
   const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
   if (!stimulus) return;
+  activeAoiUiScope?.dispose();
+  const lifetime = createStimulusUiScope();
+  activeAoiUiScope = lifetime;
+  lifetime.onDispose(() => { if (activeAoiUiScope === lifetime) activeAoiUiScope = null; });
+  try {
   if (stimulus.apiContentUrl && !stimulus._previewObjectUrl) {
     try {
       await hydrateApiStimulusPreview(stimulus);
     } catch (error) {
-      console.warn('[Stimuli] Failed to load AOI preview:', error);
+      // A failed preview can be retried in the current workspace; never reopen a retired UI.
+      if (!lifetime.current()) { lifetime.dispose(); return; }
     }
+  }
+  if (!lifetime.current() || stimulus._previewRetired || !stimuliList.includes(stimulus)) {
+    lifetime.dispose();
+    return;
   }
   let mediaUrl = stimulusPreviewSource(stimulus);
   const standard = window.StandardStimuli?.resolveStandardStimulus?.(stimulus.id, stimulus, { lang: CURRENT_LANG });
@@ -1681,6 +1835,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     ${hasQueue ? `<div style="padding:12px 14px;border-top:1px solid var(--stroke);display:flex;align-items:center;justify-content:flex-end;gap:10px;background:var(--card-bg);"><button id="aoiSaveNext" class="quick-btn" style="background:var(--accent);border-color:var(--accent);color:white;font-weight:800;">${isQueueLast ? (CURRENT_LANG === 'en' ? 'Save and finish queue' : 'Сохранить и завершить очередь') : (CURRENT_LANG === 'en' ? 'Save material and continue' : 'Сохранить материал и далее')} →</button></div>` : ''}`;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+  lifetime.onDispose(() => { stopStimulusUiMedia(overlay); overlay.remove(); });
 
   const svg = modal.querySelector('#aoiSvg');
   const stage = modal.querySelector('#aoiStage');
@@ -1745,13 +1900,17 @@ async function openAoiEditor(stimulusId, options = {}) {
     fitStage();
   };
   if (media) {
-    media.addEventListener(stimulus.type === 'video' ? 'loadedmetadata' : 'load', useMediaRatio, { once: true });
+    lifetime.listen(media, stimulus.type === 'video' ? 'loadedmetadata' : 'load', useMediaRatio, { once: true });
     if (media.complete || media.readyState >= 1) useMediaRatio();
   }
-  window.addEventListener('resize', fitStage);
-  requestAnimationFrame(fitStage);
+  lifetime.listen(window, 'resize', fitStage);
+  lifetime.frame(fitStage);
 
   function saveAll() {
+    if (!lifetime.current() || stimulus._previewRetired || !stimuliList.includes(stimulus)) {
+      lifetime.dispose();
+      return false;
+    }
     const normalized = aois.map((aoi, index) => normalizeAoi(aoi, stimulus.id, index + 1));
     if (normalized.some(aoi => !aoi)) {
       toast(CURRENT_LANG === 'en'
@@ -1828,7 +1987,7 @@ async function openAoiEditor(stimulusId, options = {}) {
       handle.addEventListener('dragstart', event => {
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', handle.dataset.id);
-        requestAnimationFrame(() => { handle.closest('.aoi-list-row').style.opacity = '.45'; });
+        lifetime.frame(() => { if (handle.isConnected) handle.closest('.aoi-list-row').style.opacity = '.45'; });
       });
       handle.addEventListener('dragend', clearDropIndicators);
     });
@@ -2109,9 +2268,9 @@ async function openAoiEditor(stimulusId, options = {}) {
     saveAll(); renderAll();
   });
   const close = (notify = true) => {
-    window.removeEventListener('resize', fitStage);
-    if (document.body.contains(overlay)) document.body.removeChild(overlay);
-    if (notify && typeof options.onClose === 'function') options.onClose(stimulus, aois);
+    const shouldNotify = lifetime.current() && overlay.isConnected;
+    lifetime.dispose();
+    if (notify && shouldNotify && typeof options.onClose === 'function') options.onClose(stimulus, aois);
   };
   modal.querySelector('#aoiSaveNext')?.addEventListener('click', () => {
     captureSelectedFormDraft();
@@ -2129,6 +2288,10 @@ async function openAoiEditor(stimulusId, options = {}) {
   overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
   modal.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
   renderAll();
+  } catch (error) {
+    lifetime.dispose();
+    throw error;
+  }
 }
 
 //~

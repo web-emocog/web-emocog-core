@@ -324,11 +324,13 @@ test.describe('wecog design system', () => {
   });
 
   test('loads the project library when authentication completes after page scripts', async ({ page }) => {
+    let releaseAuth!: () => void;
+    const authenticated = new Promise<void>(resolve => { releaseAuth = resolve; });
     await page.route('http://127.0.0.1:3000/**', async route => {
       const pathname = new URL(route.request().url()).pathname;
       const headers = { 'Access-Control-Allow-Origin': baseUrl, 'Access-Control-Allow-Credentials': 'true' };
       if (pathname.endsWith('/auth/me')) {
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await authenticated;
         return route.fulfill({ status: 200, headers, json: { id: 1, email: 'test@example.org', role: 'researcher' } });
       }
       if (pathname.endsWith('/auth/permissions')) return route.fulfill({ status: 200, headers, json: {} });
@@ -341,8 +343,25 @@ test.describe('wecog design system', () => {
       return route.fulfill({ status: 404, headers, json: { error: 'Not mocked' } });
     });
     await page.goto(`${baseUrl}/apps/web/researcher.html#/stimuli`, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean((document.getElementById('view')?.firstElementChild as any)?._stimulusLibraryUiScope));
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__initialLibraryRoot = document.getElementById('view')!.firstElementChild;
+      w.__initialLibraryScope = w.__initialLibraryRoot._stimulusLibraryUiScope;
+    });
+    releaseAuth();
     await expect(page.locator('.stimulus-card[data-id="42"]')).toBeVisible();
     await expect(page.locator('.stimulus-card[data-id="42"]')).toContainText('restored.png');
+    expect(await page.evaluate(() => {
+      const w = window as any, root = document.getElementById('view')!.firstElementChild as any;
+      return { replaced: root !== w.__initialLibraryRoot, retired: !w.__initialLibraryScope.current(),
+        current: root._stimulusLibraryUiScope.current() };
+    })).toEqual({ replaced: true, retired: true, current: true });
+    expect(await page.evaluate(() => {
+      const root = document.getElementById('view')!.firstElementChild;
+      window.dispatchEvent(new Event('wecog:researcherauthenticated'));
+      return document.getElementById('view')!.firstElementChild === root;
+    })).toBe(true);
   });
 
   test('developer pages share one active shell and preserve module geometry', async ({ page }) => {

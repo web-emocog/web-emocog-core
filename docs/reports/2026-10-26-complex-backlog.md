@@ -22,6 +22,17 @@ benchmark-точек; старые результаты не пересчита�
 Проверить MediaStream/физическую камеру отдельно; не выдавать счётчик/повторный
 опрос за независимые измерения. [Новые измерения и воспроизведение](2026-10-27-firefox-source-scheduling-audit.md).
 
+Дополнительная регрессия 27.10: неизменённый native FPS observer в headless
+Firefox завышает частоту looped 10 FPS fixture до 26..31 FPS. Probe показывает
+скачки `presentedFrames`/`mediaTime` при обычном decoded counter. Не исправлять
+это повышением gate и не заменять все MediaStream counters без проверки
+provenance/inert/reset/seek/drop. См. [новый локальный аудит](2026-10-27-diagnostics-lifecycle-audit.md).
+
+Продолжение 28.10: исправлен файловый counter path с явным `video_cadence.v2`,
+отдельным учётом drops/displayed и lower-bound fallback. Native MediaStream path
+и scientific thresholds сохранены. Это не закрывает общий >=25 analysis FPS
+или проверку физической камеры. [Исправление и регрессия](2026-10-28-frame-cadence-followup.md).
+
 **Приёмка:** Три последовательных 60-секундных real-time replay каждого движка: >=25 analysis FPS, без 3 с подряд ниже 25, UI p95<=10 мс, gap<=250 мс, свежая сегментация. Отдельно реальные браузеры/камера/40 минут: память, RT, checkpoint/offline.
 
 ## RT-ASYNC: Убрать синхронный Python из ingest
@@ -87,7 +98,26 @@ metadata, счётчик блоков из не-array; own-property merge и о�
 
 ## LIFECYCLE: Инвентаризация listener/timer teardown
 
-Приоритет: **P2**. Строки исходной таблицы: 46,51,54,60,105,120,124,127,134,138,141.
+**Строки 46 и 60 исправлены локально 27.10.** Диагностика/HUD получили
+симметричный teardown и generation guards; legacy runner отменяет интервалы,
+обработчики и устаревшие загрузки. Это не объявляет закрытым lifecycle всех
+канонических модулей. См. [продолжение](2026-10-27-diagnostics-lifecycle-audit.md).
+
+**Строка 141 исправлена локально 28.10.** Библиотека стимулов получила owned
+UI scopes: delayed AOI не открывается на другом экране, dialogs не сохраняют
+через старые controls после смены workspace, thumbnail observers/RAF/listeners
+освобождаются при unmount. Shell продолжает работать при смене проекта и
+восстанавливается после persisted pageshow, не повторяя мутации.
+[Реализация, регрессии, ограничения](2026-10-28-stimulus-ui-lifecycle-audit.md).
+
+**Строка 105 исправлена локально 28.10.** Developer BPM получил отмену
+асинхронного запуска, освобождение late camera/model results, bounded removable
+waiters и teardown metadata/RAF/timers при Stop/pagehide/account block.
+Проверены 100 полных start/stop и init/close настоящей локальной модели в трёх
+движках, без физической камеры. Это не проверка accuracy/FPS на человеке.
+[Реализация и ограничения](2026-10-28-developer-bpm-lifecycle-audit.md).
+
+Приоритет: **P2**. Открытые строки исходной таблицы: 51,54,120,124,127,134,138.
 
 Проверить повторный mount/start/stop, оставленные document/window listeners, интервал rest и debug UI. Удалённые DOM nodes обычно освобождаются GC, поэтому наличие addEventListener само по себе не баг.
 
@@ -95,7 +125,11 @@ metadata, счётчик блоков из не-array; own-property merge и о�
 
 ## ERRORS: Разобрать подавленные ошибки по критичности
 
-Приоритет: **P2**. Строки исходной таблицы: 39,41,43,44,48,50,61,67,73,81,85,87,88,98,100,107,111,113,117,126,133,137,144.
+Строка 61 проверена адресно: catches в диагностическом runtime относятся к
+optional storage/inspection/DevTools, не подавляют сохранение сессии. Их нельзя
+заменять логами с исходными Error/PII; строка снята как неподтверждённый баг.
+
+Приоритет: **P2**. Открытые строки исходной таблицы: 39,41,43,44,48,50,67,73,81,85,87,88,98,100,107,111,113,117,126,133,137,144.
 
 Разделить optional storage/focus/debug teardown и критические ошибки загрузки/публикации/сохранения. Не добавлять console.error с payload и токенами во все catch.
 
@@ -103,7 +137,13 @@ metadata, счётчик блоков из не-array; own-property merge и о�
 
 ## LEGACY: Свести entrypoints и зависимости к canonical runtime
 
-Приоритет: **P2**. Строки исходной таблицы: 53,63,68,75,82,86,195,201,209.
+**Строка 209 исправлена локально 28.10.** В developer BPM удалён перебор
+предположительных ancestor/`/main` URL. Same-origin rPPG/WASM/model paths
+разрешаются от import.meta.url, проверены repo root и path prefix. Серверный
+запрет камеры для staff pages не ослаблен. См.
+[адресный отчёт](2026-10-28-developer-bpm-lifecycle-audit.md).
+
+Приоритет: **P2**. Строки исходной таблицы: 53,63,68,75,82,86,195,201.
 
 Карта старых/updated HTML и imports, алиасы/redirects там, где сохранение совместимости доказано; убрать неиспользуемые CDN/localhost paths только после проверки. Canonical models уже закреплены локально.
 
@@ -118,6 +158,11 @@ metadata, счётчик блоков из не-array; own-property merge и о�
 **Приёмка:** Один seed воспроизводит план; retries не меняют исходную выборку; нет коллизий IDs и скрытой смены дизайна эксперимента.
 
 ## LOGS: Client logging без токенов и покадрового spam
+
+Строки 187 и 200 исправлены локально 27.10: безопаснее debug bundle и loader
+MediaPipe, отключён сбор клавиш в полях ввода, Error не раскрывает текст/stack.
+Остальные 22 logging-строки требуют отдельной проверки; redactor не является
+гарантией полной анонимизации произвольного текста.
 
 Приоритет: **P2**. Строки исходной таблицы: Открытые console.log строки таблицы.
 

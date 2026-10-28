@@ -6,6 +6,49 @@
 (function (global) {
   'use strict';
 
+  if (global.ProtocolRunner && global.ProtocolRunner.dispose) global.ProtocolRunner.dispose();
+  var disposed = false;
+  var loadReady = false;
+  var loadSequence = 0;
+  var activeLoad = null;
+  var viewGeneration = 0;
+  var viewTimer = null;
+  var activeContainer = null;
+  var viewListeners = [];
+
+  function clearView() {
+    viewGeneration++;
+    if (viewTimer !== null) clearInterval(viewTimer);
+    viewTimer = null;
+    viewListeners.splice(0).forEach(function (remove) { remove(); });
+  }
+
+  function stop() {
+    loadSequence++;
+    if (activeLoad) activeLoad.abort();
+    activeLoad = null;
+    clearView();
+    activeContainer = null;
+  }
+
+  function listenView(element, type, callback) {
+    var generation = viewGeneration;
+    var container = activeContainer;
+    function handler(event) {
+      if (generation !== viewGeneration || container !== activeContainer || container.isConnected === false) return;
+      callback(event);
+    }
+    element.addEventListener(type, handler);
+    viewListeners.push(function () { element.removeEventListener(type, handler); });
+  }
+
+  function loadCancelled() {
+    var error = new Error('Protocol load cancelled');
+    error.name = 'AbortError';
+    error.code = 'protocol_load_cancelled';
+    return error;
+  }
+
   var state = {
     invitation: null,
     definition: null,
@@ -28,23 +71,43 @@
    * Загрузить протокол по коду приглашения (GET /invitations/by-code/:code).
    */
   function loadByCode(code) {
+    if (disposed) return Promise.reject(loadCancelled());
     var base = (getApiBase() || '').replace(/\/$/, '');
     if (!base) return Promise.reject(new Error('API base is not configured'));
     var url = base + '/invitations/by-code/' + encodeURIComponent(code);
+    stop();
+    loadReady = false;
+    var request = ++loadSequence;
     var controller = new AbortController();
+    activeLoad = controller;
     var deadline = setTimeout(function () { controller.abort(); }, 15000);
-    return fetch(url, { signal: controller.signal }).then(function (r) {
+    var abort;
+    var cancelled = new Promise(function (_resolve, reject) {
+      abort = function () { reject(loadCancelled()); };
+      controller.signal.addEventListener('abort', abort, { once: true });
+    });
+    var pending = Promise.resolve().then(function () {
+      if (controller.signal.aborted) throw loadCancelled();
+      return fetch(url, { signal: controller.signal });
+    }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
       return r.json();
     }).then(function (data) {
+      if (controller.signal.aborted || request !== loadSequence) throw loadCancelled();
       state.invitation = data;
       state.definition = data.definition || { blocks: [] };
       state.blockIndex = 0;
       state.run_log = [];
       state.started_at = new Date().toISOString();
       state.answers = Object.create(null);
+      loadReady = true;
       return state.definition;
-    }).finally(function () { clearTimeout(deadline); });
+    });
+    return Promise.race([pending, cancelled]).finally(function () {
+      clearTimeout(deadline);
+      controller.signal.removeEventListener('abort', abort);
+      if (activeLoad === controller) activeLoad = null;
+    });
   }
 
   function getCurrentBlock() {
@@ -92,7 +155,7 @@
       '<h2>' + escapeHtml(title) + '</h2>' +
       '<p class="protocol-text">' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>' +
       '<button type="button" class="btn protocol-next">Next</button></div>';
-    container.querySelector('.protocol-next').addEventListener('click', onNext);
+    listenView(container.querySelector('.protocol-next'), 'click', onNext);
   }
 
   function renderConsent(block, container, onNext) {
@@ -106,8 +169,8 @@
       '<button type="button" class="btn protocol-next" id="protocolConsentBtn" disabled>Confirm and continue</button></div>';
     var check = container.querySelector('#protocolConsentCheck');
     var btn = container.querySelector('#protocolConsentBtn');
-    check.addEventListener('change', function () { btn.disabled = !check.checked; });
-    btn.addEventListener('click', onNext);
+    listenView(check, 'change', function () { btn.disabled = !check.checked; });
+    listenView(btn, 'click', onNext);
   }
 
   function renderQuestionnaire(block, container, onNext) {
@@ -141,10 +204,10 @@
     container.querySelectorAll('input[type="range"]').forEach(function (range) {
       var valEl = document.getElementById(range.id + '_val');
       if (valEl) {
-        range.addEventListener('input', function () { valEl.textContent = range.value; });
+        listenView(range, 'input', function () { valEl.textContent = range.value; });
       }
     });
-    container.querySelector('#protocolQuestionnaireForm').addEventListener('submit', function (e) {
+    listenView(container.querySelector('#protocolQuestionnaireForm'), 'submit', function (e) {
       e.preventDefault();
       var form = e.target;
       var answers = Object.create(null);
@@ -165,7 +228,7 @@
       '<h2>' + escapeHtml(title) + '</h2>' +
       '<p>In the full flow, calibration would run here. For protocol-runner MVP, click Next to continue.</p>' +
       '<button type="button" class="btn protocol-next">Next</button></div>';
-    container.querySelector('.protocol-next').addEventListener('click', onNext);
+    listenView(container.querySelector('.protocol-next'), 'click', onNext);
   }
 
   function renderStimuli(block, container, onNext) {
@@ -175,68 +238,46 @@
       '<h2>' + escapeHtml(title) + '</h2>' +
       '<p>Stimuli block. In the full flow, stimuli would be presented here.</p>' +
       '<button type="button" class="btn protocol-next">Next</button></div>';
-    container.querySelector('.protocol-next').addEventListener('click', onNext);
+    listenView(container.querySelector('.protocol-next'), 'click', onNext);
+  }
+
+  function renderCountdown(block, container, onNext, kind, fallback) {
+    var params = getBlockParams(block);
+    var duration = Number(params.duration_sec != null ? params.duration_sec : fallback);
+    if (!Number.isSafeInteger(duration) || duration < 0) {
+      showError(container, 'Invalid block duration');
+      return;
+    }
+    var title = params.title || kind[0].toUpperCase() + kind.slice(1);
+    state.restDuration = duration;
+    state.restStart = Date.now();
+    container.innerHTML = '<div class="protocol-block ' + kind + '">' +
+      '<h2>' + escapeHtml(title) + '</h2>' +
+      '<p class="rest-timer" id="protocolRestTimer">' + duration + ' s</p>' +
+      (kind === 'rest' ? '<p class="muted">Please wait...</p>' : '') + '</div>';
+    var timerEl = container.querySelector('#protocolRestTimer');
+    var generation = viewGeneration;
+    viewTimer = setInterval(function () {
+      if (generation !== viewGeneration || activeContainer !== container) return;
+      if (container.isConnected === false) { clearView(); activeContainer = null; return; }
+      var left = Math.max(0, duration - Math.floor((Date.now() - state.restStart) / 1000));
+      if (timerEl) timerEl.textContent = left + ' s';
+      if (left <= 0) {
+        onNext();
+      }
+    }, 500);
   }
 
   function renderRest(block, container, onNext) {
-    var params = getBlockParams(block);
-    var duration = (params.duration_sec != null ? params.duration_sec : 60) | 0;
-    var title = params.title || 'Rest';
-    state.restDuration = duration;
-    state.restStart = Date.now();
-    container.innerHTML = '<div class="protocol-block rest">' +
-      '<h2>' + escapeHtml(title) + '</h2>' +
-      '<p class="rest-timer" id="protocolRestTimer">' + duration + ' s</p>' +
-      '<p class="muted">Please wait...</p></div>';
-    var timerEl = container.querySelector('#protocolRestTimer');
-    var interval = setInterval(function () {
-      var left = Math.max(0, duration - Math.floor((Date.now() - state.restStart) / 1000));
-      if (timerEl) timerEl.textContent = left + ' s';
-      if (left <= 0) {
-        clearInterval(interval);
-        onNext();
-      }
-    }, 500);
+    renderCountdown(block, container, onNext, 'rest', 60);
   }
 
   function renderBaseline(block, container, onNext) {
-    var params = getBlockParams(block);
-    var duration = (params.duration_sec != null ? params.duration_sec : 180) | 0;
-    var title = params.title || 'Baseline';
-    state.restDuration = duration;
-    state.restStart = Date.now();
-    container.innerHTML = '<div class="protocol-block baseline">' +
-      '<h2>' + escapeHtml(title) + '</h2>' +
-      '<p class="rest-timer" id="protocolRestTimer">' + duration + ' s</p></div>';
-    var timerEl = container.querySelector('#protocolRestTimer');
-    var interval = setInterval(function () {
-      var left = Math.max(0, duration - Math.floor((Date.now() - state.restStart) / 1000));
-      if (timerEl) timerEl.textContent = left + ' s';
-      if (left <= 0) {
-        clearInterval(interval);
-        onNext();
-      }
-    }, 500);
+    renderCountdown(block, container, onNext, 'baseline', 180);
   }
 
   function renderRecovery(block, container, onNext) {
-    var params = getBlockParams(block);
-    var duration = (params.duration_sec != null ? params.duration_sec : 180) | 0;
-    var title = params.title || 'Recovery';
-    state.restDuration = duration;
-    state.restStart = Date.now();
-    container.innerHTML = '<div class="protocol-block recovery">' +
-      '<h2>' + escapeHtml(title) + '</h2>' +
-      '<p class="rest-timer" id="protocolRestTimer">' + duration + ' s</p></div>';
-    var timerEl = container.querySelector('#protocolRestTimer');
-    var interval = setInterval(function () {
-      var left = Math.max(0, duration - Math.floor((Date.now() - state.restStart) / 1000));
-      if (timerEl) timerEl.textContent = left + ' s';
-      if (left <= 0) {
-        clearInterval(interval);
-        onNext();
-      }
-    }, 500);
+    renderCountdown(block, container, onNext, 'recovery', 180);
   }
 
   function renderFinal(block, container) {
@@ -247,7 +288,7 @@
       '<h2>' + escapeHtml(title) + '</h2>' +
       '<p>' + escapeHtml(text) + '</p>' +
       '<button type="button" class="btn protocol-download" id="protocolDownloadBtn">Download report (JSON)</button></div>';
-    container.querySelector('#protocolDownloadBtn').addEventListener('click', function () {
+    listenView(container.querySelector('#protocolDownloadBtn'), 'click', function () {
       var log = getRunLog();
       var blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' });
       var a = document.createElement('a');
@@ -268,37 +309,29 @@
   }
 
   function runNext(container) {
-    var block = advanceBlock();
-    if (!block) {
-      renderFinal(null, container);
-      return;
-    }
-    var type = block.type || 'instruction';
-    var onNext = function () { runNext(container); };
-    if (type === 'instruction') renderInstruction(block, container, onNext);
-    else if (type === 'consent') renderConsent(block, container, onNext);
-    else if (type === 'questionnaire') renderQuestionnaire(block, container, onNext);
-    else if (type === 'calibration') renderCalibration(block, container, onNext);
-    else if (type === 'stimuli') renderStimuli(block, container, onNext);
-    else if (type === 'rest') renderRest(block, container, onNext);
-    else if (type === 'baseline') renderBaseline(block, container, onNext);
-    else if (type === 'recovery') renderRecovery(block, container, onNext);
-    else if (type === 'final') {
-      advanceBlock();
-      renderFinal(block, container);
-    } else {
-      renderInstruction(block, container, onNext);
-    }
+    advanceBlock();
+    start(container);
   }
 
   function start(container) {
+    if (disposed) throw loadCancelled();
+    if (activeLoad) throw new Error('Wait for protocol loading before starting');
+    if (!loadReady) throw new Error('Load a protocol successfully before starting');
+    clearView();
+    activeContainer = container;
     var block = getCurrentBlock();
     if (!block) {
       renderFinal(null, container);
       return;
     }
     var type = block.type || 'instruction';
-    var onNext = function () { runNext(container); };
+    var generation = viewGeneration;
+    var advanced = false;
+    var onNext = function () {
+      if (advanced || generation !== viewGeneration || activeContainer !== container || container.isConnected === false) return;
+      advanced = true;
+      runNext(container);
+    };
     if (type === 'instruction') renderInstruction(block, container, onNext);
     else if (type === 'consent') renderConsent(block, container, onNext);
     else if (type === 'questionnaire') renderQuestionnaire(block, container, onNext);
@@ -314,8 +347,15 @@
   global.ProtocolRunner = {
     loadByCode: loadByCode,
     start: start,
+    stop: stop,
+    dispose: function () {
+      stop();
+      disposed = true;
+      global.removeEventListener('pagehide', stop);
+    },
     getRunLog: getRunLog,
     getCurrentBlock: getCurrentBlock,
     getDefinition: function () { return state.definition; },
   };
+  global.addEventListener('pagehide', stop);
 })(typeof window !== 'undefined' ? window : this);

@@ -90,7 +90,7 @@ new FaceSegmenter(options)
 | `minTotalFaceSkin` | `number` | `0.55` | Минимум кожи лица |
 | `hairOcclusionThreshold` | `number` | `0.25` | Порог окклюзии волосами |
 | `handOcclusionThreshold` | `number` | `0.05` | Порог окклюзии рукой (в области) |
-| `globalHandThreshold` | `number` | `0.08` | Глобальный порог руки |
+| `globalHandThreshold` | `number` | `0.08` | Legacy diagnostic option, не самостоятельный gate |
 | `maxAsymmetry` | `number` | `0.30` | Максимальная асимметрия |
 | `onInitialized` | `Function` | `null` | Callback при инициализации |
 | `onError` | `Function` | `null` | Callback при ошибке |
@@ -118,7 +118,9 @@ MediaPipe Selfie Multiclass Segmenter возвращает 6 классов:
 | 4 | `clothes` | Одежда |
 | 5 | `others` | Аксессуары и прочее |
 
-> ⚠️ **Важно:** Класс `body_skin` включает руки. Если в области лица много `body_skin` — это означает окклюзию рукой.
+Класс `body_skin` включает шею, руки и другую кожу тела, а не только руки.
+Это не отдельная hand-detection модель. Для gate используется только
+региональная эвристика внутри локализованного контура лица.
 
 ## Формат выходных данных
 
@@ -220,19 +222,27 @@ async function analyzeLoop() {
 ## Алгоритм детекции окклюзии
 
 1. **Определение области лица:**
-   - Если есть landmarks — используем bounding box лица с padding 10%
-   - Если нет landmarks — используем центральную область (20%, 10%, 60%, 80%)
+   - При валидных landmarks пиксели отбираются внутри упорядоченного face oval,
+     без padding под подбородком; региональные rectangles также обрезаются им.
+   - Прямоугольный fallback без mesh остаётся только диагностикой. Он не может
+     подтвердить видимость: `face_region_unavailable` оставляет gate закрытым.
 
 2. **Анализ классов в области лица:**
    - Считаем пиксели каждого класса
    - Вычисляем соотношения
 
 3. **Детекция руки:**
-   - Если `bodySkin ratio >= globalHandThreshold (0.08)` → `handDetected = true`
-   - Это глобальная гипотеза сегментации, а не доказательство перекрытия рукой.
+   - `globalBodySkinRatio` диагностический, не добавляет `hand_on_face` сам.
+   - `handDetected` опирается на in-face regions, с прежними численными порогами.
    - Canonical runtime и итоговый QC используют только региональные
      `*_hand_occluded`. Методика summary: `regional_hand_evidence.v2`;
      глобальный `handDetected`/`hand_on_face` не бракует лицо автоматически.
+
+Visibility result имеет `method: face_oval_regions.v1`, а mask faceRegion
+`sampling.method: face_oval_pixels.v1`. Не пересчитывать исторические результаты
+или смешивать их с новым методом молча. Inline fallback и Worker используют
+одни чистые анализаторы. Поддерживающая геометрия хранится в WeakMap, не в
+enumerable/transfer данных; Worker по-прежнему не возвращает raw mask на UI.
 
 4. **Проверка видимости кожи:**
    - Если `faceSkin ratio < minTotalFaceSkin (0.55)` → `low_skin_visibility`

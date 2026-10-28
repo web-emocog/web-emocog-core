@@ -1,4 +1,6 @@
 import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm-publication-gate.mjs';
+import { publishedRespiration } from '../../participant-web/js/session-runtime/continuous-bpm.js';
+import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './diagnostic-run.mjs?v=20261028-1';
 
 /**
  * BPM / rPPG test with robust face targeting.
@@ -24,9 +26,12 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
     var stream = null;
     var rafId = null;
     var running = false;
+    var activeRun = null;
+    var blocked = false;
+    var modelStage = new SerialDiagnosticStage();
+    var cameraStage = new SerialDiagnosticStage();
     var faceLandmarker = null;
     var engine = null;
-    var SessionReporterCtor = null;
     var reporter = null;
     var publicationGate = new BpmPublicationGate();
     var frameCount = 0;
@@ -64,6 +69,7 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
       div.className = 'ev' + (className ? ' ' + className : '');
       div.textContent = typeof text === 'string' ? text : JSON.stringify(text);
       logEl.appendChild(div);
+      while (logEl.childElementCount > 200) logEl.firstElementChild.remove();
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -193,60 +199,22 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
     }
 
     function getImageDataFromVideo(w, h) {
-      drawCanvas.width = w;
-      drawCanvas.height = h;
+      if (drawCanvas.width !== w) drawCanvas.width = w;
+      if (drawCanvas.height !== h) drawCanvas.height = h;
       drawCtx.drawImage(video, 0, 0, w, h);
       return drawCtx.getImageData(0, 0, w, h);
     }
 
-    function buildRppgCandidateUrls() {
-      var origin = window.location.origin || '';
-      // Версия в query — сбрасывает кэш браузера для динамического import() зависимых модулей
-      var rel = '/lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=rppg6';
-      var out = [];
-      var seen = {};
-      function add(url) {
-        if (!url || seen[url]) return;
-        seen[url] = true;
-        out.push(url);
-      }
-      function cleanPrefix(prefix) {
-        if (!prefix || prefix === '/') return '';
-        return prefix.replace(/\/+$/, '');
-      }
-      try {
-        var p = window.location.pathname || '';
-        var parts = p.split('/').filter(Boolean);
-        // Проверяем ancestor-префиксы текущего URL: /a/b/c -> /a/b/c, /a/b, /a, /
-        for (var i = parts.length; i >= 0; i -= 1) {
-          var prefix = '/' + parts.slice(0, i).join('/');
-          add(origin + cleanPrefix(prefix) + rel);
-        }
-        // Отдельно учитываем базу до /apps/, если страница в apps/*
-        var appsIdx = p.indexOf('/apps/');
-        if (appsIdx >= 0) {
-          var base = cleanPrefix(p.slice(0, appsIdx));
-          add(origin + base + rel);
-        }
-      } catch (e) {
-        // no-op
-      }
-      // Жёсткие fallback-пути для типовых схем хостинга
-      add(new URL('../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=rppg6', import.meta.url).href);
-      add(new URL('../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=rppg6', document.baseURI).href);
-      add(origin + '/main' + rel);
-      add(origin + rel);
-      return out;
-    }
-
-    async function loadEngine() {
-      async function probeEngineUrl(url) {
-        return WecogHttp.request(url, {
-          method: 'GET',
-          cache: 'no-store',
-          credentials: 'same-origin',
-          redirect: 'follow'
-        }, async function (res) {
+    async function loadEngine(run) {
+      // Resolve from the module, not the page/base tag or guessed hosting ancestors.
+      var url = new URL('../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=rppg6', import.meta.url).href;
+      await run.wait(() => WecogHttp.request(url, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        redirect: 'error',
+        signal: run.signal
+      }, async function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var ct = (res.headers.get('content-type') || '').toLowerCase();
         if (ct.indexOf('text/html') >= 0) {
@@ -262,46 +230,22 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
           throw new Error('Unexpected module payload');
         }
         return true;
-        }, { scope: 'document' });
+      }, { scope: 'document' }));
+      var mod = await run.wait(() => import(url));
+      run.check();
+      if (typeof mod.RppgEngine !== 'function' || typeof mod.SessionReporter !== 'function') {
+        throw new Error('Diagnostic engine unavailable');
       }
-      var pathsToTry = buildRppgCandidateUrls();
-      var lastErr = null;
-      var errors = [];
-      for (var i = 0; i < pathsToTry.length; i += 1) {
-        var url = pathsToTry[i];
-        try {
-          await probeEngineUrl(url);
-          var mod = await import(url);
-          if (mod && mod.RppgEngine && mod.SessionReporter) {
-            SessionReporterCtor = mod.SessionReporter;
-            return mod.RppgEngine;
-          }
-          errors.push(url + ' -> loaded but RppgEngine/SessionReporter export not found');
-        } catch (e) {
-          lastErr = e;
-          errors.push(url + ' -> ' + (e && (e.message || String(e))));
-        }
-      }
-      appendLog('RppgEngine не загружен. Тест остановлен без синтетических значений BPM.', 'err');
-      if (lastErr) appendLog('Primary engine load error: ' + (lastErr.message || String(lastErr)), 'warn');
-      appendLog('RppgEngine candidate URLs: ' + pathsToTry.join(' | '), 'warn');
-      if (errors.length) appendLog('RppgEngine load attempts: ' + errors.join(' || '), 'warn');
-      appendLog(
-        'Если был 404: на сервере должен отдаваться каталог lib рядом с apps (см. main/docs/HOSTING.md). ' +
-          'Частая ошибка nginx: root только на apps/web — добавьте location для …/lib/ → файловая lib/.',
-        'warn'
-      );
-      throw lastErr || new Error('RppgEngine unavailable');
+      return mod;
     }
 
-    async function initMediaPipe() {
-      if (faceLandmarker) return faceLandmarker;
-      var vision = await import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs');
-      var resolver = await vision.FilesetResolver.forVisionTasks(
-        '../../participant-web/js/vendor/mediapipe/wasm'
-      );
+    async function initMediaPipe(run) {
+      var vision = await run.wait(() => import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs'));
+      var resolver = await run.wait(() => vision.FilesetResolver.forVisionTasks(
+        new URL('../../participant-web/js/vendor/mediapipe/wasm', import.meta.url).href
+      ));
       var baseOpt = {
-        modelAssetPath: '../../participant-web/js/vendor/mediapipe/models/face_landmarker.task'
+        modelAssetPath: new URL('../../participant-web/js/vendor/mediapipe/models/face_landmarker.task', import.meta.url).href
       };
       var opts = {
         baseOptions: baseOpt,
@@ -312,29 +256,42 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
         minTrackingConfidence: 0.45
       };
       try {
-        faceLandmarker = await vision.FaceLandmarker.createFromOptions(resolver, {
+        var task = await modelStage.request(run, () => vision.FaceLandmarker.createFromOptions(resolver, {
           ...opts,
           baseOptions: { ...baseOpt, delegate: 'GPU' }
-        });
+        }), { release: task => task.close() });
+        run.check();
         appendLog('MediaPipe FaceLandmarker: GPU', '');
+        return task;
       } catch (gpuErr) {
+        if (gpuErr?.code === 'diagnostic_timeout') throw gpuErr;
+        run.check();
         appendLog('GPU недоступен, fallback на CPU', 'warn');
-        faceLandmarker = await vision.FaceLandmarker.createFromOptions(resolver, {
+        return modelStage.request(run, () => vision.FaceLandmarker.createFromOptions(resolver, {
           ...opts,
           baseOptions: { ...baseOpt, delegate: 'CPU' }
-        });
+        }), { release: task => task.close() });
       }
-      return faceLandmarker;
+    }
+
+    function stopTracks(acquired) {
+      acquired.getTracks().forEach(function (track) {
+        try { track.stop(); } catch (_) { /* Release the other tracks too. */ }
+      });
     }
 
     function stop() {
+      var hadRun = !!activeRun;
+      var run = activeRun;
+      activeRun = null;
       running = false;
-      if (rafId) cancelAnimationFrame(rafId);
+      run?.stop();
+      if (rafId !== null) cancelAnimationFrame(rafId);
       rafId = null;
-      if (stream) {
-        stream.getTracks().forEach(function (t) { t.stop(); });
-        stream = null;
-      }
+      stream = null;
+      faceLandmarker = null;
+      engine = null;
+      try { video.pause(); } catch (_) { /* Native resources are already released by the run. */ }
       video.srcObject = null;
       video.style.display = 'none';
       overlay.style.display = 'none';
@@ -342,32 +299,51 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
       setBpm(null);
       setStatus('Остановлено');
       measurementStartedAt = 0;
-      btnStart.disabled = false;
+      btnStart.disabled = blocked;
       btnStop.disabled = true;
       if (reporter) {
-        var sessionJson = reporter.finalize();
-        var respRows = (sessionJson && sessionJson.samples) ? sessionJson.samples : [];
-        var respVals = respRows.map(function (s) { return s.resp_rate; }).filter(function (v) { return Number.isFinite(v); });
-        var respMean = respVals.length
-          ? Math.round((respVals.reduce(function (a, b) { return a + b; }, 0) / respVals.length) * 10) / 10
-          : null;
-        appendLog('Respiration session samples: ' + respRows.length + (respMean != null ? (' · mean ' + respMean + '/min') : ''), '');
+        var stoppedReporter = reporter;
         reporter = null;
+        try {
+          var sessionJson = stoppedReporter.finalize();
+          var respRows = (sessionJson && sessionJson.samples) ? sessionJson.samples : [];
+          var respVals = respRows.map(function (s) { return s.resp_rate; }).filter(function (v) { return Number.isFinite(v); });
+          var respMean = respVals.length
+            ? Math.round((respVals.reduce(function (a, b) { return a + b; }, 0) / respVals.length) * 10) / 10
+            : null;
+          appendLog('Respiration retained samples: ' + respRows.length + (respMean != null ? (' · retained mean ' + respMean + '/min') : ''), '');
+        } catch (_) { appendLog('Сводка теста недоступна. Камера и обработка остановлены.', 'warn'); }
       }
-      appendLog('BPM тест остановлен', '');
+      drawCanvas.width = drawCanvas.height = 0;
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      if (hadRun) appendLog('BPM тест остановлен', '');
       stableFrames = 0;
       centerMotionEma = 0;
       lastCenter = null;
       lastHint = '';
     }
 
-    function loop() {
-      if (!running || !stream || !engine || !faceLandmarker) return;
+    function scheduleFrame(run) {
+      if (activeRun !== run || run.signal.aborted) return;
+      rafId = requestAnimationFrame(() => {
+        if (activeRun !== run || run.signal.aborted) return;
+        rafId = null;
+        try { loop(run); }
+        catch (_) {
+          stop();
+          setStatus('Ошибка обработки видео. Тест остановлен; можно повторить запуск.');
+          appendLog('Обработка видео прервана без сохранения кадров.', 'err');
+        }
+      });
+    }
+
+    function loop(run) {
+      if (activeRun !== run || run.signal.aborted || !running || !stream || !engine || !faceLandmarker) return;
       var w = video.videoWidth;
       var h = video.videoHeight;
       if (!w || !h) {
         setStatus('Ожидание видеопотока…');
-        rafId = requestAnimationFrame(loop);
+        scheduleFrame(run);
         return;
       }
 
@@ -378,7 +354,7 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
 
       var vt = video.currentTime;
       if (vt === lastVideoTime) {
-        rafId = requestAnimationFrame(loop);
+        scheduleFrame(run);
         return;
       }
       lastVideoTime = vt;
@@ -392,7 +368,11 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
           landmarks = result.faceLandmarks[0];
         }
       } catch (err) {
-        console.warn('detectForVideo error', err);
+        setStatus('Ошибка распознавания лица. Измерения этого кадра недоступны.');
+        logHintOncePerSecond('Не удалось обработать кадр лица.');
+        setBpm(null);
+        scheduleFrame(run);
+        return;
       }
 
       var target = getTargetRegion(w, h);
@@ -404,7 +384,7 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
         setStatus(targetEval.reason);
         logHintOncePerSecond(targetEval.reason);
         setBpm(null);
-        rafId = requestAnimationFrame(loop);
+        scheduleFrame(run);
         return;
       }
 
@@ -416,13 +396,12 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
           frameW: w,
           frameH: h,
           imageData: imageData,
-          landmarks: landmarks,
-          fps: 30
+          landmarks: landmarks
         });
       } catch (updateErr) {
-        appendLog('Ошибка rPPG движка: ' + (updateErr.message || updateErr), 'err');
+        logHintOncePerSecond('Ошибка обработки сигнала rPPG. Кадр не принят.');
         setStatus('Ошибка обработки сигнала rPPG');
-        rafId = requestAnimationFrame(loop);
+        scheduleFrame(run);
         return;
       }
 
@@ -431,16 +410,16 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
       }
       if (out) {
         var publication = publicationGate.evaluate(out);
+        var rr = publishedRespiration(out.features);
         if (reporter) reporter.push({
           ...out,
-          published: publication.accepted,
+          features: { ...out.features, respRate: rr },
+          published: publication.accepted && !publication.held,
           bpmPublished: publication.bpm,
           publishReason: publication.reason
         }, timestampMs);
         var bpm = publication.bpm;
         var confidence = Number.isFinite(out.confidence) ? out.confidence : null;
-        var feat = out.features || {};
-        var rr = feat.respRate != null ? feat.respRate : feat.respRateRaw;
         var respPart = Number.isFinite(rr) ? (' · дыхание ~' + Math.round(rr) + '/мин') : '';
         if (Number.isFinite(bpm)) {
           setBpm(bpm);
@@ -464,38 +443,61 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
         setStatus('Сбор сигнала…');
       }
 
-      rafId = requestAnimationFrame(loop);
+      scheduleFrame(run);
     }
 
     async function start() {
-      if (running) return;
+      if (activeRun || blocked) return;
+      var run = new DiagnosticRun();
+      activeRun = run;
       btnStart.disabled = true;
-      btnStop.disabled = true;
+      btnStop.disabled = false;
       if (logEl) logEl.innerHTML = '';
       setBpm(null);
       setStatus('Инициализация BPM...');
       appendLog('Инициализация модуля BPM/rPPG', '');
 
       try {
-        var RppgEngineCtor = await loadEngine();
-        await initMediaPipe();
-        engine = new RppgEngineCtor({ algorithm: 'pos', mode: 'safe' });
+        var access = await run.wait(() => window.WecogBpmAccess);
+        run.check();
+        if (!access?.ok || !['admin', 'developer'].includes(access.user?.role)) {
+          throw Object.assign(new Error('Diagnostic access unavailable'), { code: 'diagnostic_access_denied' });
+        }
+        window.WecogStaffSession?.assertCurrent();
+        // A cached admission may outlive logout, role revocation or a BFCache round trip.
+        var fresh = await run.wait(() => WecogHttp.json(window.EmocogApiBase.resolve() + '/auth/me', {
+          credentials: 'include', signal: run.signal
+        }, { scope: 'document', timeoutMs: 15000 }));
+        run.check();
+        var actor = fresh?.user || fresh;
+        if (!actor?.id || String(actor.id) !== String(access.user.id)
+          || !['admin', 'developer'].includes(actor.role)) {
+          throw Object.assign(new Error('Diagnostic access unavailable'), { code: 'diagnostic_access_denied' });
+        }
+        var policy = document.permissionsPolicy || document.featurePolicy;
+        if (policy?.allowsFeature && !policy.allowsFeature('camera')) {
+          throw Object.assign(new Error('Diagnostic camera denied by policy'), { code: 'diagnostic_camera_policy_denied' });
+        }
+        var mod = await loadEngine(run);
+        var task = await initMediaPipe(run);
+        run.check();
+        faceLandmarker = task;
+        engine = new mod.RppgEngine({ algorithm: 'pos', mode: 'safe' });
         publicationGate.reset();
-        reporter = SessionReporterCtor ? new SessionReporterCtor() : null;
-        stream = await navigator.mediaDevices.getUserMedia({
+        reporter = new mod.SessionReporter({ maxSamples: 7200 });
+        var acquired = await cameraStage.request(run, () => navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 720 } },
           audio: false
-        });
+        }), { release: stopTracks });
+        run.check();
+        stream = acquired;
         video.srcObject = stream;
         video.style.display = 'block';
         overlay.style.display = 'block';
         screenEl.classList.add('running');
-        await video.play();
-        await new Promise(function (resolve) {
-          if (video.readyState >= 2 && video.videoWidth > 0) return resolve();
-          video.addEventListener('loadeddata', resolve, { once: true });
-          setTimeout(resolve, 700);
-        });
+        await run.wait(() => video.play(), { timeoutMs: 10000 });
+        await waitForDiagnosticVideo(video, run);
+        run.check();
 
         running = true;
         measurementStartedAt = performance.now();
@@ -507,32 +509,41 @@ import { BpmPublicationGate } from '../../participant-web/js/session-runtime/bpm
         btnStop.disabled = false;
         appendLog('Камера запущена. Наведите лицо в целевую зону.', '');
         setStatus('Наведите лицо в центр целевой зоны');
-        rafId = requestAnimationFrame(loop);
+        scheduleFrame(run);
       } catch (err) {
-        appendLog('Ошибка запуска: ' + (err.message || err), 'err');
-        setStatus('Ошибка запуска BPM теста: ' + (err.message || err));
-        btnStart.disabled = false;
+        if (activeRun !== run) return;
+        stop();
+        var message = err?.code === 'diagnostic_timeout'
+          ? 'Время ожидания запуска истекло. Тест остановлен; повторите запуск.'
+          : err?.code === 'diagnostic_camera_policy_denied'
+            ? 'Камера запрещена политикой этого сервера. Используйте разрешённую диагностическую среду.'
+          : err?.code === 'diagnostic_access_denied' || err?.code === 'staff_account_changed' || err?.status === 401 || err?.status === 403
+            ? 'Не удалось подтвердить доступ к тесту. Обновите страницу.'
+            : err?.name === 'NotAllowedError'
+              ? 'Камера недоступна. Проверьте разрешение браузера и повторите запуск.'
+              : 'Не удалось запустить BPM тест. Проверьте камеру и загрузку локальных модулей.';
+        appendLog(message, 'err');
+        setStatus(message);
       }
     }
 
     btnStart.addEventListener('click', function () {
-      start().catch(function (err) {
-        appendLog('Start error: ' + (err.message || err), 'err');
-        setStatus('Ошибка старта');
-        btnStart.disabled = false;
-      });
+      start();
     });
     btnStop.addEventListener('click', stop);
     window.addEventListener('beforeunload', stop);
+    window.addEventListener('pagehide', stop);
+    window.addEventListener('wecog:staffsessionblocked', () => { blocked = true; stop(); });
   } catch (err) {
-    console.error('BPM init error:', err);
     var st = document.getElementById('status');
     var lg = document.getElementById('log');
-    if (st) st.textContent = 'Ошибка инициализации: ' + (err.message || err);
+    if (st) st.textContent = 'Не удалось инициализировать BPM тест. Обновите страницу.';
+    if (btnStart) btnStart.disabled = true;
+    if (btnStop) btnStop.disabled = true;
     if (lg) {
       var errorLine = document.createElement('div');
       errorLine.className = 'ev err';
-      errorLine.textContent = String(err && err.message ? err.message : err);
+      errorLine.textContent = 'Инициализация теста недоступна. Камера не запущена.';
       lg.replaceChildren(errorLine);
     }
   }

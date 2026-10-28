@@ -7,6 +7,24 @@ export function distribution(values) {
     max: sorted.length ? sorted.at(-1) : null };
 }
 
+// Playback totals include drops; never relabel them as presented/inferred frames.
+export function frameCadencePerformance({ sourceFrames, processedFrames, elapsedMs, method, playbackQuality, fallbackReason = null }) {
+  if (![sourceFrames, processedFrames].every(n => Number.isSafeInteger(n) && n >= 0)
+      || !Number.isFinite(elapsedMs) || elapsedMs <= 0) throw new Error('invalid_reference_frame_cadence');
+  const quality = playbackQuality;
+  const confirmedPlayback = method === 'decoded-frame-counter' && !fallbackReason
+    && quality?.complete === true && quality.counterResets === 0
+    && [quality.displayedFrames, quality.droppedFrames].every(n => Number.isSafeInteger(n) && n >= 0)
+    && quality.displayedFrames + quality.droppedFrames === sourceFrames;
+  const presentedFrames = method === 'video-frame-callback' && !fallbackReason ? sourceFrames
+    : confirmedPlayback ? quality.displayedFrames : null;
+  return { sourceFrames, sourceWallFps: sourceFrames * 1000 / elapsedMs,
+    presentedFrames, presentedWallFps: presentedFrames === null ? null : presentedFrames * 1000 / elapsedMs,
+    skippedPresentedFrames: presentedFrames !== null && processedFrames <= presentedFrames ? presentedFrames - processedFrames : null,
+    frameIdentityMethod: method,
+    frameCadence: { measurementVersion: 'video_cadence.v2', fallbackReason, playbackQuality: quality || null } };
+}
+
 // Include empty windows; a fast burst must not hide a stall. Exclude only the
 // final partial second, whose duration is explicitly retained in the report.
 export function fpsWindows(frameTimesMs, elapsedMs) {
@@ -30,7 +48,7 @@ export function assessReplayPerformance(result) {
   const criteria = { minAnalysisFps: 25, maxUiTimerP95Ms: 10, maxCaptureGapMs: 250,
     maxBelowTargetRunMs: 3000, maxSegmentMeanMs: 1000, requireWorkers: true };
   if (result?.offlinePlaybackRate !== 1) return { status: 'not_applicable', reasons: ['not_realtime'], criteria };
-  if (!Number.isFinite(p?.processedWallFps) || !Number.isFinite(p?.uiTimerLatenessMs?.p95)
+  if (!Number.isFinite(p?.processedWallFps) || !Number.isFinite(p?.presentedWallFps) || !Number.isFinite(p?.uiTimerLatenessMs?.p95)
       || !Number.isFinite(p?.maxCaptureGapMs) || !Number.isSafeInteger(p?.fpsWindows?.fullWindows)
       || p.fpsWindows.fullWindows <= 0 || !Number.isFinite(p.fpsWindows.longestBelow25RunMs)
       || (result.auxiliary && !Number.isFinite(result.auxiliary.segmentMeanMs))) {

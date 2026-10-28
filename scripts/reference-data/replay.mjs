@@ -159,7 +159,7 @@ try {
       if (sourceInput === 'canvas') return measureSyntheticSourceCadence(document.querySelector('#clip'));
       return { ...await measureSourceCadence(document.querySelector('#clip')), sourceInput: 'finite_file' };
     }
-    const { distribution: summarize, fpsWindows } = await import('/source/scripts/reference-data/performance.mjs');
+    const { distribution: summarize, fpsWindows, frameCadencePerformance } = await import('/source/scripts/reference-data/performance.mjs');
     const { nextMediaTimestamp, prepareFiniteVideo } = await import('/source/scripts/reference-data/media-clock.mjs');
     const { VisionWorkerClient } = await import('/source/apps/participant-web/js/session-runtime/vision-worker-client.mjs');
     const workerTimings = {};
@@ -221,7 +221,7 @@ try {
     const glTotals = {};
     const initialClockTrace = [];
     let terminalFrameReplays = 0;
-    let presentedFrames = 0, playbackStarted = null, playbackElapsedMs = null, playbackStartMediaTimeMs = null;
+    let sourceFrames = 0, playbackStarted = null, playbackElapsedMs = null, playbackStartMediaTimeMs = null;
     let firstProcessedMediaTimeMs = null;
     let maxGapMs = 0, longTasks = 0, longTaskMs = 0;
     let sourceObserver = null;
@@ -234,7 +234,7 @@ try {
     let previousPublishedT = null;
     try {
       if (!await bpm.start()) throw new Error('replay_bpm_unavailable');
-      await prepareFiniteVideo(video);
+      const mediaPreparation = await prepareFiniteVideo(video);
       await new Promise((resolve, reject) => {
         let done = false, inFlight = false, ended = false, latest = null, lastFrame = null, scheduled = null, callbackId = null;
         let lastStarted = -Infinity;
@@ -348,7 +348,7 @@ try {
           if (done) return;
           playbackStarted = performance.now();
           playbackStartMediaTimeMs = video.currentTime * 1000;
-          sourceObserver = observeVideoFrames(video, (_now, count) => { presentedFrames += count; });
+          sourceObserver = observeVideoFrames(video, (_now, count) => { sourceFrames += count; });
           callbackId = video.requestVideoFrameCallback(onPresented);
         }).catch(complete);
       });
@@ -367,7 +367,8 @@ try {
       return { frames, faceFrames, failures, gaps, mediaDurationMs: lastT, elapsedMs: performance.now() - phaseStarted,
         sourceClock: 'decoded_video_pts_not_processing_wall_time', backend: analyzer.backend,
         sourceClockDiagnostics: { method: 'finite_media_pts.v2', terminalFrameReplays,
-          admission: 'seek_zero_then_play_promise_then_callbacks', playbackStartMediaTimeMs, firstProcessedMediaTimeMs },
+          admission: 'prepare_then_play_promise_then_callbacks', preparation: mediaPreparation,
+          playbackStartMediaTimeMs, firstProcessedMediaTimeMs },
         observer: analysis, web: bpm.finalize('reference_replay'),
         blinks: eyeSummary?.blinkDynamics?.blinkCount ?? eyeSummary?.blinkCount ?? null,
         perclos: { mean30sPct: eyeSummary?.perclos?.windows?.['30s']?.meanPct ?? null,
@@ -384,13 +385,15 @@ try {
           poseMeanMs: auxiliary.diagnostics.poseFrames ? auxiliary.diagnostics.poseMsTotal / auxiliary.diagnostics.poseFrames : null,
           body: auxiliary.bodyPose.summary(), emotion: emotion.getEmotionSummary(auxiliaryState.sessionData), accuracyValidated: false } : null,
         offlinePlaybackRate: video.playbackRate,
-        performance: { playbackElapsedMs, presentedFrames, processedWallFps: frames * 1000 / playbackElapsedMs,
+        performance: { schemaVersion: 'replay_performance.v2', playbackElapsedMs,
+          ...frameCadencePerformance({ sourceFrames, processedFrames: frames, elapsedMs: playbackElapsedMs,
+            method: sourceObserver?.method ?? 'not_started', playbackQuality: sourceObserver?.playbackQuality,
+            fallbackReason: sourceObserver?.fallbackReason }),
+          processedWallFps: frames * 1000 / playbackElapsedMs,
           presentationCallbacks, callbacksWhileBusy, callbackWallFps: presentationCallbacks * 1000 / playbackElapsedMs,
           callbackIntervalsMs: summarize(callbackIntervalsMs), dispatchLagMs: summarize(dispatchLagMs),
           analysisStartIntervalsMs: summarize(analysisStartIntervalsMs),
-          presentedWallFps: presentedFrames * 1000 / playbackElapsedMs,
           processedMediaFps: frames * 1000 / lastT, maxCaptureGapMs: maxGapMs,
-          skippedPresentedFrames: Math.max(0, presentedFrames - frames), frameIdentityMethod: sourceObserver?.method ?? 'not_started',
           fpsWindows: fpsWindows(completedAtMs, playbackElapsedMs),
           workerTimings: Object.fromEntries(Object.entries(workerTimings).map(([key, values]) => [key, summarize(values)])),
           faceMs: summarize(faceMs), faceAnalyzerMs: summarize(analyzerMs), signalMs: summarize(signalMs), frameMs: summarize(totalMs),
