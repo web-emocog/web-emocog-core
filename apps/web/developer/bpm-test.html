@@ -54,7 +54,7 @@
         window.location.replace('login.html');
         return;
       }
-      window.EmocogAuthGuard.ensureProtectedPage({
+      window.WecogBpmAccess = window.EmocogAuthGuard.ensureProtectedPage({
         loginPath: 'login.html',
         allowedRoles: ['admin', 'developer'],
         preserveAuthOnRoleDenied: true,
@@ -63,7 +63,7 @@
     })();
   </script>
   <div id="file-protocol-warn" style="display:none; margin-bottom:16px; padding:14px 18px; background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); border-radius:12px; color:#e8e8f0; font-size:14px;">
-    <strong>Страница открыта как файл (file://).</strong> Модули и камера не работают. Запустите локальный сервер из корня проекта и откройте страницу по адресу <code style="background:rgba(0,0,0,.2); padding:2px 6px;">http://localhost:8000/main/apps/web/developer/bpm-test.html</code> (или другой порт).
+    <strong>Страница открыта как файл (file://).</strong> Модули и камера не работают. Запустите API и локальный сервер из корня проекта согласно README и откройте <code style="background:rgba(0,0,0,.2); padding:2px 6px;">http://127.0.0.1:4173/apps/web/developer/bpm-test.html</code> (или свой порт).
   </div>
   <a href="../developer.html" class="back">← К тестам разработчика</a>
   <h1>BPM / rPPG — тест пульса по видео</h1>
@@ -93,23 +93,13 @@
       document.getElementById('file-protocol-warn').style.display = 'block';
     }
   </script>
+  <script id="bpmModule" type="module" src="bpm-test.js?v=20261028-1"></script>
   <script>
-    (function() {
-      var btn = document.getElementById('btnStart');
-      var status = document.getElementById('status');
-      if (!btn || !status) return;
-      btn.addEventListener('click', function() {
-        status.textContent = 'Инициализация…';
-        btn.disabled = true;
-        window.setTimeout(function() {
-          if (status.textContent === 'Инициализация…') {
-            status.textContent = 'Скрипт не ответил. Проверьте консоль (F12) и путь к lib (RppgEngine).';
-            btn.disabled = false;
-          }
-        }, 4000);
-      });
-    })();
+    document.getElementById('bpmModule').addEventListener('error', function () {
+      document.getElementById('status').textContent = 'Не удалось загрузить модуль теста. Обновите страницу после восстановления соединения.';
+      document.getElementById('btnStart').disabled = true;
+      document.getElementById('btnStop').disabled = true;
+    });
   </script>
-  <script type="module" src="bpm-test.js?v=20261027-1"></script>
 </body>
 </html>

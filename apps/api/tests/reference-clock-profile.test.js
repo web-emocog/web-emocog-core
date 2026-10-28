@@ -5,6 +5,63 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const load = name => import(pathToFileURL(path.resolve(__dirname, '../../../scripts/reference-data', name)));
 
+class NativePreparedVideo extends EventTarget {
+  duration = 1; readyState = 2; seeking = false; loop = false; time = .5; cancelled = [];
+  pause() { this.paused = true; }
+  get currentTime() { return this.time; }
+  set currentTime(value) {
+    this.seeking = true;
+    queueMicrotask(() => { this.time = value; this.seeking = false; this.dispatchEvent(new Event('seeked')); });
+  }
+  requestVideoFrameCallback(callback) { this.preparedFrame = callback; return 0; }
+  cancelVideoFrameCallback(id) { this.cancelled.push(id); }
+}
+
+test('finite preparation waits for the seek compositor acknowledgement without admitting its metadata', async () => {
+  const { prepareFiniteVideo } = await load('media-clock.mjs');
+  const video = new NativePreparedVideo();
+  let ready = false;
+  const pending = prepareFiniteVideo(video, { compositorDrain: true }).then(result => {
+    assert.equal(result.method, 'seek_zero_compositor_ack.v1'); ready = true;
+  });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(ready, false);
+  video.preparedFrame(0, { mediaTime: .5, presentedFrames: 100 });
+  await pending;
+  assert.equal(ready, true); assert.equal(video.currentTime, 0); assert.equal(video.paused, true);
+  assert.deepEqual(video.cancelled, [0]);
+});
+
+test('a missing preparation compositor callback has a deadline and cancels its native handle', async t => {
+  const { prepareFiniteVideo } = await load('media-clock.mjs');
+  const originalSet = global.setTimeout, originalClear = global.clearTimeout, timers = new Map(); let sequence = 0;
+  global.setTimeout = (callback, ms) => { assert.equal(ms, 10000); timers.set(++sequence, callback); return sequence; };
+  global.clearTimeout = id => { timers.delete(id); };
+  t.after(() => { global.setTimeout = originalSet; global.clearTimeout = originalClear; });
+  const video = new NativePreparedVideo(), pending = prepareFiniteVideo(video, { compositorDrain: true });
+  const rejected = assert.rejects(pending, /reference_video_prepare_frame_deadline/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(timers.size, 1); [...timers.values()][0](); await rejected;
+  assert.equal(timers.size, 0); assert.deepEqual(video.cancelled, [0]);
+  video.preparedFrame(0, { mediaTime: 0 });
+  assert.equal(video.paused, true);
+});
+
+test('a failed seek cancels preparation frame callbacks instead of leaving an orphan timer', async () => {
+  const { prepareFiniteVideo } = await load('media-clock.mjs');
+  const video = new NativePreparedVideo();
+  Object.defineProperty(video, 'currentTime', { set() { throw new Error('synthetic_seek_failure'); } });
+  await assert.rejects(prepareFiniteVideo(video, { compositorDrain: true }), /synthetic_seek_failure/);
+  assert.deepEqual(video.cancelled, [0]);
+});
+
+test('non-Firefox reference preparation does not wait for a paused compositor callback', async () => {
+  const { prepareFiniteVideo } = await load('media-clock.mjs');
+  const video = new NativePreparedVideo();
+  const result = await prepareFiniteVideo(video, { compositorDrain: false });
+  assert.equal(result.method, 'seek_zero.v1'); assert.equal(video.preparedFrame, undefined);
+  assert.deepEqual(video.cancelled, []);
+});
+
 test('finite replay resets decoder position before admitting playback, without retiming accepted samples', async () => {
   const { prepareFiniteVideo } = await load('media-clock.mjs');
   class Video extends EventTarget {

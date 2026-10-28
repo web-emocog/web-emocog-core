@@ -1,5 +1,5 @@
 /**
- * Face Segmenter Module v1.2 — Browser Wrapper / Loader
+ * Face Segmenter Module v1.3 — Browser Wrapper / Loader
  *
  * Загрузка устроена так:
  *   1) Сразу синхронно объявляется inline-класс FaceSegmenterInline (упрощённая
@@ -12,11 +12,10 @@
  *   4) Promise window.FaceSegmenterReady резолвится в 'module' | 'inline'.
  *      Новые потребители ждут его перед `new FaceSegmenter()`.
  *
- * Inline-копия здесь поддерживает совместимый публичный API, но имеет
- * упрощённый анализ (только глобальная hand-detection и low_skin_visibility).
- * Папка даёт расширенный режим (forehead/cheeks/eyes/nose/mouth/chin/symmetry).
+ * Inline fallback сохраняет публичный API и использует те же чистые
+ * mask/region-анализаторы, что и Worker/main-thread класс.
  *
- * @version 1.2.0
+ * @version 1.3.0
  * @requires @mediapipe/tasks-vision
  */
 
@@ -30,12 +29,12 @@ class FaceSegmenterInline {
         
         this.thresholds = {
             maskConfidence: options.maskConfidence ?? 0.5,
-            // ПОВЫШЕНЫ пороги чтобы уменьшить ложные срабатывания
+            // Legacy numeric thresholds, unchanged; geometry is shared with the module.
             minSkinVisibility: options.minSkinVisibility ?? 0.6,      // было 0.60
             minTotalFaceSkin: options.minTotalFaceSkin ?? 0.55,        // было 0.55
             hairOcclusionThreshold: options.hairOcclusionThreshold ?? 0.25,  // было 0.25
             handOcclusionThreshold: options.handOcclusionThreshold ?? 0.05,  // было 0.05
-            globalHandThreshold: options.globalHandThreshold ?? 0.08,  // было 0.08 - ГЛАВНАЯ ПРОБЛЕМА
+            globalHandThreshold: options.globalHandThreshold ?? 0.08,
             maxAsymmetry: options.maxAsymmetry ?? 0.30
         };
         
@@ -55,7 +54,12 @@ class FaceSegmenterInline {
     async initialize() {
         if (this.isInitialized) return true;
         try {
-            console.log('[FaceSegmenter] Инициализация v1.2...');
+            const [mask, region] = await Promise.all([
+                import('./face-segmenter/mask-analyzer.js?v=20261028-139'),
+                import('./face-segmenter/region-analyzer.js?v=20261028-139')
+            ]);
+            this.analysisCore = { ...mask, ...region };
+            console.log('[FaceSegmenter] Инициализация v1.3...');
             if (typeof FilesetResolver === 'undefined' || typeof ImageSegmenter === 'undefined') {
                 throw new Error('MediaPipe Vision не загружен.');
             }
@@ -85,15 +89,16 @@ class FaceSegmenterInline {
     }
 
     async segmentFrame(videoElement, faceLandmarks = null) {
-        if (!this.isInitialized) await this.initialize();
+        if (!this.isInitialized && !await this.initialize()) return this._createErrorResult('segmentation_unavailable');
         if (!videoElement || videoElement.readyState < 2) {
             return this._createErrorResult('Видео не готово');
         }
+        let segResult;
         try {
             const width = videoElement.videoWidth || 640;
             const height = videoElement.videoHeight || 480;
             const timestamp = performance.now();
-            const segResult = this.imageSegmenter.segmentForVideo(videoElement, timestamp);
+            segResult = this.imageSegmenter.segmentForVideo(videoElement, timestamp);
             const maskAnalysis = this._analyzeMasks(segResult, width, height, faceLandmarks);
             const faceVisibility = this._analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, width, height);
             this.lastResult = {
@@ -104,116 +109,26 @@ class FaceSegmenterInline {
                 timestamp: Date.now(),
                 frameSize: { width, height }
             };
-            if (segResult.categoryMask) segResult.categoryMask.close();
-            if (segResult.confidenceMasks) segResult.confidenceMasks.forEach(m => m.close());
             return this.lastResult;
         } catch (error) {
             return this._createErrorResult(error.message);
+        } finally {
+            segResult?.categoryMask?.close();
+            segResult?.confidenceMasks?.forEach(mask => mask.close());
         }
     }
 
-    // Методы анализа - упрощённые версии (полные в модуле)
+    // Inline fallback shares the same face-local evidence; no separate global-hand heuristic.
     _analyzeMasks(segResult, w, h, landmarks) {
-        const result = { hasData: false, classDistribution: {}, faceRegion: null };
-        const mask = segResult.categoryMask;
-        if (!mask) return result;
-        result.hasData = true;
-        const data = mask.getAsUint8Array();
-        const mW = mask.width, mH = mask.height;
-        result._rawMaskData = new Uint8Array(data);
-        result._maskDimensions = { width: mW, height: mH };
-        const counts = new Array(6).fill(0);
-        for (let i = 0; i < data.length; i++) {
-            if (data[i] < 6) counts[data[i]]++;
-        }
-        for (let i = 0; i < 6; i++) {
-            result.classDistribution[this.CLASS_NAMES[i]] = {
-                count: counts[i], ratio: counts[i] / data.length
-            };
-        }
-        result.faceRegion = this._extractFaceRegion(data, mW, mH, landmarks, w, h);
-        return result;
+        return this.analysisCore.analyzeMasks(segResult, w, h, landmarks);
     }
 
     _extractFaceRegion(data, mW, mH, landmarks, fW, fH) {
-        let box = { x: 0.2, y: 0.1, width: 0.6, height: 0.8 };
-        if (landmarks && landmarks.length > 0) {
-            let minX=1, maxX=0, minY=1, maxY=0;
-            for (const p of landmarks) {
-                minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-                minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-            }
-            const pad = 0.1;
-            box = {
-                x: Math.max(0, minX - (maxX-minX)*pad),
-                y: Math.max(0, minY - (maxY-minY)*pad),
-                width: Math.min(1, (maxX-minX)*(1+2*pad)),
-                height: Math.min(1, (maxY-minY)*(1+2*pad))
-            };
-        }
-        const sX = Math.floor(box.x*mW), eX = Math.floor((box.x+box.width)*mW);
-        const sY = Math.floor(box.y*mH), eY = Math.floor((box.y+box.height)*mH);
-        const stats = { totalPixels:0, faceSkin:0, hair:0, background:0, bodySkin:0, clothes:0, others:0 };
-        for (let y=sY; y<eY; y++) {
-            for (let x=sX; x<eX; x++) {
-                const idx = y*mW+x;
-                if (idx >= data.length) continue;
-                stats.totalPixels++;
-                const c = data[idx];
-                if (c===3) stats.faceSkin++;
-                else if (c===1) stats.hair++;
-                else if (c===0) stats.background++;
-                else if (c===2) stats.bodySkin++;
-                else if (c===4) stats.clothes++;
-                else stats.others++;
-            }
-        }
-        const t = stats.totalPixels || 1;
-        return {
-            boundingBox: box, stats,
-            ratios: {
-                faceSkin: stats.faceSkin/t, hair: stats.hair/t,
-                background: stats.background/t, bodySkin: stats.bodySkin/t,
-                clothes: stats.clothes/t, others: stats.others/t,
-                totalSkin: (stats.faceSkin+stats.bodySkin)/t,
-                occlusion: (stats.hair+stats.others+stats.clothes)/t
-            }
-        };
+        return this.analysisCore.extractFaceRegion(data, mW, mH, landmarks, fW, fH);
     }
 
     _analyzeFaceRegionsVisibility(maskAnalysis, landmarks, fW, fH) {
-        if (!maskAnalysis.hasData) {
-            return { isComplete: false, score: 0, issues: ['no_data'], regions: {} };
-        }
-        const issues = [];
-        let score = 100;
-        const regions = {};
-        let handDetected = false;
-        
-        if (maskAnalysis.faceRegion) {
-            const bodyRatio = maskAnalysis.faceRegion.ratios.bodySkin;
-            regions.globalBodySkinRatio = bodyRatio;
-            if (bodyRatio >= this.thresholds.globalHandThreshold) {
-                handDetected = true;
-                issues.push('hand_on_face');
-                score -= 30;
-            }
-            const skinRatio = maskAnalysis.faceRegion.ratios.faceSkin;
-            regions.totalFaceSkinVisibility = skinRatio;
-            if (skinRatio < this.thresholds.minTotalFaceSkin) {
-                issues.push('low_skin_visibility');
-                score -= 20;
-            }
-        }
-        
-        const uniqueIssues = [...new Set(issues)];
-        const isComplete = score >= 70 && uniqueIssues.length === 0 && !handDetected;
-        
-        return {
-            isComplete, score: Math.max(0, score),
-            issues: uniqueIssues, regions,
-            handDetected, thresholds: this.thresholds
-        };
+        return this.analysisCore.analyzeFaceRegionsVisibility(maskAnalysis, landmarks, fW, fH, this.thresholds);
     }
 
     _createErrorResult(msg) {
@@ -258,7 +173,7 @@ if (typeof window !== 'undefined') {
 
     window.FaceSegmenterReady = (async () => {
         try {
-            const mod = await import('./face-segmenter/index.js?v=20261025-1');
+            const mod = await import('./face-segmenter/index.js?v=20261028-139');
             const Cls = mod && (mod.FaceSegmenter || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export FaceSegmenter class');

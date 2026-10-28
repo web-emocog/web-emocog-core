@@ -5,6 +5,23 @@
 (function initWecogDebugHud(global) {
     'use strict';
 
+    global.WECOG_DEBUG_HUD?.dispose?.();
+    let running = false;
+    let disposed = false;
+    let generation = 0;
+    const ownedListeners = [];
+    const lifetimeListeners = [];
+
+    function listen(target, type, callback, options, lifetime = false) {
+        const current = generation;
+        const handler = event => {
+            if (disposed || (!lifetime && (!running || generation !== current))) return;
+            callback(event);
+        };
+        target.addEventListener(type, handler, options);
+        (lifetime ? lifetimeListeners : ownedListeners).push(() => target.removeEventListener(type, handler, options));
+    }
+
     const HUD_ID = 'wecog-debug-hud';
     const BTN_ID = 'wecog-debug-download-btn';
     const TOGGLE_BTN_ID = 'wecog-debug-toggle-btn';
@@ -16,6 +33,7 @@
         'visuospatial_drawing',
         'visuospatial_instruction'
     ]);
+    const KEY_DIAGNOSTIC_PHASES = new Set(['cognitive_stimulus', 'cognitive_fixation', 'visuospatial_drawing']);
 
     let userDismissed = false;
     let expanded = false;
@@ -71,6 +89,7 @@
     }
 
     function collectSnapshot() {
+        if (!isOn()) return null;
         const state = global.__WECOG_STATE__;
         const rt = state?.runtime || {};
         const flags = state?.flags || {};
@@ -136,8 +155,7 @@
                 bpmEstimate: bpmDiag.bpmEstimate ?? null,
                 bufferLength: bpmDiag.bufferLength ?? bpmDiag.sampleCount ?? null,
                 reporterAvailable: !!bpmDiag.reporterAvailable,
-                lastImportUrl: bpmDiag.lastImportUrl ?? null,
-                importAttempts: bpmDiag.importAttempts ?? null
+                importAttempts: Array.isArray(bpmDiag.importAttempts) ? bpmDiag.importAttempts.length : null
             },
             visuospatial: {
                 spaceDown: !!visDiag.spaceDown,
@@ -151,7 +169,8 @@
                 currentTest: rt.currentPhase ?? null,
                 activeOverlay: overlay?.isVisible?.()
                     ? 'qc-pause'
-                    : (document.getElementById('visuospatialDrawingOverlay')?.style.display !== 'none'
+                    : (document.getElementById('visuospatialDrawingOverlay')
+                        && document.getElementById('visuospatialDrawingOverlay').style.display !== 'none'
                         ? 'visuospatial'
                         : 'none'),
                 activeListeners: global.__WECOG_ACTIVE_LISTENERS__ ?? null,
@@ -255,17 +274,19 @@
     function ensureHud() {
         let root = document.getElementById(HUD_ID);
         if (root) return root;
+        const current = generation;
 
         const btnStyle = 'font-size:11px;padding:4px 10px;cursor:pointer;border-radius:6px;border:1px solid #64748b;background:#334155;color:#f8fafc;';
 
         const toggle = document.createElement('button');
         toggle.type = 'button';
         toggle.id = TOGGLE_BTN_ID;
-        toggle.textContent = 'DEBUG ▸';
+        toggle.textContent = expanded ? 'DEBUG ▾' : 'DEBUG ▸';
         toggle.setAttribute('aria-label', 'Toggle debug HUD');
-        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
         toggle.style.cssText = btnStyle + 'position:fixed;bottom:12px;right:12px;z-index:' + HUD_Z + ';opacity:0.92;';
         toggle.addEventListener('click', (ev) => {
+            if (!running || current !== generation) return;
             ev.preventDefault();
             ev.stopPropagation();
             toggleExpanded();
@@ -301,6 +322,7 @@
         dl.textContent = 'Download debug bundle';
         dl.style.cssText = btnStyle;
         dl.addEventListener('click', () => {
+            if (!running || current !== generation) return;
             const d = dbg();
             if (d && d.downloadDebugBundle) d.downloadDebugBundle();
         });
@@ -309,7 +331,7 @@
         hideBtn.type = 'button';
         hideBtn.textContent = 'Collapse';
         hideBtn.style.cssText = btnStyle;
-        hideBtn.addEventListener('click', () => setExpanded(false));
+        hideBtn.addEventListener('click', () => { if (running && current === generation) setExpanded(false); });
 
         const hint = document.createElement('span');
         hint.style.cssText = 'font-size:10px;color:#94a3b8;align-self:center;';
@@ -325,21 +347,32 @@
 
     let rafId = null;
     let lastQcPush = 0;
+    let lastSnapshotAt = null;
 
-    function tick() {
+    function tick(current) {
+        if (!running || disposed || current !== generation) return;
         if (!isOn()) {
-            const hud = document.getElementById(HUD_ID);
-            const toggle = document.getElementById(TOGGLE_BTN_ID);
-            if (hud) hud.style.display = 'none';
-            if (toggle) toggle.style.display = 'none';
-            rafId = null;
+            stop();
             return;
         }
         ensureHud();
         const hud = document.getElementById(HUD_ID);
         applyHudVisibility(hud);
 
-        const snap = collectSnapshot();
+        const now = global.performance.now();
+        if (lastSnapshotAt !== null && now - lastSnapshotAt < 200) {
+            rafId = global.requestAnimationFrame(() => tick(current));
+            return;
+        }
+        lastSnapshotAt = now;
+        let snap;
+        try { snap = collectSnapshot(); }
+        catch (_) {
+            // Diagnostics must not interrupt the measurement loop or spin on a broken collector.
+            stop();
+            dbg()?.mark?.('debug', 'hud:collector_unavailable');
+            return;
+        }
         const pre = document.getElementById(HUD_ID + '-body');
         if (expanded && hud && hud.style.display !== 'none') {
             renderHud(pre, snap);
@@ -347,7 +380,6 @@
         const d = dbg();
         if (d && d.setRuntimeSnapshot) d.setRuntimeSnapshot(snap);
 
-        const now = Date.now();
         if (d && d.pushTimeline && now - lastQcPush > 500) {
             lastQcPush = now;
             d.pushTimeline('qc', {
@@ -358,67 +390,99 @@
             });
         }
 
-        rafId = global.requestAnimationFrame(tick);
+        if (running && current === generation) rafId = global.requestAnimationFrame(() => tick(current));
     }
 
     function start() {
-        if (rafId) return;
-        if (!isOn()) return;
+        if (disposed || running || !isOn()) return;
+        running = true;
+        generation++;
+        lastSnapshotAt = null;
+        lastQcPush = 0;
+        wireKeyboardToggle();
+        wireFocusDiagnostics();
         const d = dbg();
         if (d && d.mark) d.mark('debug', 'hud:started');
-        tick();
+        tick(generation);
     }
 
     function stop() {
-        if (rafId) global.cancelAnimationFrame(rafId);
+        running = false;
+        generation++;
+        if (rafId !== null) global.cancelAnimationFrame(rafId);
         rafId = null;
+        ownedListeners.splice(0).forEach(remove => remove());
+        document.getElementById(HUD_ID)?.remove();
+        document.getElementById(TOGGLE_BTN_ID)?.remove();
+    }
+
+    function dispose() {
+        stop();
+        disposed = true;
+        lifetimeListeners.splice(0).forEach(remove => remove());
     }
 
     function wireKeyboardToggle() {
-        if (global.__WECOG_DEBUG_KEY_WIRED__) return;
-        global.__WECOG_DEBUG_KEY_WIRED__ = true;
-        document.addEventListener('keydown', (ev) => {
+        listen(document, 'keydown', (ev) => {
             if (!isOn()) return;
             if (ev.key !== '`' && ev.code !== 'Backquote') return;
             if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-            const tag = (ev.target && ev.target.tagName) ? String(ev.target.tagName).toLowerCase() : '';
-            if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+            if (!diagnosticKeySurface(ev) || editableEvent(ev)) return;
+            if (KEY_DIAGNOSTIC_PHASES.has(global.__WECOG_STATE__?.runtime?.currentPhase)) return;
             ev.preventDefault();
             toggleExpanded();
         }, true);
     }
 
     function wireFocusDiagnostics() {
-        if (global.__WECOG_FOCUS_WIRED__) return;
-        global.__WECOG_FOCUS_WIRED__ = true;
-        document.addEventListener('focusin', (ev) => {
+        listen(document, 'focusin', (ev) => {
             if (!isOn()) return;
             const t = ev.target;
-            const tag = t && t.tagName ? String(t.tagName).toLowerCase() : '?';
-            const id = t && t.id ? '#' + t.id : '';
+            const rawTag = String(t?.tagName || '').toLowerCase();
+            const tag = ['input', 'textarea', 'select', 'button', 'canvas', 'body'].includes(rawTag) ? rawTag : 'other';
             const d = dbg();
             if (d) {
-                d.pushTimeline('keys', { type: 'focusin', tag, id });
-                d.log('runtime', 'focus:target', { tag, id, className: t?.className || null });
+                d.pushTimeline('keys', { type: 'focusin', tag });
             }
             if (!global.__WECOG_VIS_DIAG__) global.__WECOG_VIS_DIAG__ = {};
-            global.__WECOG_VIS_DIAG__.focusTag = tag + id;
+            global.__WECOG_VIS_DIAG__.focusTag = tag;
         }, true);
-        document.addEventListener('keydown', (ev) => {
-            if (!isOn()) return;
+        function recordKey(type, ev) {
+            if (!isOn() || !diagnosticKeySurface(ev) || editableEvent(ev) || ev.isComposing || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+            const phase = global.__WECOG_STATE__?.runtime?.currentPhase;
+            if (!KEY_DIAGNOSTIC_PHASES.has(phase)) return;
+            if (!/^(Key[A-Z]|Digit[0-9]|Numpad[0-9]|Space|Enter|Escape|Backquote|Arrow(?:Left|Right|Up|Down)|Comma|Period)$/.test(ev.code)) return;
             const d = dbg();
-            if (d) d.pushTimeline('keys', { type: 'keydown', code: ev.code, key: ev.key });
-        }, true);
-        document.addEventListener('keyup', (ev) => {
-            if (!isOn()) return;
-            const d = dbg();
-            if (d) d.pushTimeline('keys', { type: 'keyup', code: ev.code, key: ev.key });
-        }, true);
+            if (d) d.pushTimeline('keys', { type, physicalCode: ev.code });
+        }
+        listen(document, 'keydown', ev => recordKey('keydown', ev), true);
+        listen(document, 'keyup', ev => recordKey('keyup', ev), true);
+    }
+
+    function diagnosticKeySurface(event) {
+        const target = event.composedPath?.()[0] || event.target;
+        // Unknown/retargeted component hosts may contain a closed shadow input.
+        return ['BODY', 'HTML', 'BUTTON', 'CANVAS'].includes(target?.tagName);
+    }
+
+    function editableEvent(event) {
+        try {
+            const nodes = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+            let active = document.activeElement;
+            for (let i = 0; active && i < 8; i++) {
+                nodes.push(active);
+                active = active.shadowRoot?.activeElement;
+            }
+            return nodes.some(node => node && (node.isContentEditable
+                || node.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')));
+        } catch (_) { return true; }
     }
 
     global.WECOG_DEBUG_HUD = {
         start,
         stop,
+        dispose,
+        isRunning: () => running,
         collectSnapshot,
         isOn,
         toggle: toggleExpanded,
@@ -427,21 +491,21 @@
     };
 
     function boot() {
-        wireKeyboardToggle();
-        wireFocusDiagnostics();
         if (isOn()) start();
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', boot);
+        listen(document, 'DOMContentLoaded', boot, { once: true }, true);
     } else {
         boot();
     }
 
-    global.addEventListener('storage', (ev) => {
+    listen(global, 'storage', (ev) => {
         if (ev.key === 'wecog_debug') {
             if (isOn()) start();
-            else stop();
+            else { stop(); dbg()?.clear?.(); }
         }
-    });
+    }, undefined, true);
+    listen(global, 'pagehide', stop, undefined, true);
+    listen(global, 'pageshow', boot, undefined, true);
 })(typeof window !== 'undefined' ? window : globalThis);

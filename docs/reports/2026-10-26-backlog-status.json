@@ -69,6 +69,206 @@
       "report": "docs/reports/2026-10-27-issue132-comment-review.md",
       "issueStillOpen": true,
       "thresholdsChanged": false
+    },
+    "diagnosticsLifecycle": {
+      "date": "2026-10-27",
+      "localBase": "f43713cd885d3dda2c2071984020341be2d83e4a",
+      "localBranch": "fix/audit-diagnostics-lifecycle",
+      "report": "docs/reports/2026-10-27-diagnostics-lifecycle-audit.md",
+      "fixedRows": [
+        46,
+        60,
+        187,
+        200
+      ],
+      "nonActionableRows": [
+        61
+      ],
+      "productionVerified": false,
+      "pushed": false
+    },
+    "frameCadence": {
+      "date": "2026-10-28",
+      "report": "docs/reports/2026-10-28-frame-cadence-followup.md",
+      "measurementVersion": "video_cadence.v2",
+      "nativeMediaStreamPathPreserved": true,
+      "thresholdsChanged": false,
+      "originalRowCountsUnchangedFromPriorStep": true,
+      "productionVerified": false,
+      "pushed": false,
+      "universalFpsClosed": false,
+      "verification": {
+        "api": {
+          "total": 588,
+          "passed": 583,
+          "skipped": 5,
+          "failed": 0
+        },
+        "runtimeWorkers": {
+          "passed": 213,
+          "failed": 0
+        },
+        "fpsSourceReplay": {
+          "passed": 72,
+          "failed": 0,
+          "retries": 0
+        },
+        "linuxNode22Targeted": {
+          "passed": 34,
+          "failed": 0
+        },
+        "originalRowsClosedThisStep": 0,
+        "newFindingsAddressed": [
+          "file_fps_counter_inflation",
+          "finite_replay_preparation_race"
+        ]
+      }
+    },
+    "stimulusUiLifecycle": {
+      "date": "2026-10-28",
+      "report": "docs/reports/2026-10-28-stimulus-ui-lifecycle-audit.md",
+      "fixedRows": [
+        141
+      ],
+      "productionVerified": false,
+      "pushed": false,
+      "verification": {
+        "api": {
+          "total": 593,
+          "passed": 588,
+          "skipped": 5,
+          "failed": 0
+        },
+        "staff": {
+          "total": 213,
+          "passed": 210,
+          "skipped": 3,
+          "failed": 0,
+          "retries": 0
+        },
+        "newLifecycleBrowser": {
+          "passed": 66,
+          "skipped": 0,
+          "failed": 0,
+          "retries": 0
+        },
+        "htmlSecurity": {
+          "passed": 33,
+          "failed": 0
+        },
+        "analyticsChromium": {
+          "passed": 7,
+          "failed": 0
+        }
+      }
+    },
+    "developerBpmLifecycle": {
+      "date": "2026-10-28",
+      "report": "docs/reports/2026-10-28-developer-bpm-lifecycle-audit.md",
+      "fixedRows": [
+        105,
+        209
+      ],
+      "productionVerified": false,
+      "pushed": false,
+      "physicalCameraUsed": false,
+      "thresholdsChanged": false,
+      "serverCameraPolicyRelaxed": false,
+      "verification": {
+        "api": {
+          "total": 602,
+          "passed": 597,
+          "skipped": 5,
+          "failed": 0
+        },
+        "linuxNode22Lifecycle": {
+          "passed": 9,
+          "failed": 0
+        },
+        "staff": {
+          "total": 276,
+          "passed": 273,
+          "skipped": 3,
+          "failed": 0,
+          "retries": 0
+        },
+        "developerBpmInStaff": {
+          "passed": 63,
+          "skipped": 0,
+          "failed": 0
+        },
+        "repeatedBpmMatrix": {
+          "passed": 126,
+          "failed": 0,
+          "repeatsPerEngine": 2,
+          "retries": 0
+        },
+        "resumedFirefoxTargeted": {
+          "passed": 6,
+          "failed": 0,
+          "repeatsPerCase": 3
+        },
+        "htmlSecurity": {
+          "passed": 33,
+          "failed": 0
+        },
+        "analyticsChromium": {
+          "passed": 7,
+          "failed": 0
+        }
+      },
+      "interruptedBackgroundRun": {
+        "passed": 124,
+        "failed": 2,
+        "engine": "firefox",
+        "causeNotEstablished": true,
+        "includesPageCreationTimeoutBeforeApplicationCode": true,
+        "retainedInReport": true
+      }
+    },
+    "issue139FaceVisibility": {
+      "date": "2026-10-28",
+      "issue": "https://github.com/web-emocog/web-emocog-core/issues/139",
+      "report": "docs/reports/2026-10-28-issue139-face-visibility.md",
+      "method": "face_oval_regions.v1",
+      "samplingMethod": "face_oval_pixels.v1",
+      "thresholdsChanged": false,
+      "productionVerified": false,
+      "pushed": false,
+      "physicalCameraUsed": false,
+      "originalAuditRowsClosedThisStep": 0,
+      "developSourceBlobs": {
+        "maskAnalyzer": "b18d31003f6018329006a05f022e9bbfec602187",
+        "regionAnalyzer": "3be6cd8994f120390ee6581e2adb383a94e06a88"
+      },
+      "verification": {
+        "api": {
+          "total": 608,
+          "passed": 603,
+          "skipped": 5,
+          "failed": 0
+        },
+        "runtimeWorkers": {
+          "passed": 231,
+          "failed": 0,
+          "retries": 0
+        },
+        "fpsSourceReplay": {
+          "passed": 36,
+          "failed": 0,
+          "retries": 0
+        },
+        "newBrowserRepeated": {
+          "passed": 36,
+          "failed": 0,
+          "retries": 0,
+          "repeatsPerEngine": 2
+        },
+        "linuxNode22Targeted": {
+          "passed": 11,
+          "failed": 0
+        }
+      }
     }
   },
   "rows": [
@@ -707,11 +907,11 @@
       "severity": "Средняя",
       "file": "apps/participant-web/js/protocol-runner-new.js",
       "title": "Listeners без симметричного teardown",
-      "status": "Требует адресной проверки",
-      "scope": "Локальный код; production не проверен",
-      "evidence": "Большая часть обработчиков привязана к DOM-узлам, удаляемым вместе с экраном, либо к lifetime страницы. Утечка не доказана отсутствием removeEventListener; проверить повторный mount/stop и глобальные timers отдельно.",
-      "tests": "Нужны repeated-navigation/listener/timer accounting tests.",
-      "next": "См. отдельный список сложных задач.",
+      "status": "Исправлено локально",
+      "scope": "Локальный код 27.10; production не проверен",
+      "evidence": "Таймеры rest/baseline/recovery и DOM handlers снимаются при stop/start/dispose. Generation guards защищают от stale callback/submit; поздний invitation response не меняет новый протокол. Устранён double-advance авторского final.",
+      "tests": "protocol-runner-security.test.js; diagnostics-lifecycle.spec.ts: 100 циклов, late body/deadline, stale form, final, invalid duration.",
+      "next": "Review/CI и staging перед выпуском. См. docs/reports/2026-10-27-diagnostics-lifecycle-audit.md.",
       "group": "LIFECYCLE",
       "complexity": "Средняя",
       "currentFileExists": true
@@ -903,11 +1103,11 @@
       "severity": "Средняя",
       "file": "apps/participant-web/js/web-page/debug-hud.js",
       "title": "Listeners без симметричного teardown",
-      "status": "Требует адресной проверки",
-      "scope": "Локальный код; production не проверен",
-      "evidence": "Большая часть обработчиков привязана к DOM-узлам, удаляемым вместе с экраном, либо к lifetime страницы. Утечка не доказана отсутствием removeEventListener; проверить повторный mount/stop и глобальные timers отдельно.",
-      "tests": "Нужны repeated-navigation/listener/timer accounting tests.",
-      "next": "См. отдельный список сложных задач.",
+      "status": "Исправлено локально",
+      "scope": "Локальный код 27.10; production не проверен",
+      "evidence": "HUD снимает keyboard/focus listeners и RAF; re-evaluation заменяет экземпляр. Snapshot polling до 5 Hz. Нажатия из editable/shadow/IME/modifier не записываются; RT-ввод не перехватывается.",
+      "tests": "diagnostics-lifecycle.spec.ts: 100 циклов, late RAF/button, reload/pagehide/pageshow/storage, настоящий browser typing/download в трёх движках.",
+      "next": "Review/CI и staging перед выпуском. См. docs/reports/2026-10-27-diagnostics-lifecycle-audit.md.",
       "group": "LIFECYCLE",
       "complexity": "Средняя",
       "currentFileExists": true
@@ -917,11 +1117,11 @@
       "severity": "Средняя",
       "file": "apps/participant-web/js/web-page/debug-runtime.js",
       "title": "Пустой catch",
-      "status": "Требует адресной проверки",
-      "scope": "Локальный код; production не проверен",
-      "evidence": "Пустые catch часто защищают недоступный storage/focus/teardown. Это не равнозначно потере основных данных. Проверять критические await и сохранение отдельно; не заменять все catch шумными логами с PII.",
-      "tests": "Storage/offline/reset regressions покрывают canonical runtime, но не все legacy ветки.",
-      "next": "См. отдельный список сложных задач.",
+      "status": "Неактуально: не подтверждённый баг",
+      "scope": "Адресная локальная проверка debug-runtime 27.10; не оценка всех catch проекта",
+      "evidence": "Catches относятся к optional storage/diagnostic inspection/console, не к сохранению сессии. Отказы не блокируют основную обработку; экспорт сообщает unavailable без Error/PII. Прямое логирование всех исключений ухудшило бы приватность.",
+      "tests": "debug-runtime-privacy.test.js: blocked storage, hostile accessor/Proxy, optional inspector failure, broken console sink. Браузерный HUD collector failure.",
+      "next": "Сохранять best-effort поведение; остальные ERRORS-строки требуют собственного source-to-sink аудита.",
       "group": "ERRORS",
       "complexity": "Средняя",
       "currentFileExists": true
@@ -1533,13 +1733,13 @@
       "severity": "Средняя",
       "file": "apps/web/developer/bpm-test.js",
       "title": "Listeners без симметричного teardown",
-      "status": "Требует адресной проверки",
+      "status": "Исправлено локально",
       "scope": "Локальный код; production не проверен",
-      "evidence": "Большая часть обработчиков привязана к DOM-узлам, удаляемым вместе с экраном, либо к lifetime страницы. Утечка не доказана отсутствием removeEventListener; проверить повторный mount/stop и глобальные timers отдельно.",
-      "tests": "Нужны repeated-navigation/listener/timer accounting tests.",
-      "next": "См. отдельный список сложных задач.",
+      "evidence": "28.10: browser test подтвердил возобновление камеры поздним getUserMedia после pagehide. DiagnosticRun владеет async stages/late results; Stop доступен при запуске; отмена при pagehide/account block, close модели, track stop, teardown loadeddata/error/RAF с handle 0. Serial native stages имеют удаляемые waiters: 100 отмен не накапливают очередь. Fresh server identity/role проверяются перед камерой; Permissions-Policy не ослабляется.",
+      "tests": "diagnostic-run.test.js: 9 passed на macOS/Node24 и Linux/Node22. Developer BPM: 126 passed в двух повторах трёх движков; общий staff suite: 273 passed / 3 existing skips, включая 63 BPM cases. 100 полных start/stop и native model init/close без физической камеры.",
+      "next": "Review/CI и отдельный выпуск с production retest. Реальная камера, scientific accuracy и nginx camera policy этим локальным шагом не подтверждены.",
       "group": "LIFECYCLE",
-      "complexity": "Средняя",
+      "complexity": "Закрыто",
       "currentFileExists": true
     },
     {
@@ -2037,13 +2237,13 @@
       "severity": "Средняя",
       "file": "apps/web/researcher-stimuli.js",
       "title": "Listeners без симметричного teardown",
-      "status": "Требует адресной проверки",
+      "status": "Исправлено локально",
       "scope": "Локальный код; production не проверен",
-      "evidence": "Большая часть обработчиков привязана к DOM-узлам, удаляемым вместе с экраном, либо к lifetime страницы. Утечка не доказана отсутствием removeEventListener; проверить повторный mount/stop и глобальные timers отдельно.",
-      "tests": "Нужны repeated-navigation/listener/timer accounting tests.",
-      "next": "См. отдельный список сложных задач.",
+      "evidence": "28.10: подтверждён late AOI после ухода из библиотеки. Owned UI scopes для library/preview/AOI/naming/folder/progress; guard по DOM/account/hash/project/API/generation. Shell следует проекту, dialogs отменяются; teardown observers/listeners/layout callbacks и persisted pageshow remount без мутаций. Shared workspace cache сохраняется.",
+      "tests": "stimulus-ui-lifecycle.test.js: 5 passed; stimulus-lifecycle.spec.ts: 66 browser cases passed в трёх движках, включая 100 циклов и immediate unmount. Полный staff: 210 passed / 3 existing skips; HTML: 33; analytics: 7; API/unit: 588 passed / 5 skips.",
+      "next": "Review/CI, затем выпуск и production retest. Остальные lifecycle и HTML строки не считаются закрытыми.",
       "group": "LIFECYCLE",
-      "complexity": "Средняя",
+      "complexity": "Закрыто",
       "currentFileExists": true
     },
     {
@@ -2681,11 +2881,11 @@
       "severity": "Низкая",
       "file": "apps/participant-web/js/web-page/debug-runtime.js",
       "title": "Прямой console.log",
-      "status": "Открыто: логирование",
-      "scope": "Локальный код; production не проверен",
-      "evidence": "Информационные/отладочные логи остались. Сам console.log не баг; нужно отдельно проверить payload на PII, token и покадровый spam.",
-      "tests": "error-log-privacy/nginx-log-security защищают сервер; client logs требуют отдельного inventory.",
-      "next": "Развести debug/operational logs, проверить отсутствие секретов, не удалять полезную диагностику вслепую.",
+      "status": "Исправлено локально",
+      "scope": "Локальный код 27.10; production не проверен",
+      "evidence": "Debug ring/timelines/snapshots проходят bounded copy-by-value очистку. Error message/stack и session answers/IDs не экспортируются; есть explicit double opt-in, privacyVersion technical_only.v2. Это не гарантия анонимности произвольного текста.",
+      "tests": "debug-runtime-privacy.test.js; diagnostics-lifecycle.spec.ts: console/export/download, циклы/Proxy/accessor, disabled/clear/dispose.",
+      "next": "Review/CI и staging перед выпуском. См. docs/reports/2026-10-27-diagnostics-lifecycle-audit.md.",
       "group": "LOGS",
       "complexity": "Средняя",
       "currentFileExists": true
@@ -2863,11 +3063,11 @@
       "severity": "Низкая",
       "file": "apps/participant-web/mvp_with_precheck_1-updated.html",
       "title": "Прямой console.log",
-      "status": "Открыто: логирование",
-      "scope": "Локальный код; production не проверен",
-      "evidence": "Информационные/отладочные логи остались. Сам console.log не баг; нужно отдельно проверить payload на PII, token и покадровый spam.",
-      "tests": "error-log-privacy/nginx-log-security защищают сервер; client logs требуют отдельного inventory.",
-      "next": "Развести debug/operational logs, проверить отсутствие секретов, не удалять полезную диагностику вслепую.",
+      "status": "Исправлено локально",
+      "scope": "Локальный код 27.10; production не проверен",
+      "evidence": "MediaPipe loader сообщает стабильный technical failure code, не Error/message/stack. Информационный лог gated debug; HTML с согласованными cache tags debug runtime/HUD.",
+      "tests": "debug-runtime-privacy.test.js: actual HTML loader callback с synthetic rejection; общая browser runtime регрессия.",
+      "next": "Review/CI и staging перед выпуском. См. docs/reports/2026-10-27-diagnostics-lifecycle-audit.md.",
       "group": "LOGS",
       "complexity": "Средняя",
       "currentFileExists": true
@@ -2989,13 +3189,13 @@
       "severity": "Низкая",
       "file": "apps/web/developer/bpm-test.js",
       "title": "Жестко заданный URL",
-      "status": "Частично исправлено",
+      "status": "Исправлено локально",
       "scope": "Локальный код; production не проверен",
-      "evidence": "Активный participant pipeline использует same-origin assets/API. Старые конфигурации/CDN fallback и developer BPM page требуют отдельной инвентаризации; текущий replay не доказывает их автономность.",
-      "tests": "vision-workers + private replay offline; отдельно проверить legacy/developer pages.",
-      "next": "См. отдельный список сложных задач.",
+      "evidence": "28.10: developer BPM использует один same-origin путь rPPG от import.meta.url, без guessed ancestors или /main fallback. WASM/model URLs также module-relative. Проверено разрешение root/prefix путей, native локальный MediaPipe init/close; physical camera и production policy отдельно. Probe имеет signal/deadline, dynamic import bounded логически.",
+      "tests": "developer-bpm-lifecycle.spec.ts: root и /audit-prefix в Chromium/Firefox/WebKit; реальные self-hosted model init/close cases в трёх движках. Общий API/unit: 597 passed / 5 skips, staff/HTML/analytics без ошибок.",
+      "next": "Review/CI и отдельный выпуск с production retest. Реальная камера, scientific accuracy и nginx camera policy этим локальным шагом не подтверждены.",
       "group": "LEGACY",
-      "complexity": "Средняя",
+      "complexity": "Закрыто",
       "currentFileExists": true
     },
     {
@@ -3421,26 +3621,26 @@
   ],
   "counts": {
     "Исправлено в текущем коде": 49,
-    "Частично исправлено": 9,
-    "Неактуально: не подтверждённый баг": 40,
-    "Исправлено локально": 19,
-    "Требует адресной проверки": 36,
+    "Частично исправлено": 8,
+    "Неактуально: не подтверждённый баг": 41,
+    "Исправлено локально": 26,
+    "Требует адресной проверки": 31,
     "Неактуально: не security-баг": 6,
     "Открыто: legacy entrypoints": 6,
     "Неактуально: исходный файл удалён": 2,
     "Открыто: случайность/идентификаторы": 5,
     "Неактуально: не доказан XSS": 13,
     "Открыто: архитектурный техдолг": 15,
-    "Открыто: логирование": 24,
+    "Открыто: логирование": 22,
     "Открыто: продуктовый техдолг": 3,
     "Открыто: стиль, не функциональный баг": 12
   },
   "auditTotals": {
     "sourceRows": 239,
-    "fixedInCurrentOrLocalCode": 68,
-    "notActionableOrObsolete": 61,
-    "remainingIncludingPartial": 110,
-    "partial": 9,
+    "fixedInCurrentOrLocalCode": 75,
+    "notActionableOrObsolete": 62,
+    "remainingIncludingPartial": 102,
+    "partial": 8,
     "productionVerified": false,
     "scope": "Исходные 239 строк; новые отдельные FPS/validation/posture задачи не добавлены в знаменатель."
   }

@@ -46,18 +46,18 @@
                 window.FilesetResolver = vision.FilesetResolver;
                 window.FaceLandmarker = vision.FaceLandmarker;
                 window.ImageSegmenter = vision.ImageSegmenter;
-                console.log('[MediaPipe] Vision modules loaded (self-hosted)');
+                window.WECOG_DEBUG?.log?.('mediapipe', 'runtime:loaded', { source: 'self_hosted' });
             })
-            .catch(err => {
-                window.__WECOG_MEDIAPIPE_LOAD_ERROR__ = String(err?.message || err);
-                console.error('[MediaPipe] Self-hosted runtime load error:', err);
+            .catch(() => {
+                window.__WECOG_MEDIAPIPE_LOAD_ERROR__ = 'mediapipe_runtime_load_failed';
+                console.error('[MediaPipe] Self-hosted runtime load failed');
             });
     </script>
     
     <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
     <script src="js/precheck-analyzer.js?v=20261025-1"></script>
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
-    <script src="js/face-segmenter.js?v=20261025-1"></script>
+    <script src="js/face-segmenter.js?v=20261028-139"></script>
     <!-- QC Metrics Module -->
     <script src="js/qc-metrics.js?v=20261025-1"></script>
     <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
@@ -539,8 +539,8 @@
 
     </div>
 
-    <script src="js/web-page/debug-runtime.js"></script>
-    <script src="js/web-page/debug-hud.js"></script>
+    <script src="js/web-page/debug-runtime.js?v=20261027-1"></script>
+    <script src="js/web-page/debug-hud.js?v=20261027-1"></script>
     <script>
       if (!window.WECOG_DEBUG) {
         console.error('[WECOG_DEBUG] debug-runtime.js failed to load — using no-op stub');
