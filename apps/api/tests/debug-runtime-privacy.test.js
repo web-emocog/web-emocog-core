@@ -209,9 +209,11 @@ test('a console integration mutating its payload cannot alter the stored diagnos
 
 test('canonical MediaPipe loader keeps a stable technical failure code, never raw exception data', async () => {
   const html = fs.readFileSync(path.resolve(__dirname, '../../participant-web/mvp_with_precheck_1-updated.html'), 'utf8');
-  const loader = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1])
+  const findLoader = source => [...source.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1])
     .find(script => script.includes("import('./js/vendor/mediapipe/vision_bundle.mjs')"));
+  const loader = findLoader(html);
   assert.ok(loader);
+  assert.equal(findLoader(html.replace(/<script>/gi, '<ScRiPt>').replace(/<\/script>/gi, '</SCRIPT>')), loader);
   const logs = [], global = {};
   vm.runInNewContext(loader.replace("import('./js/vendor/mediapipe/vision_bundle.mjs')", 'loadVision()'), {
     window: global, console: { error: (...values) => logs.push(values) },
