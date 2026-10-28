@@ -279,6 +279,35 @@ test('folder creation is single flight and a late committed result cannot invoke
   expect(await page.evaluate(() => (window as any).__folderCallbacks)).toBe(0);
 });
 
+test('repeated authentication preserves current AOI; a locked account cannot remount its library', async ({ page }) => {
+  await page.evaluate(async () => {
+    const w = window as any;
+    await w.openAoiEditor('std_simple_black_square');
+    w.__authRoot = document.getElementById('view')!.firstElementChild;
+    w.__authScope = w.__authRoot._stimulusLibraryUiScope;
+    w.__authDialog = document.getElementById('aoiClose');
+    window.dispatchEvent(new Event('wecog:researcherauthenticated'));
+  });
+  await expect(page.locator('#aoiClose')).toBeVisible();
+  expect(await page.evaluate(() => {
+    const w = window as any;
+    return document.getElementById('view')!.firstElementChild === w.__authRoot
+      && document.getElementById('aoiClose') === w.__authDialog && w.__authScope.current();
+  })).toBe(true);
+  await page.evaluate(() => {
+    const w = window as any;
+    localStorage.setItem('emocog_workspace_owner_v1', '2');
+    try { w.WecogStaffSession.assertCurrent(); } catch (_) {}
+    window.dispatchEvent(new Event('wecog:researcherauthenticated'));
+  });
+  await expect(page.locator('#staffSessionChanged')).toBeVisible();
+  await expect(page.locator('#aoiClose')).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const w = window as any;
+    return document.getElementById('view')!.firstElementChild === w.__authRoot && !w.__authScope.current();
+  })).toBe(true);
+});
+
 test('normal AOI save, next, close and accepted upload retain their intended callbacks and ownership', async ({ page }) => {
   await page.evaluate(async () => {
     const w = window as any; w.__saved = []; w.__next = 0; w.__closed = 0;

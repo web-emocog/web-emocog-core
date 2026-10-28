@@ -10,31 +10,49 @@ test.beforeEach(async ({ page, baseURL }) => {
   });
 });
 
-test('native live-stream FPS retains the camera path and stops without reading a playback counter', async ({ page }) => {
-  await page.goto('/apps/participant-web/tools/session-report.html');
-  test.skip(!await page.evaluate(() => typeof HTMLCanvasElement.prototype.captureStream === 'function'),
-    'No synthetic MediaStream support; never substitute a physical camera.');
-  const result = await page.evaluate(async () => {
-    const modulePath = '/apps/participant-web/js/session-runtime/video-frames.mjs';
-    const { measureVideoFps } = await import(modulePath);
-    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    const video = document.createElement('video'); video.muted = true; video.playsInline = true;
-    const stream = canvas.captureStream(10); let paints = 0, qualityReads = 0;
-    const timer = setInterval(() => { ctx.fillStyle = paints++ % 2 ? '#fff' : '#000'; ctx.fillRect(0, 0, 64, 64); }, 100);
-    video.srcObject = stream; document.body.append(video);
-    video.getVideoPlaybackQuality = () => { qualityReads++; throw new Error('inert fixture'); };
-    try {
-      await video.play();
-      const measured = await measureVideoFps(video, 2200);
-      return { measured, qualityReads };
-    } finally { clearInterval(timer); video.pause(); stream.getTracks().forEach(track => track.stop()); video.srcObject = null; video.remove(); }
+for (const paintInterval of [100, 250]) {
+  test(`native live-stream FPS retains the camera path and stops without reading a playback counter (${paintInterval}ms paints)`, async ({ page }) => {
+    await page.goto('/apps/participant-web/tools/session-report.html');
+    test.skip(!await page.evaluate(() => typeof HTMLCanvasElement.prototype.captureStream === 'function'),
+      'No synthetic MediaStream support; never substitute a physical camera.');
+    const result = await page.evaluate(async paintInterval => {
+      const modulePath = '/apps/participant-web/js/session-runtime/video-frames.mjs';
+      const { measureVideoFps } = await import(modulePath);
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+      const video = document.createElement('video'); video.muted = true; video.playsInline = true;
+      const stream = canvas.captureStream(10); let paints = 0, qualityReads = 0;
+      const timer = setInterval(() => { ctx.fillStyle = paints++ % 2 ? '#fff' : '#000'; ctx.fillRect(0, 0, 64, 64); }, paintInterval);
+      video.srcObject = stream; document.body.append(video);
+      video.getVideoPlaybackQuality = () => { qualityReads++; throw new Error('inert fixture'); };
+      const request = video.requestVideoFrameCallback.bind(video), cancel = video.cancelVideoFrameCallback.bind(video);
+      const pending = new Set<number>(), delivered: number[] = [];
+      video.requestVideoFrameCallback = callback => {
+        const id = request((now, metadata) => {
+          pending.delete(id); delivered.push(metadata.presentedFrames); callback(now, metadata);
+        });
+        pending.add(id); return id;
+      };
+      video.cancelVideoFrameCallback = id => { pending.delete(id); cancel(id); };
+      try {
+        await video.play();
+        const measured = await measureVideoFps(video, 2200);
+        return { measured, qualityReads, delivered, pending: pending.size };
+      } finally { clearInterval(timer); video.pause(); stream.getTracks().forEach(track => track.stop()); video.srcObject = null; video.remove(); }
+    }, paintInterval);
+    expect(result.qualityReads).toBe(0);
+    expect(result.measured).toMatchObject({ method: 'video-frame-callback', measurementVersion: 'video_cadence.v2', playbackQuality: null });
+    // captureStream's requested rate is a ceiling, not a CI scheduling guarantee.
+    // Compare the measurement with actual native delivery, including skipped notifications.
+    expect(result.delivered.length).toBeGreaterThan(1);
+    expect(result.delivered.every((counter, index, all) => Number.isSafeInteger(counter)
+      && (index === 0 || counter > all[index - 1]))).toBe(true);
+    expect(result.measured.frames).toBe(1 + result.delivered[result.delivered.length - 1] - result.delivered[0]);
+    expect(result.measured.fps).toBe(Math.round(result.measured.frames / result.measured.duration));
+    expect(result.measured.duration).toBeGreaterThan(0);
+    expect(result.pending).toBe(0);
   });
-  expect(result.qualityReads).toBe(0);
-  expect(result.measured).toMatchObject({ method: 'video-frame-callback', measurementVersion: 'video_cadence.v2', playbackQuality: null });
-  expect(result.measured.fps).toBeGreaterThanOrEqual(7);
-  expect(result.measured.fps).toBeLessThanOrEqual(14);
-});
+}
 
 test('file FPS restart cleans callbacks and unavailable counters are explicitly lower-bound notifications', async ({ page }) => {
   await page.goto('/apps/participant-web/tools/session-report.html');

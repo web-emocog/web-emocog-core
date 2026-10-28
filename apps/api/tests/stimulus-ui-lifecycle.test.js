@@ -116,6 +116,42 @@ test('the library shell follows projects and API scopes but remains bound to its
   assert.ok(h.observers.every(observer => !observer.active));
 });
 
+test('late first authentication replaces the anonymous shell without reviving its controls', () => {
+  const h = harness();
+  h.store.delete('emocog_workspace_owner_v1');
+  const old = h.owner._stimulusLibraryUiScope = h.evaluate('createStimulusUiScope(undefined, { workspaceView: true })');
+  let renders = 0;
+  h.context.render = () => {
+    renders++;
+    h.owner._stimulusLibraryUiScope = h.evaluate('createStimulusUiScope(undefined, { workspaceView: true })');
+  };
+  h.store.set('emocog_workspace_owner_v1', '1');
+  h.window.emit('wecog:researcherauthenticated');
+  assert.equal(renders, 1);
+  assert.equal(old.current(), false);
+  assert.equal(h.owner._stimulusLibraryUiScope.current(), true);
+  h.window.emit('wecog:researcherauthenticated');
+  assert.equal(renders, 1, 'repeated authentication must preserve a current shell');
+  h.owner._stimulusLibraryUiScope.dispose();
+  assert.equal(h.window.count(), h.baseline);
+});
+
+test('authentication cannot remount an old shell on another route or a locked staff tab', () => {
+  for (const boundary of ['route', 'staff-lock']) {
+    const h = harness();
+    const old = h.owner._stimulusLibraryUiScope = h.evaluate('createStimulusUiScope(undefined, { workspaceView: true })');
+    let renders = 0;
+    h.context.render = () => { renders++; };
+    h.store.set('emocog_workspace_owner_v1', '2');
+    if (boundary === 'route') h.context.location.hash = '#/overview';
+    else h.window.WecogStaffSession = { assertCurrent() { throw new Error('synthetic account lock'); } };
+    h.window.emit('wecog:researcherauthenticated');
+    assert.equal(renders, 0);
+    assert.equal(old.current(), false);
+    assert.equal(h.window.count(), h.baseline);
+  }
+});
+
 test('failed decoder teardown still clears every source and releases the remaining media', () => {
   const h = harness(), released = [];
   h.context.mediaContainer = { querySelectorAll: () => [1, 2].map(id => ({

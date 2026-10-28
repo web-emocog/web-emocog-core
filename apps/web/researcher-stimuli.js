@@ -320,7 +320,17 @@ function invalidateProjectStimuli() {
 }
 
 window.addEventListener('wecog:projectchange', activateStimulusLibraryScope);
-window.addEventListener('wecog:researcherauthenticated', activateStimulusLibraryScope);
+window.addEventListener('wecog:researcherauthenticated', () => {
+  try { window.WecogStaffSession?.assertCurrent(); } catch (_) { return; }
+  activateStimulusLibraryScope();
+  if (!/^#\/stimuli(?:\/|$)/.test(location.hash)) return;
+  const shell = document.getElementById('view')?.firstElementChild?._stimulusLibraryUiScope;
+  if (shell && !shell.current() && typeof render === 'function') {
+    // First authentication retires the anonymous shell; never rebind its old controls.
+    shell.dispose();
+    render();
+  }
+});
 document.addEventListener('DOMContentLoaded', activateStimulusLibraryScope, { once: true });
 window.addEventListener('pageshow', event => {
   if (!event.persisted || !/^#\/stimuli(?:\/|$)/.test(location.hash)) return;
@@ -750,6 +760,7 @@ function StimuliAOIView() {
   const root = document.createElement('div');
   // This shell follows project selection; dialogs and preview observers do not.
   const lifetime = createStimulusUiScope(root, { workspaceView: true });
+  root._stimulusLibraryUiScope = lifetime;
   lifetime.onDispose(() => stopStimulusUiMedia(root));
   root.style.cssText = 'display:flex; flex-direction:column; height:calc(100% + 40px); min-height:0; margin:-20px; padding:0;';
   const status = document.createElement('div');
