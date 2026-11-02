@@ -1,0 +1,220 @@
+name: Баг-репорт
+description: Ошибка платформы, найденная при тестировании или в исследовании
+title: "[Баг]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Заполните обязательные поля (*). Пояснения к части системы и срочности — прямо над этими полями.
+        После отправки поставьте выбранные часть системы и срочность метками справа, в поле Labels.
+
+  - type: input
+    id: project
+    attributes:
+      label: Название проекта
+      placeholder: Валидация платформы 2.0
+    validations:
+      required: true
+
+  - type: input
+    id: protocol
+    attributes:
+      label: Название протокола
+      placeholder: test_AOI
+    validations:
+      required: true
+
+  - type: input
+    id: protocol_version
+    attributes:
+      label: Версия протокола
+      placeholder: Публикация 1
+    validations:
+      required: true
+
+  - type: input
+    id: protocol_link
+    attributes:
+      label: Ссылка на протокол
+      placeholder: https://wecog.ru/apps/participant-web/run_new.html?code=...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Этап, на котором возник баг
+      options:
+        - Вход / согласие
+        - Precheck (проверка камеры и лица)
+        - Калибровка
+        - Валидация калибровки
+        - Инструкция
+        - Измерительный блок / задание
+        - Завершение / отправка данных
+        - Аналитика / дашборд / экспорт
+        - Другое
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: В чём заключается баг
+      description: Что произошло. Одна проблема — один баг-репорт.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что должно было произойти
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Что вызвало баг (какие действия)
+      description: Шаги по порядку, чтобы другой человек мог повторить.
+      placeholder: |
+        1. Открыть протокол по ссылке
+        2. Нажать «Начать проверку»
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: repro
+    attributes:
+      label: Как часто повторяется
+      options:
+        - Всегда
+        - Часто (больше половины попыток)
+        - Иногда
+        - Один раз, повторить не удалось
+    validations:
+      required: true
+
+  - type: input
+    id: datetime
+    attributes:
+      label: Дата и время фиксации (МСК)
+      placeholder: 28.10.2026 15:20
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        #### Как выбрать часть системы
+        Можно выбрать несколько. Не уверены — выберите ближайшую, при разборе метку поправят.
+
+        | Метка | Когда ставить | Пример |
+        |---|---|---|
+        | qc | Проверки качества и анализ с камеры: FPS, детекция лица и руки, освещение, поза, незасчитанные пробы, ложные предупреждения | «Рука на лице», когда руки нет; FPS анализа 1 |
+        | protocol | Ход протокола: переходы между этапами, калибровка, задания, повторы проб, не загружаются модули | После инструкции не начинается блок; не загрузился модуль ЧСС |
+        | frontend | Внешний вид и интерфейс: тексты, кнопки, вёрстка, переводы, отображение кабинета исследователя | Кнопка перекрывает инструкцию |
+        | backend\api | Сервер: сохранение и отправка данных, аналитика, карточка сессии, экспорт PDF/JSON, ошибки запросов в консоли (4xx/5xx) | Сессии нет в аналитике; 401 на /ingest |
+        | network | Связь: долгая загрузка страницы или моделей, обрывы соединения, работа без интернета | После потери сети данные не дошли |
+        | RBAC | Роли и права: кто что видит и может делать в кабинете | Исследователь не видит свой проект |
+        | infosec | Безопасность: вход в обход пароля, токены или ключи в логах, уязвимости | В консоли виден токен доступа |
+        | privacy | Данные участников попадают туда, где их быть не должно | Видео лица в экспорте |
+        | documentation | Ошибки в документации и инструкциях для исследователей | README расходится с тем, что на экране |
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Часть системы
+      multiple: true
+      options:
+        - qc
+        - protocol
+        - frontend
+        - backend\api
+        - network
+        - RBAC
+        - infosec
+        - privacy
+        - documentation
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        #### Как выбрать срочность
+        Срочность — это срок выполнения: учитывайте и то, что сломано, и насколько это важно для работы.
+
+        | Метка | Баг | Фича |
+        |---|---|---|
+        | must | Стопорит работу и требует немедленного исправления | Очень важная и нужная |
+        | should | Неприятный, мешает, но решение можно отложить | Полезная и не требует много времени |
+        | can | Визуальный или несущественный | Идея, на реализацию которой нужно время |
+        | draft | Ещё не изучен, описание дополняется | Идея пока не описана |
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Срочность
+      options:
+        - must
+        - should
+        - can
+        - draft
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Устройство и браузер
+      placeholder: |
+        Устройство: MacBook Air, macOS 26.x
+        Браузер: Safari 26.6.2
+        Камера: встроенная
+        Место: дома / лаборатория
+    validations:
+      required: true
+
+  - type: input
+    id: session
+    attributes:
+      label: ID сессии
+      description: Если сессия видна в аналитике.
+
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Условия
+      description: Если важны для бага — освещение, положение камеры, посадка, что было на экране.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Обходной путь
+      description: Как удалось продолжить работу и не портит ли это данные.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи из консоли
+      description: Safari — «Разработка → Показать консоль JavaScript»; Chrome — Cmd+Option+J. Скопируйте ошибки (красные) и предупреждения (жёлтые).
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Фото / скриншот бага
+      description: Перетащите файлы сюда.
+    validations:
+      required: true
+
+  - type: input
+    id: related
+    attributes:
+      label: Связанные баги
+      placeholder: "#123, #130"
