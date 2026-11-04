@@ -132,7 +132,7 @@ web-emocog-core/
 ├── packages/shared/          versioned JSON Schema и TypeScript declarations
 ├── lib/rppg_.../             browser rPPG/BPM engine
 ├── rt_component-/            Python RT post-analysis
-├── Audio_detection/          standalone audio core, пока не session-integrated
+├── Audio_detection/          MIT audio core; opt-in session adapter в participant-web/js/audio/
 ├── docs/                     API, research, licenses и мини-отчёты
 ├── deploy/                   nginx snippets
 ├── ml/, packages/ui/, db/    преимущественно заготовки, не runtime source
@@ -227,6 +227,13 @@ Primary face/gaze не ждёт auxiliary pose/segment; их очередь ог
 задачей. Strides 3/6/6 не адаптируются скрыто; фактические counts/backend/timing
 сохраняются в `tech.framePipeline` (`frame_pipeline.v2`). Маска старше 1000 ms не
 переиспользуется как свежая. Pixels передаются только между локальными потоками.
+`completed-primary-stages.v1` разделяет elapsed time завершённых primary frames
+на face (включая захват/Worker round trip), guide/gaze/eyes, emotion/multimodal,
+QC, BPM и auxiliary dispatch. Это не pure model CPU time и не accuracy metric.
+Хранить только bounded counters/totals/maxima, без истории кадров/landmarks;
+snapshot публикуется примерно раз в секунду и обязательно при stop, без пропуска
+измерительных samples. Hidden head guide не должен очищать canvas на каждом
+кадре; активный precheck и pose smoothing продолжаются с прежней частотой.
 При недоступности Worker действует прежний main-thread backend; fallback имеет
 явную причину в диагностике. Нельзя менять scientific/QC thresholds ради FPS.
 MaskReader читает GPU MPMask через публичный texture API и RGBA/FLOAT: это
@@ -250,8 +257,17 @@ Firefox/WebKit используют GPU, при ошибке есть однок
 Успешный Worker с ответом медленнее 1000 ms не доказывает свежесть сегментации.
 
 Поздний ответ/ошибка Worker после reset/stop не изменяет новую generation.
+Primary scheduling использует `frame-notification.v1`: уведомление нового
+кадра, один in-flight inference, только последний pending frame, бюджет 33 ms
+между стартами и 1000 ms heartbeat для camera stall. Не возвращать polling,
+который расходится с camera cadence. Ошибка диагностики тоже освобождает
+single-flight ownership; retry не должен становиться синхронной рекурсией.
 Привязка rPPG к pixels, landmarks и capture wall time должна оставаться общей,
 даже если inference завершился позже или размер live video изменился.
+Precheck также использует пиксели результата face для сегментации того же кадра.
+Общий `protocol-profile.mjs` задаёт запрос камеры, 33 ms и cadence 3/6/6.
+`framePipeline.budget` отделяет source cadence, среднее время последовательного
+анализа и нагрузку вспомогательного слота; это верхняя оценка, не фактический FPS.
 Отсутствие новых кадров дольше существующего `low_fps.holdMs` сообщает
 `camera_frames_stalled`: один frame-based QC без новых кадров не сработает.
 Нельзя считать повторный start доказательством восстановления камеры.
@@ -281,8 +297,44 @@ sample и не ретайминг принятого PTS. WebKit/Chromium не �
 и не даёт performance pass. Старые отчёты не пересчитывать автоматически.
 
 - не создавать второй `requestAnimationFrame`/MediaPipe loop;
+- precheck camera setup и подготовка калибровки single-flight: повторный вызов
+  разделяет текущий promise. Отмена precheck закрывает поздно полученный stream,
+  metadata/playback wait и FPS sampler; успешный переход к калибровке сохраняет
+  общий stream. Поздний результат старого precheck/gaze run не пишет историю/UI,
+  не освобождает слот новой сегментации и не планирует новый timer. Legacy gaze
+  уступает continuous pipeline, не сбрасывая его smoothing/current gaze;
+- tracking test не запускает второй camera FPS monitor поверх continuous
+  pipeline. Один browser module path должен иметь один canonical query URL:
+  проверка `duplicate-work.spec.ts` входит в `test:fps`. Разные Worker globals
+  являются отдельными execution contexts, а не дублирующей загрузкой UI;
+- precheck history хранит копии derived results, не исходные frame-объекты,
+  удерживающие raw pixel buffers через WeakMap. Исходный capture остаётся
+  доступным same-frame потребителям; копия истории не получает pixel ownership;
 - не ставить trial timer на скрытую паузу из-за QC;
 - не удалять failed attempt: он нужен для missingness и аудита;
+- `trialId` обозначает логическую пробу, не уникальное предъявление. Каждый
+  запуск/цикл получает отдельный `presentationId` и checkpointed sequence;
+  late frame guard сравнивает также presentation ID. Суффикс repetitions в
+  trial ID не является номером quality attempt;
+- `presentation_attempts.v1` сохраняет отдельные rejected/accepted карточки
+  и long export rows. Default AOI/group aggregates исключают rejected,
+  ambiguous и incomplete attempts. Не угадывать разбиение необратимо склеенных
+  legacy записей и не подставлять session duration при missing presentation;
+- разные explicit presentation IDs никогда не связываются только по attempt.
+  Точное совпадение имеет приоритет перед legacy fallback; одна legacy запись
+  результата не может подтверждать несколько разных предъявлений. При
+  неоднозначности показывать diagnostic status, а не подмешивать данные;
+- с checkpointed `experimentMeta.presentationSequence` отсутствие первого
+  cognitive result означает incomplete, не legacy unknown/pass. Известный
+  `invalidationReason=page_reloaded` сохраняется как причина при чтении;
+- session visuals могут показывать полный обзор участника, но export обязан
+  использовать `respectFilters` и соблюдать block/stimulus/AOI/condition tuple.
+  Condition filter применяется к trial counts, task/AOI/group metrics и
+  heatmap одинаково; неизвестное условие не подменяется выбранным;
+- protocol QC накапливается только при активном block attempt. Ошибка,
+  накопленная на инструкции, не должна заранее браковать новую попытку;
+  завершённые failed attempts/events сохраняются. Это не разрешение снижать
+  опубликованные thresholds или принимать реальный low FPS;
 - повторять минимальную единицу, которую определяет протокол;
 - checkpoint writes сериализовать и дожидаться in-flight save перед clear;
 - восстановленная активная попытка считается прерванной и требует повтора;
@@ -373,6 +425,13 @@ dynamics нельзя интерпретировать клинически бе
 Код: `lib/rppg_alg_qc_test_web_alg_test_v10/` и
 `apps/participant-web/js/session-runtime/continuous-bpm.js`.
 
+POS/CHROM используют один private ColorProjectionWindow на RppgEngine:
+четыре Float64 scratch vectors переиспользуются по максимальному размеру
+временного окна. Не разделять mutable workspace между engines/потоками.
+Сохранять summation order, epsilons, inclusive time boundary и минимум 30 samples;
+старые чистые pos.js/chrom.js остаются reference implementation. Нужны exact
+equivalence tests, включая весь engine, jitter/dropout и разные размеры окон.
+
 `apps/web/developer/bpm-test.js` является отдельным developer diagnostic,
 не каноническим participant collector. Его `DiagnosticRun` владеет async stages,
 таймерами и late camera/model results; Stop/pagehide/account block не дают
@@ -401,9 +460,22 @@ diagnostic series ограничены 7200 значениями; диапазо
 `continuous_signals` каталога 1.1. Не заменять отсутствующий сигнал нулём и не
 выдавать наличие summary за пройденный независимый QC. Полносессионные сводки
 нельзя применять к фильтру блока, условия, стимула или AOI; для такого запроса
-возвращается `session_summary_not_interval`. В группе сначала усредняются
-сессии участника, затем участники имеют равный вес. Число кадров не является
-числом независимых наблюдений/участников.
+возвращается `session_summary_not_interval`, если подходящей интервальной записи нет.
+Опциональный `physiology_intervals.v1` (#146) хранит сводки ЧСС и дыхания по
+минутам от начала измерений и отдельным попыткам блоков. Накопитель не читает
+усечённую историю сырых замеров и не меняет полносессионный алгоритм.
+Границы блока берутся из жизненного цикла реальной попытки, а для отдыха,
+аудиотестов и опросов учитываются отдельно, без вмешательства в QC. Инструкции
+и скрытые таймеры не считаются измерительными блоками. Покрытие учитывает время
+между соседними свежими публикациями, не кадры камеры, не hold и не интервалы
+перезагрузки. Первое номинальное окно оценки исключается из сводки блока.
+В отчёте не показывать среднее при покрытии меньше 1 с; сохранить счётчик и
+покрытие. Фильтр блока использует только засчитанные попытки, прерванные и
+повторённые остаются видимы отдельно. Фильтр стимула, условия или AOI не имеет
+права выдавать весь блок за измерение выбранного сегмента. В группе сначала
+усредняются сессии участника, затем участники имеют равный вес. Минуты и кадры
+не являются независимыми наблюдениями. Полная интервальная детализация доступна
+в выгрузке одной сессии; групповые выгрузки сохраняют агрегаты по выбранным блокам.
 
 `event-windows-1.1.0` добавляет опциональное дыхание в `rt_alignment.v1`;
 историческая 1.0.0 без дыхания принимается. Короткие окна вокруг RT - только
@@ -506,11 +578,20 @@ Test: моторный канал, feedback и scoring отличаются. Д�
 
 ### 8.8 Audio
 
-`Audio_detection/` — standalone MIT-licensed эвристическое ядро. Оно пока не
-подключено к canonical session frame/transport и не должно описываться как
-работающий throughout-session module. Перед интеграцией нужны отдельное
-согласие на микрофон, data-flow/privacy review, quality gates, typed contract,
-teardown, browser tests и запрет отправки сырой записи по умолчанию.
+`Audio_detection/` — MIT-licensed эвристическое ядро. Canonical opt-in adapter —
+`apps/participant-web/js/audio/session-audio.js`: отдельное согласие, capture через
+AudioWorklet/ScriptProcessor fallback, audio-window Worker и typed агрегаты.
+Это не автоматически включённый канал и не валидированная оценка настроения.
+Сырой звук не сохраняется и не отправляется на API. Полный переданный буфер
+AudioWorklet можно принять без второй копии; borrowed/shared/partial buffers
+нужно копировать. Очередь анализа удерживает максимум два PCM-окна; перегрузка
+и ошибки явно увеличивают droppedWindowCount и дают audio_window_dropped,
+без подстановки измерений. Исключение окна не должно отравлять очередь/teardown.
+Таймаут обязан terminate самого Worker: нельзя оставлять очередь PCM внутри
+зависшего потока или повторять зависшую обработку на UI thread. При таком
+таймауте optional audio останавливается, освобождает microphone tracks и
+сохраняет failed, а не completed. Остальные измерительные каналы не прерываются.
+Тестировать реальные transferable buffers синтетически, без доступа к микрофону.
 
 ## 9. API, данные и контракты
 
@@ -618,6 +699,15 @@ server commit. Недоступный auth не очищает черновик�
 и без повторной отправки мутаций. Проверки: `stimulus-ui-lifecycle.test.js`,
 `stimulus-lifecycle.spec.ts`, общий `test:staff-regression`.
 
+Participant media preparation использует `session-runtime/media-preload.mjs`:
+максимум три полных download/decode задачи, не только три fetch-запроса.
+Сохранять порядок metadata rows, shared HTTP 429 cooldown и повторное использование
+того же publication/version/hash. Временные image/video probes очищают handlers,
+timers и src при любом исходе; video дополнительно pause/load без src. Успешный
+Blob URL остаётся у invitation owner; failed URL отзывается. Не отзывать cached
+media при очистке probe и не менять RT onset/readiness или offline retry policy.
+Это ограничение временной подготовки, а не общий бюджет retained Blob cache.
+
 Повторная публикация сохраняет публичную ссылку протокола и создаёт новую
 immutable protocol/media publication. Допущенная сессия остаётся привязана к
 своему snapshot; новые участники получают актуальную публикацию. Checkpoint
@@ -709,6 +799,14 @@ Regex-redaction не гарантирует анонимность произв�
 `stop/dispose` HUD обязаны снимать owned listeners/RAF; диагностический отказ
 не должен останавливать измерительный runtime. Проверки входят в
 `diagnostics-lifecycle.spec.ts` и обязательный `test:frame-workers`.
+
+Standalone диагностика разработчика для ЧСС/дыхания, FACS, корпуса и QC
+использует классы participant pipeline и стандартные параметры протокола.
+Аудиодиагностика использует SessionAudioCollector; RT открывает канонический Hub.
+Не добавлять второй детектор, веса, цикл камеры или пороги только для тестового UI.
+Персональная калибровка, конфигурация опубликованного протокола и его QC
+проверяются в полной сессии. Перед датчиком проверять роль, текущий аккаунт
+и Permissions-Policy; не ослаблять политику или отправлять измерения из диагностики.
 
 Legacy `ProtocolRunner` не является каноническим participant flow. Его
 `stop/dispose` отменяют загрузку и принадлежащие экрану интервалы/обработчики;
@@ -803,7 +901,7 @@ keyboard/screen-reader и human review. Изменения participant UX тре
 | Invitation in URL | остаётся в browser history/profile threat model | server-side participant session exchange |
 | Abandoned admission policy | run расходуется без завершённого результата | retention/status UX и controlled operator action |
 | Нет централизованной observability | сложно отличить module, QC и network failures | redacted metrics, traces, SLO/alerts |
-| Audio не интегрирован | README core не равен работающему session module | consent, contract, QC, runtime и tests |
+| Audio scientific validation | Opt-in adapter есть; акустические proxies не равны диагнозу/эмоциям | consent, quality gates, reference validation, явная missingness |
 
 ### P2: методические риски
 

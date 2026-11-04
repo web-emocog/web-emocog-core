@@ -2,8 +2,8 @@ import { test, expect, Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 
-const participant = 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
-const moduleVersion = '20261025-1';
+const participant = `${process.env.WECOG_TEST_BASE_URL || 'http://127.0.0.1:4173'}/apps/participant-web/mvp_with_precheck_1-updated.html`;
+const moduleVersion = '20261104-4';
 const code = 'recovery-invitation';
 const definition = { version: 'v2.0_universal', participantShell: { consent: true, questionnaire: true, precheck: true, calibration: true },
   blocks: [
@@ -256,7 +256,8 @@ test('rolling gaze retention rebases IndexedDB chunks without corrupting a long-
   await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
   const result = await page.evaluate(async ({ moduleVersion }) => {
     const shared = (window as any).__WECOG_STATE__;
-    const { appendGazeSample } = await import(new URL(`js/web-page/app-updated.js?v=${moduleVersion}`, location.href).href);
+    const appUrl = Array.from(document.scripts).find(script => script.src.includes('/js/web-page/app-updated.js?'))!.src;
+    const { appendGazeSample } = await import(appUrl);
     const { SessionCheckpointStore } = await import(new URL('js/session-runtime/checkpoint-store.mjs', location.href).href);
     shared.sessionData.ids.session = 'rolling-retention';
     shared.sessionData.eyeTracking = Array.from({ length: 32000 }, (_, i) => ({ t: i, x: .5, y: .5 }));

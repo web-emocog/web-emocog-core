@@ -51,4 +51,17 @@ function validateGazeValidation(value) {
   return errors;
 }
 
-module.exports = { validateGazeValidation };
+function validateGazePresentationTiming(value) {
+  const errors = [];
+  if (!object(value) || !Array.isArray(value.presentations)) return errors;
+  value.presentations.slice(0, 200).forEach((entry, index) => {
+    if (!object(entry) || entry.presentationStartMs === undefined || entry.presentationStartMs === null) return;
+    if (typeof entry.presentationStartMs !== 'number' || !Number.isFinite(entry.presentationStartMs) || entry.presentationStartMs < 0) {
+      errors.push({ path: `/gaze_analytics/presentations/${index}/presentationStartMs`, keyword: 'presentationTiming',
+        message: 'invalid presentation timing metadata' });
+    }
+  });
+  return errors;
+}
+
+module.exports = { validateGazeValidation, validateGazePresentationTiming };

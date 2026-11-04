@@ -100,9 +100,9 @@ export function show(reason) {
     const messages = REASON_MESSAGES[lang] || REASON_MESSAGES.en;
     const text = messages[reason] || messages.low_qc;
     const msgEl = document.getElementById('qc-pause-overlay-message');
-    if (msgEl) msgEl.textContent = text;
+    if (msgEl && msgEl.textContent !== text) msgEl.textContent = text;
     const wasVisible = visible;
-    overlayEl.style.display = 'flex';
+    if (overlayEl.style.display !== 'flex') overlayEl.style.display = 'flex';
     visible = true;
     lastVisibleReason = reason;
     if (!wasVisible) logOverlayTransition('show', reason);
@@ -111,7 +111,7 @@ export function show(reason) {
 export function hide() {
     if (!overlayEl) return;
     const wasVisible = visible;
-    overlayEl.style.display = 'none';
+    if (overlayEl.style.display !== 'none') overlayEl.style.display = 'none';
     visible = false;
     if (wasVisible) logOverlayTransition('hide', lastVisibleReason);
     lastVisibleReason = null;

@@ -530,9 +530,13 @@ describe('researcher navigation contract', () => {
     const runtime = read('participant-web/js/session-runtime/index.js');
     const ui = read('participant-web/js/web-page/ui-updated.js');
     const gazeTests = read('participant-web/js/gaze-tracker/gaze-tests/index.js');
-    assert.match(runtime, /runtime-ui\.js\?v=20261025-1/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261103-1/);
     for (const file of ['web-page/precheck-updated.js', 'web-page/tests-updated.js', 'session-runtime/frame-pipeline.js', 'session-runtime/runtime-ui.js']) {
-      assert.match(read('participant-web/js/' + file), /head-pose-guide\.js\?v=20261025-1/);
+      assert.match(read('participant-web/js/' + file), /head-pose-guide\.js\?v=20261103-1/);
+    }
+    for (const source of [app, tests, task, ui, read('participant-web/js/session-runtime/frame-pipeline.js')]) {
+      assert.match(source, /qc-pause-overlay-new\.js\?v=20261103-1/);
+      assert.doesNotMatch(source, /qc-pause-overlay-new\.js['"]/);
     }
     const gazeAnalysis = read('participant-web/js/gaze-tracker/gaze-tests/common/analysis-loop.js');
     const vpcRunner = read('participant-web/js/gaze-tracker/gaze-tests/vpc/runner.js');
@@ -542,22 +546,22 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20261025-1/);
-    assert.match(app, /tests-updated\.js\?v=20261025-1/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20261025-1/);
-    assert.match(task, /tests-updated\.js\?v=20261025-1/);
-    assert.match(app, /session-runtime\/index\.js\?v=20261025-1/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20261025-1/);
-    assert.match(task, /session-runtime\/index\.js\?v=20261025-1/);
-    assert.match(runtime, /tests-updated\.js\?v=20261025-1/);
-    assert.match(runtime, /runtime-ui\.js\?v=20261025-1/);
-    assert.match(app, /precheck-updated\.js\?v=20261025-1/);
-    assert.match(tests, /precheck-updated\.js\?v=20261025-1/);
-    assert.match(ui, /precheck-updated\.js\?v=20261025-1/);
-    assert.match(tests, /gaze-tests\/index\.js\?v=20261025-1/);
-    assert.match(gazeTests, /analysis-loop\.js\?v=20261025-1/);
-    assert.match(tests, /unified-aggregates-new\.js\?v=20261025-1/);
-    assert.match(ui, /unified-aggregates-new\.js\?v=20261025-1/);
+    assert.match(tests, /ui-updated\.js\?v=20261104-4/);
+    assert.match(app, /tests-updated\.js\?v=20261104-4/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20261104-4/);
+    assert.match(task, /tests-updated\.js\?v=20261104-4/);
+    assert.match(app, /session-runtime\/index\.js\?v=20261104-4/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20261104-4/);
+    assert.match(task, /session-runtime\/index\.js\?v=20261104-4/);
+    assert.match(runtime, /tests-updated\.js\?v=20261104-4/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261103-1/);
+    assert.match(app, /precheck-updated\.js\?v=20261104-4/);
+    assert.match(tests, /precheck-updated\.js\?v=20261104-4/);
+    assert.match(ui, /precheck-updated\.js\?v=20261104-4/);
+    assert.match(tests, /gaze-tests\/index\.js\?v=20261104-4/);
+    assert.match(gazeTests, /analysis-loop\.js\?v=20261104-4/);
+    assert.match(tests, /unified-aggregates-new\.js\?v=20261104-4/);
+    assert.match(ui, /unified-aggregates-new\.js\?v=20261104-4/);
     for (const source of [
       app,
       tests,
@@ -584,7 +588,8 @@ describe('researcher navigation contract', () => {
     const analytics = read('web/researcher-analytics-production.js');
     const builder = read('web/researcher-builder.js');
     assert.match(participant, /preloadInvitationStimulus/);
-    assert.match(participant, /URL\.createObjectURL\(blob\)/);
+    assert.match(participant, /return preloadMediaBlob\(blob, declaredMimeType\)/);
+    assert.match(read('participant-web/js/session-runtime/media-preload.mjs'), /URL\.createObjectURL\(blob\)/);
     assert.match(participant, /invitationStimulusObjectUrls/);
     assert.match(calibration, /const POLLS_PER_POINT = 60/);
     assert.match(calibration, /samplingWindow\.accept\(prediction\)/);
@@ -611,9 +616,15 @@ describe('researcher navigation contract', () => {
     const preloadEnd = app.indexOf('let _gazeDebugSampleN', preloadStart);
     assert.ok(preloadStart >= 0 && preloadEnd > preloadStart);
     const preload = app.slice(preloadStart, preloadEnd);
-    assert.match(preload, /await image\.decode\(\)/);
-    assert.match(preload, /image\.naturalWidth > 0 && image\.naturalHeight > 0/);
-    assert.match(preload, /URL\.revokeObjectURL\(objectUrl\)/);
+    const preparer = read('participant-web/js/session-runtime/media-preload.mjs');
+    assert.match(preload, /return preloadMediaBlob\(blob, declaredMimeType\)/);
+    assert.match(preparer, /await probe\.decode\(\)/);
+    assert.match(preparer, /probe\.naturalWidth/);
+    assert.match(preparer, /!\(width > 0 && height > 0\)/);
+    assert.match(preparer, /URL\.revokeObjectURL\(objectUrl\)/);
+    assert.match(preparer, /probe\.removeAttribute\('src'\)/);
+    assert.match(app, /mapMediaPreloads\(rows,/);
+    assert.doesNotMatch(app, /Promise\.all\(rows\.map/);
 
     const renderStart = task.indexOf('function renderStimulus(trial)');
     const renderEnd = task.indexOf('function stopCognitiveAnalysisLoop()', renderStart);
@@ -774,12 +785,13 @@ describe('researcher navigation contract', () => {
 
   it('keeps browser errors inert and static pages protected from hostile framing', () => {
     const analytics = read('web/researcher-analytics.js');
-    const bpm = read('web/developer/bpm-test.js');
+    const bpm = read('web/developer/protocol-diagnostic-page.mjs');
     const nginx = read('../deploy/nginx-participant-media.conf');
     assert.doesNotMatch(analytics, /innerHTML\s*=\s*['"`][^\n]*e\.message/);
     assert.doesNotMatch(bpm, /innerHTML\s*=\s*['"`][^\n]*err\.message/);
     assert.match(analytics, /message\.textContent\s*=/);
-    assert.match(bpm, /errorLine\.textContent\s*=/);
+    assert.match(bpm, /node\.textContent\s*=\s*value/);
+    assert.doesNotMatch(bpm, /write\('status',\s*error\.message/);
     assert.match(nginx, /location \^~ \/apps\/participant-web\/[\s\S]+frame-ancestors 'self'/);
     assert.match(nginx, /location \^~ \/apps\/web\/[\s\S]+camera=\(\), microphone=\(\)/);
     assert.match(nginx, /X-Frame-Options "SAMEORIGIN"/);

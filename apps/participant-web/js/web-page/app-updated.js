@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261025-1';
+} from './ui-updated.js?v=20261104-4';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck-updated.js?v=20261025-1';
+} from './precheck-updated.js?v=20261104-4';
 
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20261025-1';
+} from './tests-updated.js?v=20261104-4';
 
 import {
     deriveInvitationHubMetrics,
@@ -33,16 +33,17 @@ import {
     getParticipantShell
 } from './protocol-invite-utils.js?v=20260915-1';
 
-import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261025-1';
+import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261104-4';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
 import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
 import { createInvitationRequestPool } from '../session-runtime/invitation-http.mjs?v=20261019-hotfix1';
+import { mapMediaPreloads, preloadMediaBlob } from '../session-runtime/media-preload.mjs?v=20261104-1';
 import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
-import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261025-1';
+import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261102-1';
 import { mediaContentRect } from './stimulus-geometry.mjs?v=20261025-1';
 import {
     captureAudioConsent,
@@ -108,65 +109,7 @@ async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
         if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
         return response.blob();
     }, 120000);
-    if (!blob.size) throw new Error('Stimulus preload returned an empty file');
-    const expectedMime = String(declaredMimeType || '').toLowerCase();
-    const actualMime = String(blob.type || expectedMime).toLowerCase();
-    const mediaKind = actualMime.startsWith('video/') || expectedMime.startsWith('video/')
-        ? 'video'
-        : 'image';
-    if (actualMime && !actualMime.startsWith(`${mediaKind}/`)) {
-        throw new Error(`Stimulus preload returned unexpected media type ${actualMime}`);
-    }
-    const objectUrl = URL.createObjectURL(blob);
-    try {
-        if (mediaKind === 'video') {
-            const video = document.createElement('video');
-            video.muted = true;
-            video.playsInline = true;
-            video.preload = 'metadata';
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error('Stimulus video metadata timed out')), 15000);
-                const cleanup = () => {
-                    clearTimeout(timeout);
-                    video.onloadedmetadata = null;
-                    video.onerror = null;
-                };
-                video.onloadedmetadata = () => { cleanup(); resolve(); };
-                video.onerror = () => { cleanup(); reject(new Error('Stimulus video could not be decoded')); };
-                video.src = objectUrl;
-                video.load();
-            });
-            if (!(video.videoWidth > 0 && video.videoHeight > 0)) {
-                throw new Error('Stimulus video has invalid dimensions');
-            }
-        } else {
-            const image = new Image();
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => { cleanup(); reject(new Error('Stimulus image decode timed out')); }, 15000);
-                const cleanup = () => { clearTimeout(timeout); image.onload = null; image.onerror = null; };
-                let decoding = false;
-                const ready = async () => {
-                    if (decoding) return;
-                    decoding = true;
-                    try {
-                        if (typeof image.decode === 'function') await image.decode();
-                        cleanup(); resolve();
-                    } catch (_) { cleanup(); reject(new Error('Stimulus image could not be decoded')); }
-                };
-                image.onload = ready;
-                image.onerror = () => { cleanup(); reject(new Error('Stimulus image could not be decoded')); };
-                image.src = objectUrl;
-                if (image.complete && image.naturalWidth > 0) ready();
-            });
-            if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) {
-                throw new Error('Stimulus image has invalid dimensions');
-            }
-        }
-        return objectUrl;
-    } catch (error) {
-        URL.revokeObjectURL(objectUrl);
-        throw error;
-    }
+    return preloadMediaBlob(blob, declaredMimeType);
 }
 
 let _gazeDebugSampleN = 0;
@@ -503,7 +446,7 @@ async function loadInvitationProtocolByCode(code) {
                 }
                 if (!Array.isArray(rows)) throw new Error('Invalid stimulus metadata response');
                 if (Array.isArray(rows)) {
-                    const mappedRows = await Promise.all(rows.map(async (row) => {
+                    const mappedRows = await mapMediaPreloads(rows, async (row) => {
                             const id = String(row?.id);
                             if (!stimulusIds.includes(id)) return null;
                             const contentUrl = typeof row?.content_url === 'string'
@@ -540,7 +483,7 @@ async function loadInvitationProtocolByCode(code) {
                                     ...(contentUrl ? { source_url: contentUrl } : {})
                                 }
                             };
-                    }));
+                    });
                     stimuliMap = Object.fromEntries(
                         mappedRows.filter(Boolean).map(row => [row.id, row])
                     );

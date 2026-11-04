@@ -395,7 +395,7 @@ if (typeof window !== 'undefined') {
 
     window.PrecheckAnalyzerReady = (async () => {
         try {
-            const mod = await import('./precheck-analyzer/index.js?v=20261025-1');
+            const mod = await import('./precheck-analyzer/index.js?v=20261104-4');
             const Cls = mod && (mod.PrecheckAnalyzer || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export PrecheckAnalyzer class');

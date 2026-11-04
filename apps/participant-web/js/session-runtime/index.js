@@ -6,17 +6,18 @@ import {
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261025-1';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261025-1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261025-1';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261103-1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261104-4';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs';
-import { SessionAudioCollector } from '../audio/session-audio.js?v=20260915-1';
+import { SessionAudioCollector } from '../audio/session-audio.js?v=20261104-4';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 import { SessionDelivery } from './delivery.mjs?v=20261025-1';
-import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261025-1';
+import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261102-1';
 import { combineSignalSummaries } from './signal-history.mjs?v=20261025-1';
-import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261025-1';
+import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261104-4';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261104-4';
 import { showPersistenceNotice } from './persistence-ui.mjs?v=20261025-1';
 import { sendSessionFeature } from './ingest-transport.mjs?v=20261025-1';
 import '../../../shared/protocol-quality.js?v=20261025-1';
@@ -50,6 +51,7 @@ class ParticipantSessionRuntime {
             sessionData: state.sessionData,
             build: async () => {
                 captureGazeHistory(state.sessionData, state.runtime);
+                this.capturePhysiologyIntervals();
                 const current = state.runtime.qcMetrics?.getCurrentMetrics?.();
                 const bpm = this.getBpmSnapshot();
                 return this.checkpointBuilder.build({ ...state.sessionData,
@@ -151,6 +153,7 @@ class ParticipantSessionRuntime {
             const resumeInterruptedFinish = restored.machineSnapshot.state === SESSION_STATES.FINISHING
                 || (restored.sessionData.experimentMeta?.protocolProgress?.status === 'ready_to_finish' && !restored.machineSnapshot.currentBlock);
             replaceObject(state.sessionData, restored.sessionData);
+            this.restorePhysiologyIntervals();
             this.protocolRecoveryPending = true;
             this.restoredProtocolProgress = state.sessionData.experimentMeta?.protocolProgress || null;
             this.machine.restore(restored.machineSnapshot);
@@ -226,7 +229,7 @@ class ParticipantSessionRuntime {
     _scheduleFinalUploadRetry() {
         this.restoringFinal = true;
         const retry = () => {
-            import('../web-page/tests-updated.js?v=20261025-1')
+            import('../web-page/tests-updated.js?v=20261104-4')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };
@@ -241,7 +244,15 @@ class ParticipantSessionRuntime {
     }
 
     _onTransition(transition, snapshot) {
+        const intervalTime = this.physiologyTime();
+        if (transition.reason === 'block_start') {
+            this.physiologyIntervals?.beginBlock(transition.details, intervalTime);
+        } else if (transition.reason === 'block_complete') {
+            const status = transition.details.repeatRequired ? 'repeat_required' : 'accepted';
+            this.physiologyIntervals?.endBlock(status, intervalTime);
+        }
         if (transition.state === SESSION_STATES.PAUSED) {
+            this.physiologyIntervals?.breakContinuity();
             this.protocolQualitySince.clear();
             this.audioCollector?.pause?.().catch(error => {
                 console.warn('[SessionRuntime] audio pause failed:', error);
@@ -281,6 +292,10 @@ class ParticipantSessionRuntime {
     }
 
     updateProtocolQuality(metrics, now = Date.now()) {
+        if (!this.machine.currentBlock) {
+            this.clearProtocolQualityIssues();
+            return;
+        }
         if (!state.sessionData.experimentMeta?.protocolProgress || [SESSION_STATES.COMPLETED, SESSION_STATES.FINISHING, SESSION_STATES.PAUSED].includes(this.machine.state)
             || !metrics || metrics.durationMs < 10000 || metrics.totalFrames < 10) return;
         const report = globalThis.WecogProtocolQuality.evaluate(state.runtime.invitationProtocolDefinition, metrics);
@@ -305,6 +320,13 @@ class ParticipantSessionRuntime {
         }
     }
 
+    clearProtocolQualityIssues() {
+        this.protocolQualitySince.clear();
+        for (const key of Object.keys(globalThis.WecogProtocolQuality?.METRICS || {})) {
+            this.resolveIssue(`protocol_qc_${key}`);
+        }
+    }
+
     async saveCheckpoint() {
         if (this.checkpointRestoreFailed) return false;
         const sessionId = state.sessionData?.ids?.session;
@@ -320,6 +342,7 @@ class ParticipantSessionRuntime {
                 if (!currentSessionId || this.machine.state === SESSION_STATES.COMPLETED) continue;
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.getBpmSnapshot();
+                this.capturePhysiologyIntervals();
                 await this.checkpoints.save(
                     currentSessionId,
                     state.sessionData,
@@ -347,6 +370,7 @@ class ParticipantSessionRuntime {
 
     beginBlock(block) {
         document.getElementById('sessionPersistenceStatus')?.remove();
+        if (!this.machine.currentBlock) this.clearProtocolQualityIssues();
         const run = this.machine.beginBlock(block);
         recordSessionEvent('session_block_attempt_start', {
             category: EVENT_CATEGORIES.BLOCK,
@@ -553,6 +577,7 @@ class ParticipantSessionRuntime {
             state.runtime?.invitationProtocolDefinition || null
         );
         ensureMeasurementStart(state.sessionData);
+        if (!Number.isFinite(this.physiologyOriginMs)) this.restorePhysiologyIntervals();
         if (!this.sessionClock) {
             this.sessionClock = createMonotonicClock({
                 startedMonotonicMs: Number(state.sessionData.startTime) || undefined
@@ -682,6 +707,59 @@ class ParticipantSessionRuntime {
         return { ...combined, lastSample };
     }
 
+    restorePhysiologyIntervals() {
+        try {
+            this.physiologyIntervals = new PhysiologyIntervals(state.sessionData.physiologyIntervals);
+            if (!state.sessionData.physiologyIntervals && state.sessionData.continuousSignalState?.sampleCount) {
+                this.physiologyIntervals.truncated = true;
+            }
+        } catch (_) {
+            this.physiologyIntervals = new PhysiologyIntervals();
+            this.physiologyIntervals.truncated = true;
+        }
+        const start = state.sessionData.startTime;
+        this.physiologyOriginMs = Number.isFinite(start) && start > 0
+            ? Math.max(0, Date.now() - start, this.physiologyIntervals.throughMs) - performance.now()
+            : null;
+    }
+
+    physiologyTime(timestamp = performance.now()) {
+        return Number.isFinite(this.physiologyOriginMs) ? Math.round(this.physiologyOriginMs + timestamp) : null;
+    }
+
+    beginPhysiologyOnlyBlock(blockId) {
+        this.physiologyIntervals?.beginBlock({ blockId: String(blockId) }, this.physiologyTime());
+    }
+
+    endPhysiologyOnlyBlock() {
+        this.physiologyIntervals?.endBlock('accepted', this.physiologyTime());
+    }
+
+    recordPhysiologyFrame(timestamp, sample, config, hasLandmarks) {
+        if (!Number.isFinite(timestamp) || this.machine.state === SESSION_STATES.PAUSED || !config || !hasLandmarks) {
+            this.physiologyIntervals?.breakContinuity();
+            this.lastPhysiologyFrame = null;
+            return;
+        }
+        if (this.lastPhysiologyFrame != null && timestamp - this.lastPhysiologyFrame > 250) {
+            this.physiologyIntervals?.breakContinuity();
+        }
+        this.lastPhysiologyFrame = timestamp;
+        // The engine emits estimates, not a measurement for every captured frame.
+        if (sample === null) return;
+        const cadence = config.updateEveryMs ?? 500;
+        this.physiologyIntervals?.record(this.physiologyTime(timestamp), sample,
+            (config.windowSec ?? 10) * 1000, (config.respiration?.windowSec ?? 20) * 1000,
+            cadence + Math.min(250, cadence / 2));
+    }
+
+    capturePhysiologyIntervals() {
+        const now = this.physiologyEndedAt ?? this.physiologyTime();
+        if (now !== null && this.physiologyIntervals) {
+            state.sessionData.physiologyIntervals = this.physiologyIntervals.snapshot(now);
+        }
+    }
+
     _startRtListener() {
         if (this.rtListenersActive) return;
         this.rtListenersActive = true;
@@ -708,6 +786,9 @@ class ParticipantSessionRuntime {
         if (this.stopModulesPromise) return this.stopModulesPromise;
         this.stopModulesPromise = (async () => {
             this.getBpmSnapshot();
+            this.physiologyEndedAt = this.physiologyTime();
+            this.physiologyIntervals?.endBlock('interrupted', this.physiologyEndedAt);
+            this.capturePhysiologyIntervals();
             const bpmRun = this.framePipeline?.stop(reason) || null;
             if (bpmRun) {
                 if (!Array.isArray(state.sessionData.bpmRuns)) state.sessionData.bpmRuns = [];

@@ -27,9 +27,9 @@
   <script src="../auth-guard.js?v=20261027-1"></script>
   <script>
     if (!window.EmocogAuthGuard) location.replace('login.html');
-    else window.EmocogAuthGuard.ensureProtectedPage({ loginPath:'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied:true, roleDeniedRedirect:'../researcher.html' });
+    else window.WecogDiagnosticAccess = window.EmocogAuthGuard.ensureProtectedPage({ loginPath:'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied:true, roleDeniedRedirect:'../researcher.html' });
   </script>
-  <header class="top"><h1>Движение корпуса</h1><a href="../developer.html">← К диагностике</a></header>
+  <header class="top"><h1>Движение корпуса</h1><a href="../developer.html?v=20261104-4">← К диагностике</a></header>
   <main class="layout">
     <section class="card">
       <div class="stage"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas></div>
@@ -48,6 +48,6 @@
       <p class="note">MediaPipe Pose отслеживает плечи и таз. В сессию сохраняются только нормализованные координаты, наклоны, скорость и события движения. Видео и исходные landmarks не сохраняются.</p>
     </section>
   </main>
-  <script type="module" src="body-pose-test.js?v=20260827-1"></script>
+  <script type="module" src="body-pose-test.js?v=20261104-4"></script>
 </body>
 </html>

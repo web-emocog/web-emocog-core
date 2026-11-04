@@ -1,14 +1,16 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
 import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261025-1';
-import { measureCameraFPS } from './camera.js?v=20261025-1';
+import { measureCameraFPS } from './camera.js?v=20261104-4';
+import { protocolCameraConstraints } from '../session-runtime/protocol-profile.mjs?v=20261104-4';
+import { getFramePixels } from '../session-runtime/frame-pixels.mjs';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
     captureHeadPoseReference,
     resetHeadPoseReference,
     setHeadPoseGuideMode,
     updateHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20261025-1';
+} from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 
 function dbg(scope, event, data) {
     try {
@@ -25,6 +27,47 @@ function dbgErr(scope, event, data) {
 }
 
 let _precheckFrameLogN = 0;
+let precheckSetup = null;
+let precheckAnalysisRun = null;
+
+function releaseSetupStream(setup) {
+    if (!setup?.stream || setup.released) return;
+    setup.released = true;
+    for (const track of setup.stream.getTracks()) {
+        try { track.stop(); } catch (_) {}
+    }
+    if (setup.video?.srcObject === setup.stream) setup.video.srcObject = null;
+    if (state.runtime.cameraStream === setup.stream) state.runtime.cameraStream = null;
+}
+
+function waitForPrecheckVideo(video, signal) {
+    return new Promise((resolve, reject) => {
+        let timeout, settled = false, playing = false;
+        const finish = error => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            video.removeEventListener('loadedmetadata', ready);
+            video.removeEventListener('error', failed);
+            signal.removeEventListener('abort', cancelled);
+            if (error) reject(error); else resolve();
+        };
+        const ready = () => {
+            if (settled || playing) return;
+            playing = true;
+            try { Promise.resolve(video.play()).then(() => finish(), finish); }
+            catch (error) { finish(error); }
+        };
+        const failed = () => finish(new Error('Camera video metadata could not be loaded'));
+        const cancelled = () => finish(new DOMException('Precheck cancelled', 'AbortError'));
+        if (signal.aborted) { cancelled(); return; }
+        video.addEventListener('loadedmetadata', ready);
+        video.addEventListener('error', failed);
+        signal.addEventListener('abort', cancelled, { once: true });
+        timeout = setTimeout(() => finish(new Error('Camera video preparation timed out')), 15000);
+        if (video.readyState >= 1) ready();
+    });
+}
 
 const PRECHECK_TEXT_FALLBACK = {
     status_optimal: 'Optimal',
@@ -97,18 +140,26 @@ function setCalibrationButtonState(button, { visible, enabled = false }) {
     button.disabled = !enabled;
 }
 
-export async function startPreCheck() {
+export function startPreCheck() {
+    if (precheckSetup) return precheckSetup.promise;
+    if (state.flags.isPrecheckRunning) return Promise.resolve(true);
+    if (state.runtime.sessionRuntime?.isAnalysisRunning?.()) return Promise.resolve(false);
+    const setup = { controller: new AbortController(), stream: null, video: null, released: false, promise: null };
+    precheckSetup = setup;
+    setup.promise = preparePrecheck(setup).finally(() => {
+        if (precheckSetup === setup) precheckSetup = null;
+    });
+    return setup.promise;
+}
+
+async function preparePrecheck(setup) {
+    const isCurrent = () => precheckSetup === setup && !setup.controller.signal.aborted;
     console.log('Запуск pre-check камеры...');
     dbg('precheck', 'startPreCheck:clicked', {});
     ensurePrecheckLayoutStyles();
     resetHeadPoseReference();
     setHeadPoseGuideMode('precheck');
     state.runtime.headPoseReference = null;
-
-    if (state.flags.isPrecheckRunning) {
-        stopPreCheck();
-        return;
-    }
 
     const startPrecheckBtn = document.getElementById('startPrecheckBtn');
     const startCalibBtn = document.getElementById('startCalibBtn');
@@ -122,63 +173,42 @@ export async function startPreCheck() {
     precheckStatus.className = 'precheck-status waiting-bg';
 
     try {
-        const streamConstraints = {
-            video: {
-                width: { ideal: 640 },
-                height: { ideal: 480 },
-                frameRate: { ideal: 30, min: 15 }
-            }
-        };
+        const streamConstraints = protocolCameraConstraints();
         dbg('precheck', 'camera:permission:requested', { constraints: streamConstraints });
         // Запрос доступа к камере с ЯВНЫМ указанием высокого frameRate
-        state.runtime.cameraStream = await navigator.mediaDevices.getUserMedia(streamConstraints);
+        setup.stream = await navigator.mediaDevices.getUserMedia(streamConstraints);
+        if (!isCurrent()) return false;
+        state.runtime.cameraStream = setup.stream;
         dbg('precheck', 'camera:permission:granted', {});
         
-        const video = document.getElementById('precheckVideo');
+        const video = setup.video = document.getElementById('precheckVideo');
         video.srcObject = state.runtime.cameraStream;
-        
-        await new Promise((resolve) => {
-            video.onloadedmetadata = () => {
-                video.play();
-                console.log(`Разрешение видео: ${video.videoWidth}x${video.videoHeight}`);
-                dbg('precheck', 'video:dimensions', {
-                    videoWidth: video.videoWidth,
-                    videoHeight: video.videoHeight
-                });
-                
-                // Получаем реальные настройки камеры
-                const videoTrack = state.runtime.cameraStream.getVideoTracks()[0];
-                if (videoTrack) {
-                    const settings = videoTrack.getSettings();
-                    console.log(`[Camera] Реальный frameRate: ${settings.frameRate || 'unknown'}`);
-                    
-                    // Сохраняем в sessionData
-                    state.sessionData.tech.camera = {
-                        width: settings.width,
-                        height: settings.height,
-                        frameRate: settings.frameRate,
-                        facingMode: settings.facingMode
-                    };
-                }
-                
-                // размеры canvas для overlay
-                const canvas = document.getElementById('overlayCanvas');
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-
-                const cameraPreview = document.getElementById('cameraPreview');
-                const faceGuide = document.querySelector('.face-guide');
-                const previewRect = cameraPreview ? cameraPreview.getBoundingClientRect() : null;
-                const guideRect = faceGuide ? faceGuide.getBoundingClientRect() : null;
-                const cs = window.getComputedStyle(video);
-                
-                resolve();
-            };
+        await waitForPrecheckVideo(video, setup.controller.signal);
+        if (!isCurrent()) return false;
+        console.log(`Разрешение видео: ${video.videoWidth}x${video.videoHeight}`);
+        dbg('precheck', 'video:dimensions', {
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight
         });
+        const videoTrack = setup.stream.getVideoTracks()[0];
+        if (videoTrack) {
+            const settings = videoTrack.getSettings();
+            console.log(`[Camera] Реальный frameRate: ${settings.frameRate || 'unknown'}`);
+            state.sessionData.tech.camera = {
+                width: settings.width,
+                height: settings.height,
+                frameRate: settings.frameRate,
+                facingMode: settings.facingMode
+            };
+        }
+        const canvas = document.getElementById('overlayCanvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
         
         // Измеряем реальный FPS камеры (2 секунды)
         console.log('[Camera] Измеряем реальный FPS камеры...');
-        const cameraFpsResult = await measureCameraFPS(video, 2000);
+        const cameraFpsResult = await measureCameraFPS(video, 2000, { signal: setup.controller.signal });
+        if (!isCurrent()) return false;
         console.log(`[Camera] Измеренный FPS: ${cameraFpsResult.fps} (${cameraFpsResult.frames} кадров за ${cameraFpsResult.duration.toFixed(2)}s)`);
         dbg('precheck', 'camera:fps:measured', {
             fps: cameraFpsResult.fps,
@@ -199,8 +229,11 @@ export async function startPreCheck() {
         
         // Запускаем анализ
         startContinuousAnalysis();
+        return true;
 
     } catch (error) {
+        if (!isCurrent()) return false;
+        releaseSetupStream(setup);
         console.error('Ошибка камеры:', error);
         dbgErr('precheck', 'camera:permission:denied', {
             message: error?.message,
@@ -211,23 +244,45 @@ export async function startPreCheck() {
         
         startPrecheckBtn.style.display = 'block';
         setCalibrationButtonState(startCalibBtn, { visible: false });
-        
+        return false;
+    } finally {
+        if (!isCurrent()) releaseSetupStream(setup);
     }
 }
 
 export function stopPreCheck() {
-    state.flags.isPrecheckRunning = false;
-    if (state.runtime.analysisFrameId) {
-        clearTimeout(state.runtime.analysisFrameId);
-        state.runtime.analysisFrameId = null;
-    }
-    // Освобождаем ресурсы локального анализатора
-    if (state.runtime.localAnalyzer) {
+    const setup = precheckSetup;
+    precheckSetup = null;
+    setup?.controller.abort();
+    releaseSetupStream(setup);
+    retirePrecheckAnalysis();
+    // Navigation cleanup must not reset an analyzer already owned by the session.
+    if (state.runtime.localAnalyzer && !state.runtime.sessionRuntime?.isAnalysisRunning?.()) {
         state.runtime.localAnalyzer.reset();
     }
 }
 
+function retirePrecheckAnalysis() {
+    precheckAnalysisRun = null;
+    state.flags.isPrecheckRunning = false;
+    if (state.runtime.analysisFrameId != null) {
+        clearTimeout(state.runtime.analysisFrameId);
+        state.runtime.analysisFrameId = null;
+    }
+}
+
 export function startContinuousAnalysis() {
+    if (precheckAnalysisRun && state.flags.isPrecheckRunning) return true;
+    if (state.runtime.sessionRuntime?.isAnalysisRunning?.()) return false;
+    const run = precheckAnalysisRun = {};
+    const isCurrent = () => {
+        if (precheckAnalysisRun !== run || !state.flags.isPrecheckRunning) return false;
+        if (state.runtime.sessionRuntime?.isAnalysisRunning?.()) {
+            retirePrecheckAnalysis();
+            return false;
+        }
+        return true;
+    };
     state.flags.isPrecheckRunning = true;
     state.runtime.successFrames = 0;
     state.runtime.precheckFramesHistory = []; // Сбрасываем историю
@@ -235,11 +290,12 @@ export function startContinuousAnalysis() {
     const video = document.getElementById('precheckVideo');
 
     async function analyzeFrame() {
-        if (!state.flags.isPrecheckRunning) return;
+        if (!isCurrent()) return;
         
         try {
             // Используем ЛОКАЛЬНЫЙ анализатор вместо бэкенда
-            const results = await runLocalPrecheckAnalysis(video);
+            const results = await runLocalPrecheckAnalysis(video, isCurrent);
+            if (!isCurrent()) return;
 
             _precheckFrameLogN += 1;
             if (window.WECOG_DEBUG && window.WECOG_DEBUG.enabled && _precheckFrameLogN % 30 === 0) {
@@ -273,11 +329,11 @@ export function startContinuousAnalysis() {
             // Проверяем все индикаторы
             checkAllIndicators();
         } catch (error) {
-            console.error('Ошибка анализа кадра:', error);
+            if (isCurrent()) console.error('Ошибка анализа кадра:', error);
         }
         
         // Интервал анализа 
-        if (state.flags.isPrecheckRunning) {
+        if (isCurrent()) {
             state.runtime.analysisFrameId = setTimeout(
                 analyzeFrame,
                 LOCAL_ANALYSIS_CONFIG.FRAME_INTERVAL_MS
@@ -287,6 +343,7 @@ export function startContinuousAnalysis() {
 
     // Запускаем цикл анализа
     analyzeFrame();
+    return true;
 }
 
 export function updateIndicators(data) {
@@ -877,13 +934,14 @@ export function updateVisibilityIndicator(data) {
  * Использует PrecheckAnalyzer для анализа освещения, лица, позы и шеи
  * Использует FaceSegmenter для проверки видимости областей лица
  */
-async function runLocalPrecheckAnalysis(videoElement) {
+async function runLocalPrecheckAnalysis(videoElement, isCurrent) {
     // Инициализируем анализатор если ещё не создан
     if (!state.runtime.localAnalyzer) {
         const paReady = !!window.PrecheckAnalyzerReady;
         if (window.PrecheckAnalyzerReady) {
             await window.PrecheckAnalyzerReady;
         }
+        if (!isCurrent()) return null;
         dbg('precheck', 'PrecheckAnalyzerReady:resolved', { hadPromise: paReady });
         state.runtime.localAnalyzer = new PrecheckAnalyzer({
             onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
@@ -898,6 +956,7 @@ async function runLocalPrecheckAnalysis(videoElement) {
         if (window.FaceSegmenterReady) {
             await window.FaceSegmenterReady;
         }
+        if (!isCurrent()) return null;
         dbg('precheck', 'FaceSegmenterReady:resolved', { hadPromise: fsReady });
         state.runtime.faceSegmenter = new FaceSegmenter({
             segmentationType: 'selfie_multiclass',
@@ -910,13 +969,17 @@ async function runLocalPrecheckAnalysis(videoElement) {
     try {
         // Анализируем кадр локально
         const results = await state.runtime.localAnalyzer.analyzeFrame(videoElement);
+        if (!isCurrent()) return null;
         
         // Анализируем видимость областей лица через FaceSegmenter
         let visibilityResults = null;
         try {
             // Передаём landmarks из результатов Face Landmarker для более точного анализа
             const faceLandmarks = results.landmarks || null;
-            visibilityResults = await state.runtime.faceSegmenter.segmentFrame(videoElement, faceLandmarks);
+            visibilityResults = await state.runtime.faceSegmenter.segmentFrame(
+                getFramePixels(results) || videoElement, faceLandmarks, results.timestamp
+            );
+            if (!isCurrent()) return null;
             
             // Добавляем результаты видимости в общие результаты
             results.visibility = {
@@ -927,6 +990,7 @@ async function runLocalPrecheckAnalysis(videoElement) {
                 timestamp: visibilityResults.timestamp
             };
         } catch (segmentError) {
+            if (!isCurrent()) return null;
             console.warn('[PreCheck] Ошибка FaceSegmenter:', segmentError);
             results.visibility = {
                 isComplete: false,
@@ -937,7 +1001,8 @@ async function runLocalPrecheckAnalysis(videoElement) {
         }
         
         // Сохраняем в историю для QC-метрик
-        state.runtime.precheckFramesHistory.push(results);
+        // History needs derived values, not the frame's transient pixel ownership.
+        state.runtime.precheckFramesHistory.push({ ...results });
         
         // Ограничиваем размер истории (последние 100 кадров)
         if (state.runtime.precheckFramesHistory.length > 100) {
@@ -947,6 +1012,7 @@ async function runLocalPrecheckAnalysis(videoElement) {
         return results;
         
     } catch (error) {
+        if (!isCurrent()) return null;
         console.error('[PreCheck] Ошибка локального анализа:', error);
         return {
             error: true,

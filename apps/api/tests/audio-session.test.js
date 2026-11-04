@@ -69,6 +69,72 @@ class FakeNode {
   disconnect() {}
 }
 
+test('slow audio analysis retains at most two PCM windows and reports backpressure without saving raw audio', async () => {
+  const { SessionAudioCollector } = await import(audioModuleUrl);
+  const events = [], releases = [];
+  const collector = new SessionAudioCollector({ state: stateWithConsent(true), clock: fakeClock(), enabled: true,
+    WorkerCtor: null, recordEvent: (type, details) => events.push({ type, details }) });
+  collector.sampleRate = 16;
+  collector._analyzeWindow = () => new Promise(resolve => releases.push(resolve));
+  for (let index = 0; index < 20; index++) collector._queueWindow(new Float32Array(16));
+  await Promise.resolve();
+  assert.equal(collector.pendingWindowCount, 2);
+  assert.equal(releases.length, 1, 'audio analysis stays single-flight');
+  assert.equal(collector.droppedWindowCount, 18);
+  assert.equal(events.filter(event => event.type === 'audio_window_dropped').length, 18);
+  assert.ok(events.every(event => event.details.reason === 'analysis_backpressure'));
+  assert.ok(!JSON.stringify(events).includes('samples'), 'drop diagnostics must never retain PCM');
+  releases[0](null);
+  for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+  assert.equal(releases.length, 2);
+  releases[1](null); await collector.analysisQueue;
+  assert.equal(collector.pendingWindowCount, 0);
+  const summary = collector._storeSummary('running');
+  assert.equal(summary.droppedWindowCount, 20);
+  assert.equal(summary.windowCount, 0);
+  assert.equal(summary.rawAudioStored, false);
+});
+
+test('audio analysis exceptions release the queue and cannot prevent sensor teardown', async () => {
+  const { SessionAudioCollector } = await import(audioModuleUrl);
+  const events = [], state = stateWithConsent(true);
+  const collector = new SessionAudioCollector({ state, clock: fakeClock(), enabled: true,
+    WorkerCtor: null, recordEvent: (type, details) => events.push({ type, details }) });
+  collector.sampleRate = 16; collector.everStarted = true;
+  let calls = 0, stopped = false;
+  collector.stream = { getTracks: () => [{ stop() { stopped = true; } }] };
+  collector._analyzeWindow = async () => { calls++; if (calls === 1) throw new Error('synthetic analyzer failure'); return null; };
+  collector._queueWindow(new Float32Array(16)); collector._queueWindow(new Float32Array(16));
+  await collector.analysisQueue;
+  assert.equal(calls, 2); assert.equal(collector.pendingWindowCount, 0); assert.equal(collector.droppedWindowCount, 2);
+  assert.ok(events.some(event => event.type === 'audio_window_dropped' && event.details.reason === 'analysis_failed'));
+  const summary = await collector.stop();
+  assert.equal(stopped, true); assert.equal(summary.droppedWindowCount, 2);
+  assert.equal(collector.stream, null);
+});
+
+test('audio owns transferred worklet buffers but copies borrowed, shared or partial buffers', async () => {
+  const { SessionAudioCollector } = await import(audioModuleUrl);
+  const collector = new SessionAudioCollector({ state: stateWithConsent(true), clock: fakeClock(), enabled: true, WorkerCtor: null });
+  collector.started = true; collector.sampleRate = 16000;
+  const borrowed = new Float32Array([.1, .2, .3]), transferred = new Float32Array([.4, .5, .6]);
+  collector._captureSamples(borrowed); collector._captureSamples(transferred, true);
+  assert.notEqual(collector.pendingChunks[0], borrowed);
+  assert.equal(collector.pendingChunks[1], transferred);
+  borrowed.fill(0); assert.ok(collector.pendingChunks[0][0] > 0);
+  const partial = new Float32Array(1024).subarray(8, 12);
+  collector._captureSamples(partial, true);
+  assert.notEqual(collector.pendingChunks[2].buffer, partial.buffer);
+  let expectedSamples = 10;
+  if (typeof SharedArrayBuffer === 'function') {
+    const shared = new Float32Array(new SharedArrayBuffer(16));
+    collector._captureSamples(shared, true);
+    assert.notEqual(collector.pendingChunks[3].buffer, shared.buffer);
+    expectedSamples += 4;
+  }
+  assert.equal(collector._consume(collector.pendingSamples).length, expectedSamples);
+});
+
 class FakeAudioContext {
   constructor() {
     this.sampleRate = 16000;
@@ -333,10 +399,34 @@ test('unresponsive audio worker times out instead of blocking session finish', a
     workerTimeoutMs: 5,
   });
   collector.sampleRate = 16000;
-  collector.worker = { postMessage() {} };
+  let terminated = false, sent = 0;
+  collector.worker = { postMessage() { sent++; }, terminate() { terminated = true; } };
   const result = await collector._analyzeWindow(sine(16000, 1), {});
   assert.equal(result, null);
   assert.equal(collector.workerPending.size, 0);
+  assert.equal(terminated, true, 'timeout must end the actual worker, not just the pending promise');
+  assert.equal(collector.worker, null);
+  assert.equal(await collector._analyzeWindow(sine(16000, 1), {}), null, 'do not run a stalled computation on the UI thread');
+  assert.equal(sent, 1, 'no additional PCM is sent to a timed-out worker');
+  const summary = await collector.stop();
+  assert.equal(summary.status, 'failed', 'finishing does not relabel a failed audio module as completed');
+});
+
+test('a timeout drains the bounded audio queue, releases sensors and survives diagnostic callback errors', async () => {
+  const { SessionAudioCollector } = await import(audioModuleUrl);
+  let sent = 0, terminated = false, released = false;
+  const collector = new SessionAudioCollector({ state: stateWithConsent(true), clock: fakeClock(), enabled: true, WorkerCtor: null,
+    workerTimeoutMs: 5, recordEvent() { throw new Error('synthetic diagnostic callback failure'); } });
+  collector.sampleRate = 16; collector.started = true; collector.everStarted = true;
+  collector.stream = { getTracks: () => [{ stop() { released = true; } }] };
+  collector.worker = { postMessage() { sent++; }, terminate() { terminated = true; } };
+  collector._queueWindow(new Float32Array(16)); collector._queueWindow(new Float32Array(16));
+  await collector.analysisQueue;
+  const summary = await collector.stop();
+  assert.equal(sent, 1); assert.equal(terminated, true); assert.equal(released, true);
+  assert.equal(collector.pendingWindowCount, 0); assert.equal(collector.workerPending.size, 0);
+  assert.equal(collector.started, false); assert.equal(collector.stream, null);
+  assert.equal(summary.status, 'failed'); assert.equal(summary.droppedWindowCount, 2);
 });
 
 test('finish during a pending permission prompt cancels late audio startup', async () => {
@@ -415,3 +505,39 @@ test('ingest accepts aggregate audio but blocks raw media fields', () => {
   payload.audio_summary.windows.push({ pcmSamples: [0.1, 0.2] });
   assert.ok(validateSessionFeaturePayload(payload).some(error => error.keyword === 'rawMedia'));
 });
+
+for (const stage of ['worklet', 'resume']) {
+  test('stop during pending audio ' + stage + ' cannot resurrect the graph or start a worker', async () => {
+    const { SessionAudioCollector } = await import(audioModuleUrl);
+    let entered, release, closeEntered, finishClose, stopCount = 0, workers = 0;
+    const pending = new Promise(resolve => { release = resolve; });
+    const ready = new Promise(resolve => { entered = resolve; });
+    const closing = new Promise(resolve => { closeEntered = resolve; });
+    const close = new Promise(resolve => { finishClose = resolve; });
+    class DelayedContext extends FakeAudioContext {
+      constructor() {
+        super();
+        if (stage === 'worklet') this.audioWorklet = { addModule() { entered(); return pending; } };
+      }
+      async resume() { if (stage === 'resume') { entered(); await pending; } }
+      async close() { closeEntered(); await close; await super.close(); }
+    }
+    const state = stateWithConsent(true);
+    const collector = new SessionAudioCollector({ state, clock: fakeClock(), enabled: true,
+      WorkerCtor: class { constructor() { workers++; } }, AudioContextCtor: DelayedContext,
+      AudioWorkletNodeCtor: class extends FakeNode { constructor() { super(); this.port = {}; } },
+      mediaDevices: { async getUserMedia() { return { getTracks: () => [{ stop() { stopCount++; } }] }; } } });
+    const startup = collector.start();
+    await ready;
+    const stopping = collector.stop();
+    await closing;
+    release();
+    assert.equal(await startup, false);
+    finishClose();
+    await stopping;
+    assert.equal(stopCount, 1);
+    assert.equal(workers, 0);
+    assert.equal(collector.started, false);
+    assert.equal(state.runtime.audioStream, null);
+  });
+}

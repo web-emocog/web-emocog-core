@@ -4,6 +4,7 @@ const sessionEvent = require('../../../packages/shared/contracts/session-event.v
 const sessionLifecycle = require('../../../packages/shared/contracts/session-lifecycle.v1.schema.json');
 const ingestResponse = require('../../../packages/shared/contracts/ingest-session-feature-response.v1.schema.json');
 const rtAlignment = require('../../../packages/shared/contracts/rt-alignment.v1.schema.json');
+const physiologyIntervals = require('../../../packages/shared/contracts/physiology-intervals.v1.schema.json');
 
 const router = express.Router();
 const schemas = {
@@ -12,6 +13,7 @@ const schemas = {
   [sessionLifecycle.$id]: sessionLifecycle,
   [ingestResponse.$id]: ingestResponse,
   [rtAlignment.$id]: rtAlignment,
+  [physiologyIntervals.$id]: physiologyIntervals,
 };
 const aliases = {
   'session-feature.v1': sessionFeature.$id,
@@ -19,6 +21,7 @@ const aliases = {
   'session-lifecycle.v1': sessionLifecycle.$id,
   'ingest-session-feature-response.v1': ingestResponse.$id,
   'rt-alignment.v1': rtAlignment.$id,
+  'physiology-intervals.v1': physiologyIntervals.$id,
 };
 
 router.get('/', (req, res) => {

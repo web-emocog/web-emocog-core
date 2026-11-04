@@ -17,6 +17,7 @@ let referencePose = null;
 let lastPose = null;
 let guideMode = 'hidden';
 let precheckStatus = 'pending';
+let paintedPrecheckCanvas = null;
 
 function finite(value, fallback = 0) {
     return Number.isFinite(value) ? Number(value) : fallback;
@@ -137,8 +138,10 @@ function drawFixedGuide(canvas, current) {
 }
 
 function drawPrecheckOverlay(canvas, current) {
+    if (paintedPrecheckCanvas && paintedPrecheckCanvas !== canvas) clearPrecheckOverlay();
     const prepared = prepareCanvas(canvas);
     if (!prepared) return;
+    paintedPrecheckCanvas = canvas;
     const { ctx, width, height } = prepared;
     canvas.dataset.precheckStatus = precheckStatus;
     const video = document.getElementById('precheckVideo');
@@ -167,11 +170,13 @@ function drawPrecheckOverlay(canvas, current) {
     ctx.restore();
 }
 
-function clearPrecheckOverlay() {
-    const canvas = document.getElementById('overlayCanvas');
+function clearPrecheckOverlay(force = false) {
+    // Once cleared on mode exit, a hidden preview needs no per-frame canvas work.
+    const canvas = paintedPrecheckCanvas || (force ? document.getElementById('overlayCanvas') : null);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    paintedPrecheckCanvas = null;
 }
 
 function ensureCalibrationGuide() {
@@ -188,16 +193,19 @@ function ensureCalibrationGuide() {
 }
 
 function renderCurrentMode() {
-    const root = ensureCalibrationGuide();
     const currentDeviation = referencePose
         ? deviation(lastPose, referencePose)
         : { status: 'missing' };
     const fixedVisible = FIXED_GUIDE_MODES.has(guideMode)
         && Boolean(referencePose)
         && currentDeviation.status !== 'aligned';
-    root.classList.toggle('active', fixedVisible);
     if (fixedVisible) {
+        const root = ensureCalibrationGuide();
+        if (!root.classList.contains('active')) root.classList.add('active');
         drawFixedGuide(document.getElementById('calibrationHeadPoseCanvas'), lastPose);
+    } else {
+        const root = document.getElementById('calibrationHeadPoseGuide');
+        if (root?.classList.contains('active')) root.classList.remove('active');
     }
     if (guideMode === 'precheck') {
         drawPrecheckOverlay(document.getElementById('overlayCanvas'), lastPose);
@@ -228,7 +236,7 @@ export function resetHeadPoseReference() {
     lastPose = null;
     guideMode = 'hidden';
     precheckStatus = 'pending';
-    clearPrecheckOverlay();
+    clearPrecheckOverlay(true);
     document.getElementById('calibrationHeadPoseGuide')?.classList.remove('active');
 }
 

@@ -17,6 +17,7 @@ const TOP_LEVEL_FIELDS = new Set([
   'bpm_summary',
   'rppg_summary',
   'respiration_summary',
+  'physiology_intervals',
   'experimentMeta',
   'cognitiveResults',
   'gazeValidation',
@@ -601,8 +602,12 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   validateEvents(payload.events, limits, errors);
   validateResearchExtensions(payload, errors);
   errors.push(...require('./gaze-validation').validateGazeValidation(payload.gazeValidation));
+  errors.push(...require('./gaze-validation').validateGazePresentationTiming(payload.gaze_analytics));
   if (payload.rt_alignment !== undefined) {
     errors.push(...require('../analytics/connectedness').validateAlignment(payload.rt_alignment));
+  }
+  if (payload.physiology_intervals !== undefined) {
+    errors.push(...require('./physiology-intervals').validatePhysiologyIntervals(payload.physiology_intervals));
   }
 
   walkPayload(

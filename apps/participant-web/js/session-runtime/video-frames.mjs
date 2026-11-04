@@ -73,20 +73,31 @@ export function observeVideoFrames(video, onFrame) {
     } };
 }
 
-export function measureVideoFps(video, durationMs = 2000) {
+export function measureVideoFps(video, durationMs = 2000, { signal } = {}) {
     if (!Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 2147483647) {
         return Promise.reject(new RangeError('Invalid FPS sampling duration'));
     }
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
         const started = performance.now();
-        let frames = 0;
-        const observer = observeVideoFrames(video, (_now, count) => { frames += count; });
-        setTimeout(() => {
-            observer.stop();
+        let frames = 0, observer = null, timer = null, settled = false;
+        const finish = error => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            observer?.stop();
+            signal?.removeEventListener('abort', cancelled);
+            if (error) { reject(error); return; }
             const duration = (performance.now() - started) / 1000;
             resolve({ fps: Math.round(frames / duration), frames, duration, method: observer.method,
                 measurementVersion: 'video_cadence.v2', fallbackReason: observer.fallbackReason,
                 playbackQuality: observer.playbackQuality });
-        }, durationMs);
+        };
+        const cancelled = () => finish(new DOMException('FPS sampling cancelled', 'AbortError'));
+        if (signal?.aborted) { cancelled(); return; }
+        signal?.addEventListener('abort', cancelled, { once: true });
+        try {
+            observer = observeVideoFrames(video, (_now, count) => { frames += count; });
+            timer = setTimeout(() => finish(), durationMs);
+        } catch (error) { finish(error); }
     });
 }

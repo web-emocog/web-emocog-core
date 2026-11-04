@@ -2,7 +2,7 @@ import { createCheckpointRequest, isCheckpointRequest, isCheckpointResponse } fr
 
 const KEYS = ['ids', 'user', 'tech', 'consent', 'precheck', 'qcSummary', 'attentionMetrics', 'blinkSummary', 'perclosSummary',
     'bodyPoseSummary', 'audioSummary', 'multimodalSummary', 'multimodalHeatmap', 'emotionSummary', 'emotionAccumulator',
-    'bpmSummary', 'bpmRuns', 'respirationRuns', 'rppgSession', 'experimentMeta', 'cognitiveResults', 'gazeValidation',
+    'bpmSummary', 'bpmRuns', 'respirationRuns', 'physiologyIntervals', 'rppgSession', 'experimentMeta', 'cognitiveResults', 'gazeValidation',
     'bpm', 'bpmData', 'rppg', 'rppgSummary', 'rppg_summary', 'bpm_summary', 'respirationSummary', 'respiration_summary', 'continuousSignalState',
     'heatmapState', 'heatmaps', 'emotion_summary', 'emotionEvents', 'eyeTracking', 'eyeSignals', 'emotionSamples', 'bodyPoseSamples', 'events', 'lifecycle', 'startTime', 'testHub', 'gazeTests'];
 
@@ -17,7 +17,7 @@ export class CheckpointBuilder {
                 const request = createCheckpointRequest(source);
                 if (!isCheckpointRequest(request)) throw new Error('checkpoint_worker_invalid_request');
                 const packet = await new Promise((resolve, reject) => {
-                    this.worker = new Worker(new URL('./aggregate-worker.mjs?v=20261025-1', import.meta.url), { type: 'module' });
+                    this.worker = new Worker(new URL('./aggregate-worker.mjs?v=20261104-4', import.meta.url), { type: 'module' });
                     const timer = setTimeout(() => reject(new Error('checkpoint_worker_timeout')), 10000);
                     this.cancel = () => { clearTimeout(timer); reject(new Error('checkpoint_worker_cancelled')); };
                     this.worker.onmessage = event => {
@@ -36,7 +36,7 @@ export class CheckpointBuilder {
         }
         // Unsupported workers must not run full gaze/alignment calculations
         // on the active RT thread or fabricate empty-signal measurements.
-        const { buildAggregatesPayload } = await import('../unified-aggregates-new.js?v=20261025-1');
+        const { buildAggregatesPayload } = await import('../unified-aggregates-new.js?v=20261104-4');
         const packet = buildAggregatesPayload({ ...source, eyeTracking: [], eyeSignals: [], emotionSamples: [], bodyPoseSamples: [] }, { forIngest: true });
         delete packet.gaze_analytics;
         delete packet.rt_alignment;

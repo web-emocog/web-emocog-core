@@ -291,7 +291,9 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
 
         if (isStimulusPhase && blockId != null && stimulusId != null) {
             const attemptKey = String(attempt ?? 'attempt');
-            const perStimulusKey = JSON.stringify([blockId, attempt, trialId, stimulusId, sample?.stimulusVersion || '1']);
+            const identity = [blockId, attempt, trialId, stimulusId, sample?.stimulusVersion || '1'];
+            if (sample?.presentationId != null) identity.push(String(sample.presentationId));
+            const perStimulusKey = JSON.stringify(identity);
             if (!perStimulusMap.has(perStimulusKey) && perStimulusMap.size >= 2000) { summary.omittedPresentations++; return; }
             if (!perStimulusMap.has(perStimulusKey)) {
                 perStimulusMap.set(perStimulusKey, {
@@ -308,7 +310,8 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
                         intrinsicHeight: sample?.stimulusRect?.intrinsicHeight ?? null,
                         coordinateMappingVersion: sample?.stimulusRect?.coordinateMappingVersion ?? null,
                         presentationStartMs: Number.isFinite(sample?.tRelMs) ? sample.tRelMs : t,
-                        presentationId: `${String(blockId)}:${attemptKey}:${String(trialId ?? 'trial')}:${String(stimulusId)}`
+                        presentationId: sample?.presentationId != null ? String(sample.presentationId)
+                            : `${String(blockId)}:${attemptKey}:${String(trialId ?? 'trial')}:${String(stimulusId)}`
                     },
                     acc: createAccumulator(width, height)
                 });
