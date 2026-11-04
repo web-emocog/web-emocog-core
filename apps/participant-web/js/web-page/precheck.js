@@ -1,6 +1,6 @@
 import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js';
-import { measureCameraFPS } from './camera.js?v=20261025-1';
+import { measureCameraFPS } from './camera.js?v=20261104-4';
 
 export async function startPreCheck() {
     console.log('Запуск pre-check камеры...');
@@ -736,7 +736,8 @@ async function runLocalPrecheckAnalysis(videoElement) {
         }
         
         // Сохраняем в историю для QC-метрик
-        state.runtime.precheckFramesHistory.push(results);
+        // History needs derived values, not the frame's transient pixel ownership.
+        state.runtime.precheckFramesHistory.push({ ...results });
         
         // Ограничиваем размер истории (последние 100 кадров)
         if (state.runtime.precheckFramesHistory.length > 100) {

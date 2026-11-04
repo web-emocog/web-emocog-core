@@ -46,9 +46,9 @@
   <script src="../auth-guard.js?v=20261027-1"></script>
   <script>
     if (!window.EmocogAuthGuard) location.replace('login.html');
-    else window.EmocogAuthGuard.ensureProtectedPage({ loginPath: 'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied: true, roleDeniedRedirect: '../researcher.html' });
+    else window.WecogDiagnosticAccess = window.EmocogAuthGuard.ensureProtectedPage({ loginPath: 'login.html', allowedRoles: ['admin', 'developer'], preserveAuthOnRoleDenied: true, roleDeniedRedirect: '../researcher.html' });
   </script>
-  <header class="top"><h1>Аудиомодуль</h1><a href="../developer.html">← К диагностике</a></header>
+  <header class="top"><h1>Аудиомодуль</h1><a href="../developer.html?v=20261104-4">← К диагностике</a></header>
   <main class="layout">
     <section class="card">
       <h2>Речевое окно</h2>
@@ -75,6 +75,6 @@
       </div>
     </section>
   </main>
-  <script type="module" src="audio-test.js?v=20260827-1"></script>
+  <script type="module" src="audio-test.js?v=20261104-4"></script>
 </body>
 </html>

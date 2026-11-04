@@ -1,6 +1,6 @@
 import { getEmotionSummary } from './emotion-stub-new.js';
 import '../../shared/rt-alignment.js?v=20261025-1';
-import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs?v=20261025-1';
+import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs';
 
 /**
  * Формирование payload агрегатов для отправки на сервер (Фаза 0.1).
@@ -455,6 +455,7 @@ function buildGazeAnalyticsPayload(sessionData) {
             stimulusType: entry.stimulusType ?? null,
             stimulusVersion: entry.stimulusVersion || '1',
             presentationId: entry.presentationId || `${String(entry.blockId)}:${String(entry.attempt ?? 'attempt')}:${String(entry.trialId ?? 'trial')}:${String(entry.stimulusId)}`,
+            presentationStartMs: Number.isFinite(entry.presentationStartMs) ? entry.presentationStartMs : null,
             intrinsicWidth: Number.isFinite(entry.intrinsicWidth) ? entry.intrinsicWidth : null,
             intrinsicHeight: Number.isFinite(entry.intrinsicHeight) ? entry.intrinsicHeight : null,
             grid: entry.grid || { width: 0, height: 0, values: [] },
@@ -559,6 +560,8 @@ export function buildAggregatesPayload(sessionData, options = {}) {
         bpm_summary,
         rppg_summary,
         respiration_summary,
+        ...(sessionData.physiologyIntervals?.schemaVersion === 'physiology_intervals.v1'
+            ? { physiology_intervals: sessionData.physiologyIntervals } : {}),
         ...(sessionData.experimentMeta && typeof sessionData.experimentMeta === 'object'
             ? { experimentMeta: { ...sessionData.experimentMeta } }
             : {}),

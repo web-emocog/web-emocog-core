@@ -218,12 +218,17 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     assert.equal(admission.status, 200);
     const token = (await admission.json()).token;
     const ids = { session: uuid, participant: 'synthetic-passive', invitationCode: invitation.code };
+    const interval = { startMs: 0, endMs: 60000, heartRate: { mean: 81, count: 60, observedMs: 45000 },
+      respiration: { mean: 14, count: 55, observedMs: 44000 } };
+    const physiology = { schemaVersion: 'physiology_intervals.v1', throughMs: 60000, truncated: false,
+      minutes: [interval], blocks: [{ ...interval, blockId: 'instruction', attempt: 1, status: 'accepted' }] };
     const payload = { schemaVersion: 'session_feature.v1', ids, events: [],
       delivery: { schemaVersion: 'session_delivery.v1', sequence: 1, kind: 'final' },
       lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed',
         finishAttemptId: 'finish-passive', completedAt: Date.now() },
       bpm_summary: { bpmMean: 80, validSampleCount: 30, methodVersion: 'continuous_signals.v2' },
       respiration_summary: { resp_rate_mean: 12, resp_sample_count: 20, resp_available: true },
+      physiology_intervals: physiology,
       blink_summary: { blinkCount: 0, blinkRatePerMin: 0 },
       attentionMetrics: { sampleCounts: { eyeSignals: 1800 }, global: { eyeDurationMs: 60000 } },
       perclos_summary: { windows: { '60s': { meanPct: 0 } } },
@@ -245,13 +250,20 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const endpoint = `/analytics/v1/sessions/${row.id}/summary?snapshot_id=${snapshot.id}`;
     const response = await request(endpoint);
     assert.equal(response.status, 200);
-    const metrics = (await response.json()).data.metrics;
+    const data = (await response.json()).data;
+    const { metrics } = data;
+    assert.deepEqual(data.physiologyIntervals, physiology);
     assert.equal(metrics.length, 9);
     assert.ok(metrics.every(metric => metric.status === 'computed'));
     assert.equal(metrics.find(metric => metric.metricId === 'physiology.respiration_mean').value, 12);
     assert.equal(metrics.find(metric => metric.metricId === 'blink.count').value, 0);
     const exported = await (await request(`/analytics/v1/exports?snapshot_id=${snapshot.id}`)).json();
     assert.equal(exported.summary.session.metrics.find(metric => metric.metricId === 'physiology.bpm_mean').value, 80);
+    assert.deepEqual(exported.summary.session.physiologyIntervals, physiology);
+    assert.equal(exported.longData.find(metric => metric.sourceKind === 'physiology_minute'
+      && metric.metricId === 'physiology.bpm_mean').coveragePct, 75);
+    const csv = await (await request(`/analytics/v1/exports?snapshot_id=${snapshot.id}&format=csv`)).text();
+    assert.match(csv, /physiology_block.*coveragePct/);
     assert.equal((await request(endpoint, 'GET', undefined, 'outsider')).status, 404);
     assert.equal((await request(`/analytics/v1/exports?snapshot_id=${snapshot.id}`, 'GET', undefined, 'outsider')).status, 404);
   });

@@ -147,7 +147,7 @@
       )) : source.events };
     }
     const moduleUrl = new URL(
-      '../participant-web/js/unified-aggregates-new.js?v=20261019-5',
+      '../participant-web/js/unified-aggregates-new.js?v=20261104-4',
       global.location.href
     );
     const aggregates = await import(moduleUrl.href);
@@ -314,6 +314,14 @@
     const code = String(value || '').trim().toLowerCase();
     const labels = {
       low_valid_gaze_fraction: ['Недостаточная доля валидного взгляда', 'Low valid-gaze fraction'],
+      protocol_qc_gazevalid: ['Доля валидного взгляда ниже порога протокола', 'Valid-gaze fraction is below the protocol threshold'],
+      protocol_qc_fpsstable: ['Частота анализа ниже порога протокола', 'Analysis frame rate is below the protocol threshold'],
+      protocol_qc_facedetected: ['Лицо недостаточно видно для требований протокола', 'Face visibility is below the protocol threshold'],
+      protocol_qc_lighting: ['Освещение не соответствует требованиям протокола', 'Lighting is below the protocol threshold'],
+      presentation_attempt_ambiguous: ['Старые данные не позволяют разделить попытки; исключено из итогового расчёта', 'Legacy data cannot separate attempts; excluded from default statistics'],
+      trial_result_missing: ['Попытка не завершена; исключена из итогового расчёта', 'Attempt is incomplete; excluded from default statistics'],
+      page_reloaded: ['Попытка прервана перезагрузкой страницы', 'Attempt was interrupted by a page reload'],
+      gaze_presentation_missing: ['Для этого показа нет данных взгляда', 'Gaze data is missing for this presentation'],
       low_signal_confidence: ['Низкая надёжность сигнала', 'Low signal confidence'],
       response_before_rt_min: ['Ответ раньше минимально допустимого RT', 'Response before minimum RT'],
       target_not_reached_before_presentation_end: ['AOI не достигнута до конца показа', 'AOI was not reached before presentation end'],
@@ -325,6 +333,7 @@
       signal_summary_invalid: ['Некорректная сводка сигнала', 'Invalid signal summary'],
       insufficient_window_duration: ['Недостаточно данных для полного окна 60 секунд', 'Insufficient data for a full 60-second window'],
       session_summary_not_interval: ['Сводка относится ко всей сессии. Для неё снимите фильтр блока, стимула или условия; оконные данные смотрите в связанности.', 'This is a whole-session summary. Clear block, stimulus or condition filters; use Connectedness for trial windows.'],
+      block_physiology_missing: ['Нет измерений в засчитанных попытках выбранного блока', 'No measurements in accepted attempts of the selected block'],
       summary_not_independent_validation: ['Сводка не является независимой проверкой точности канала', 'A summary is not independent channel-accuracy validation'],
       gaze_fixations_truncated: ['Карта накоплена за весь показ. Список фиксаций сокращён до 500 или из-за общего лимита размера отчёта; показатели AOI для этого показа недоступны.', 'The map covers the entire presentation. The fixation list is limited to 500 or shortened by the overall report size limit; AOI metrics for this presentation are unavailable.'],
       gaze_presentations_truncated: ['Сохранена только часть показов: достигнут лимит отчёта в 200 показов. Общая статистика взгляда сохранена; не используйте эту выборку как полную историю стимулов.', 'Only some presentations were retained: the 200-presentation report limit was reached. Overall gaze statistics are retained; do not treat this as the complete stimulus history.'],
@@ -2070,6 +2079,7 @@
       : '16/9';
     const contentUrl = stimulusContentUrl(stimulus.contentUrl);
     return `<article style="padding:14px 0;border-top:${index ? '1px solid var(--stroke)' : '0'};">
+      ${context.presentationId ? `<p data-attempt-status="${escapeHtml(context.attemptStatus || 'unknown')}" style="font-size:11px;overflow-wrap:anywhere;color:${context.includedInDefault === false ? 'var(--bad)' : 'var(--muted)'};">${escapeHtml(attemptLabel(context))} · ${escapeHtml(attemptStatusLabel(context))}${context.qualityIssueCodes?.length ? ` · ${escapeHtml(context.qualityIssueCodes.map(reasonLabel).join('; '))}` : ''}</p>` : ''}
       ${heatmap.reason ? `<p role="status" style="color:var(--warn);font-size:11px;">${escapeHtml(reasonLabel(heatmap.reason))}</p>` : ''}
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:9px;"><div><div style="font-size:12px;font-weight:750;color:var(--text);">${escapeHtml(stimulus.name || stimulus.id || tr('Стимул','Stimulus'))}</div><div style="font-size:9px;color:var(--muted);margin-top:3px;">${escapeHtml(context.blockName || context.blockId || '—')} · v${escapeHtml(stimulus.version || '1')} · ${escapeHtml(context.presentationId || tr('показ не найден','presentation unavailable'))}</div></div><span style="font-size:9px;color:${context.status === 'computed' ? 'var(--good)' : 'var(--muted)'};">${context.status === 'computed' ? tr('Данные рассчитаны','Computed') : tr('Нет данных показа','No presentation data')}</span></div>
       <div style="max-width:920px;margin:0 auto;position:relative;box-sizing:content-box;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">
@@ -2125,10 +2135,25 @@
   }
 
   function exclusionRowsHtml(exclusions) {
-    return exclusions.map((item, index) => `<div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;"><span style="font-weight:700;color:var(--text);">${tr('Проба','Trial')} ${index + 1}</span><span style="color:var(--muted);line-height:1.45;">${escapeHtml(reasonLabel(item.reasonCode))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
+    return exclusions.map(item => `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;overflow-wrap:anywhere;"><span style="font-weight:700;color:var(--text);">${escapeHtml(attemptLabel(item))}<br>${escapeHtml(item.stimulusId || item.trialId || item.entityId || '—')}<br>${escapeHtml(item.presentationId || '')}</span><span style="color:var(--muted);line-height:1.45;">${escapeHtml((item.qualityIssueCodes?.length ? item.qualityIssueCodes : [item.reasonCode]).map(reasonLabel).join('; '))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
   }
 
-  function passiveAnalyticsHtml(data, group = false) {
+  function attemptLabel(item) {
+    const trial = Number.isSafeInteger(item.sourceTrialIndex) ? `${tr('Проба','Trial')} ${item.sourceTrialIndex + 1}` : item.trialId || '';
+    const show = Number.isSafeInteger(item.presentationIndex) ? `${tr('Показ','Presentation')} ${item.presentationIndex}` : '';
+    const attempt = Number.isSafeInteger(item.attempt) ? `${tr('Попытка','Attempt')} ${item.attempt}${item.attempt > 1 ? tr(' (повтор)',' (repeat)') : ''}` : tr('Номер попытки неизвестен','Attempt number unknown');
+    return [show, trial, attempt].filter(Boolean).join(' · ');
+  }
+
+  function attemptStatusLabel(item) {
+    if (item.attemptStatus === 'excluded') return tr('Исключена из итоговых метрик','Excluded from default metrics');
+    if (item.attemptStatus === 'accepted') return tr('Засчитана','Accepted');
+    if (item.attemptStatus === 'ambiguous') return reasonLabel('presentation_attempt_ambiguous');
+    if (item.attemptStatus === 'incomplete') return reasonLabel('trial_result_missing');
+    return tr('Статус попытки не сохранён (старые данные)','Attempt status was not recorded (legacy data)');
+  }
+
+  function passiveAnalyticsHtml(data, group = false, groupBlockSelected = false) {
     const definitions = global.EmocogPassiveMetrics?.definitions || [];
     const metrics = Array.isArray(data?.metrics) ? data.metrics : [];
     const cards = definitions.map(definition => {
@@ -2136,13 +2161,16 @@
       const observed = metric?.status === 'computed' && Number.isFinite(group ? metric.median : metric.value);
       const value = observed ? formatMetricNumber(group ? metric.median : metric.value) : tr('Нет данных','No data');
       const count = group ? metric?.nParticipants : metric?.denominator;
+      const scope = metric?.algorithm?.id === 'passive-accepted_blocks' || (groupBlockSelected && definition.id.startsWith('physiology.'))
+        ? tr('засчитанные попытки блока','accepted block attempts')
+        : definition.id === 'body.velocity_p95' ? tr('сохранённое окно','retained window') : tr('вся измеренная сессия','whole measured session');
       const unit = { pct: '%', bpm: tr('уд/мин','bpm'), 'breaths/min': tr('дых/мин','breaths/min'),
         count: tr('шт.','count'), 'blinks/min': tr('морганий/мин','blinks/min'),
         'torso/s': tr('длины корпуса/с','torso/s'), index: tr('индекс','index') }[definition.unit] || definition.unit;
       return `<article data-passive-metric="${escapeHtml(definition.id)}" style="padding:13px;border:1px solid var(--stroke);border-radius:12px;min-width:0;overflow-wrap:anywhere;">
         <h3 style="font-size:12px;margin:0 0 8px;color:var(--text);">${escapeHtml(definition.label[isEnglish() ? 'en' : 'ru'])}</h3>
         <div style="font-size:23px;font-weight:750;color:var(--text);">${escapeHtml(value)}${observed ? ` <small style="font-size:11px;">${escapeHtml(unit)}</small>` : ''}</div>
-        <p style="font-size:10px;color:var(--muted);">${group ? tr('Участников','Participants') : tr('Наблюдений','Observations')}: ${count == null ? tr('неизвестно','unknown') : escapeHtml(count)} · ${definition.id === 'body.velocity_p95' ? tr('сохранённое окно','retained window') : tr('вся измеренная сессия','whole measured session')}</p>
+        <p style="font-size:10px;color:var(--muted);">${group ? tr('Участников','Participants') : tr('Наблюдений','Observations')}: ${count == null ? tr('неизвестно','unknown') : escapeHtml(count)} · ${scope}</p>
         ${!group && observed ? `<p style="font-size:10px;color:var(--muted);">${tr('Метод','Method')}: ${escapeHtml(metric.algorithm?.version || tr('неизвестно','unknown'))}</p>` : ''}
         ${!observed ? `<p style="font-size:10px;">${escapeHtml(reasonLabel(metric?.reason || 'signal_data_missing'))}</p>` : ''}
       </article>`;
@@ -2153,6 +2181,55 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:10px;">${cards}</div>
       <p style="font-size:11px;color:var(--muted);">${group ? tr('Сначала среднее по сессиям каждого участника, затем медиана с равным весом участников.','First average sessions within each participant, then take the median with equal participant weight.') : tr('ЧСС и дыхание — скользящие оценки, не мгновенный ответ на стимул. Удержанные значения не считаются новыми измерениями.','Heart rate and respiration are rolling estimates, not an instantaneous stimulus response. Held values are not fresh measurements.')} ${tr('Число наблюдений не равно числу независимых участников. Мимика — proxy, не настроение; PERCLOS не доказывает микросон. HRV, стресс и диагнозы здесь не вычисляются.','Observation counts are not counts of independent participants. Facial expression is a proxy, not mood; PERCLOS does not prove microsleep. HRV, stress and diagnoses are not computed here.')}</p>
       <a href="#/analytics/connectedness">${tr('Открыть связанность с RT и деталями проб','Open RT connectedness and trial details')}</a>
+    </section>`;
+  }
+
+  function physiologyIntervalsHtml(data, blockOptions = []) {
+    const intervals = data?.physiologyIntervals;
+    if (!intervals) return '';
+    const elapsed = ms => {
+      const secs = Math.floor(ms / 1000);
+      return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    };
+    const cell = (channel, duration, unit) => {
+      const coverage = duration > 0 ? 100 * channel.observedMs / duration : 0;
+      const displayCoverage = coverage > 0 && coverage < .1 ? '<0.1' : formatMetricNumber(coverage, 1);
+      const value = channel.observedMs > 0 && Number.isFinite(channel.mean)
+        ? `${formatMetricNumber(channel.mean, 1)} ${unit}` : tr('Нет данных','No data');
+      return `<td style="padding:7px 10px;"><strong>${escapeHtml(value)}</strong><br><small>${tr('Замеров','Estimates')}: ${escapeHtml(channel.count)} · ${tr('Покрытие','Coverage')}: ${escapeHtml(displayCoverage)}%</small></td>`;
+    };
+    const statuses = {
+      accepted: tr('Засчитан','Accepted'), repeat_required: tr('Потребовался повтор','Repeat required'),
+      interrupted: tr('Прерван','Interrupted'), in_progress: tr('В процессе','In progress')
+    };
+    const table = (rows, label, block) => {
+      if (!rows.length) return '';
+      return `<details data-physiology-intervals="${block ? 'blocks' : 'minutes'}" style="margin-top:9px;">
+        <summary style="cursor:pointer;font-weight:700;">${label} (${rows.length})</summary>
+        <div style="overflow:auto;max-height:420px;margin-top:6px;">
+          <table style="width:100%;min-width:430px;border-collapse:collapse;font-size:12px;">
+            <thead><tr><th scope="col">${tr('Интервал','Interval')}</th><th scope="col">${tr('ЧСС','Heart rate')}</th><th scope="col">${tr('Дыхание','Respiration')}</th></tr></thead>
+            <tbody>${rows.map(row => {
+              const name = block ? localizedName(blockOptions.find(item => String(item.id) === row.blockId), row.blockId) : '';
+              return `<tr style="border-top:1px solid var(--stroke);">
+                <th scope="row" style="text-align:left;padding:7px 10px;overflow-wrap:anywhere;">
+                  ${block ? `${escapeHtml(name)} · ${tr('Попытка','Attempt')} ${escapeHtml(row.attempt)} · ${escapeHtml(statuses[row.status] || '')}<br>` : ''}
+                  ${escapeHtml(elapsed(row.startMs))}–${escapeHtml(elapsed(row.endMs))}
+                </th>
+                ${cell(row.heartRate, row.endMs - row.startMs, tr('уд/мин','bpm'))}
+                ${cell(row.respiration, row.endMs - row.startMs, tr('дых/мин','breaths/min'))}
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>
+      </details>`;
+    };
+    return `<section id="analyticsPhysiologyIntervals" style="padding:16px 18px;border-bottom:1px solid var(--stroke);">
+      <h2 style="font-size:16px;">${tr('ЧСС и дыхание во времени','Heart rate and respiration over time')}</h2>
+      <p style="font-size:12px;color:var(--muted);">${tr('Покрытие — доля интервала между соседними свежими оценками. Среднее не показывается, если покрыто меньше секунды. В начале блока исключается длина окна расчёта.','Coverage is the share of the interval between adjacent fresh estimates. No mean is reported below one second of coverage. The initial analysis window is excluded from each block.')}</p>
+      ${intervals.truncated ? `<p role="status">${tr('История интервалов неполная.','Interval history is incomplete.')}</p>` : ''}
+      ${table(intervals.minutes || [], tr('По минутам','By minute'), false)}
+      ${table(intervals.blocks || [], tr('По блокам и попыткам','By block and attempt'), true)}
     </section>`;
   }
 
@@ -2232,6 +2309,10 @@
     const qcMetrics = metrics.filter(metric => String(metric.metricId).startsWith('qc.'));
     const trialValid = metrics.find(metric => metric.metricId === 'task.trial_count_valid');
     const trialExcluded = metrics.find(metric => metric.metricId === 'task.trial_count_excluded');
+    const validCount = Number.isSafeInteger(data.trialCounts?.valid) ? data.trialCounts.valid
+      : trialValid?.status === 'computed' ? trialValid.value : null;
+    const excludedCount = Number.isSafeInteger(data.trialCounts?.excluded) ? data.trialCounts.excluded
+      : trialExcluded?.status === 'computed' ? trialExcluded.value : null;
     const exclusions = Array.isArray(data.exclusions) ? data.exclusions : [];
     const channels = Array.isArray(data.qcChannels) ? data.qcChannels : [];
     const protocol = selectedProtocol(state);
@@ -2244,9 +2325,10 @@
       <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}<div style="font-size:8px;opacity:.75;margin-top:5px;">${escapeHtml(channel.ruleVersion || '—')}</div></article>`; }).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Выполнение задачи','Task performance')}</div>${taskMetrics.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${taskMetrics.map(metricCardHtml).join('')}</div>` : `<div style="font-size:11px;color:var(--muted);">${tr('Метрики задачи не настроены для этого протокола.','Task metrics are not configured for this protocol.')}</div>`}</section>
       ${passiveAnalyticsHtml(data)}
+      ${physiologyIntervalsHtml(data, state.filterOptions?.blocks)}
       ${audioAnalyticsHtml(data.audio)}
       ${qcMetrics.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Показатели качества данных','Data quality metrics')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${qcMetrics.map(metricCardHtml).join('')}</div></section>` : ''}
-      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${trialValid && trialValid.status === 'computed' ? escapeHtml(trialValid.value) : '—'}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${trialExcluded && trialExcluded.status === 'computed' ? escapeHtml(trialExcluded.value) : exclusions.length}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(86px,.45fr) minmax(250px,2fr) minmax(105px,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
+      <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${validCount === null ? '—' : escapeHtml(validCount)}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${excludedCount === null ? exclusions.length : escapeHtml(excludedCount)}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>
       ${sessionVisualAnalyticsHtml(state)}
       <details style="padding:12px 18px;border-bottom:1px solid var(--stroke);"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Технические данные сессии','Session technical details')}</summary>${technicalDetailsHtml(session, algorithms)}</details>
       <footer style="padding:10px 18px;font-size:9px;color:var(--muted);">snapshot ${escapeHtml(response.snapshot.id)} · ${escapeHtml(response.snapshot.datasetHash)} · contract ${escapeHtml(response.contractVersion)} · ${tr('сформировано','generated')} ${escapeHtml(formatDateTime(response.generatedAt))}</footer>
@@ -2313,7 +2395,7 @@
     const aoiMetrics = metrics.filter(metric => String(metric.metricId).startsWith('aoi.'));
     const snapshot = response.snapshot;
     return `<div>
-      ${passiveAnalyticsHtml(data, true)}
+      ${passiveAnalyticsHtml(data, true, Boolean(snapshot.queryEcho?.filters?.blockIds?.length))}
       <section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Состав выборки','Sample composition')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;margin-top:10px;">${[[tr('Участники','Participants'),data.nParticipants],[tr('Сессии','Sessions'),data.nSessions],[tr('Наблюдения','Observations'),data.nObservations],[tr('Исключённые сессии','Excluded sessions'),(snapshot.excludedSessions||[]).length]].map(([label,value],index)=>`<div style="padding:12px;border:1px solid var(--stroke);border-radius:11px;background:${index===0?'rgba(92,102,189,.08)':'rgba(255,255,255,.3)'};"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;">${label}</div><div style="font-size:${index===0?'25':'20'}px;font-weight:780;color:var(--text);margin-top:5px;">${escapeHtml(value)}</div></div>`).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('QC по каналам','QC by channel')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">${(data.qcByChannel||[]).map(channel=>`<article style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="font-size:10px;font-weight:700;color:var(--text);">${escapeHtml(channelLabel(channel.channel))}</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:9px;"><span style="color:var(--good);">${statusLabel('valid')}: ${channel.valid}</span><span style="color:var(--warn);">${statusLabel('borderline')}: ${channel.borderline}</span><span style="color:var(--bad);">${statusLabel('invalid')}: ${channel.invalid}</span><span style="color:var(--muted);">${statusLabel('not_computed')}: ${channel.notComputed}</span></div></article>`).join('')}</div><details style="margin-top:10px;"><summary style="font-size:10px;font-weight:700;cursor:pointer;">${tr('Missingness и причины исключения','Missingness and exclusion reasons')}</summary><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;">${(data.missingness||[]).map(item=>`<span style="padding:6px 8px;border-radius:8px;background:rgba(100,116,139,.08);font-size:9px;color:var(--muted);">${escapeHtml(reasonLabel(item.reasonCode))}: ${escapeHtml(item.count)}</span>`).join('')}</div>${(snapshot.excludedSessions||[]).map(item=>`<div style="font-size:9px;color:var(--muted);margin-top:6px;">${tr('Сессия','Session')} ${escapeHtml(item.sessionId)} · ${escapeHtml(reasonLabel(item.reasonCode))} · ${escapeHtml(item.channel?channelLabel(item.channel):'—')}</div>`).join('')}</details></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Описательные групповые показатели','Group descriptive metrics')}</div><div style="font-size:9px;color:var(--muted);margin:-5px 0 10px;">${tr('Точки — значения участников; рамка — IQR; тёмная линия — медиана.','Dots are participant values; the box is IQR; the dark line is the median.')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;">${metrics.map(groupMetricCardHtml).join('')}</div></section>

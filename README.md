@@ -677,7 +677,7 @@ erDiagram
 | **PreCheck analyzer** | [js/precheck-analyzer/](apps/participant-web/js/precheck-analyzer/) · [README](apps/participant-web/js/precheck-analyzer/README.md) | проверка камеры/освещения/позы перед тестами |
 | **Face segmenter** | [js/face-segmenter/](apps/participant-web/js/face-segmenter/) · [README](apps/participant-web/js/face-segmenter/README.md) | сегментация лица/кожи для ROI |
 | **rPPG / BPM** | [lib/rppg_alg_qc_test_web_alg_test_v10/](lib/rppg_alg_qc_test_web_alg_test_v10/) · [README](lib/rppg_alg_qc_test_web_alg_test_v10/README.md) | оценка пульса и дыхания из видеосигнала лица |
-| **Emotion / FACS** | [js/emotion/](apps/participant-web/js/emotion/) | извлечение Action Units, классификация эмоций, валентность/возбуждение |
+| **Emotion / FACS** | [js/emotion/](apps/participant-web/js/emotion/) · [Как устроена модель и её коэффициенты](docs/research/emotion-model.md) | извлечение Action Units, классификация выражений лица, валентность/возбуждение |
 | **QC-метрики** | [js/qc-metrics/](apps/participant-web/js/qc-metrics/) · [README](apps/participant-web/js/qc-metrics/README.md) | клиентская оценка качества (лицо, взгляд, длительность, FPS) |
 | **Audio (опц.)** | [Audio_detection/](Audio_detection/) · [README](Audio_detection/README.md) | отдельное согласие, WebAudio capture, Worker-анализ, QC и агрегаты всей сессии |
 | **Multimodal** | [packages/shared/multimodal/](packages/shared/multimodal/) · [README](packages/shared/multimodal/README.md) | синхронизация gaze/emotion/head/body, слои heatmap и UI-независимый renderer |

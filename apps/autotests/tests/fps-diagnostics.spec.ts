@@ -1,5 +1,185 @@
 import { test, expect } from '@playwright/test';
 
+test('transferred PCM is not copied again and a stalled audio queue stays bounded without requesting a microphone', async ({ page }) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  const result = await page.evaluate(async () => {
+    const modulePath = '/apps/participant-web/js/audio/session-audio.js?v=20261104-4';
+    const { SessionAudioCollector } = await import(modulePath);
+    let time = 1000;
+    const events: any[] = [], releases: Array<(value: null) => void> = [];
+    const collector = new SessionAudioCollector({ state: { sessionData: { audioConsent: { granted: true } }, runtime: {} }, enabled: true,
+      WorkerCtor: null, clock: { now: () => ({ monotonicMs: time += 1000, sessionTimeMs: time - 1000 }) },
+      recordEvent: (type: string, details: any) => events.push({ type, details }) });
+    collector.started = true; collector.sampleRate = 16;
+    const channel = new MessageChannel(), source = new Float32Array([.25, .5, -.75]);
+    let received: Float32Array;
+    try {
+      const message = new Promise<Float32Array>(resolve => { channel.port2.onmessage = event => resolve(event.data); });
+      channel.port1.postMessage(source, [source.buffer]); received = await message;
+      collector._captureSamples(received, true);
+    } finally { channel.port1.close(); channel.port2.close(); }
+    const owned = collector.pendingChunks[0] === received!;
+    const values = Array.from(collector._consume(3));
+    collector._analyzeWindow = () => new Promise(resolve => releases.push(resolve));
+    for (let i = 0; i < 20; i++) collector._queueWindow(new Float32Array(16));
+    await Promise.resolve();
+    const pending = collector.pendingWindowCount, dropped = collector.droppedWindowCount, inFlight = releases.length;
+    releases[0](null); for (let i = 0; i < 10; i++) await Promise.resolve();
+    releases[1](null); await collector.analysisQueue;
+    collector._analyzeWindow = async () => { throw new Error('synthetic analysis failure'); };
+    collector._queueWindow(new Float32Array(16)); await collector.analysisQueue;
+    const summary = await collector.stop();
+    let terminated = false, sensorReleased = false, sent = 0;
+    const timed = new SessionAudioCollector({ state: { sessionData: { audioConsent: { granted: true } }, runtime: {} },
+      enabled: true, WorkerCtor: null, workerTimeoutMs: 10, clock: { now: () => ({ monotonicMs: 1000, sessionTimeMs: 0 }) } });
+    timed.sampleRate = 16; timed.started = true; timed.everStarted = true;
+    timed.worker = { postMessage() { sent++; }, terminate() { terminated = true; } };
+    timed.stream = { getTracks: () => [{ stop() { sensorReleased = true; } }] };
+    timed._queueWindow(new Float32Array(16)); timed._queueWindow(new Float32Array(16));
+    await timed.analysisQueue; const timeoutSummary = await timed.stop();
+    return { sourceDetached: source.byteLength === 0, owned, values, pending, dropped, inFlight,
+      pendingAfterStop: collector.pendingWindowCount, summary, rawInEvents: JSON.stringify(events).includes('samples'),
+      failedRecorded: events.some(event => event.type === 'audio_window_dropped' && event.details.reason === 'analysis_failed'),
+      timeout: { terminated, sensorReleased, sent, pending: timed.pendingWindowCount, status: timeoutSummary.status, dropped: timeoutSummary.droppedWindowCount } };
+  });
+  expect(result.sourceDetached).toBe(true); expect(result.owned).toBe(true); expect(result.values).toEqual([.25, .5, -.75]);
+  expect(result.pending).toBe(2); expect(result.inFlight).toBe(1); expect(result.dropped).toBe(18);
+  expect(result.pendingAfterStop).toBe(0); expect(result.failedRecorded).toBe(true); expect(result.rawInEvents).toBe(false);
+  expect(result.summary).toMatchObject({ windowCount: 0, droppedWindowCount: 21, rawAudioStored: false, rawAudioTransmitted: false });
+  expect(result.timeout).toEqual({ terminated: true, sensorReleased: true, sent: 1, pending: 0, status: 'failed', dropped: 2 });
+});
+
+test('rPPG scratch reuse preserves exact POS/CHROM values without per-frame array maps or RGB copies', async ({ page }, info) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  const result = await page.evaluate(async () => {
+    const base = '/lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/algorithms/';
+    const { ColorProjectionWindow } = await import(base + 'color-projection.mjs?v=20261103-2');
+    const { posSampleFromWindow: pos } = await import(base + 'pos.js');
+    const { chromSampleFromWindow: chrom } = await import(base + 'chrom.js');
+    const workspace = new ColorProjectionWindow();
+    const samples = (length: number) => Object.freeze(Array.from({ length }, (_, i) => Object.freeze({
+      tMs: i * 1000 / 30, r: 160 + 10 * Math.sin(i * .13), g: 110 + 7 * Math.cos(i * .17), b: 80 + Math.sin(i * .23) })));
+    const legacy = (input: readonly any[], since: number | null = null) => {
+      const rgb = input.filter(point => since === null || point.tMs >= since).map(point => ({ r: point.r, g: point.g, b: point.b }));
+      return { sampleCount: rgb.length, pos: pos(rgb), chrom: chrom(rgb) };
+    };
+    let comparisons = 0, mismatch = false;
+    for (const length of [0, 1, 29, 30, 31, 240, 1024, 31]) for (const since of [null, 0, 1000, Infinity]) {
+      const input = samples(length), expected = legacy(input, since), actual = workspace.sample(input, since);
+      mismatch ||= actual.sampleCount !== expected.sampleCount || !Object.is(actual.pos, expected.pos) || !Object.is(actual.chrom, expected.chrom);
+      comparisons++;
+    }
+    const input = samples(240); workspace.sample(input, 0);
+    const buffers = workspace._vectors.slice();
+    let maps = 0, filters = 0;
+    const map = Array.prototype.map, filter = Array.prototype.filter;
+    let beforeMaps, beforeFilters, afterMaps, afterFilters;
+    try {
+      (Array.prototype as any).map = function (...args: any[]) { maps++; return map.apply(this, args); };
+      (Array.prototype as any).filter = function (...args: any[]) { filters++; return filter.apply(this, args); };
+      for (let i = 0; i < 100; i++) legacy(input, 0);
+      beforeMaps = maps; beforeFilters = filters; maps = 0; filters = 0;
+      for (let i = 0; i < 100; i++) workspace.sample(input, 0);
+      afterMaps = maps; afterFilters = filters;
+    } finally { Array.prototype.map = map; Array.prototype.filter = filter; }
+    const beforeMs: number[] = [], afterMs: number[] = [];
+    for (let round = 0; round < 5; round++) {
+      let started = performance.now(); for (let i = 0; i < 1000; i++) legacy(input, 0); beforeMs.push(performance.now() - started);
+      started = performance.now(); for (let i = 0; i < 1000; i++) workspace.sample(input, 0); afterMs.push(performance.now() - started);
+    }
+    return { comparisons, mismatch, beforeMaps, beforeFilters, afterMaps, afterFilters,
+      capacity: workspace.capacity, scratchBytes: workspace._vectors.reduce((sum: number, value: Float64Array) => sum + value.byteLength, 0),
+      reused: workspace._vectors.every((value: Float64Array, index: number) => value === buffers[index]), beforeMs, afterMs };
+  });
+  expect(result.comparisons).toBe(32); expect(result.mismatch).toBe(false); expect(result.reused).toBe(true);
+  expect(result.beforeMaps).toBe(2100); expect(result.beforeFilters).toBe(100);
+  expect(result.afterMaps).toBe(0); expect(result.afterFilters).toBe(0);
+  expect(result.capacity).toBe(1024); expect(result.scratchBytes).toBe(32768);
+  await info.attach('projection-microbenchmark-not-full-pipeline-fps', { body: JSON.stringify(result), contentType: 'application/json' });
+  console.log(`${info.project.name} rPPG projection: ${JSON.stringify(result)}`);
+});
+
+test('head guide keeps every pose update but clears its precheck canvas only on exit', async ({ page }) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  const result = await page.evaluate(async () => {
+    document.body.innerHTML = '<style>#overlayCanvas{width:640px;height:480px}'
+      + '#calibrationHeadPoseCanvas{width:160px;height:112px}</style>'
+      + '<canvas id="overlayCanvas" width="640" height="480"></canvas>';
+    const guidePath = '/apps/participant-web/js/gaze-tracker/head-pose-guide.js?v=20261103-1';
+    const guide = await import(guidePath);
+    const canvas = document.querySelector('canvas')!;
+    const ctx = canvas.getContext('2d')!;
+    let clears = 0;
+    const clear = ctx.clearRect.bind(ctx);
+    ctx.clearRect = (...args: Parameters<typeof clear>) => { clears++; clear(...args); };
+    const frame = { face: { detected: true, bbox: { x: .3, y: .2, width: .36, height: .54 }, status: 'valid' },
+      pose: { yaw: 0, pitch: 0, roll: 0, status: 'stable' }, illumination: { status: 'optimal' } };
+    guide.resetHeadPoseReference(); guide.setHeadPoseGuideMode('precheck');
+    const before = clears;
+    for (let i = 0; i < 30; i++) guide.updateHeadPoseGuide(frame);
+    const precheckClears = clears - before;
+    guide.captureHeadPoseReference(frame); guide.setHeadPoseGuideMode('hidden');
+    const hiddenStart = clears;
+    for (let i = 0; i < 300; i++) guide.updateHeadPoseGuide({ ...frame, pose: { ...frame.pose, yaw: 20 } });
+    const hiddenClears = clears - hiddenStart;
+    const hidden = guide.getHeadPoseGuideSnapshot();
+    const observer = new MutationObserver(() => {});
+    const root = document.getElementById('calibrationHeadPoseGuide');
+    if (root) observer.observe(root, { attributes: true });
+    for (let i = 0; i < 30; i++) guide.updateHeadPoseGuide(frame);
+    const hiddenMutations = observer.takeRecords().length; observer.disconnect();
+    guide.setHeadPoseGuideMode('precheck'); guide.updateHeadPoseGuide(frame);
+    const resumedStart = clears;
+    const replacement = canvas.cloneNode() as HTMLCanvasElement;
+    canvas.replaceWith(replacement); guide.updateHeadPoseGuide(frame);
+    guide.setHeadPoseGuideMode('hidden');
+    const replacementPixels = replacement.getContext('2d')!.getImageData(0, 0, replacement.width, replacement.height).data;
+    guide.setHeadPoseGuideMode('calibration'); guide.updateHeadPoseGuide({ ...frame, pose: { ...frame.pose, yaw: 90 } });
+    const fixedVisible = document.getElementById('calibrationHeadPoseGuide')!.classList.contains('active');
+    guide.updateHeadPoseGuide({ face: { detected: false } });
+    const missing = guide.getHeadPoseGuideSnapshot();
+    guide.resetHeadPoseReference();
+    return { precheckClears, hiddenClears, hiddenMutations, hidden,
+      oldCanvasCleared: clears > resumedStart, replacementEmpty: replacementPixels.every(value => value === 0), fixedVisible, missing };
+  });
+  expect(result.precheckClears).toBe(30);
+  expect(result.hiddenClears).toBe(0); expect(result.hiddenMutations).toBe(0);
+  expect(result.hidden.current.yaw).toBeCloseTo(20, 6);
+  expect(result.hidden.deviation.status).not.toBe('aligned');
+  expect(result.oldCanvasCleared).toBe(true); expect(result.replacementEmpty).toBe(true);
+  expect(result.fixedVisible).toBe(true); expect(result.missing.current).toBeNull();
+});
+
+test('QC warning avoids repeated DOM mutations while keeping language, reasons and recovery debounce live', async ({ page }) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  const result = await page.evaluate(async () => {
+    const overlayPath = '/apps/participant-web/js/qc-pause-overlay-new.js?v=20261103-1';
+    const qc = await import(overlayPath);
+    let lang = 'en'; qc.init({ getLang: () => lang }); qc.show('face_lost');
+    const root = document.getElementById('qc-pause-overlay')!;
+    const observer = new MutationObserver(() => {});
+    observer.observe(root, { attributes: true, subtree: true, childList: true, characterData: true });
+    for (let i = 0; i < 300; i++) qc.show('face_lost');
+    const repeatedMutations = observer.takeRecords().length;
+    lang = 'ru'; qc.show('face_lost'); const russian = root.textContent;
+    qc.show('low_light'); const lighting = root.textContent;
+    const acceptable = { face: { detected: true, status: 'valid' }, pose: { status: 'stable' }, illumination: { status: 'optimal' } };
+    for (let i = 0; i < 3; i++) qc.updateFromMetrics({ qcScore: .8 }, acceptable);
+    qc.show('face_lost');
+    await new Promise(resolve => setTimeout(resolve, 450));
+    const interruptedRecovery = qc.isVisible();
+    for (let i = 0; i < 3; i++) qc.updateFromMetrics({ qcScore: .8 }, acceptable);
+    await new Promise(resolve => setTimeout(resolve, 450));
+    const recovered = !qc.isVisible(); observer.takeRecords();
+    qc.hide(); qc.hide(); const hiddenMutations = observer.takeRecords().length;
+    observer.disconnect();
+    return { repeatedMutations, russian, lighting, interruptedRecovery, recovered, hiddenMutations };
+  });
+  expect(result.repeatedMutations).toBe(0); expect(result.hiddenMutations).toBe(0);
+  expect(result.russian).toBe('Верните лицо в кадр'); expect(result.lighting).toBe('Улучшите освещение');
+  expect(result.interruptedRecovery).toBe(true); expect(result.recovered).toBe(true);
+});
+
 // Only the tiny synthetic fixture is used. No camera/microphone permission,
 // account, production invitation or biometric recording is required.
 test.beforeEach(async ({ page, baseURL }) => {
@@ -87,8 +267,7 @@ test('file FPS restart cleans callbacks and unavailable counters are explicitly 
 });
 
 test('17 FPS quality failure is not hidden by a 61 FPS camera publication, and recovery clears the next attempt', async ({ page }) => {
-  // Characterizes the phase behavior reported in issue 132, not approval of
-  // instruction-wide invalidation or a new scientific acceptance threshold.
+  // A real deficit during an active attempt remains invalid at the same threshold.
   await page.goto('/apps/participant-web/mvp_with_precheck_1-updated.html');
   await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
   await page.evaluate(() => (window as any).QCMetricsReady);
@@ -104,6 +283,7 @@ test('17 FPS quality failure is not hidden by a 61 FPS camera publication, and r
         rules: { fpsStable: { enabled: true, threshold: 25, hardStop: false } } } } };
       s.sessionData.experimentMeta = { protocolProgress: { status: 'running' } };
       s.runtime.qcMetrics = qc; qc.start(); runtime.enterInstruction({ source: 'synthetic-issue132' });
+      runtime.beginBlock({ blockId: 'synthetic-fps', blockType: 'passive' });
       const run = (fps: number, seconds: number) => {
         for (let index = 0; index < fps * seconds; index++) {
           clock += 1000 / fps; qc.processFrame({}); qc.setCameraFps(61);
@@ -112,7 +292,7 @@ test('17 FPS quality failure is not hidden by a 61 FPS camera publication, and r
         }
       };
       run(17, 30);
-      const slow = qc.getCurrentMetrics(), first = runtime.beginBlock({ blockId: 'synthetic-fps', blockType: 'passive' });
+      const slow = qc.getCurrentMetrics(), first = runtime.getCurrentBlock();
       const slowAttempt = { invalid: first.invalid, issues: first.issues.map((issue: any) => issue.code) };
       runtime.completeBlock({ success: true }); runtime.discardRepeat('synthetic-fps');
       runtime.enterInstruction({ source: 'synthetic-recovery' }); run(30, 5);
@@ -134,6 +314,34 @@ test('17 FPS quality failure is not hidden by a 61 FPS camera publication, and r
   expect(result.recoveredInvalid).toBe(false);
   expect(result.activeCodes).not.toContain('protocol_qc_fpsStable');
   expect(result.historyPreserved).toBe(true);
+});
+
+test('instruction FPS cannot poison an unstarted attempt; an actual active deficit still rejects it', async ({ page }) => {
+  await page.goto('/apps/participant-web/mvp_with_precheck_1-updated.html');
+  await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
+  const result = await page.evaluate(() => {
+    const s = (window as any).__WECOG_STATE__, runtime = s.runtime.sessionRuntime;
+    s.sessionData.experimentMeta = { protocolProgress: {} };
+    s.runtime.invitationProtocolDefinition = { settings: { qualityControl: { schemaVersion: 'protocol_quality.v1',
+      rules: { fpsStable: { enabled: true, threshold: 25, hardStop: false } } } } };
+    runtime.machine.start(); runtime.enterInstruction();
+    const metrics = { durationMs: 30000, totalFrames: 500, analysisFps: 17 };
+    runtime.updateProtocolQuality(metrics, 1000); runtime.updateProtocolQuality(metrics, 30000);
+    const instructionIssues = runtime.getActiveIssues();
+    const first = runtime.beginBlock({ blockId: 'instruction-safe', blockType: 'passive' });
+    runtime.updateProtocolQuality(metrics, 31000); runtime.updateProtocolQuality(metrics, 34001);
+    const active = runtime.getCurrentBlock();
+    const decision = runtime.completeBlock();
+    runtime.updateProtocolQuality(metrics, 35000);
+    const next = runtime.beginBlock({ blockId: 'instruction-safe', blockType: 'passive' });
+    return { instructionIssues, first, active, decision, next, historical: s.sessionData.events.some((e: any) => e.type === 'session_issue_raised') };
+  });
+  expect(result.instructionIssues).toEqual([]);
+  expect(result.first.invalid).toBe(false);
+  expect(result.active.invalid).toBe(true);
+  expect(result.decision.repeatRequired).toBe(true);
+  expect(result.next.invalid).toBe(false);
+  expect(result.historical).toBe(true);
 });
 
 test('source-only control counts compositor callbacks without running a model and releases video callbacks', async ({ page }) => {

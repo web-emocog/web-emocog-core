@@ -2153,6 +2153,14 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
         }),
         cognitiveResults: [{
           blockId: 'main', trialId: 'trial-1', stimulusId: 'std_emo_neutral_01',
+          presentationId: 'presentation-rejected', attempt: 1, presentationIndex: 1, onsetMs: 1000,
+          condition: 'failed-condition',
+          response: 'Space', correct: true, rt: 450, qualityValid: false, sourceTrialIndex: 8,
+          qualityIssueCodes: ['protocol_qc_fpsStable'],
+        }, {
+          blockId: 'main', trialId: 'trial-1', stimulusId: 'std_emo_neutral_01',
+          presentationId: 'presentation-1', attempt: 2, presentationIndex: 2, onsetMs: 3000,
+          condition: 'selected-condition',
           response: 'Space', correct: true, rt: 410, qualityValid: true,
         }],
         gaze_analytics: {
@@ -2165,10 +2173,19 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
           },
           presentations: [{
             blockId: 'main', trialId: 'trial-1', presentationId: 'presentation-1',
+            attempt: 2, presentationStartMs: 3000,
             stimulusId: 'std_emo_neutral_01', stimulusName: 'Neutral face', stimulusType: 'image',
             stimulusVersion: '1', intrinsicWidth: 800, intrinsicHeight: 600,
             grid: { width: 2, height: 2, values: [1, 0, 0, 0] },
             fixationPoints: [{ x: 0.25, y: 0.25, startMs: 120, durationMs: 240, signalConfidence: 0.9 }],
+            validObservationDurationMs: 1000, meanConfidence: 0.9,
+          }, {
+            blockId: 'main', trialId: 'trial-1', presentationId: 'presentation-rejected',
+            attempt: 1, presentationStartMs: 1000,
+            stimulusId: 'std_emo_neutral_01', stimulusName: 'Neutral face', stimulusType: 'image',
+            stimulusVersion: '1', intrinsicWidth: 800, intrinsicHeight: 600,
+            grid: { width: 2, height: 2, values: [0, 1, 0, 0] },
+            fixationPoints: [{ x: 0.25, y: 0.25, startMs: 120, durationMs: 400, signalConfidence: 0.9 }],
             validObservationDurationMs: 1000, meanConfidence: 0.9,
           }],
         },
@@ -2261,10 +2278,23 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       { headers: { authorization } }
     );
     assert.equal(connectednessSummary.status, 200);
-    const connectednessData = (await connectednessSummary.json()).data.connectedness;
+    const summaryData = (await connectednessSummary.json()).data;
+    assert.deepEqual(summaryData.trialCounts, { valid: 1, excluded: 1, total: 2 });
+    assert.equal(summaryData.exclusions[0].presentationId, 'presentation-rejected');
+    assert.equal(summaryData.exclusions[0].sourceTrialIndex, 8);
+    const connectednessData = summaryData.connectedness;
     assert.equal(connectednessData.source, 'stored_event_windows');
     assert.equal(connectednessData.trials[0].rtMs, 410);
     assert.equal(connectednessData.trials[0].windows.response.channels.gaze.value, 1);
+    const visualResponse = await fetch(
+      `${baseUrl}/analytics/v1/sessions/${snapshot.includedSessionIds[0]}/visuals?snapshot_id=${snapshot.id}`,
+      { headers: { authorization } }
+    );
+    assert.equal(visualResponse.status, 200);
+    const contexts = (await visualResponse.json()).data.contexts;
+    assert.deepEqual(contexts.map(context => context.presentationId), ['presentation-rejected', 'presentation-1']);
+    assert.deepEqual(contexts.map(context => context.attemptStatus), ['excluded', 'accepted']);
+    assert.deepEqual(contexts.map(context => context.includedInDefault), [false, true]);
     const outsider = await pool.query(
       `INSERT INTO users (email, password_hash, role) VALUES ($1, $2, 'researcher') RETURNING id, email, role, token_version`,
       [`s2-analytics-outsider-${randomUUID()}@example.test`, await bcrypt.hash('outsider-test-password', 4)]
@@ -2326,7 +2356,35 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(bundle.content, 'both');
     assert.ok(bundle.summary.group.metrics.some(metric => metric.scope?.aoiId === 'face'));
     assert.ok(bundle.longData.some(metric => metric.metricId === 'aoi.dwell_time_ms'));
+    const attemptRows = bundle.longData.filter(metric => metric.metricId === 'aoi.dwell_time_ms' && metric.sourceKind === 'session_aoi');
+    assert.deepEqual(attemptRows.map(metric => metric.scope.presentationId), ['presentation-rejected', 'presentation-1']);
+    assert.deepEqual(attemptRows.map(metric => metric.value), [400, 240]);
+    assert.deepEqual(attemptRows.map(metric => metric.includedInDefault), [false, true]);
     assert.ok(bundle.dataDictionary.every(metric => Object.hasOwn(metric, 'description')));
+
+    const scopedSnapshotResponse = await fetch(`${baseUrl}/analytics/v1/snapshots`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...snapshot.queryEcho,
+        filters: { ...snapshot.queryEcho.filters, conditionIds: ['selected-condition'] } }),
+    });
+    assert.equal(scopedSnapshotResponse.status, 201, await scopedSnapshotResponse.clone().text());
+    const scopedSnapshot = await scopedSnapshotResponse.json();
+    const scopedSummary = await fetch(
+      `${baseUrl}/analytics/v1/sessions/${snapshot.includedSessionIds[0]}/summary?snapshot_id=${scopedSnapshot.id}`,
+      { headers: { authorization } }
+    );
+    assert.equal(scopedSummary.status, 200);
+    assert.deepEqual((await scopedSummary.json()).data.trialCounts, { valid: 1, excluded: 0, total: 1 });
+    const scopedExport = await fetch(
+      `${baseUrl}/analytics/v1/exports?snapshot_id=${scopedSnapshot.id}&format=json&content=long`,
+      { headers: { authorization } }
+    );
+    assert.equal(scopedExport.status, 200);
+    const scopedBundle = await scopedExport.json();
+    const scopedRows = scopedBundle.longData.filter(metric => metric.sourceKind === 'session_aoi');
+    assert.equal(scopedRows.length, 3);
+    assert.ok(scopedRows.every(metric => metric.scope.presentationId === 'presentation-1'));
+    assert.equal(scopedBundle.longData.find(metric => metric.sourceKind === 'group_summary' && metric.metricId === 'aoi.dwell_time_ms').value, 240);
 
     const summaryOnly = await fetch(
       `${baseUrl}/analytics/v1/exports?snapshot_id=${snapshot.id}&format=json&content=summary`,

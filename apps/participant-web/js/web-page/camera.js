@@ -1,5 +1,5 @@
 import { state } from './state.js?v=20261025-1';
-import { observeVideoFrames, measureVideoFps } from '../session-runtime/video-frames.mjs';
+import { observeVideoFrames, measureVideoFps } from '../session-runtime/video-frames.mjs?v=20261104-4';
 
 export function measureRenderFPS() {
     return new Promise(resolve => {

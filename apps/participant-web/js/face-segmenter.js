@@ -55,7 +55,7 @@ class FaceSegmenterInline {
         if (this.isInitialized) return true;
         try {
             const [mask, region] = await Promise.all([
-                import('./face-segmenter/mask-analyzer.js?v=20261028-139'),
+                import('./face-segmenter/mask-analyzer.js?v=20261104-4'),
                 import('./face-segmenter/region-analyzer.js?v=20261028-139')
             ]);
             this.analysisCore = { ...mask, ...region };
@@ -173,7 +173,7 @@ if (typeof window !== 'undefined') {
 
     window.FaceSegmenterReady = (async () => {
         try {
-            const mod = await import('./face-segmenter/index.js?v=20261028-139');
+            const mod = await import('./face-segmenter/index.js?v=20261104-4');
             const Cls = mod && (mod.FaceSegmenter || mod.default);
             if (typeof Cls !== 'function') {
                 throw new Error('module did not export FaceSegmenter class');

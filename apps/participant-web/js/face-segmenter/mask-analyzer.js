@@ -6,7 +6,7 @@
  * @module face-segmenter/mask-analyzer
  */
 
-import { CLASS_INDICES, CLASS_NAMES } from './constants.js';
+import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
 import { createFaceSupport, rememberFaceSupport, isFacePixel } from './face-support.mjs?v=20261028-139';
 
 /**

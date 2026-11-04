@@ -6,29 +6,29 @@ import {
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261025-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261025-1';
-import { stopPreCheck } from './precheck-updated.js?v=20261025-1';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261025-1';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261025-1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261104-4';
+import { stopPreCheck } from './precheck-updated.js?v=20261104-4';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261104-4';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
     getInvitationSessionPlan
 } from './protocol-invite-utils.js?v=20260915-1';
-import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261025-1';
+import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=20261102-1';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261025-2';
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261025-1';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261104-4';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../gaze-tracker/validation-sampling.mjs';
 import { extractEyeSignalSample } from './eye-signal.js';
-import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
-import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js';
-import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js';
+import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js?v=20261103-1';
+import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js?v=20261103-1';
+import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261025-1';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261104-4';
 import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261025-1';
 import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261025-1';
 import {
@@ -46,12 +46,12 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261025-1';
+} from '../session-runtime/index.js?v=20261104-4';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
     showCalibrationHeadPoseGuide
-} from '../gaze-tracker/head-pose-guide.js?v=20261025-1';
+} from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 
 function participantMessage(key, replacements = {}) {
     const pack = translations[state.currentLang] || translations.en;
@@ -431,7 +431,18 @@ export function getWorstValidationTargets(points, viewport = getContentViewport(
         .slice(0, Math.max(1, Math.min(6, Number(limit) || 4)));
 }
 
-export async function startCalibration(options = {}) {
+let calibrationSetup = null;
+
+export function startCalibration(options = {}) {
+    if (calibrationSetup) return calibrationSetup;
+    const pending = prepareCalibration(options).finally(() => {
+        if (calibrationSetup === pending) calibrationSetup = null;
+    });
+    calibrationSetup = pending;
+    return pending;
+}
+
+async function prepareCalibration(options) {
     const targetedPositions = normalizeCalibrationTargets(options.targetedPositions);
     const targeted = targetedPositions.length > 0
         && state.runtime?.gazeTracker?.isCalibrated?.() === true;
@@ -1761,7 +1772,7 @@ export function startTrackingTest(options = {}) {
     const video = document.getElementById('precheckVideo');
     
     // === CAMERA FPS MONITOR ===
-    if (video && video.srcObject) {
+    if (!isContinuousSessionAnalysisRunning() && video && video.srcObject) {
         startCameraFpsMonitor(video);
         console.log('[TrackingTest] CameraFPSMonitor запущен');
     }
@@ -1900,8 +1911,6 @@ export function startTrackingTest(options = {}) {
         if (currentTrajectory >= trajectories.length) {
             // Останавливаем анализ
             stopTrackingAnalysisLoop();
-            stopCameraFpsMonitor();
-            console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
             finishTrackingTest(trackingTestOptions);
             return;
         }
@@ -1961,7 +1970,7 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     }
     
     // === Останавливаем CameraFPSMonitor (если ещё работает) ===
-    stopCameraFpsMonitor();
+    if (!isContinuousSessionAnalysisRunning()) stopCameraFpsMonitor();
     if (state.runtime.qcMetrics && state.sessionData.trackingTest && state.sessionData.trackingTest.length > 0) {
         state.runtime.qcMetrics.setTrackingDeviationData(state.sessionData.trackingTest);
         const summary = state.runtime.qcMetrics.getSummary?.();

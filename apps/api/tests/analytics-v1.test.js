@@ -173,10 +173,11 @@ test('analytics v1 contract and computations', async t => {
       },
     };
     const visuals = buildSessionVisuals(source, multiProtocol, query());
-    assert.equal(visuals.length, 2);
-    assert.deepEqual(visuals.map(item => item.stimulus.id), ['10', '11']);
-    assert.equal(visuals[1].blockName, 'Second task');
-    assert.equal(visuals[1].heatmap.nFixations, 1);
+    assert.equal(visuals.length, 3);
+    assert.deepEqual(visuals.map(item => item.stimulus.id), ['10', '10', '11']);
+    assert.deepEqual(visuals.map(item => item.presentationId), ['presentation-1', 'presentation-2', 'presentation-3']);
+    assert.equal(visuals[2].blockName, 'Second task');
+    assert.equal(visuals[2].heatmap.nFixations, 1);
   });
 
   await t.test('uses project-library metadata for analytics stimulus labels and content', () => {

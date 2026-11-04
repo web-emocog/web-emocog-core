@@ -7,20 +7,20 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { finishSession } from './tests-updated.js?v=20261025-1';
+import { finishSession } from './tests-updated.js?v=20261104-4';
 import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
-import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js';
-import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js';
-import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js';
+import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js?v=20261103-1';
+import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
+import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
 import { translations } from '../../translations.js?v=20261025-1';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261025-1';
+} from '../session-runtime/index.js?v=20261104-4';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -869,6 +869,7 @@ function getTaskPayload(extra = {}) {
         phase: state.runtime.currentPhase || null,
         blockId: ctx.blockId ?? null,
         trialId: ctx.trialId ?? null,
+        presentationId: ctx.presentationId ?? null,
         stimulusId: ctx.stimulusId ?? null,
         stimulusType: ctx.stimulusType ?? null,
         stimulusVersion: ctx.stimulusVersion ?? null,
@@ -1636,6 +1637,7 @@ function showTimedParticipantBlock(block, kind) {
     const startedAt = Date.now();
     const deadline = startedAt + durationMs;
     const runtime = getSessionRuntime();
+    runtime?.beginPhysiologyOnlyBlock(block.id || `${kind}_${currentBlockIndex}`);
     if (isAudio && runtime?.audioCollector?.started !== true) runtime?.startAudioModule?.();
     const collector = runtime?.audioCollector;
     const audioWindowStartPromise = isAudio
@@ -1678,6 +1680,7 @@ function showTimedParticipantBlock(block, kind) {
         completing = true;
         if (timedProtocolBlockInterval) clearInterval(timedProtocolBlockInterval);
         timedProtocolBlockInterval = null;
+        runtime?.endPhysiologyOnlyBlock();
         ex_state.instruction.btn.style.display = '';
         if (isAudio) {
             const audioWindowStart = await audioWindowStartPromise;
@@ -1861,6 +1864,7 @@ function showSurvey(block) {
         };
         return;
     }
+    getSessionRuntime()?.beginPhysiologyOnlyBlock(block.id || `survey_${currentBlockIndex}`);
 
     const survey = localized.survey;
     if (survey.description) {
@@ -1978,6 +1982,7 @@ function showSurvey(block) {
             return;
         }
 
+        getSessionRuntime()?.endPhysiologyOnlyBlock();
         recordSessionEvent('survey_response', {
             category: 'block',
             blockId: block?.id || null,
@@ -2229,6 +2234,8 @@ function runTrial() {
         activeAtStart: runtime?.getActiveIssues?.() || []
     };
 
+    const meta = state.sessionData.experimentMeta ||= {};
+    meta.presentationSequence = (Number.isSafeInteger(meta.presentationSequence) ? meta.presentationSequence : 0) + 1;
     setTaskContext({
         blockId: block?.id ?? null,
         attempt: currentBlockAttempt,
@@ -2237,7 +2244,8 @@ function runTrial() {
             block?.id ?? `cognitive_${currentBlockIndex}`,
             currentBlockAttempt,
             trialId,
-            trial?.stimulus?.stimulusId ?? trialId
+            trial?.stimulus?.stimulusId ?? trialId,
+            meta.presentationSequence
         ].map(String).join(':'),
         stimulusId: trial?.stimulus?.stimulusId ?? trialId,
         stimulusName: trial?.stimulus?.stimulusName ?? null,
@@ -2425,6 +2433,10 @@ function handleResponse(rt, key, decision = {}) {
 
     state.sessionData.cognitiveResults.push({
         trialId: planItem.trialId,
+        presentationId: state.runtime.taskContext?.presentationId ?? null,
+        presentationIndex: state.sessionData.experimentMeta?.presentationSequence ?? null,
+        onsetMs: Number.isFinite(activeTrialRuntime?.stimulusOnEpoch)
+            ? getRelativeSessionTimeMs(activeTrialRuntime.stimulusOnEpoch) : null,
         block: block.id,
         blockId: block.id,
         task_id: block?.taskType || block?.rt_task || null,
