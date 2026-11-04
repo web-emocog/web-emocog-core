@@ -1001,10 +1001,12 @@ S2_TEST_DATABASE_URL=postgres://... \
 ```
 
 `test:postgres` последовательно выполняет security/concurrency и protocol
-persistence suites. Матрица обязательного frame-pipeline job также выполняет
-изолированные staff HTTP, HTML/data и staff regression tests: Chromium/Firefox
-на Linux, WebKit на macOS. Не переносить модельные Worker tests обратно в
-Linux headless WebKit без подтверждённого Worker WebGL2 и отдельной приёмки.
+persistence suites. Обязательный frame-pipeline job также выполняет
+изолированные staff HTTP, HTML/data и staff regression tests в Chromium/Firefox
+на Linux. WebKit на macOS запускается отдельно через `macos-webkit.yml` при
+правках камеры, MediaPipe, обработки кадров или совместимости с Safari.
+Не переносить модельные Worker tests обратно в Linux headless WebKit без
+подтверждённого Worker WebGL2 и отдельной приёмки.
 
 Дополнительно перед передачей:
 

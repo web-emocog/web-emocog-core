@@ -83,14 +83,24 @@ describe('S3-01 release hardening', () => {
     assert.match(workflow, /\[\[ "\$BROWSER_RESULT" == "success" \]\]/);
   });
 
-  it('keeps audit regressions in the required isolated browser matrix', () => {
+  it('keeps Linux regressions required and runs the same WebKit checks only on demand', () => {
     const root = path.resolve(apiRoot, '../..');
     const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-gates.yml'), 'utf8');
+    const webkitWorkflow = fs.readFileSync(path.join(root, '.github/workflows/macos-webkit.yml'), 'utf8');
     const frameJob = workflow.split('  frame-pipeline-regression:')[1].split('  release-gate:')[0];
     const scripts = require('../../autotests/package.json').scripts;
+    assert.match(frameJob, /runs-on: ubuntu-24\.04/);
+    assert.doesNotMatch(workflow, /macos-|macos-webkit\.yml/);
+    assert.match(webkitWorkflow, /^on:\n  workflow_dispatch:\n\npermissions:\n  contents: read$/m);
+    assert.match(webkitWorkflow, /runs-on: macos-15/);
+    assert.match(frameJob, /xvfb-run --auto-servernum npm run test:vision-gl/);
+    assert.match(webkitWorkflow, /run: npm run test:vision-gl/);
+    for (const name of ['frame-workers', 'fps', 'staff-http', 'html-security', 'staff-regression']) {
+      assert.ok(frameJob.includes(`npm run test:${name} -- --project=chromium --project=firefox`), name);
+      assert.ok(webkitWorkflow.includes(`npm run test:${name} -- --project=webkit`), name);
+    }
     for (const [name, config] of [['staff-http', 'staff-http'], ['html-security', 'html-security'],
       ['staff-regression', 'staff-regression']]) {
-      assert.ok(frameJob.includes(`npm run test:${name} -- \${{ matrix.projects }}`));
       assert.equal(scripts[`test:${name}`], `playwright test --config=playwright.${config}.config.ts`);
       const source = fs.readFileSync(path.join(root, `apps/autotests/playwright.${config}.config.ts`), 'utf8');
       assert.match(source, /retries: 0/);
