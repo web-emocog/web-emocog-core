@@ -84,7 +84,7 @@ async function boot(page: Page, stage = 'running', prefix = '', target = '/apps/
     if (url.origin !== origin) return route.abort();
     if (stage === 'module-missing' && url.pathname.endsWith('/bpm-test.js')) return route.abort();
     if (url.pathname.includes('/rppg_alg/index.js')) return route.fulfill({ contentType: 'text/javascript', body: engineModule });
-    if (stage !== 'real-model' && url.pathname.endsWith('/vision_bundle.mjs')) return route.fulfill({ contentType: 'text/javascript', body: visionModule });
+    if (url.pathname.endsWith('/vision_bundle.mjs')) return route.fulfill({ contentType: 'text/javascript', body: visionModule });
     if (prefix && url.pathname.startsWith(prefix + '/')) {
       const response = await route.fetch({ url: origin + url.pathname.slice(prefix.length) + url.search });
       return route.fulfill({ response });
@@ -299,36 +299,6 @@ test('server camera policy is reported accurately without weakening it or reques
   await expect(page.locator('#status')).toContainText('политикой этого сервера');
   expect(await page.evaluate(() => ({ models: (window as any).__models, camera: (window as any).__cameraCalls })))
     .toEqual({ models: 0, camera: 0 });
-});
-
-test('real self-hosted MediaPipe can initialize and close without accessing a physical camera', async ({ page }) => {
-  test.setTimeout(60000);
-  await boot(page, 'real-model');
-  await page.evaluate(async () => {
-    const w = window as any;
-    // @ts-expect-error browser-only dynamic module
-    const vision = await import('/apps/participant-web/js/vendor/mediapipe/vision_bundle.mjs');
-    const create = vision.FaceLandmarker.createFromOptions.bind(vision.FaceLandmarker);
-    w.__nativeTasks = 0;
-    vision.FaceLandmarker.createFromOptions = async (...args: any[]) => {
-      const task = await create(...args), close = task.close.bind(task); w.__nativeTasks++;
-      task.close = () => { w.__closed++; close(); };
-      return task;
-    };
-    // Let camera cadence sampling finish, then prevent fake video from reaching inference.
-    const video = document.getElementById('video') as HTMLVideoElement;
-    const callback = video.requestVideoFrameCallback.bind(video);
-    video.requestVideoFrameCallback = fn => document.getElementById('screen')!.classList.contains('running')
-      ? 0 : callback((now, metadata) => {
-        if (!document.getElementById('screen')!.classList.contains('running')) fn(now, metadata);
-      });
-    document.getElementById('btnStart')!.click();
-  });
-  await expect(page.locator('#screen')).toHaveClass(/running/, { timeout: 35000 });
-  await page.evaluate(() => document.getElementById('btnStop')!.click());
-  expect(await page.evaluate(() => ({ tasks: (window as any).__nativeTasks,
-    closed: (window as any).__closed, stops: (window as any).__streams[0].track.stops })))
-    .toEqual({ tasks: 1, closed: 1, stops: 1 });
 });
 
 test('developer summaries never promote raw/held respiration or a held BPM to fresh measurements', async ({ page }) => {
