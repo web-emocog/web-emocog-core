@@ -8,6 +8,7 @@ const DISCLAIMER = 'Исследовательские акустические 
 const DEFAULT_WINDOW_SECONDS = 10;
 const DEFAULT_WORKER_TIMEOUT_MS = 15_000;
 const RETAINED_WINDOW_CAP = 360;
+const PENDING_WINDOW_CAP = 2;
 
 function finite(value) {
     return Number.isFinite(Number(value)) ? Number(value) : null;
@@ -294,7 +295,9 @@ export class SessionAudioCollector {
         this.worker = null;
         this.workerSequence = 0;
         this.workerPending = new Map();
+        this.workerStalled = false;
         this.droppedWindowCount = 0;
+        this.pendingWindowCount = 0;
         this.analysisQueue = Promise.resolve();
         this.started = false;
         this.everStarted = false;
@@ -357,12 +360,13 @@ export class SessionAudioCollector {
                     await this.context.audioWorklet.addModule(
                         new URL('./pcm-capture-worklet.js', import.meta.url)
                     );
+                    if (this.stopRequested) { await this._teardownGraph(); return false; }
                     this.processor = new this.AudioWorkletNodeCtor(
                         this.context,
                         'wecog-pcm-capture',
                         { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 }
                     );
-                    this.processor.port.onmessage = event => this._captureSamples(event.data);
+                    this.processor.port.onmessage = event => this._captureSamples(event.data, true);
                 } catch (error) {
                     this.processor = null;
                     this.recordEvent('audio_worklet_fallback', {
@@ -385,6 +389,7 @@ export class SessionAudioCollector {
             this.processor.connect(this.mute);
             this.mute.connect(this.context.destination);
             await this.context.resume?.();
+            if (this.stopRequested) { await this._teardownGraph(); return false; }
             this._startWorker();
             this.started = true;
             this.everStarted = true;
@@ -396,6 +401,7 @@ export class SessionAudioCollector {
             });
             return true;
         } catch (error) {
+            if (this.stopRequested) { await this._teardownGraph(); return false; }
             this.permission = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
                 ? 'denied'
                 : 'failed';
@@ -416,9 +422,13 @@ export class SessionAudioCollector {
         this._captureSamples(channel);
     }
 
-    _captureSamples(channel) {
+    _captureSamples(channel, owned = false) {
         if (!this.started || this.paused || !channel?.length) return;
-        this.pendingChunks.push(new Float32Array(channel));
+        // AudioWorklet transfers a full, exclusive ArrayBuffer. ScriptProcessor
+        // buffers are borrowed and must still be copied before its next callback.
+        const transferred = owned && channel instanceof Float32Array && channel.buffer instanceof ArrayBuffer
+            && channel.byteOffset === 0 && channel.byteLength === channel.buffer.byteLength;
+        this.pendingChunks.push(transferred ? channel : new Float32Array(channel));
         this.pendingSamples += channel.length;
         const windowSize = Math.max(1, Math.round(this.sampleRate * this.windowSeconds));
         while (this.pendingSamples >= windowSize) {
@@ -442,7 +452,7 @@ export class SessionAudioCollector {
     }
 
     _queueWindow(samples) {
-        if (!samples.length) return;
+        if (!samples.length) return false;
         const end = this.clock.now();
         const durationMs = samples.length / Math.max(1, this.sampleRate) * 1000;
         const context = {
@@ -452,23 +462,42 @@ export class SessionAudioCollector {
             sessionEndMs: end.sessionTimeMs,
             scope: phaseContext(this.state)
         };
-        this.analysisQueue = this.analysisQueue.then(async () => {
-            const result = await this._analyzeWindow(samples, context);
-            if (result) {
-                this.windows.push(result);
-                if (this.windows.length > RETAINED_WINDOW_CAP) this.windows.shift();
-            } else {
-                this.droppedWindowCount += 1;
+        // A hung worker must not retain an unbounded chain of raw PCM windows.
+        if (this.pendingWindowCount >= PENDING_WINDOW_CAP) {
+            this._dropWindow('analysis_backpressure', context);
+            return false;
+        }
+        this.pendingWindowCount++;
+        const analyze = async () => {
+            try {
+                const result = await this._analyzeWindow(samples, context);
+                if (result) {
+                    this.windows.push(result);
+                    if (this.windows.length > RETAINED_WINDOW_CAP) this.windows.shift();
+                } else this._dropWindow('analysis_no_result', context);
+            } catch (_) {
+                this._dropWindow('analysis_failed', context);
+            } finally {
+                this.pendingWindowCount--;
             }
             // `samples` is not retained after this callback returns.
-        });
+        };
+        this.analysisQueue = this.analysisQueue.then(analyze, analyze);
+        return true;
+    }
+
+    _dropWindow(reason, context) {
+        this.droppedWindowCount++;
+        try {
+            this.recordEvent('audio_window_dropped', { reason, ...context });
+        } catch (_) { /* Diagnostics must not prevent releasing raw PCM or stopping sensors. */ }
     }
 
     _startWorker() {
         if (!this.WorkerCtor || this.worker) return false;
         try {
             this.worker = new this.WorkerCtor(
-                new URL('./audio-window-worker.js?v=20260915-1', import.meta.url),
+                new URL('./audio-window-worker.js?v=20261104-4', import.meta.url),
                 { type: 'module', name: 'wecog-audio-analysis' }
             );
             this.worker.onmessage = event => {
@@ -497,6 +526,7 @@ export class SessionAudioCollector {
     }
 
     _analyzeWindow(samples, context) {
+        if (this.workerStalled) return Promise.resolve(null);
         if (!this.worker) {
             return Promise.resolve(analyzeAudioWindow(samples, this.sampleRate, context));
         }
@@ -505,8 +535,13 @@ export class SessionAudioCollector {
             const timeoutId = setTimeout(() => {
                 const pending = this.workerPending.get(id);
                 if (!pending) return;
-                this.workerPending.delete(id);
-                pending.resolve(null);
+                // Releasing only the promise would leave PCM accumulating inside
+                // a blocked worker. Never retry that calculation on the UI thread.
+                this.workerStalled = true;
+                this.status = 'failed';
+                this._disableWorker();
+                try { this.recordEvent('audio_module_unavailable', { reason: 'audio_worker_timeout', permission: this.permission }); } catch (_) {}
+                void this.stop('audio_worker_timeout').catch(() => {});
             }, this.workerTimeoutMs);
             this.workerPending.set(id, { resolve, timeoutId });
             try {
@@ -573,23 +608,24 @@ export class SessionAudioCollector {
     }
 
     async _teardownGraph() {
-        if (this.processor) this.processor.onaudioprocess = null;
-        if (this.processor?.port) this.processor.port.onmessage = null;
-        for (const node of [this.source, this.processor, this.mute]) {
-            try { node?.disconnect?.(); } catch (_) {}
-        }
-        for (const track of this.stream?.getTracks?.() || []) {
-            try { track.stop(); } catch (_) {}
-        }
-        try {
-            if (this.context && this.context.state !== 'closed') await this.context.close();
-        } catch (_) {}
+        const { processor, source, mute, stream, context } = this;
         this.stream = null;
         this.context = null;
         this.source = null;
         this.processor = null;
         this.mute = null;
         if (this.state?.runtime) this.state.runtime.audioStream = null;
+        if (processor) processor.onaudioprocess = null;
+        if (processor?.port) processor.port.onmessage = null;
+        for (const node of [source, processor, mute]) {
+            try { node?.disconnect?.(); } catch (_) {}
+        }
+        for (const track of stream?.getTracks?.() || []) {
+            try { track.stop(); } catch (_) {}
+        }
+        try {
+            if (context && context.state !== 'closed') await context.close();
+        } catch (_) {}
     }
 
     async stop(reason = 'session_finish') {
@@ -603,14 +639,16 @@ export class SessionAudioCollector {
             await this.analysisQueue;
             this._disableWorker();
             await this._teardownGraph();
-            if (this.everStarted) this.status = 'completed';
+            if (this.everStarted && !this.workerStalled) this.status = 'completed';
             else if (this.status === 'requesting_permission') this.status = 'stopped';
             const summary = this._storeSummary(this.status);
-            this.recordEvent('audio_module_stopped', {
-                reason,
-                windowCount: summary.windowCount,
-                acceptedWindowCount: summary.acceptedWindowCount
-            });
+            try {
+                this.recordEvent('audio_module_stopped', {
+                    reason,
+                    windowCount: summary.windowCount,
+                    acceptedWindowCount: summary.acceptedWindowCount
+                });
+            } catch (_) { /* A diagnostic callback must not reject successful teardown. */ }
             return summary;
         })();
         return this.stopPromise;

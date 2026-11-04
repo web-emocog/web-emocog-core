@@ -738,6 +738,140 @@
               "type": "null"
             }
           ]
+        },
+        "presentationId": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "trialId": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "blockId": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "stimulusId": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "attempt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sourceTrialIndex": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "presentationIndex": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "presentationStartMs": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "attemptStatus": {
+          "enum": [
+            "accepted",
+            "excluded",
+            "ambiguous",
+            "incomplete",
+            "unknown",
+            null
+          ]
+        },
+        "qualityValid": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "qualityIssueCodes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "includedInDefault": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "attemptMethod": {
+          "enum": [
+            "presentation_attempts.v1",
+            null
+          ]
+        },
+        "qualityReasons": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "label"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "label": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ru",
+                  "en"
+                ],
+                "properties": {
+                  "ru": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "en": {
+                    "type": "string",
+                    "maxLength": 255
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -2023,6 +2157,12 @@
         "connectedness": {
           "$ref": "#/$defs/connectedness"
         },
+        "physiologyIntervals": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "../../../../packages/shared/contracts/physiology-intervals.v1.schema.json" }
+          ]
+        },
         "quality": {
           "type": "object"
         },
@@ -2048,6 +2188,29 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/exclusion"
+          }
+        },
+        "trialCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "valid",
+            "excluded",
+            "total"
+          ],
+          "properties": {
+            "valid": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "excluded": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       },

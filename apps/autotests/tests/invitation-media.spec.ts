@@ -64,8 +64,27 @@ test.describe('Large invitation media hotfix', () => {
   for (const count of [63, 360]) {
     test(`preloads ${count} images, recovers from 429, and starts without downloading them twice`, async ({ page }) => {
       const mock = await mockInvitation(page, count, { rateLimitOnce: true });
+      await page.addInitScript(() => {
+        const original = HTMLImageElement.prototype.decode;
+        const audit = { active: 0, peak: 0, finished: 0, probes: [] as HTMLImageElement[] };
+        (window as any).__MEDIA_DECODE_AUDIT__ = audit;
+        HTMLImageElement.prototype.decode = async function () {
+          if (!this.src.startsWith('blob:')) return original.call(this);
+          audit.peak = Math.max(audit.peak, ++audit.active); audit.probes.push(this);
+          try { await new Promise(resolve => setTimeout(resolve, 20)); return await original.call(this); }
+          finally { audit.active--; audit.finished++; }
+        };
+      });
       await page.goto(`${PAGE_URL}?code=${CODE}`, { waitUntil: 'load' });
       await waitForImages(page, count);
+      const decoding = await page.evaluate(() => {
+        const audit = (window as any).__MEDIA_DECODE_AUDIT__;
+        return { active: audit.active, peak: audit.peak, finished: audit.finished,
+          released: audit.probes.every((image: HTMLImageElement) => !image.hasAttribute('src') && image.onload === null && image.onerror === null) };
+      });
+      expect(decoding.active).toBe(0); expect(decoding.peak).toBeLessThanOrEqual(3);
+      expect(decoding.finished).toBe(count); expect(decoding.released).toBe(true);
+      console.log(`media preparation ${count}: ${JSON.stringify({ ...decoding, peakDownloads: mock.peak })}`);
       expect(mock.peak).toBeLessThanOrEqual(3);
       expect(mock.requests.size).toBe(count);
       expect(mock.requests.get(1)).toBe(2);
@@ -87,7 +106,7 @@ test.describe('Large invitation media hotfix', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const url = new URL('js/web-page/experimental_task-updated.js?v=20261025-1', window.location.href).href;
+        const url = new URL('js/web-page/experimental_task-updated.js?v=20261104-4', window.location.href).href;
         const { loadAndStartCognitiveTask } = await import(url);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
@@ -145,4 +164,29 @@ test.describe('Large invitation media hotfix', () => {
     await expect(page.locator('#btnStartIntro')).toBeEnabled();
     expect(requests).toBe(1);
   });
+});
+
+test('temporary image/video probes release their sources while cached media remains readable', async ({ page }) => {
+  await page.goto('/apps/participant-web/tools/session-report.html');
+  const result = await page.evaluate(async png => {
+    const modulePath = '/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261104-1';
+    const { preloadMediaBlob } = await import(modulePath);
+    const videos: HTMLVideoElement[] = [], images: HTMLImageElement[] = [];
+    const create = document.createElement.bind(document), decode = HTMLImageElement.prototype.decode;
+    const originalCreate = document.createElement;
+    (document as any).createElement = (...args: any[]) => { const element = create(...args as [any]);
+      if (String(args[0]).toLowerCase() === 'video') videos.push(element as HTMLVideoElement); return element; };
+    HTMLImageElement.prototype.decode = function () { images.push(this); return decode.call(this); };
+    const urls: string[] = [];
+    try {
+      const imageUrl = await preloadMediaBlob(new Blob([new Uint8Array(png)], { type: 'image/png' })); urls.push(imageUrl);
+      const videoBlob = await fetch('/apps/autotests/tests/fixtures/passive-video.webm').then(response => response.blob());
+      const videoUrl = await preloadMediaBlob(videoBlob, 'video/webm'); urls.push(videoUrl);
+      const readable = await Promise.all(urls.map(url => fetch(url).then(response => response.ok && response.blob()).then(blob => !!blob && blob.size > 0)));
+      return { readable, images: images.length, videos: videos.length,
+        imageReleased: images.every(image => !image.hasAttribute('src') && image.onload === null && image.onerror === null),
+        videoReleased: videos.every(video => !video.hasAttribute('src') && video.paused && video.onloadedmetadata === null && video.onerror === null) };
+    } finally { document.createElement = originalCreate; HTMLImageElement.prototype.decode = decode; urls.forEach(url => URL.revokeObjectURL(url)); }
+  }, [...IMAGE]);
+  expect(result).toEqual({ readable: [true, true], images: 1, videos: 1, imageReleased: true, videoReleased: true });
 });

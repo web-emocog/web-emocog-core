@@ -5,7 +5,7 @@ const origin = process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173';
 const engineModule = `
 export class RppgEngine { update() { window.__updates++; return window.__output || null; } }
 export class SessionReporter {
-  constructor(options) { window.__reporterOptions = options; }
+  constructor(options) { window.__reporterOptions = options; window.__reporters++; }
   push(value) { window.__reported.push(value); }
   finalize() { window.__finalized++; if (window.__reporterFailure) throw new Error('synthetic private finalize error'); return { samples: [] }; }
 }
@@ -15,7 +15,7 @@ export const FilesetResolver = { forVisionTasks: async path => { window.__wasmPa
 export const FaceLandmarker = { createFromOptions: async (resolver, options) => {
   window.__models++;
   window.__modelPath = options.baseOptions.modelAssetPath;
-  if (window.__stage === 'gpu-fallback' && options.baseOptions.delegate === 'GPU') throw new Error('synthetic private GPU error');
+  window.__faceOptions = options;
   const task = { close() { window.__closed++; }, detectForVideo() {
     return { faceLandmarks: window.__landmarks ? [window.__landmarks] : [] };
   } };
@@ -24,16 +24,34 @@ export const FaceLandmarker = { createFromOptions: async (resolver, options) => 
   });
   return task;
 } };
+export const ImageSegmenter = { createFromOptions: async () => ({
+  close() {}, segmentForVideo(_frame, _time, callback) { callback({}); }
+}) };
+export const PoseLandmarker = { createFromOptions: async () => ({
+  close() {}, detectForVideo() { return { landmarks: [] }; }
+}) };
 `;
 
-async function boot(page: Page, stage = 'running', prefix = '') {
+async function boot(page: Page, stage = 'running', prefix = '', target = '/apps/web/developer/bpm-test.html') {
   let role = 'developer';
   await page.addInitScript(stage => {
     const w = window as any;
     localStorage.setItem('emocog_workspace_owner_v1', '1');
     localStorage.setItem('emocog_api_user', JSON.stringify({ id: 1, role: 'developer', email: 'synthetic@example.test' }));
     w.__stage = stage; w.__models = 0; w.__closed = 0; w.__cameraCalls = 0;
-    w.__updates = 0; w.__finalized = 0; w.__streams = []; w.__reported = [];
+    w.__updates = 0; w.__reporters = 0; w.__finalized = 0; w.__streams = []; w.__reported = [];
+    Object.defineProperty(window, 'Worker', { configurable: true, value: undefined });
+    let presentedFrames = 0;
+    HTMLVideoElement.prototype.requestVideoFrameCallback = function(callback) {
+      return window.setTimeout(() => {
+        if (!w.__pauseFrames) callback(performance.now(), { presentedFrames: ++presentedFrames } as VideoFrameCallbackMetadata);
+      }, 33);
+    };
+    HTMLVideoElement.prototype.cancelVideoFrameCallback = handle => window.clearTimeout(handle);
+    const nativeDraw = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function(...args: any[]) {
+      if (!(args[0] instanceof HTMLVideoElement)) (nativeDraw as any).apply(this, args);
+    };
     const objects = new WeakMap();
     Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', {
       configurable: true, get() { return objects.get(this) || null; }, set(value) { objects.set(this, value); }
@@ -45,10 +63,10 @@ async function boot(page: Page, stage = 'running', prefix = '') {
     HTMLMediaElement.prototype.play = () => w.__stage === 'play'
       ? new Promise(resolve => { w.__finishPlay = resolve; }) : Promise.resolve();
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
-      getUserMedia: () => {
-        w.__cameraCalls++;
-        const track = { stops: 0, stop() { this.stops++; } };
-        const stream = { getTracks: () => [track], track }; w.__streams.push(stream);
+      getUserMedia: (constraints: MediaStreamConstraints) => {
+        w.__cameraCalls++; w.__constraints = constraints;
+        const track = Object.assign(new EventTarget(), { stops: 0, stop() { this.stops++; }, getSettings: () => ({ width: 320, height: 240, frameRate: 30 }) });
+        const stream = { getTracks: () => [track], getVideoTracks: () => [track], track }; w.__streams.push(stream);
         if (w.__stage === 'camera') return new Promise(resolve => { w.__finishCamera = () => resolve(stream); });
         return Promise.resolve(stream);
       }
@@ -66,15 +84,15 @@ async function boot(page: Page, stage = 'running', prefix = '') {
     if (url.origin !== origin) return route.abort();
     if (stage === 'module-missing' && url.pathname.endsWith('/bpm-test.js')) return route.abort();
     if (url.pathname.includes('/rppg_alg/index.js')) return route.fulfill({ contentType: 'text/javascript', body: engineModule });
-    if (stage !== 'real-model' && url.pathname.endsWith('/vision_bundle.mjs')) return route.fulfill({ contentType: 'text/javascript', body: visionModule });
+    if (url.pathname.endsWith('/vision_bundle.mjs')) return route.fulfill({ contentType: 'text/javascript', body: visionModule });
     if (prefix && url.pathname.startsWith(prefix + '/')) {
       const response = await route.fetch({ url: origin + url.pathname.slice(prefix.length) + url.search });
       return route.fulfill({ response });
     }
     return route.continue();
   });
-  await page.goto(origin + prefix + '/apps/web/developer/bpm-test.html');
-  await expect(page.locator('#btnStart')).toBeVisible();
+  await page.goto(origin + prefix + target);
+  await expect(page.locator('#btnStart, #startBtn')).toBeVisible();
   return { setRole: (value: string) => { role = value; } };
 }
 
@@ -138,7 +156,7 @@ for (const prefix of ['', '/audit-prefix']) {
   });
 }
 
-test('100 start/stop cycles retain no stage timers, video listeners or RAF and late frames cannot restart them', async ({ page }) => {
+test('100 start/stop cycles retain no stage timers or video listeners and late frame callbacks cannot restart them', async ({ page }) => {
   await boot(page);
   const result = await page.evaluate(async () => {
     const w = window as any, frames = new Map(), timers = new Map(), listeners = new Set();
@@ -147,22 +165,22 @@ test('100 start/stop cycles retain no stage timers, video listeners or RAF and l
     video.addEventListener = ((type: string, fn: any, options: any) => { listeners.add(fn); add(type, fn, options); }) as any;
     video.removeEventListener = ((type: string, fn: any, options: any) => { listeners.delete(fn); remove(type, fn, options); }) as any;
     let id = 0;
-    window.requestAnimationFrame = fn => { frames.set(id, fn); return id++; };
-    window.cancelAnimationFrame = handle => { frames.delete(handle); };
+    (video as HTMLVideoElement).requestVideoFrameCallback = fn => { frames.set(id, fn); return id++; };
+    (video as HTMLVideoElement).cancelVideoFrameCallback = handle => { frames.delete(handle); };
     window.setTimeout = ((fn: any, ms: number) => {
-      const handle = nativeTimeout(() => { timers.delete(handle); fn(); }, ms); timers.set(handle, ms); return handle;
+      const handle = nativeTimeout(() => { timers.delete(handle); fn(); }, ms === 2000 ? 0 : ms); timers.set(handle, ms); return handle;
     }) as any;
     window.clearTimeout = handle => { timers.delete(handle); nativeClear(handle); };
     for (let i = 0; i < 100; i++) {
       document.getElementById('btnStart')!.click();
       let spins = 0;
-      while (!frames.size) {
+      while (!document.getElementById('screen')!.classList.contains('running') || w.__reporters !== i + 1) {
         if (++spins > 1000) throw new Error('Synthetic start did not complete');
         await new Promise(resolve => nativeTimeout(resolve, 2));
       }
-      const late = Array.from(frames.values())[0] as FrameRequestCallback;
-      if (typeof late !== 'function') throw new Error('A fully started run must own one RAF');
-      document.getElementById('btnStop')!.click(); late(0);
+      const late = Array.from(frames.values())[0] as VideoFrameRequestCallback;
+      if (frames.size !== 1 || typeof late !== 'function') throw new Error('A fully started run must own one video callback');
+      document.getElementById('btnStop')!.click(); late(performance.now(), { presentedFrames: 1 } as VideoFrameCallbackMetadata);
       if (frames.size || timers.size || listeners.size) return { clean: false, iteration: i };
     }
     return { clean: true, models: w.__models, closed: w.__closed, finalized: w.__finalized,
@@ -196,13 +214,13 @@ test(`a pending ${stage} times out and late native results cannot change the err
 });
 }
 
-test('stopping a held module probe aborts its staff request and never requests the camera', async ({ page }) => {
+test('stopping during a held model import never requests the camera or restarts after the import completes', async ({ page }) => {
   let pending = false, release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   await boot(page);
-  await page.route('**/rppg_alg/index.js*', async route => {
+  await page.route('**/vision_bundle.mjs', async route => {
     pending = true; await held;
-    return route.fulfill({ contentType: 'text/javascript', body: engineModule });
+    return route.fulfill({ contentType: 'text/javascript', body: visionModule });
   });
   await start(page); await expect.poll(() => pending).toBe(true);
   await page.locator('#btnStop').click();
@@ -221,19 +239,23 @@ test('a stopped model failure does not trigger CPU fallback or expose its raw er
   await expect(page.locator('#status')).toHaveText('Остановлено');
   expect(await page.evaluate(() => ({ models: (window as any).__models, camera: (window as any).__cameraCalls })))
     .toEqual({ models: 1, camera: 0 });
-  await expect(page.locator('#log')).not.toContainText('credential-fixture');
+  await expect(page.locator('#status')).not.toContainText('credential-fixture');
 });
 
-test('normal GPU rejection still falls back to CPU; reporter failure cannot retain the camera', async ({ page }) => {
-  await boot(page, 'gpu-fallback'); await start(page);
+test('canonical face settings are used and reporter failure cannot retain the camera', async ({ page }) => {
+  await boot(page); await start(page);
   await expect(page.locator('#screen')).toHaveClass(/running/);
-  expect(await page.evaluate(() => (window as any).__models)).toBe(2);
+  expect(await page.evaluate(() => (window as any).__faceOptions)).toMatchObject({
+    baseOptions: { delegate: 'GPU' }, numFaces: 1, minFaceDetectionConfidence: .5,
+    minFacePresenceConfidence: .5, minTrackingConfidence: .5,
+    outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true
+  });
   await page.evaluate(() => { (window as any).__reporterFailure = true; });
   await page.locator('#btnStop').click();
   await expect(page.locator('#btnStart')).toBeEnabled();
   expect(await page.evaluate(() => ({ closed: (window as any).__closed, stops: (window as any).__streams[0].track.stops })))
     .toEqual({ closed: 1, stops: 1 });
-  await expect(page.locator('#log')).not.toContainText('synthetic private');
+  await expect(page.locator('#status')).not.toContainText('synthetic private');
 });
 
 test('staff blocking stops a pending run, and a denied admission never requests camera access', async ({ page }) => {
@@ -279,36 +301,11 @@ test('server camera policy is reported accurately without weakening it or reques
     .toEqual({ models: 0, camera: 0 });
 });
 
-test('real self-hosted MediaPipe can initialize and close without accessing a physical camera', async ({ page }) => {
-  test.setTimeout(60000);
-  await boot(page, 'real-model');
-  await page.evaluate(async () => {
-    const w = window as any;
-    // @ts-expect-error browser-only dynamic module
-    const vision = await import('/apps/participant-web/js/vendor/mediapipe/vision_bundle.mjs');
-    const create = vision.FaceLandmarker.createFromOptions.bind(vision.FaceLandmarker);
-    w.__nativeTasks = 0;
-    vision.FaceLandmarker.createFromOptions = async (...args: any[]) => {
-      const task = await create(...args), close = task.close.bind(task); w.__nativeTasks++;
-      task.close = () => { w.__closed++; close(); };
-      return task;
-    };
-    // Initialize/close a real task; do not pretend a mock video is a real frame benchmark.
-    window.requestAnimationFrame = () => 0; window.cancelAnimationFrame = () => {};
-    document.getElementById('btnStart')!.click();
-  });
-  await expect(page.locator('#screen')).toHaveClass(/running/, { timeout: 35000 });
-  await page.evaluate(() => document.getElementById('btnStop')!.click());
-  expect(await page.evaluate(() => ({ tasks: (window as any).__nativeTasks,
-    closed: (window as any).__closed, stops: (window as any).__streams[0].track.stops })))
-    .toEqual({ tasks: 1, closed: 1, stops: 1 });
-});
-
 test('developer summaries never promote raw/held respiration or a held BPM to fresh measurements', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => {
     const w = window as any;
-    w.__landmarks = [{ x: .3, y: .25 }, { x: .7, y: .75 }];
+    w.__landmarks = Array.from({ length: 478 }, (_, i) => ({ x: .3 + (i % 5) * .08, y: .25 + (i % 7) * .07, z: .01 }));
     let time = 0;
     Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', { configurable: true, get: () => (time += 1 / 30) });
     const draw = CanvasRenderingContext2D.prototype.drawImage;
@@ -321,14 +318,60 @@ test('developer summaries never promote raw/held respiration or a held BPM to fr
   });
   await start(page);
   await expect.poll(() => page.evaluate(() => (window as any).__reported.length)).toBeGreaterThan(0);
-  await expect(page.locator('#status')).not.toContainText('дыхание');
+  await expect(page.locator('#respirationV')).toHaveText('—');
   expect(await page.evaluate(() => (window as any).__reported.every((row: any) => !row.published && row.features.respRate === null))).toBe(true);
   await page.evaluate(() => {
     const w = window as any; w.__reported = [];
     w.__output = { published: true, bpmPublished: 70, publishReason: 'ok', confidence: .9,
       features: { respRate: 16, respConf: .9, respHeld: false, respPublished: true } };
   });
-  await expect(page.locator('#status')).toContainText('дыхание ~16');
+  await expect(page.locator('#respirationV')).toHaveText('16.0');
   expect(await page.evaluate(() => (window as any).__reported.every((row: any) => row.published && row.features.respRate === 16))).toBe(true);
+  await page.locator('#btnStop').click();
+});
+
+for (const [pagePath, button] of [
+  ['/apps/web/developer/emotion-test.html', '#startBtn'],
+  ['/apps/web/developer/body-pose-test.html', '#startBtn'],
+  ['/apps/participant-web/test-qc-metrics.html', '#btnStart']
+]) {
+  test(`${pagePath} uses the protocol camera and one face analyzer; no measurement uploads`, async ({ page }) => {
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (['POST', 'PATCH', 'PUT'].includes(request.method())) writes.push(new URL(request.url()).pathname);
+    });
+    await boot(page, 'running', '', pagePath);
+    expect(await page.evaluate(() => (window as any).__cameraCalls)).toBe(0);
+    await page.locator(button).click();
+    await expect(page.locator('#profilePerformance')).toContainText('FPS');
+    const result = await page.evaluate(() => {
+      const w = window as any;
+      return { constraints: w.__constraints, calls: w.__cameraCalls, models: w.__models };
+    });
+    expect(result).toEqual({ calls: 1, models: 1, constraints: {
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, min: 15 } }
+    } });
+    await page.locator('#btnStop, #stopBtn').click();
+    expect(await page.evaluate(() => (window as any).__streams[0].track.stops)).toBe(1);
+    expect(writes).toEqual([]);
+  });
+}
+
+test('audio diagnostic denies the microphone when the staff role changes', async ({ page }) => {
+  const auth = await boot(page, 'running', '', '/apps/web/developer/audio-test.html');
+  auth.setRole('researcher');
+  await page.locator('#startBtn').click();
+  await expect(page.locator('#status')).toContainText('Аудиомодуль недоступен');
+  expect(await page.evaluate(() => (window as any).__cameraCalls)).toBe(0);
+});
+
+test('stalled video does not display the last completed analysis FPS as current', async ({ page }) => {
+  await boot(page); await start(page);
+  const performance = page.locator('#profilePerformance');
+  await expect(performance).toContainText(/анализ: [1-9]\d* FPS/);
+  await page.evaluate(() => { (window as any).__pauseFrames = true; });
+  await expect(performance).toContainText('анализ: нет свежего окна', { timeout: 6000 });
+  await expect(performance).toContainText('Источник: 0 FPS');
+  await expect(performance).toContainText('Расчётная верхняя граница: — FPS');
   await page.locator('#btnStop').click();
 });

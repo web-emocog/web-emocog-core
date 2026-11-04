@@ -1,5 +1,5 @@
 import { VIDEO_ELEMENT_IDS } from './constants.js';
-import { observeVideoFrames } from '../session-runtime/video-frames.mjs';
+import { observeVideoFrames } from '../session-runtime/video-frames.mjs?v=20261104-4';
 
 // Analysis throughput and camera delivery are independent measurements.
 export class VideoFpsMonitor {

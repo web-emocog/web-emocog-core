@@ -4,7 +4,7 @@ import path from 'path';
 export default defineConfig({
   testDir: './tests',
   // These run with their own loopback servers in the required matrix job.
-  testIgnore: ['**/vision-workers.spec.ts', '**/fps-diagnostics.spec.ts',
+  testIgnore: ['**/vision-workers.spec.ts', '**/developer-native-models.spec.ts', '**/fps-diagnostics.spec.ts',
     '**/security-performance.spec.ts', '**/diagnostics-lifecycle.spec.ts', '**/issue139-face-visibility.spec.ts',
     '**/staff-http.spec.ts', '**/html-data-boundaries.spec.ts'],
   timeout: 30_000,

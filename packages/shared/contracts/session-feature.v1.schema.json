@@ -169,12 +169,17 @@
         "schemaVersion": { "const": "gaze_analytics.v1" },
         "coordinateSpace": { "const": "stimulus_normalized_0_1" },
         "summary": { "type": "object" },
-        "presentations": { "type": "array", "maxItems": 200, "items": { "type": "object" } }
+        "presentations": { "type": "array", "maxItems": 200, "items": {
+          "type": "object", "properties": {
+            "presentationStartMs": { "type": ["number", "null"], "minimum": 0 }
+          }
+        } }
       },
       "required": ["schemaVersion", "coordinateSpace", "summary", "presentations"],
       "additionalProperties": false
     },
     "rt_alignment": { "$ref": "./rt-alignment.v1.schema.json" },
+    "physiology_intervals": { "$ref": "./physiology-intervals.v1.schema.json" },
     "events": {
       "type": "array",
       "items": { "$ref": "./session-event.v1.schema.json" },

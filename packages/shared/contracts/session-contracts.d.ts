@@ -73,6 +73,31 @@ export interface RtAlignmentWindowV1 {
     & { respiration?: RtAlignmentMetricV1 };
 }
 
+export interface PhysiologyIntervalChannel {
+  mean: number | null;
+  count: number;
+  observedMs: number;
+}
+
+export interface PhysiologyInterval {
+  startMs: number;
+  endMs: number;
+  heartRate: PhysiologyIntervalChannel;
+  respiration: PhysiologyIntervalChannel;
+}
+
+export interface PhysiologyIntervalsV1 {
+  schemaVersion: 'physiology_intervals.v1';
+  throughMs: number;
+  truncated: boolean;
+  minutes: PhysiologyInterval[];
+  blocks: (PhysiologyInterval & {
+    blockId: string;
+    attempt: number;
+    status: 'accepted' | 'repeat_required' | 'interrupted' | 'in_progress';
+  })[];
+}
+
 export interface RtAlignmentV1 {
   schemaVersion: 'rt_alignment.v1';
   algorithmVersion: 'event-windows-1.0.0' | 'event-windows-1.1.0';
@@ -140,8 +165,14 @@ export interface SessionFeatureV1 {
   blocks?: Array<Record<string, unknown>>;
   cognitiveResults?: Array<Record<string, unknown>>;
   gazeValidation?: GazeValidationSummary | null;
-  gaze_analytics?: Record<string, unknown> | null;
+  gaze_analytics?: {
+    schemaVersion: 'gaze_analytics.v1';
+    coordinateSpace: 'stimulus_normalized_0_1';
+    summary: Record<string, unknown>;
+    presentations: Array<Record<string, unknown> & { presentationStartMs?: number | null }>;
+  } | null;
   rt_alignment?: RtAlignmentV1;
+  physiology_intervals?: PhysiologyIntervalsV1;
   startTime?: number | string | null;
   testHub?: Record<string, unknown> | null;
   gazeTests?: Record<string, unknown> | null;

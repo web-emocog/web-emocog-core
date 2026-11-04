@@ -15,7 +15,7 @@ import { analyzePose, checkStability, checkEyesCentering, addToHistory } from '.
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261104-4';
 
 class PrecheckAnalyzer {
     constructor(options = {}) {
@@ -82,6 +82,7 @@ class PrecheckAnalyzer {
             
             const wasmRoot = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
             const vision = await FilesetResolver.forVisionTasks(wasmRoot);
+            if (generation !== this.generation) return false;
             const modelPath = new URL(
                 '../vendor/mediapipe/models/face_landmarker.task',
                 import.meta.url
@@ -111,6 +112,7 @@ class PrecheckAnalyzer {
             return true;
             
         } catch (error) {
+            if (generation !== this.generation) return false;
             console.error('[PrecheckAnalyzer] Ошибка:', error);
             if (this.onError) this.onError(error);
             return false;

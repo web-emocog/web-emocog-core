@@ -124,56 +124,56 @@
       <div class="tag">Pre-check</div>
       <h2>Precheck (камера, лицо, освещение)</h2>
       <p>Проверка готовности: освещение, лицо в кадре, поза. Калибровка и кнопка «Начать калибровку» после прохождения.</p>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=precheck&v=20260913" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Precheck</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=precheck&v=20261104-4" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Precheck</a>
     </div>
     <div class="card">
       <div class="tag">BPM / rPPG</div>
-      <h2>BPM (пульс по видео)</h2>
-      <p>Оценка ЧСС по видео лица (rPPG). Требует камеру и стабильное лицо в кадре.</p>
-      <a href="./developer/bpm-test.html?v=20260324">Открыть тест BPM</a>
+      <h2>ЧСС и дыхание по видео</h2>
+      <p>Тот же rPPG-модуль и правила публикации показаний, что в протоколе. Отдельно видны FPS источника и обработки.</p>
+      <a href="./developer/bpm-test.html?v=20261104-4">Открыть тест BPM</a>
     </div>
     <div class="card">
       <div class="tag">Emotion Module</div>
       <h2>Emotion Test (valence/arousal)</h2>
       <p>Тестирование эмоционального модуля из participant flow: live-метрики valence/arousal, динамика на таймлайне.</p>
-      <a href="developer/emotion-test.html?v=20260825-3">Открыть Emotion Test</a>
+      <a href="developer/emotion-test.html?v=20261104-4">Открыть Emotion Test</a>
     </div>
     <div class="card">
       <div class="tag">Audio / Voice QC</div>
       <h2>Аудиомодуль</h2>
       <p>Локальная проверка микрофона, качества речевого окна и акустических признаков. Сырой звук не сохраняется и не отправляется.</p>
-      <a href="developer/audio-test.html?v=20260825">Открыть тест аудио</a>
+      <a href="developer/audio-test.html?v=20261104-4">Открыть тест аудио</a>
     </div>
     <div class="card">
       <div class="tag">MediaPipe Pose</div>
       <h2>Движение корпуса</h2>
       <p>Проверка плеч, таза, наклона корпуса, скорости перемещения и всплесков движения. Видео и исходные landmarks не сохраняются.</p>
-      <a href="developer/body-pose-test.html?v=20260827">Открыть детекцию корпуса</a>
+      <a href="developer/body-pose-test.html?v=20261104-4">Открыть детекцию корпуса</a>
     </div>
     <div class="card">
       <div class="tag">Reaction Time</div>
       <h2>Reaction Time (Go/NoGo)</h2>
-      <p>Кликер: считывание нажатий (Space/клик), лог в формате rt_component. Go/NoGo без MVP — только проверка аналитики и считывания. Скачать JSONL и прогнать через <code>rt_component-/scripts/analyze_log.py</code>.</p>
-      <a href="developer/rt-test.html?v=20260324">Открыть RT-тест (кликер)</a>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260913" class="secondary" style="margin-left:8px;" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Полный модульный Hub</a>
+      <p>RT-задачи в общем модульном Hub: тот же код предъявления стимулов, обработки клавиш и измерения времени реакции.</p>
+      <a href="developer/rt-test.html?v=20261104-4">Открыть RT-тест</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20261104-4" class="secondary" style="margin-left:8px;" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Полный модульный Hub</a>
     </div>
     <div class="card">
       <div class="tag">Gaze / Tracking</div>
       <h2>Gaze-on-target и Tracking</h2>
       <p>Калибровка взгляда и тест слежения: откроется сразу тестовый hub (без лэндинга респондента).</p>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=tracking&v=20260913" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Tracking/Hub</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=tracking&v=20261104-4" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть модуль Tracking/Hub</a>
     </div>
     <div class="card">
       <div class="tag">QC Metrics</div>
       <h2>QC Metrics (качество сигнала)</h2>
-      <p>Модуль качества: точки взгляда, валидность, offscreen. Автотесты без камеры.</p>
-      <a href="../participant-web/test-qc-metrics.html">Открыть тест QC</a>
+      <p>Живые метрики камеры, лица и обработки из QCMetrics протокола. Для проверки взгляда с калибровкой используйте Tracking/Hub.</p>
+      <a href="../participant-web/test-qc-metrics.html?v=20261104-4">Открыть тест QC</a>
     </div>
     <div class="card">
       <div class="tag">Приглашения</div>
       <h2>Ссылки-приглашения для участников</h2>
       <p>Создание ссылок на пречек (камера, калибровка, тесты). Участник переходит по ссылке и проходит проверку условий и калибровку.</p>
-      <a href="developer/invite.html?v=20260324">Создать ссылку-приглашение</a>
+      <a href="developer/invite.html">Создать ссылку-приглашение</a>
     </div>
     <div class="card">
       <div class="tag">Experiment Accounting</div>
@@ -185,7 +185,7 @@
       <div class="tag">Интеграционная проверка</div>
       <h2>Сессия без приглашения</h2>
       <p>Тестовый запуск пречека, калибровки и модульного Hub. Пароль участника и ссылка на исследование не требуются.</p>
-      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20260913" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть тестовую сессию</a>
+      <a href="../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&v=20261104-4" onclick="try{localStorage.setItem('emocog_dev_auto_precheck','1')}catch(_){}">Открыть тестовую сессию</a>
     </div>
     <div class="card">
       <div class="tag">Отчёт</div>

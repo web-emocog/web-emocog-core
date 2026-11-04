@@ -62,25 +62,10 @@
       });
     })();
   </script>
-  <a href="../developer.html" class="back">← К тестам разработчика</a>
-  <h1>Reaction Time — считывание нажатий</h1>
-  <p class="sub">Go/NoGo: при зелёном «GO» нажмите Space или кликните. При красном «NO GO» не нажимайте. Лог в формате rt_component (JSONL).</p>
-  <div class="panel" style="margin-bottom: 16px;">
-    <button type="button" id="btnStart">Старт</button>
-  </div>
-  <div id="screen" class="wait">Нажмите «Старт» или Space для начала теста</div>
-  <div class="panel" id="statsPanel" style="display: none;">
-    <h2>Метрики</h2>
-    <div class="stats" id="stats"></div>
-    <div class="row" style="margin-top: 12px;">
-      <button type="button" id="btnDownload" class="secondary">Скачать JSONL (для rt_component)</button>
-      <button type="button" id="btnAgain">Ещё раз</button>
-    </div>
-  </div>
-  <div class="panel">
-    <h2>Лог событий</h2>
-    <div id="log"></div>
-  </div>
-  <script src="rt-test.js?v=20260820-2"></script>
+  <a href="../developer.html?v=20261104-4" class="back">К диагностике</a>
+  <h1>RT: модуль протокола</h1>
+  <p class="sub">Старый отдельный кликер использовал другой таймер и свои правила. Теперь тест выполняется каноническим обработчиком участника: те же кнопки, фиксация предъявления и правила ответа.</p>
+  <a id="canonicalRtLink" href="../../participant-web/mvp_with_precheck_1-updated.html?developer_module=hub&amp;v=20261104-4">Открыть модуль RT в полном Hub</a>
+  <p>Для опубликованного исследования используйте его ссылку: количество проб, способ ответа и QC задаются конкретной публикацией. Камера на этой странице автоматически не включается.</p>
 </body>
 </html>

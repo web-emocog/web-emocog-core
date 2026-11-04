@@ -301,3 +301,21 @@ test('invalid FPS observation windows reject before scheduling any video callbac
   }
   assert.equal(callbacks, 0);
 });
+
+test('cancelled FPS sampling releases its video callback and timer, including callback handle zero', async t => {
+  const { measureVideoFps } = await load('session-runtime/video-frames.mjs');
+  const original = { setTimeout: global.setTimeout, clearTimeout: global.clearTimeout };
+  t.after(() => Object.assign(global, original));
+  const timers = new Map(); let cancelled = null, callbacks = 0;
+  global.setTimeout = fn => { timers.set(0, fn); return 0; };
+  global.clearTimeout = id => timers.delete(id);
+  const video = { srcObject: {}, requestVideoFrameCallback() { callbacks++; return 0; },
+    cancelVideoFrameCallback(id) { cancelled = id; } };
+  const controller = new AbortController();
+  const pending = measureVideoFps(video, 2000, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(cancelled, 0); assert.equal(timers.size, 0); assert.equal(callbacks, 1);
+  await assert.rejects(measureVideoFps(video, 2000, { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(callbacks, 1, 'already cancelled sampling does not schedule a callback');
+});

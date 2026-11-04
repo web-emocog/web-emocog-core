@@ -1,7 +1,7 @@
 import { state } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js';
-import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js?v=20261025-1';
-import { measureRenderFPS } from './camera.js?v=20261025-1';
+import { stopPreCheck, resetIndicatorsToWaiting } from './precheck.js?v=20261104-4';
+import { measureRenderFPS } from './camera.js?v=20261104-4';
 
 export function setLanguage(lang) {
     const nextLang = Object.prototype.hasOwnProperty.call(translations, lang) ? lang : 'ru';

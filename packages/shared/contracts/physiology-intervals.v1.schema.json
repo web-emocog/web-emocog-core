@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "physiology_intervals.v1",
+  "type": "object",
+  "required": ["schemaVersion", "throughMs", "truncated", "minutes", "blocks"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "physiology_intervals.v1" },
+    "throughMs": { "$ref": "#/$defs/time" },
+    "truncated": { "type": "boolean" },
+    "minutes": { "type": "array", "maxItems": 480, "items": { "$ref": "#/$defs/minute" } },
+    "blocks": { "type": "array", "maxItems": 400, "items": { "$ref": "#/$defs/block" } }
+  },
+  "$defs": {
+    "time": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+    "channel": {
+      "type": "object",
+      "required": ["mean", "count", "observedMs"],
+      "additionalProperties": false,
+      "properties": {
+        "mean": { "type": ["number", "null"] },
+        "count": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "observedMs": { "$ref": "#/$defs/time" }
+      }
+    },
+    "heartRate": {
+      "allOf": [
+        { "$ref": "#/$defs/channel" },
+        { "properties": { "mean": { "minimum": 45, "maximum": 180 } } }
+      ]
+    },
+    "respiration": {
+      "allOf": [
+        { "$ref": "#/$defs/channel" },
+        { "properties": { "mean": { "minimum": 6, "maximum": 24 } } }
+      ]
+    },
+    "minute": {
+      "type": "object",
+      "required": ["startMs", "endMs", "heartRate", "respiration"],
+      "additionalProperties": false,
+      "properties": {
+        "startMs": { "$ref": "#/$defs/time" },
+        "endMs": { "$ref": "#/$defs/time" },
+        "heartRate": { "$ref": "#/$defs/heartRate" },
+        "respiration": { "$ref": "#/$defs/respiration" }
+      }
+    },
+    "block": {
+      "type": "object",
+      "required": ["blockId", "attempt", "status", "startMs", "endMs", "heartRate", "respiration"],
+      "additionalProperties": false,
+      "properties": {
+        "blockId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+        "status": { "enum": ["accepted", "repeat_required", "interrupted", "in_progress"] },
+        "startMs": { "$ref": "#/$defs/time" },
+        "endMs": { "$ref": "#/$defs/time" },
+        "heartRate": { "$ref": "#/$defs/heartRate" },
+        "respiration": { "$ref": "#/$defs/respiration" }
+      }
+    }
+  }
+}

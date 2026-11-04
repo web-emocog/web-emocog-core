@@ -9,6 +9,7 @@ const { HttpError } = require('../security/http-error');
 const { protectSpreadsheetCell, escapeCsv } = require('../security/csv');
 const { loadPinnedStimuli } = require('../stimuli/versions');
 const { buildConnectedness } = require('./connectedness');
+const { intervalData, intervalExportRows } = require('./passive');
 const { standardStimulusPreview, resolveStandardStimulus } = require('../../shared/standard-stimuli');
 const { validateAnalyticsQuery } = require('./query');
 const { resolveProtocolVersion } = require('./protocol-versions');
@@ -31,6 +32,7 @@ const {
   buildSessionVisuals,
   channelQc,
 } = require('./metrics');
+const { trialSummary } = require('./attempts');
 
 const router = express.Router();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -443,6 +445,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
     const hydrated = await requireSnapshot(req);
     const row = selectedSession(hydrated, req.params.sessionRef);
     const technical = sessionTechnicalDetails(row);
+    const trials = trialSummary(row, hydrated.snapshot.queryEcho);
     const data = {
       session: {
         sessionId: Number(row.id),
@@ -457,18 +460,11 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
       quality: sessionQualityDetails(row),
       audio: sessionAudioDetails(row, hydrated.protocol?.definition),
       connectedness: buildConnectedness(row, hydrated.snapshot.queryEcho),
+      physiologyIntervals: intervalData(row, hydrated.snapshot.queryEcho),
       qcChannels: hydrated.snapshot.queryEcho.filters.qcChannels.map(channel => channelQc(row, channel)),
       metrics: buildSessionMetrics(row, hydrated.snapshot.queryEcho),
-      exclusions: (Array.isArray(row.features_payload?.cognitiveResults)
-        ? row.features_payload.cognitiveResults
-        : [])
-        .filter(trial => trial?.qualityValid === false)
-        .map(trial => ({
-          level: 'trial',
-          entityId: String(trial.trialId || trial.sourceTrialIndex || ''),
-          reasonCode: trial.qualityIssueCodes?.[0] || 'quality_invalid',
-          channel: 'task',
-        })),
+      trialCounts: trials.counts,
+      exclusions: trials.exclusions,
     };
     return res.json(envelope('session_summary', hydrated.snapshot, data));
   } catch (error) {
@@ -668,6 +664,10 @@ function exportCsv(bundle) {
       participantId: sessionSummary.participantId,
       sourceKind: 'session_summary',
     })),
+    ...intervalExportRows(sessionSummary?.physiologyIntervals, bundle.snapshot.queryEcho.metricIds || [], {
+      sessionId: sessionSummary?.sessionId,
+      participantId: sessionSummary?.participantId,
+    }),
     ...(sessionSummary?.aoiRows || []).flatMap(aoiRow => (aoiRow.metrics || []).map(metric => ({
       ...metric,
       sessionId: sessionSummary.sessionId,
@@ -688,7 +688,14 @@ function exportCsv(bundle) {
     metric.unit, metric.status, metric.reason, metric.numerator, metric.denominator,
     metric.nParticipants, metric.sessionId ? 1 : bundle.counts.sessions,
     metric.nObservations,
-    { algorithm: metric.algorithm, scope: metric.scope, sourceKind: metric.sourceKind, statistic: metric.statistic },
+    { algorithm: metric.algorithm, scope: metric.scope, sourceKind: metric.sourceKind, statistic: metric.statistic,
+      presentationId: metric.presentationId, attempt: metric.attempt, presentationIndex: metric.presentationIndex,
+      sourceTrialIndex: metric.sourceTrialIndex, attemptStatus: metric.attemptStatus,
+      qualityValid: metric.qualityValid, qualityIssueCodes: metric.qualityIssueCodes,
+      qualityReasons: metric.qualityReasons,
+      includedInDefault: metric.includedInDefault, observationDurationMs: metric.observationDurationMs,
+      blockId: metric.blockId, intervalStartMs: metric.intervalStartMs,
+      intervalEndMs: metric.intervalEndMs, coveragePct: metric.coveragePct },
   ]));
   if (bundle.comparison) rows.push([
     'comparison', bundle.snapshot.id, bundle.snapshot.datasetHash, '', '', '',

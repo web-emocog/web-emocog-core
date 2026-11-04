@@ -9,7 +9,7 @@
 
 import { DEFAULT_THRESHOLDS, QC_WEIGHTS, QC_PENALTIES } from './constants.js';
 import { round1, round3, clamp01 } from './helpers.js';
-import { computePercentages } from './frame-analysis.js';
+import { computePercentages } from './frame-analysis.js?v=20261025-1';
 import { getValidationMetrics, getTrackingDeviationMetrics } from './validation.js';
 
 /**

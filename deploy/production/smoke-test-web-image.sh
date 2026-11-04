@@ -23,7 +23,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command in curl docker find grep sed seq sleep tr; do
+for command in curl docker find grep sed seq sleep; do
   command -v "${command}" >/dev/null || {
     echo "Required command is missing: ${command}" >&2
     exit 69
@@ -72,34 +72,33 @@ expect_status() {
   fi
 }
 
-expect_header() {
-  local path=$1 expected=$2
-  if ! curl \
+response_headers() {
+  local path=$1 headers
+  # Drain curl before grep -q can close its input under pipefail.
+  headers=$(curl \
     --fail \
     --silent \
     --show-error \
     --dump-header - \
     --output /dev/null \
-    "${BASE_URL}${path}" \
-    | tr -d '\r' \
-    | grep --fixed-strings --ignore-case --quiet "${expected}"; then
+    "${BASE_URL}${path}") || return
+  printf '%s\n' "${headers//$'\r'/}"
+}
+
+expect_header() {
+  local path=$1 expected=$2 headers
+  headers=$(response_headers "${path}") || return
+  if ! grep --fixed-strings --ignore-case --quiet "${expected}" <<< "${headers}"; then
     echo "Expected ${path} headers to contain: ${expected}" >&2
     return 1
   fi
 }
 
 expect_javascript_mime() {
-  local path=$1
-  if ! curl \
-    --fail \
-    --silent \
-    --show-error \
-    --dump-header - \
-    --output /dev/null \
-    "${BASE_URL}${path}" \
-    | tr -d '\r' \
-    | grep --extended-regexp --ignore-case --quiet \
-        '^Content-Type: (application|text)/javascript(;|$)'; then
+  local path=$1 headers
+  headers=$(response_headers "${path}") || return
+  if ! grep --extended-regexp --ignore-case --quiet \
+    '^Content-Type: (application|text)/javascript(;|$)' <<< "${headers}"; then
     echo "Expected ${path} to use a JavaScript MIME type." >&2
     return 1
   fi

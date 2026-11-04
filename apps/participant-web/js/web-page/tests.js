@@ -7,13 +7,13 @@ import {
     clearTaskContext
 } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js';
-import { updateFinalStepWithQC, nextStep } from './ui.js?v=20261025-1';
-import { stopPreCheck } from './precheck.js?v=20261025-1';
-import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261025-1';
-import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261025-1';
-import { buildHeatmaps } from './heatmap.js?v=20261025-1';
+import { updateFinalStepWithQC, nextStep } from './ui.js?v=20261104-4';
+import { stopPreCheck } from './precheck.js?v=20261104-4';
+import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
+import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261104-4';
+import { buildHeatmaps } from './heatmap.js?v=20261102-1';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
-import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261025-1';
+import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261104-4';
 import { extractEyeSignalSample } from './eye-signal.js';
 
 
@@ -1205,7 +1205,7 @@ export function startTrackingTest(options = {}) {
     const video = document.getElementById('precheckVideo');
     
     // === CAMERA FPS MONITOR ===
-    if (video && video.srcObject) {
+    if (!isContinuousSessionAnalysisRunning() && video && video.srcObject) {
         startCameraFpsMonitor(video);
         console.log('[TrackingTest] CameraFPSMonitor запущен');
     }
@@ -1315,8 +1315,6 @@ export function startTrackingTest(options = {}) {
         if (currentTrajectory >= trajectories.length) {
             // Останавливаем анализ
             stopTrackingAnalysisLoop();
-            stopCameraFpsMonitor();
-            console.log(`[TrackingTest] CameraFPSMonitor остановлен. Средний FPS: ${getAverageCameraFps()}`);
             finishTrackingTest(trackingTestOptions);
             return;
         }
@@ -1376,7 +1374,7 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     }
     
     // === Останавливаем CameraFPSMonitor (если ещё работает) ===
-    stopCameraFpsMonitor();
+    if (!isContinuousSessionAnalysisRunning()) stopCameraFpsMonitor();
     
     const testArea = document.getElementById('trackingTestArea');
     const progressText = document.getElementById('testProgressText');

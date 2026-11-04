@@ -6,7 +6,7 @@
  * @module face-segmenter/visualization
  */
 
-import { CLASS_COLORS } from './constants.js';
+import { CLASS_COLORS } from './constants.js?v=20261025-1';
 
 /**
  * Создание маски визуализации для отладки

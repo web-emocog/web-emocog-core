@@ -1,7 +1,8 @@
 const { METRIC_CATALOG } = require('./query');
 const { buildConnectedness } = require('./connectedness');
-const { IDS: PASSIVE_IDS, passiveMetric } = require('./passive');
+const { IDS: PASSIVE_IDS, passiveMetric, intervalData, intervalExportRows } = require('./passive');
 const { definitions: passiveDefinitions, measurement } = require('../../shared/passive-metrics');
+const { presentationAttempts, attemptMetadata, trialSummary, taskTrials, matchesTrialFilters } = require('./attempts');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
 
 const CATALOG_BY_ID = new Map((METRIC_CATALOG.metrics || []).map(metric => [metric.id, metric]));
@@ -94,9 +95,7 @@ function channelQc(row, channel) {
     };
   }
   if (channel === 'task') {
-    const trials = Array.isArray(row.features_payload?.cognitiveResults)
-      ? row.features_payload.cognitiveResults
-      : [];
+    const trials = taskTrials(row);
     const valid = trials.filter(trial => trial?.qualityValid !== false).length;
     const validFraction = trials.length ? valid / trials.length : null;
     let status = 'not_computed';
@@ -144,7 +143,8 @@ function metricBase(metricId, row, options = {}) {
     reason: options.reason || null,
     numerator: options.numerator ?? null,
     denominator: options.denominator ?? null,
-    observationDurationMs: options.observationDurationMs ?? sessionDurationMs(row),
+    observationDurationMs: Object.hasOwn(options, 'observationDurationMs') ? options.observationDurationMs
+      : metricId.startsWith('aoi.') ? null : sessionDurationMs(row),
     nParticipants: options.nParticipants ?? (row?.participant_id ? 1 : 0),
     nObservations: options.nObservations ?? 0,
     signalConfidence: options.signalConfidence ?? null,
@@ -164,17 +164,6 @@ function metricBase(metricId, row, options = {}) {
       parametersHash: null,
     },
   };
-}
-
-function taskTrials(row, query) {
-  const filters = query.filters;
-  return (Array.isArray(row.features_payload?.cognitiveResults)
-    ? row.features_payload.cognitiveResults
-    : []).filter(trial => {
-    if (filters.blockIds.length && !filters.blockIds.some(id => String(id) === String(trial?.blockId ?? trial?.block))) return false;
-    if (filters.stimulusIds.length && !filters.stimulusIds.some(id => normalizeStimulusId(id) === normalizeStimulusId(trial?.stimulusId))) return false;
-    return true;
-  });
 }
 
 function taskMetricValues(row, query) {
@@ -326,12 +315,18 @@ function protocolAois(protocol, query) {
   return rows;
 }
 
-function matchingPresentations(row, blockId, stimulusId) {
-  const presentations = gazeAnalytics(row)?.presentations || [];
-  return presentations.filter(presentation => (
-    String(presentation.blockId) === String(blockId)
-    && normalizeStimulusId(presentation.stimulusId) === normalizeStimulusId(stimulusId)
-  ));
+function presentationScopeKey(entry) {
+  return JSON.stringify([String(entry.blockId), normalizeStimulusId(entry.stimulusId)]);
+}
+
+function indexPresentationScopes(presentations) {
+  const byScope = new Map();
+  for (const presentation of presentations) {
+    const key = presentationScopeKey(presentation);
+    if (!byScope.has(key)) byScope.set(key, []);
+    byScope.get(key).push(presentation);
+  }
+  return byScope;
 }
 
 function coordinateMappings(presentations) {
@@ -355,11 +350,15 @@ function gazeAlgorithm(presentation, id = GAZE_ALGORITHM.id) {
 }
 
 function aoiMetric(metricId, row, aoiRow, presentations) {
+  const scope = { blockId: aoiRow.blockId, stimulusId: aoiRow.stimulusId, aoiId: aoiRow.aoi.id,
+    presentationId: presentations.length === 1 ? presentations[0].presentationId : null,
+    trialId: presentations.length === 1 ? presentations[0].trialId : null };
   if (presentations.some(item => item.fixationsTruncated === true)) return metricBase(metricId, row, {
-    reason: 'gaze_fixations_truncated', blockId: aoiRow.blockId, stimulusId: aoiRow.stimulusId, aoiId: aoiRow.aoi.id
+    ...scope, reason: 'gaze_fixations_truncated',
   });
   const mixedMappings = coordinateMappings(presentations).size > 1;
   if (!presentations.length || mixedMappings) return metricBase(metricId, row, {
+    ...scope,
     reason: mixedMappings ? 'gaze_coordinate_mappings_mixed' : 'gaze_presentation_missing',
     blockId: aoiRow.blockId,
     stimulusId: aoiRow.stimulusId,
@@ -402,6 +401,7 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
   const reached = reachedCount > 0;
   const first = quantile(presentationRows.map(item => item.first).filter(Number.isFinite), 0.5);
   if (observation <= 0) return metricBase(metricId, row, {
+    ...scope, observationDurationMs: presentations.some(item => Number.isFinite(item.validObservationDurationMs)) ? 0 : null,
     reason: 'valid_observation_missing',
     blockId: aoiRow.blockId,
     stimulusId: aoiRow.stimulusId,
@@ -416,6 +416,7 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
     blockId: aoiRow.blockId,
     stimulusId: aoiRow.stimulusId,
     aoiId: aoiRow.aoi.id,
+    trialId: presentations.length === 1 ? presentations[0].trialId : null,
     presentationId: presentations.length === 1 ? presentations[0].presentationId : null,
     algorithm: gazeAlgorithm(presentations[0]),
   };
@@ -454,10 +455,13 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
   });
 }
 
-function buildAoiRows(row, protocol, query) {
+function buildAoiRows(row, protocol, query, selectedPresentations) {
+  const available = (selectedPresentations ?? presentationAttempts(row).filter(entry => entry.includedInDefault))
+    .filter(entry => matchesTrialFilters(entry, query));
+  const byScope = indexPresentationScopes(available);
+  const requested = query.metricIds.filter(metricId => metricId.startsWith('aoi.'));
   return protocolAois(protocol, query).map(aoiRow => {
-    const presentations = matchingPresentations(row, aoiRow.blockId, aoiRow.stimulusId);
-    const requested = query.metricIds.filter(metricId => metricId.startsWith('aoi.'));
+    const presentations = byScope.get(presentationScopeKey(aoiRow)) || [];
     return {
       aoi: aoiRow.aoi,
       metrics: requested.map(metricId => aoiMetric(metricId, row, aoiRow, presentations)),
@@ -470,18 +474,14 @@ function buildAoiRows(row, protocol, query) {
 }
 
 function selectPresentation(row, query) {
-  const presentations = gazeAnalytics(row)?.presentations || [];
-  return presentations.find(presentation => {
-    const blockOk = !query.filters.blockIds.length || query.filters.blockIds.some(id => String(id) === String(presentation.blockId));
-    const stimulusOk = !query.filters.stimulusIds.length || query.filters.stimulusIds.some(id => normalizeStimulusId(id) === normalizeStimulusId(presentation.stimulusId));
-    return blockOk && stimulusOk;
-  }) || null;
+  return presentationAttempts(row).find(entry => entry.includedInDefault && matchesTrialFilters(entry, query)) || null;
 }
 
 function selectPresentations(row, query) {
-  const first = selectPresentation(row, query);
+  const available = presentationAttempts(row).filter(entry => entry.includedInDefault && matchesTrialFilters(entry, query));
+  const first = available[0];
   if (!first) return [];
-  return (gazeAnalytics(row)?.presentations || []).filter(presentation => (
+  return available.filter(presentation => (
     String(presentation.blockId) === String(first.blockId)
     && normalizeStimulusId(presentation.stimulusId) === normalizeStimulusId(first.stimulusId)
   ));
@@ -533,15 +533,15 @@ function stimulusDescriptor(presentation) {
   };
 }
 
-function buildHeatmapData(row, query) {
-  const presentations = selectPresentations(row, query);
+function buildHeatmapData(row, query, selectedPresentations) {
+  const presentations = selectedPresentations ?? selectPresentations(row, query);
   const presentation = presentations[0] || null;
-  if (!presentation) {
+  if (!presentation || presentation.gazeMissing === true) {
     return {
       status: 'no_data',
       reason: 'gaze_presentation_missing',
       aggregationLevel: 'session',
-      stimulus: null,
+      stimulus: presentation ? stimulusDescriptor(presentation) : null,
       coordinateSpace: 'stimulus_normalized_0_1',
       normalizationMode: 'fixation_duration_weighted',
       smoothing: { method: 'none', bandwidthNorm: null },
@@ -586,7 +586,7 @@ function buildHeatmapData(row, query) {
   };
 }
 
-function buildSessionVisuals(row, protocol, query) {
+function buildSessionVisuals(row, protocol, query, { respectFilters = false, presentations = presentationAttempts(row) } = {}) {
   const unfilteredQuery = {
     ...query,
     filters: {
@@ -594,47 +594,56 @@ function buildSessionVisuals(row, protocol, query) {
       blockIds: [],
       stimulusIds: [],
       aoiIds: [],
+      conditionIds: [],
     },
   };
   const contexts = new Map();
-  protocolAois(protocol, unfilteredQuery).forEach(aoiRow => {
+  const visualQuery = respectFilters ? query : unfilteredQuery;
+  protocolAois(protocol, visualQuery).forEach(aoiRow => {
     const key = JSON.stringify([aoiRow.blockId, aoiRow.stimulusId]);
     if (!contexts.has(key)) contexts.set(key, aoiRow);
   });
-  return Array.from(contexts.values()).map(context => {
+  const byScope = indexPresentationScopes(presentations.filter(entry => matchesTrialFilters(entry, visualQuery)));
+  const visuals = [];
+  for (const context of contexts.values()) {
     const scopedQuery = {
-      ...query,
+      ...visualQuery,
       filters: {
-        ...query.filters,
+        ...visualQuery.filters,
         blockIds: [context.blockId],
         stimulusIds: [context.stimulusId],
-        aoiIds: [],
       },
     };
-    const rows = buildAoiRows(row, protocol, scopedQuery);
-    const heatmap = buildHeatmapData(row, scopedQuery);
-    const presentation = selectPresentation(row, scopedQuery);
-    const stimulus = heatmap.stimulus || {
-      id: context.stimulusId,
-      version: '1',
-      name: context.stimulusId,
-      type: 'image',
-      contentUrl: /^\d+$/.test(context.stimulusId) ? `/stimuli/${context.stimulusId}/content` : null,
-      intrinsicWidth: null,
-      intrinsicHeight: null,
-    };
-    return {
-      status: heatmap.status,
-      reason: heatmap.reason,
-      blockId: context.blockId,
-      blockName: context.blockName,
-      presentationId: presentation?.presentationId || null,
-      stimulus,
-      coordinateSpace: 'stimulus_normalized_0_1',
-      aoiRows: rows.map(item => ({ aoi: item.aoi, metrics: item.metrics })),
-      heatmap: { ...heatmap, stimulus },
-    };
-  });
+    const matches = byScope.get(presentationScopeKey(context)) || [];
+    if (!matches.length && visualQuery.filters.conditionIds?.length) continue;
+    for (const presentation of matches.length ? matches : [null]) {
+      const selected = presentation ? [presentation] : [];
+      const rows = buildAoiRows(row, protocol, scopedQuery, selected);
+      const heatmap = buildHeatmapData(row, scopedQuery, selected);
+      const stimulus = heatmap.stimulus || {
+        id: context.stimulusId,
+        version: '1',
+        name: context.stimulusId,
+        type: 'image',
+        contentUrl: /^\d+$/.test(context.stimulusId) ? `/stimuli/${context.stimulusId}/content` : null,
+        intrinsicWidth: null,
+        intrinsicHeight: null,
+      };
+      visuals.push({
+        ...attemptMetadata(presentation),
+        status: heatmap.status,
+        reason: heatmap.reason,
+        blockId: context.blockId,
+        blockName: context.blockName,
+        presentationId: presentation?.presentationId || null,
+        stimulus,
+        coordinateSpace: 'stimulus_normalized_0_1',
+        aoiRows: rows.map(item => ({ aoi: item.aoi, metrics: item.metrics })),
+        heatmap: { ...heatmap, stimulus },
+      });
+    }
+  }
+  return visuals.sort((a, b) => (a.presentationIndex ?? Infinity) - (b.presentationIndex ?? Infinity));
 }
 
 function numericMetricValue(metric) {
@@ -759,6 +768,7 @@ function buildGroupSummary(rows, query, protocol = null, excludedSessions = []) 
   if (protocol) {
     const aoiMetricIds = query.metricIds.filter(metricId => metricId.startsWith('aoi.'));
     const groupedAoiRecords = new Map();
+    const mappingsByScope = new Map();
     const aoiRows = protocolAois(protocol, query);
     aoiRows.forEach(aoiRow => aoiMetricIds.forEach(metricId => {
       groupedAoiRecords.set(JSON.stringify([
@@ -767,12 +777,16 @@ function buildGroupSummary(rows, query, protocol = null, excludedSessions = []) 
     }));
     rows.forEach(row => {
       const participantId = String(row.participant_id || `session-${row.id}`);
-      buildAoiRows(row, protocol, query).forEach(aoiRow => aoiRow.metrics.forEach(metric => {
-        const key = JSON.stringify([
-          metric.metricId, aoiRow.blockId, aoiRow.stimulusId, aoiRow.aoi.id,
-        ]);
-        groupedAoiRecords.get(key)?.push({ participantId, metric });
-      }));
+      buildAoiRows(row, protocol, query).forEach(aoiRow => {
+        const scope = presentationScopeKey(aoiRow);
+        if (!mappingsByScope.has(scope)) mappingsByScope.set(scope, new Set());
+        const mappings = mappingsByScope.get(scope);
+        for (const mapping of coordinateMappings(aoiRow.presentations)) mappings.add(mapping);
+        aoiRow.metrics.forEach(metric => {
+          const key = JSON.stringify([metric.metricId, aoiRow.blockId, aoiRow.stimulusId, aoiRow.aoi.id]);
+          groupedAoiRecords.get(key)?.push({ participantId, metric });
+        });
+      });
     });
     aoiRows.forEach(aoiRow => {
       aoiMetricIds.forEach(metricId => {
@@ -780,8 +794,7 @@ function buildGroupSummary(rows, query, protocol = null, excludedSessions = []) 
           metricId, aoiRow.blockId, aoiRow.stimulusId, aoiRow.aoi.id,
         ]);
         const records = groupedAoiRecords.get(key) || [];
-        const presentations = rows.flatMap(row => matchingPresentations(row, aoiRow.blockId, aoiRow.stimulusId));
-        if (coordinateMappings(presentations).size > 1) records.forEach(record => {
+        if (mappingsByScope.get(presentationScopeKey(aoiRow))?.size > 1) records.forEach(record => {
           record.metric = { ...record.metric, value: null, status: 'no_data', reason: 'gaze_coordinate_mappings_mixed',
             nObservations: 0, numerator: null, denominator: null, observationDurationMs: null };
         });
@@ -844,18 +857,19 @@ function buildGroupSummary(rows, query, protocol = null, excludedSessions = []) 
 }
 
 function buildGroupHeatmap(rows, query) {
-  const mappings = coordinateMappings(rows.flatMap(row => selectPresentations(row, query)));
+  const selected = rows.map(row => ({ row, presentations: selectPresentations(row, query) }));
+  const mappings = coordinateMappings(selected.flatMap(item => item.presentations));
   if (mappings.size > 1) return {
-    ...buildHeatmapData(rows[0] || { features_payload: {} }, query),
+    ...buildHeatmapData(rows[0] || { features_payload: {} }, query, selected[0]?.presentations || []),
     status: 'no_data', reason: 'gaze_coordinate_mappings_mixed', aggregationLevel: 'group',
     equalParticipantWeight: true, nParticipants: 0, nSessions: rows.length,
     grid: { width: 0, height: 0, values: [], maxValue: 0 }, fixationPoints: [], nFixations: 0, validObservationDurationMs: 0,
   };
   const participantGrids = new Map();
   let template = null;
-  rows.forEach(row => {
-    const presentation = selectPresentation(row, query);
-    const sessionHeatmap = buildHeatmapData(row, query);
+  selected.forEach(({ row, presentations }) => {
+    const presentation = presentations[0];
+    const sessionHeatmap = buildHeatmapData(row, query, presentations);
     if (!presentation || sessionHeatmap.status !== 'computed') return;
     const grid = sessionHeatmap.grid;
     if (!grid.width || !grid.height || !grid.values.length) return;
@@ -867,7 +881,7 @@ function buildGroupHeatmap(rows, query) {
   });
   if (!template) {
     return {
-      ...buildHeatmapData(rows[0] || { features_payload: {} }, query),
+      ...buildHeatmapData(rows[0] || { features_payload: {} }, query, selected[0]?.presentations || []),
       aggregationLevel: 'group',
       equalParticipantWeight: true,
       nParticipants: 0,
@@ -898,9 +912,9 @@ function buildGroupHeatmap(rows, query) {
     fixationPoints: [],
     nParticipants: perParticipant.length,
     nSessions: rows.length,
-    nFixations: rows.reduce((sum, row) => sum + selectPresentations(row, query)
+    nFixations: selected.reduce((sum, { presentations }) => sum + presentations
       .reduce((count, presentation) => count + (finite(presentation.fixationCountTotal) ?? presentation.fixationPoints?.length ?? 0), 0), 0),
-    validObservationDurationMs: rows.reduce((sum, row) => sum + selectPresentations(row, query)
+    validObservationDurationMs: selected.reduce((sum, { presentations }) => sum + presentations
       .reduce((duration, presentation) => duration + (finite(presentation.validObservationDurationMs) || 0), 0), 0),
     algorithm: gazeAlgorithm(template.presentation, 'participant-equal-heatmap'),
   };
@@ -928,13 +942,22 @@ function exportMetric(metric, sourceKind, context = {}) {
 function buildExportBundle(hydrated, content = 'both') {
   const { snapshot, sessionRows, protocol } = hydrated;
   const query = snapshot.queryEcho;
-  const sessions = sessionRows.map(row => ({
-    sessionId: Number(row.id),
-    participantId: row.participant_id || null,
-    metrics: buildSessionMetrics(row, query),
-    connectedness: buildConnectedness(row, query),
-    aoiRows: buildAoiRows(row, protocol, query).map(item => ({ aoi: item.aoi, metrics: item.metrics })),
-  }));
+  const sessions = sessionRows.map(row => {
+    const presentations = presentationAttempts(row);
+    const trials = trialSummary(row, query, presentations);
+    return {
+      sessionId: Number(row.id),
+      participantId: row.participant_id || null,
+      metrics: buildSessionMetrics(row, query),
+      connectedness: buildConnectedness(row, query),
+      ...(query.mode === 'session' ? { physiologyIntervals: intervalData(row, query) } : {}),
+      trialCounts: trials.counts,
+      exclusions: trials.exclusions,
+      presentations: buildSessionVisuals(row, protocol, query, { respectFilters: true, presentations }).map(({ heatmap, ...context }) => context),
+      aoiRows: buildAoiRows(row, protocol, query, presentations.filter(entry => entry.includedInDefault))
+        .map(item => ({ aoi: item.aoi, metrics: item.metrics })),
+    };
+  });
   const group = query.mode === 'group'
     ? buildGroupSummary(sessionRows, query, protocol, snapshot.excludedSessions)
     : null;
@@ -972,13 +995,18 @@ function buildExportBundle(hydrated, content = 'both') {
           sessionId: session.sessionId,
           participantId: session.participantId,
         })),
-        ...session.aoiRows.flatMap(aoiRow => aoiRow.metrics.map(metric => exportMetric(metric, 'session_aoi', {
+        ...intervalExportRows(session.physiologyIntervals, query.metricIds, {
+          sessionId: session.sessionId,
+          participantId: session.participantId,
+        }),
+        ...session.presentations.flatMap(presentation => presentation.aoiRows.flatMap(aoiRow => aoiRow.metrics.map(metric => exportMetric(metric, 'session_aoi', {
+          ...attemptMetadata(presentation),
           sessionId: session.sessionId,
           participantId: session.participantId,
           aoiId: aoiRow.aoi.id,
           aoiName: aoiRow.aoi.name,
           aoiOrder: aoiRow.aoi.order,
-        }))),
+        })))),
       ]),
       ...(group ? group.metrics.map(metric => exportMetric(metric, 'group_summary', {
         statistic: 'participant_median',
@@ -987,6 +1015,8 @@ function buildExportBundle(hydrated, content = 'both') {
     dataDictionary,
     provenance: {
       source: 'analysis_snapshot',
+      attemptMethod: 'presentation_attempts.v1',
+      defaultAttemptPolicy: 'exclude_rejected_and_ambiguous',
       frontend: snapshot.versions.frontend,
       exportContract: '1.0',
       backend: snapshot.versions.backend,

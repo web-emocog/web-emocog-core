@@ -7,7 +7,7 @@
  */
 
 // Основной класс
-export { default, FaceSegmenter } from './FaceSegmenter.js?v=20261028-139';
+export { default, FaceSegmenter } from './FaceSegmenter.js?v=20261104-4';
 
 // Константы
 export { CLASS_INDICES, CLASS_NAMES, LANDMARK_INDICES, CLASS_COLORS } from './constants.js?v=20261025-1';
@@ -16,7 +16,7 @@ export { CLASS_INDICES, CLASS_NAMES, LANDMARK_INDICES, CLASS_COLORS } from './co
 export { DEFAULT_THRESHOLDS, getAreaThresholds } from './thresholds.js';
 
 // Анализ масок
-export { analyzeMasks, extractFaceRegion, extractConfidenceStats } from './mask-analyzer.js?v=20261028-139';
+export { analyzeMasks, extractFaceRegion, extractConfidenceStats } from './mask-analyzer.js?v=20261104-4';
 
 // Анализ областей
 export { 
@@ -30,4 +30,4 @@ export {
 export { checkSymmetry, checkSymmetryExtended } from './symmetry-checker.js';
 
 // Визуализация
-export { createVisualizationMask, drawMaskOnCanvas, getColorLegend } from './visualization.js';
+export { createVisualizationMask, drawMaskOnCanvas, getColorLegend } from './visualization.js?v=20261104-4';
