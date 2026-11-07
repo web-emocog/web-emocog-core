@@ -1,4 +1,4 @@
-import { LANDMARKS, MIN_LANDMARKS } from './constants.js';
+import { LANDMARKS, MIN_LANDMARKS } from './constants.js?v=20261106-143';
 
 function dist2d(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
@@ -23,13 +23,13 @@ function hasFiniteCoordinates(point) {
         && Number.isFinite(point.y);
 }
 
-function eyeLocalCoordinates(iris, inner, outer, top, bottom) {
+function eyeLocalCoordinates(iris, inner, outer, top, bottom, cornerAnchored) {
     const width = dist2d(inner, outer);
     const height = dist2d(top, bottom);
     if (Math.min(width, height) < 1e-6) return null;
 
     const horizontalCenter = midpoint(inner, outer);
-    const verticalCenter = midpoint(top, bottom);
+    const verticalCenter = cornerAnchored ? horizontalCenter : midpoint(top, bottom);
     let horizontalX = (outer.x - inner.x) / width;
     let horizontalY = (outer.y - inner.y) / width;
     if (horizontalX < 0) {
@@ -51,14 +51,14 @@ function eyeLocalCoordinates(iris, inner, outer, top, bottom) {
         y: (
             (iris.x - verticalCenter.x) * verticalX
             + (iris.y - verticalCenter.y) * verticalY
-        ) / (height / 2),
+        ) / ((cornerAnchored ? width : height) / 2),
         width,
         height,
         center: horizontalCenter
     };
 }
 
-export function extractFeatureGroups(landmarks) {
+function extractGroups(landmarks, cornerAnchored) {
     if (!Array.isArray(landmarks) || landmarks.length < MIN_LANDMARKS) return null;
     try {
         // Averaging all five MediaPipe iris landmarks is less sensitive to
@@ -82,8 +82,8 @@ export function extractFeatureGroups(landmarks) {
             rightInner, rightOuter, rightTop, rightBottom, nose, leftEar,
             rightEar, forehead, chin].every(hasFiniteCoordinates)) return null;
 
-        const leftEye = eyeLocalCoordinates(leftIris, leftInner, leftOuter, leftTop, leftBottom);
-        const rightEye = eyeLocalCoordinates(rightIris, rightInner, rightOuter, rightTop, rightBottom);
+        const leftEye = eyeLocalCoordinates(leftIris, leftInner, leftOuter, leftTop, leftBottom, cornerAnchored);
+        const rightEye = eyeLocalCoordinates(rightIris, rightInner, rightOuter, rightTop, rightBottom, cornerAnchored);
         if (!leftEye || !rightEye) return null;
 
         const leftWidth = leftEye.width;
@@ -108,7 +108,10 @@ export function extractFeatureGroups(landmarks) {
         const faceScale = dist2d(leftEar, rightEar);
         const yawProxy = (dLeft - dRight) / Math.max(1e-6, dLeft + dRight);
         const pitchProxy = (dForehead - dChin) / Math.max(1e-6, dForehead + dChin);
-        const rollProxy = Math.atan2(rightCenter.y - leftCenter.y, rightCenter.x - leftCenter.x) / Math.PI;
+        // Anatomical LEFT is on image-right in unmirrored MediaPipe coordinates.
+        // The opposite vector is near +/-pi for a level face, so minute motion
+        // across horizontal used to produce a spurious ~2-unit OOD jump.
+        const rollProxy = Math.atan2(leftCenter.y - rightCenter.y, leftCenter.x - rightCenter.x) / Math.PI;
 
         const iris = [
             leftNormX,
@@ -148,15 +151,50 @@ export function extractFeatureGroups(landmarks) {
     }
 }
 
+export function extractFeatureGroups(landmarks) {
+    return extractGroups(landmarks, false);
+}
+
+// Diagnostic candidate only: do not promote on synthetic invariance alone.
+// Lids still determine openness/confidence, but not the iris coordinate frame.
+export function extractCornerFeatureGroups(landmarks) {
+    return extractGroups(landmarks, true);
+}
+
+// Diagnostic factorial comparison only. Pixels use CAPTURE dimensions, never
+// CSS viewport/DPR, guessed camera intrinsics, or calibration target positions.
+// Keep baseline eye-confidence/head/OOD inputs identical: this experiment is
+// about the regression inputs, not about accepting an easier subset of frames.
+export function extractAblationFeatureGroups(landmarks, { geometry, basis, frameWidth, frameHeight }) {
+    const baseline = extractFeatureGroups(landmarks);
+    if (!baseline || !['normalized', 'camera_pixel'].includes(geometry)
+        || !['quadratic', 'linear', 'axis_mixed', 'axis_auto'].includes(basis)) return null;
+    let coordinates = baseline;
+    if (geometry === 'camera_pixel') {
+        if (![frameWidth, frameHeight].every(v => Number.isSafeInteger(v) && v > 0 && v <= 16384)) return null;
+        // A common scalar (frameWidth) cancels in local ratios. x and y must
+        // share that scalar; x*width,y*height is equivalent without the large
+        // global coordinates. The epsilon then stays in the original units.
+        const aspect = frameHeight / frameWidth;
+        coordinates = extractGroups(landmarks.map(p => ({ x: p?.x, y: p?.y * aspect })), false);
+        if (!coordinates) return null;
+    }
+    const iris = basis === 'linear' ? [...coordinates.iris.slice(0, 8), 1] : coordinates.iris;
+    return { iris, gateIris: baseline.iris, head: baseline.head, eye: baseline.eye };
+}
+
 export function extractFeatures(landmarks) {
     return extractFeatureGroups(landmarks)?.iris || null;
 }
 
 export function estimateConfidence(landmarks) {
-    const groups = extractFeatureGroups(landmarks);
-    if (!groups) return 0;
-    const leftEAR = groups.eye.leftEAR;
-    const rightEAR = groups.eye.rightEAR;
+    return confidenceFromFeatureGroups(extractFeatureGroups(landmarks));
+}
+
+export function confidenceFromFeatureGroups(groups) {
+    const leftEAR = groups?.eye?.leftEAR;
+    const rightEAR = groups?.eye?.rightEAR;
+    if (!Number.isFinite(leftEAR) || !Number.isFinite(rightEAR) || leftEAR < 0 || rightEAR < 0) return 0;
     if (leftEAR < 0.12 || rightEAR < 0.12) return 0.08;
     const eyeBalance = 1 - Math.min(1, Math.abs(leftEAR - rightEAR) / 0.15);
     const openness = Math.min(1, Math.min(leftEAR, rightEAR) / 0.24);

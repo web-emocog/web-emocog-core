@@ -1,6 +1,6 @@
 # AGENTS.md: инструкция для ИИ-агентов проекта EmoCog
 
-Актуальность описания: 2026-10-19.
+Актуальность описания: 2026-11-07.
 
 Этот файл задаёт правила работы ИИ-агента во всём репозитории
 `web-emocog-core`. Он является инженерной инструкцией, а не заявлением о
@@ -395,6 +395,104 @@ Signal contract:
 Перед изменением модели выполнить baseline-versus-new benchmark по accuracy,
 precision/jitter, latency, off-screen specificity, missingness и head-motion
 robustness. Синтетический unit test не доказывает webcam accuracy.
+
+`same_eye_iris.v2` сопоставляет iris 473..477 с анатомически левым глазом
+(контур 362/263), а 468..472 с правым (133/33). Mirrored preview не меняет
+индексы MediaPipe. Head roll использует вектор от правого глаза к левому,
+без разрыва около горизонтальной позы. Версия predictor передаётся в
+`meta.tech.gazeFeatureMethod`; отсутствие поля у legacy не означает эту версию.
+`gaze_spatial_qc.v1` отделяет доступность сигнала от пространственной точности:
+общая pre-session validation не удостоверяет конкретные AOI или отсутствие
+дрейфа внутри блока. При сохранённом провале validation AOI-метрики возвращают
+`null + insufficient_quality`, не нули. Непрерывный блок нельзя прерывать
+проверочными целями без изменения согласованного исследовательского протокола.
+
+Live QC получает один `qc-signal.mjs` input до display-ветки: только finite
+`correctedX/Y` с `valid===true`. Принятый off-screen прогноз без display остаётся
+available/off-screen, не missing; raw/display fallback запрещён. Gate rejection
+не становится valid из-за старой нарисованной точки. Метод обозначается
+`meta.tech.gazeQcSignalMethod: corrected_validity.v1`; отсутствие legacy поля не
+означает эту методику. Численные QC thresholds и формулы долей не меняются,
+но source/denominator observations отличаются от старого display-based пути.
+100% on-screen остаётся условной долей gate-accepted прогнозов, не AOI accuracy.
+
+`open_eye_calibration.v1` исключает из fit кадры, не проходящие прежний
+base-confidence gate; моргание не усредняется в обучающую точку. Метод
+передаётся в опциональном `meta.tech.gazeCalibrationSampling`. Диагностический
+`corner_width_iris.experimental.v1` сравнивает iris относительно углов/ширины
+глаза, без текущей высоты век. Он включается только явным constructor option
+локального A/B-теста, не является default и не допускается в ingest. Обе модели
+должны видеть одни capture frames; считать missingness и common-frame ошибки
+отдельно. Не продвигать candidate по synthetic invariance или одному человеку.
+
+`click_capture.v1` привязывает calibration samples к capture time после клика,
+без отложенного старта сбора и повторного использования одного кадра. Общий
+`calibration-capture.mjs` используется основным flow и локальной диагностикой:
+25 точек × 2 клика, unique capture gate, серия открытых глаз, прежние first-attempt
+pose/min-frame limits без ослабления после неудачных кликов. Срок сбора 2000 ms
+ограничивает camera stall; неполная/отменённая серия не обучает модель. Это новая
+методика сбора, а не доказанное устранение drift. `validation-metrics.mjs` делит
+прежние correction/benchmark вычисления с диагностикой без смены thresholds.
+Локальная v3 сравнивает raw/corrected одной модели, не экспериментальный predictor;
+не путать её с историческими v1/v2 без production correction.
+
+Локальная `issue143_factorial_geometry.v4` (`?models=ablation`) сравнивает baseline,
+camera-pixel quadratic, normalized linear и camera-pixel linear на тех же кадрах.
+`experimentalModel` только явный opt-in с capture width/height, не CSS/DPR;
+production default не меняется и API отвергает experimental method tags.
+Camera geometry и basis меняются раздельно; confidence/head/iris-OOD остаются
+baseline-входами, чтобы не получить ложный выигрыш через другие exclusions.
+Correction рассчитывается отдельно для каждого варианта и замораживается до
+контрольных before/after targets. Model selection по этим целям нет. Парные
+сравнения — только common-accepted frames с отдельными missing/off-screen counts.
+Не считать synthetic roll-invariance или отсутствие нелинейных признаков
+доказательством улучшения реального длительного gaze.
+
+Локальная `issue143_axis_regularization.v5` (`?models=axis`) отделяет basis от
+регуляризации: baseline, linear-auto, по четыре fixed-λ quadratic/linear,
+`axis_mixed` (X-quadratic/Y-linear) и `axis_auto` (basis/λ отдельно для X/Y).
+Всего 12 regressions на одном completed frame; общий baseline gate сохраняется.
+Выбор выполняется только leave-one-calibration-target-out, оба клика исключаются
+вместе. `getCalibrationDiagnostics()` выдаёт bounded curve (4 или 8 строк),
+выбранные basis/λ, но не features/weights; scalar `selectedRidgeLambda` у axis
+кандидатов обозначает λX. Минимум CV после выбора не является независимой accuracy.
+Before/after и correction targets не выбирают basis/λ; модель не адаптируется
+во время блока. Все experimental tags отвергаются ingest, production default
+не меняется. Нельзя форсировать linear Y по одному run: nonlinear-Y negative
+oracle показывает regression; synthetic общий сдвиг входа не исправляется
+одним выбором λ/basis. Приёмка требует real-camera accuracy/precision/drift и
+полного протокола, не только зелёных unit/clock тестов.
+
+Локальная `issue143_eye_patch.v6` (`?models=appearance`) проверяет дополнительную
+информацию из eye pixels: baseline, axis-auto и full/core eye-patch ridge.
+Только `getFramePixels(completedFrame)` с совпадающим frameSize; нет recapture
+live video, второго inference или повторного использования старого patch.
+`experimentalEyePatch` — явный constructor opt-in с callback локального WeakMap,
+не настраиваемый published-протоколом. Calibrator временно ассоциирует features
+с копией landmarks через локальный hook, не копирует pixel ownership. До 50
+training rows; после fit patch rows удаляются, stop/reset очищает веса/ссылки.
+Все модели усредняют пересечение full/core-usable calibration captures;
+отдельные достаточные counts не заменяют общий набор. Extraction, fit/CV и
+regression timing раздельны, capture→analyzer age не включает patch extraction.
+В JSON нет patches/feature vectors/весов, только counts/CV/агрегаты ошибок.
+Full — 120 признаков, core — 24 из центральных 6×2 cells каждого глаза; dual ridge
+эквивалентен прежней математике с unpenalized intercept. Baseline/head/eye gates
+не ослабляются; дополнительная missingness обязательна в сравнении.
+Оба method tags отвергаются ingest. Это original код без внешних весов/библиотек;
+научный источник не означает перенос self-calibration по курсору в сессию.
+Naive full-patch имеет тяжёлый synthetic lid-shift failure; core теряет часть
+точности и тоже не защищает от всех окклюзий. Это не webcam acceptance и не
+разрешение на promotion даже при зелёных функциональных тестах.
+
+Локальная `issue143_eye_gradient.v7` (`?models=gradient`) сравнивает baseline,
+full patch и all/lateral gradient-center features. Search использует только
+same-frame pixels/corners, не iris landmark, stimulus или prediction history.
+Один camera loop, 50-row bound и cleanup v6 сохранены; все модели получают
+пересечение пригодных calibration captures. V7 пока короткая spatial-only:
+`intervalMs=0`, `after=[]`, не измерение длительного drift. Блики и near-closure
+остаются negative cases; missingness не выдавать за accuracy. Ни один новый
+method tag не допускается ingest. Методика, нагрузка и приёмка — в
+`docs/reports/2026-11-07-issue143-eye-gradient.md`.
 
 `session-runtime/gaze-history.mjs` накапливает карты до обрезки raw gaze buffer.
 Локальный `heatmapState` входит в checkpoint, но не в ingest. Worker и final

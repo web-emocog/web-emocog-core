@@ -34,7 +34,11 @@
           },
           "additionalProperties": false
         },
-        "tech": { "type": ["object", "null"] }
+        "tech": { "type": ["object", "null"], "properties": {
+          "gazeFeatureMethod": { "const": "same_eye_iris.v2" },
+          "gazeCalibrationSampling": { "const": "open_eye_calibration.v1" },
+          "gazeQcSignalMethod": { "const": "corrected_validity.v1" }
+        } }
       },
       "additionalProperties": false
     },

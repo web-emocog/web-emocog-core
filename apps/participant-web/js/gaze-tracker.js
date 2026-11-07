@@ -4,7 +4,7 @@
  * previously produced different smoothing and calibration semantics.
  */
 (function loadCanonicalGazeTracker() {
-    const loading = import('./gaze-tracker/index.js')
+    const loading = import('./gaze-tracker/index.js?v=20261107-143i')
         .then(module => {
             window.GazeTracker = module.GazeTracker || module.default;
             return 'module';

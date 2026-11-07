@@ -4,8 +4,8 @@ const { HttpError } = require('../security/http-error');
 const { METRIC_CATALOG } = require('./query');
 const { sessionVersion, resolveProtocolVersion } = require('./protocol-versions');
 
-const ANALYTICS_BACKEND_VERSION = 'analytics-api-1.1.0';
-const QC_RULES_VERSION = 'qc-rules-1.0.0';
+const ANALYTICS_BACKEND_VERSION = 'analytics-api-1.2.0';
+const QC_RULES_VERSION = 'qc-rules-1.1.0';
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;

@@ -80,7 +80,7 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261104-4', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261107-143i', location.href).href);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
       await page.locator('#cogStartBtn').click();
@@ -95,7 +95,8 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await expect(page.locator('#step6')).toHaveCSS('animation-name', 'none');
       await expect(page.locator('#step6')).toHaveCSS('transform', 'none');
       const { rect, gazeRect, actualViewport } = await page.evaluate(async kind => {
-        const { currentStimulusContentRect } = await import(new URL('js/web-page/app-updated.js?v=20261104-4', location.href).href);
+        const appUrl = Array.from(document.scripts).find(script => script.src.includes('/js/web-page/app-updated.js?'))!.src;
+        const { currentStimulusContentRect } = await import(appUrl);
         const element = document.getElementById(kind === 'video' ? 'cogVideo' : 'cogImage')!;
         const box = element.getBoundingClientRect();
         return { rect: { x: box.x, y: box.y, width: box.width, height: box.height },

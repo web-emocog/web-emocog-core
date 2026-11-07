@@ -15,7 +15,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261104-4';
+} from './ui-updated.js?v=20261107-143i';
 
 import { 
     startPreCheck, 
@@ -25,7 +25,7 @@ import {
 import { 
     startCalibration, 
     finishSession
-} from './tests-updated.js?v=20261104-4';
+} from './tests-updated.js?v=20261107-143i';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,7 +34,7 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261104-4';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261107-143i';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -45,6 +45,7 @@ import { mapMediaPreloads, preloadMediaBlob } from '../session-runtime/media-pre
 import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
 import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261102-1';
 import { mediaContentRect } from './stimulus-geometry.mjs?v=20261025-1';
+import { qcGazeSignal, QC_GAZE_SIGNAL_METHOD } from '../gaze-tracker/qc-signal.mjs';
 import {
     captureAudioConsent,
     configureAudioConsentUI
@@ -146,6 +147,21 @@ window.downloadData = downloadData;
 export function handleGazeUpdate(gazeData) {
     const customDot = document.getElementById('customGazeDot');
     state.runtime.currentGazePrediction = gazeData || null;
+    if (gazeData?.featureMethod === 'same_eye_iris.v2') {
+        state.sessionData.tech ||= {};
+        state.sessionData.tech.gazeFeatureMethod = gazeData.featureMethod;
+        if (gazeData.calibrationSampling === 'open_eye_calibration.v1') {
+            state.sessionData.tech.gazeCalibrationSampling = gazeData.calibrationSampling;
+        }
+    }
+    // Feed QC once, before the display-only branch. Display may be absent for
+    // a valid off-screen prediction; it must not turn that sample into missing.
+    if (state.runtime.qcMetrics?.isRunning()
+        && state.runtime.gazeTracker?.isCalibrated?.() === true) {
+        state.sessionData.tech ||= {};
+        state.sessionData.tech.gazeQcSignalMethod = QC_GAZE_SIGNAL_METHOD;
+        state.runtime.qcMetrics.addGazePoint(qcGazeSignal(gazeData, getContentViewport()), state.runtime.lastPoseData);
+    }
     const displayX = Number.isFinite(gazeData?.displayX)
         ? gazeData.displayX
         : (Number.isFinite(gazeData?.x) ? gazeData.x : null);
@@ -228,13 +244,6 @@ export function handleGazeUpdate(gazeData) {
             });
         }
         
-        if (
-            state.runtime.qcMetrics
-            && state.runtime.qcMetrics.isRunning()
-            && state.runtime.gazeTracker?.isCalibrated?.() === true
-        ) {
-            state.runtime.qcMetrics.addGazePoint(null, state.runtime.lastPoseData);
-        }
         return;
     }
 
@@ -336,15 +345,6 @@ export function handleGazeUpdate(gazeData) {
         }
     }
 
-    if (
-        state.runtime.qcMetrics
-        && state.runtime.qcMetrics.isRunning()
-        && state.runtime.gazeTracker?.isCalibrated?.() === true
-    ) {
-        // Передаём onScreen, чтобы QC использовал честный флаг от трекера
-        // и не пересчитывал его по уже зажатым координатам.
-        state.runtime.qcMetrics.addGazePoint({ x, y, onScreen }, state.runtime.lastPoseData);
-    }
 }
 
 window.handleGazeUpdate = handleGazeUpdate;

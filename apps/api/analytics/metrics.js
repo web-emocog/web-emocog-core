@@ -66,6 +66,22 @@ function gazeAnalytics(row) {
   return value && value.schemaVersion === 'gaze_analytics.v1' ? value : null;
 }
 
+function gazeSpatialAccuracy(row) {
+  const validation = row.features_payload?.gazeValidation;
+  const nonnegative = value => finite(value) != null && value >= 0 ? value : null;
+  return {
+    version: 'gaze_spatial_qc.v1',
+    validationStatus: validation?.passed === true ? 'passed' : validation?.passed === false ? 'failed' : 'not_recorded',
+    meanErrorPx: nonnegative(validation?.metrics?.accuracyPx),
+    meanErrorPct: nonnegative(validation?.metrics?.accuracyPct),
+    // The current validation reports SD of radial errors, not spatial jitter.
+    radialErrorSdPx: nonnegative(validation?.metrics?.precisionPx),
+    scope: 'pre_session_only',
+    driftStatus: 'not_measured',
+    aoiSuitability: 'not_established',
+  };
+}
+
 function channelQc(row, channel) {
   const overall = String(row.qc_validity || 'not_computed').toLowerCase();
   if (channel === 'gaze') {
@@ -85,13 +101,24 @@ function channelQc(row, channel) {
     } else if (!['invalid', 'borderline'].includes(overall)) {
       status = 'valid';
     }
+    const spatialAccuracy = gazeSpatialAccuracy(row);
+    if (spatialAccuracy.validationStatus === 'failed') {
+      status = 'invalid';
+      reasons.push('gaze_spatial_validation_failed');
+    } else if (spatialAccuracy.validationStatus === 'not_recorded') {
+      reasons.push('gaze_spatial_validation_missing');
+    }
+    // Availability/confidence cannot establish accuracy at an AOI or stability
+    // over time. Never infer drift from how often an AOI was visited.
+    reasons.push('gaze_aoi_accuracy_unestablished', 'gaze_drift_not_measured');
     return {
       channel,
       status: ['valid', 'borderline', 'invalid'].includes(status) ? status : 'not_computed',
       validFraction,
       signalConfidence,
       reasons,
-      ruleVersion: 'gaze-qc-1.0.0',
+      ruleVersion: 'gaze-qc-1.1.0',
+      spatialAccuracy,
     };
   }
   if (channel === 'task') {
@@ -353,6 +380,9 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
   const scope = { blockId: aoiRow.blockId, stimulusId: aoiRow.stimulusId, aoiId: aoiRow.aoi.id,
     presentationId: presentations.length === 1 ? presentations[0].presentationId : null,
     trialId: presentations.length === 1 ? presentations[0].trialId : null };
+  if (gazeSpatialAccuracy(row).validationStatus === 'failed') return metricBase(metricId, row, {
+    ...scope, status: 'insufficient_quality', reason: 'gaze_spatial_validation_failed',
+  });
   if (presentations.some(item => item.fixationsTruncated === true)) return metricBase(metricId, row, {
     ...scope, reason: 'gaze_fixations_truncated',
   });

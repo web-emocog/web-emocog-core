@@ -130,6 +130,24 @@ export function ridgeRegression(X, y, lambda) {
     return solveLinearSystem(XtX, Xty);
 }
 
+// Dual form for the local high-dimensional eye-patch experiment. Centering
+// keeps the intercept unpenalized; the production iris fit above is unchanged.
+export function ridgeRegressionDual(X, y, lambda) {
+    const n = X?.length, d = X?.[0]?.length;
+    if (!(n >= 2 && d >= 2) || y?.length !== n || !Number.isFinite(lambda) || lambda <= 0
+        || !y.every(Number.isFinite) || !X.every(row => Array.isArray(row) && row.length === d
+            && row[d - 1] === 1 && row.every(Number.isFinite))) return null;
+    const meanX = Array.from({ length: d - 1 }, (_, j) => X.reduce((s, row) => s + row[j], 0) / n);
+    const meanY = y.reduce((s, value) => s + value, 0) / n;
+    const centered = X.map(row => meanX.map((mean, j) => row[j] - mean));
+    const gram = centered.map((a, i) => centered.map((b, j) =>
+        a.reduce((sum, value, k) => sum + value * b[k], i === j ? lambda : 0)));
+    const alpha = solveLinearSystem(gram, y.map(value => value - meanY));
+    const weights = meanX.map((_, j) => centered.reduce((s, row, i) => s + row[j] * alpha[i], 0));
+    weights.push(meanY - weights.reduce((sum, value, j) => sum + value * meanX[j], 0));
+    return weights.every(Number.isFinite) ? weights : null;
+}
+
 /**
  * Скалярное произведение двух векторов.
  */
