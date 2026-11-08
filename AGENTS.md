@@ -911,6 +911,14 @@ API security headers не заменяют CSP для static frontend, кото�
 API/import/localStorage данных. Не использовать `innerHTML` с недоверенными
 значениями без явной sanitizer/escaping стратегии.
 
+Staff documents по умолчанию получают `camera=(), microphone=(), geolocation=()`.
+Точное исключение `/apps/web/developer/emotion-test.html` разрешает только
+`camera=(self)`; микрофон, геолокация и соседние staff paths остаются запрещены.
+Это policy документа, не выдача роли или разрешения пользователя: перед камерой
+сохраняются fresh `/auth/me`, identity и admin/developer checks. Не заменять
+точное исключение разрешением для всего `/apps/web/` или developer-каталога.
+Image smoke проверяет единственный policy header, query URL и соседние пути.
+
 ### 10.6 Логи
 
 Неожиданные ошибки канонических API handlers передаются в
