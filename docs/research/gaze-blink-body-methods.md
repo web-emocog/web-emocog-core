@@ -24,11 +24,116 @@
 - predictor использует только нормализованные iris features;
 - head pose и translation считаются отдельным nuisance/OOD channel;
 - calibration target не передается в prediction;
-- post-calibration affine correction выбирается по leave-one-target-out
+- post-calibration residual-bias correction выбирается по leave-one-target-out
   cross-validation;
 - финальная оценка проводится на независимом benchmark target set;
 - сохраняется сравнение `baseline raw` против `new corrected`;
 - rejected/OOD кадр не заменяется последней display-точкой.
+
+### Геометрия `same_eye_iris.v2` (issue 143)
+
+Исправлено сопоставление радужки с контуром того же анатомического глаза:
+left 473..477 с 362/263/386/374, right 468..472 с 133/33/159/145. Основание:
+[MediaPipe Face Mesh connections](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/python/solutions/face_mesh_connections.py)
+и одноимённые константы уже vendored `vision_bundle.mjs`. Mirrored preview не
+меняет landmark IDs. Head roll использует right-to-left вектор: малое движение
+через горизонталь больше не пересекает разрыв +/-pi и не создаёт ложный OOD.
+Head не добавляется в predictor; target-blind и raw/corrected/display сохраняются.
+Численные пороги QC, калибровка и correction не менялись.
+
+Исправление уменьшает геометрический источник ошибки, но без записей исходных
+landmarks сессий 116/117 не доказывает причину всего наблюдавшегося дрейфа.
+Остаются изменения век, освещения, позы и ошибки модели. Доступность gaze и
+confidence не измеряют пространственную точность. `accuracyPx` текущей validation
+есть средняя евклидова ошибка, не RMS; `precisionPx` есть SD радиальных ошибок,
+не двумерный jitter. Общий pre-session pass не удостоверяет пригодность для
+конкретных размеров AOI. API сообщает `gaze_spatial_qc.v1`, включая
+`driftStatus: not_measured` и `aoiSuitability: not_established`.
+
+Live QC input имеет собственную provenance `corrected_validity.v1`: принятый
+finite corrected-прогноз за экраном остаётся наблюдением, даже когда display
+отсутствует. Старый display-based путь мог выдавать 100% on-screen только среди
+оставшихся рисуемых точек. Thresholds не менялись; корректировка источника не
+создаёт ground truth и не требует подавлять обычные моргания. Scope live QC и
+полносессионного gaze accumulator может различаться (инструкции, calibration,
+validation); их доли нельзя сравнивать без проверки знаменателей. Разбор
+[сессий 125/126](../reports/2026-11-07-issue143-session125-126.md) фиксирует это
+различие, независимую pre-block ошибку и проверку AOI-арифметики.
+
+Непрерывный блок из 40 показов не прерывается новыми целями или скрытой паузой.
+Локальный тест до/после четырёхминутного интервала измеряет только две границы,
+не время возникновения дрейфа, и не заменяет полный протокол. План реальной
+проверки и synthetic baseline: [отчёт issue 143](../reports/2026-11-06-issue143-gaze.md).
+
+Обычный blink не является ошибкой участника. `open_eye_calibration.v1`
+исключает очевидно закрытые глаза по прежнему base-confidence gate до
+усреднения feature vectors. Это не независимая разметка blink transition.
+Второй диагностический метод `corner_width_iris.experimental.v1` убирает
+текущие lid positions/height из вертикальной системы iris coordinates, но
+сохраняет их для confidence. Synthetic lid-only intervention проверяет только
+геометрическую инвариантность, не биологическую независимость landmarks.
+Нет ground truth, гарантий при полуприкрытых глазах и разрешения на deployment.
+
+Следующий этап `click_capture.v1` меняет именно отбор обучающих кадров: серия
+сразу после подтверждения участником, только unique capture timestamps с открытыми
+глазами/приемлемой позой, минимум считается после фильтра. Прежние first-attempt
+limits не ослабляются при повторных неудачных кликах; deadline 2000 ms не даёт
+зависнуть при stall. Основной flow и локальная v3 используют общий collector,
+25 точек × 2 клика и общие correction/independent benchmark функции. V3 оценивает
+raw и corrected раздельно, а не две разные модели. Это изменение методики сбора
+требует real-camera приёмки и само по себе не доказывает устранение drift.
+
+Локальная v4 разделяет две гипотезы: анизотропию normalized image coordinates и
+чувствительность polynomial regression. MediaPipe нормирует x по ширине, y по
+высоте, а не по одному общему масштабу ([официальный контракт](https://developers.google.com/edge/api/mediapipe/js/tasks-vision.normalizedlandmark)).
+Pixel-geometry кандидат возвращает общий image-plane масштаб; это не 3D camera
+calibration, не измерение угла взгляда в градусах и не head-based predictor.
+Linear кандидат удаляет три нелинейных члена. Обе правки диагностические,
+независимо комбинируемые, с прежним gate. Нельзя выдавать меньшую synthetic
+ошибку при rotation за устранение временного drift; смещение век все четыре
+варианта по-прежнему не компенсируют. Матрица и acceptance plan — в отчёте.
+Default остаётся `same_eye_iris.v2`; локальный matched-frame A/B должен учитывать
+ошибку, число принятых/отброшенных frames и common-frame comparison вместе.
+Простой постфактум сдвиг прогноза по одному добровольному run не применяется.
+
+Локальная v5 отделяет basis от регуляризации и координатных осей. Fixed-λ
+linear/quadratic controls используют одну λ без её подбора; mixed и axis-auto
+выбирают λ по каждой оси, а axis-auto также выбирает basis каждой оси. Решение
+использует только calibration target-group CV, не subsequent check/benchmark
+targets. Парные клики всегда исключаются из fit вместе. Выбранный CV minimum
+является selection diagnostic с оптимистическим смещением, не новой оценкой
+независимой accuracy. Внешняя validation/rollback correction не изменены.
+Прототипы explicit opt-in и не принимаются production ingest.
+
+Отрицательные контроли обязательны: linear Y проигрывает на nonlinear-Y truth,
+а общий непредсказуемый сдвиг iris input остаётся ошибкой у adaptive basis.
+Меньший jitter не доказывает меньший bias. Настройка regression не создаёт
+вертикальную информацию, которой нет в landmarks. Официальное описание
+[MediaPipe Iris](https://github.com/google-ai-edge/mediapipe/blob/master/docs/solutions/iris.md)
+явно отделяет iris tracking от определения направления взгляда. Appearance-based
+оценка по eye crops — отдельная модельная гипотеза, не гарантированный upgrade;
+она требует лицензии весов, same-frame обработки без сохранения crops, измерения
+нагрузки и независимой приёмки. Проверенные варианты и ограничения лицензий
+зафиксированы в отчёте #143; новых моделей/датасетов сейчас не подключали.
+
+Локальная v6 добавляет original eye-image regression без новых весов/библиотек:
+same-frame pixel crop, full/core features и calibration-only grouped ridge CV.
+Все модели обучаются на пересечении общих full/core-usable captures; признаки
+не попадают в export/checkpoint и training rows удаляются после fit. Наивный
+full-patch не проходит synthetic lid-shift negative control; core уменьшает
+эту зависимость, но теряет точность и тоже не универсален. Это не production
+upgrade или доказательство отсутствия длительного drift. Реализация, источник,
+privacy и отрицательные результаты — в
+[отчёте eye-appearance](../reports/2026-11-07-issue143-eye-appearance.md).
+
+Следующая local-only v7 использует собственную gradient-center локализацию,
+методологически связанную с [Timm & Barth, VISAPP 2011](https://doi.org/10.5220/0003326101250130).
+Это eye-center signal, не самостоятельная оценка screen gaze: mapping к экрану
+по-прежнему требует личной калибровки и независимой проверки. Исходные iris/lid
+landmarks не задают найденный центр, head остаётся отдельным gate. В toy lid-shift
+case чувствительность меньше, но при бликах/почти закрытых глазах остаются
+ошибки/пропуски. Короткий v7 check не измеряет длительный drift и не заменяет
+human/full-protocol приёмку. [Реализация и ограничения](../reports/2026-11-07-issue143-eye-gradient.md).
 
 ### Уникальные измерения validation
 

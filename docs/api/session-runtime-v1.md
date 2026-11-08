@@ -1,5 +1,32 @@
 # Session Runtime и API-контракты v1
 
+## Дополнение: происхождение gaze features
+
+Опциональное `meta.tech.gazeFeatureMethod: same_eye_iris.v2` обозначает predictor
+с сопоставлением радужки и контура того же анатомического глаза и непрерывным
+около горизонтали head roll. Producer, SessionFeature schema, TypeScript и
+server payload policy согласованы. Иные значения поля отклоняются; отсутствие
+поля у legacy payload допускается и не приравнивается к новой версии.
+Поле не содержит сырых landmarks/видео и не означает научную приёмку точности.
+Миграций БД, изменения invitation tuple или transport нет.
+
+Опциональное `meta.tech.gazeCalibrationSampling: open_eye_calibration.v1`
+обозначает исключение из калибровки кадров ниже того же base-confidence gate,
+который используется в prediction (численно порог не менялся). Поле проходит
+producer/schema/TypeScript/server policy и не содержит исходных кадров.
+Экспериментальный corner/width predictor локального A/B-теста не разрешён
+SessionFeature schema или server policy и не является production default.
+
+Опциональное `meta.tech.gazeQcSignalMethod: corrected_validity.v1` обозначает
+исправленный input live QC: finite `correctedX/Y` при `valid===true`, независимо
+от наличия display. Accepted off-screen prediction без display учитывается как
+available/off-screen; model gate rejection — как missing. Raw/display aliases
+не подменяют этот input. Producer/schema/TypeScript/server policy согласованы,
+другие значения отклоняются. Старые payload без поля принимаются как legacy,
+не пересчитываются; tag сам по себе не удостоверяет однородность истории при
+resume через обновление. Новых исходных gaze данных в ingest нет, формулы долей
+и численные QC thresholds не изменены. Метод не сертифицирует AOI accuracy.
+
 ## Дополнение: уникальная выборка проверки взгляда
 
 Опциональные `gazeValidation.samplingVersion: unique_capture.v1`, `sampling`

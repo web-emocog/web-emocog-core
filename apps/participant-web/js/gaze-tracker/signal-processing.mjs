@@ -130,6 +130,8 @@ export function distributionDistance(vector, distribution) {
     };
 }
 
+export const MIN_GAZE_CONFIDENCE = 0.28;
+
 export function evaluateGazeGate({ baseConfidence, irisDistance, headDistance }) {
     if (
         !Number.isFinite(baseConfidence)
@@ -161,7 +163,7 @@ export function evaluateGazeGate({ baseConfidence, irisDistance, headDistance })
     let rejectionReason = null;
     if (headRms > 7 || headPeak > 11) rejectionReason = 'head_out_of_distribution';
     else if (irisRms > 5.5 || irisPeak > 10) rejectionReason = 'iris_out_of_distribution';
-    else if (confidence < 0.28) rejectionReason = 'low_confidence';
+    else if (confidence < MIN_GAZE_CONFIDENCE) rejectionReason = 'low_confidence';
 
     return {
         accepted: rejectionReason === null,

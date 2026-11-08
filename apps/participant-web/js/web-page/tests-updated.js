@@ -6,10 +6,10 @@ import {
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261025-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261104-4';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261108-143l';
 import { stopPreCheck } from './precheck-updated.js?v=20261104-4';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261104-4';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261108-143l';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -20,8 +20,13 @@ import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261104-4';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261108-143l';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
+import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
+    CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
+} from '../gaze-tracker/calibration-capture.mjs?v=20261108-143l';
+import { calculateValidationMetrics as sharedValidationMetrics,
+    fitValidationCorrection, assessCorrectionBenchmark } from '../gaze-tracker/validation-metrics.mjs';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../gaze-tracker/validation-sampling.mjs';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js?v=20261103-1';
@@ -37,16 +42,9 @@ import {
 } from '../gaze-tracker/viewport-coordinates.mjs';
 
 import {
-    applyResidualBiasCorrection,
-    evaluateIndependentCorrectionBenchmark,
-    evaluateResidualBiasLOOCV,
-    fitResidualBias,
-    shouldApplyResidualBiasCorrection
-} from '../gaze-tracker/bias-correction.mjs';
-import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261104-4';
+} from '../session-runtime/index.js?v=20261108-143l';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -432,6 +430,7 @@ export function getWorstValidationTargets(points, viewport = getContentViewport(
 }
 
 let calibrationSetup = null;
+let calibrationGeneration = 0;
 
 export function startCalibration(options = {}) {
     if (calibrationSetup) return calibrationSetup;
@@ -443,6 +442,7 @@ export function startCalibration(options = {}) {
 }
 
 async function prepareCalibration(options) {
+    const generation = ++calibrationGeneration;
     const targetedPositions = normalizeCalibrationTargets(options.targetedPositions);
     const targeted = targetedPositions.length > 0
         && state.runtime?.gazeTracker?.isCalibrated?.() === true;
@@ -575,23 +575,15 @@ async function prepareCalibration(options) {
     
     instructionText.innerText = translations[state.currentLang].calib_click_instruction;
 
-    // Усиленная калибровка по ВСЕМУ экрану: 5×5 сетка (25 точек) в snake-порядке.
-    // Snake-маршрут уменьшает длинные скачки глаз и делает фиксацию стабильнее.
-    const fullCalibrationPositions = [
-        { x: 8, y: 8 }, { x: 29, y: 8 }, { x: 50, y: 8 }, { x: 71, y: 8 }, { x: 92, y: 8 },
-        { x: 92, y: 29 }, { x: 71, y: 29 }, { x: 50, y: 29 }, { x: 29, y: 29 }, { x: 8, y: 29 },
-        { x: 8, y: 50 }, { x: 29, y: 50 }, { x: 50, y: 50 }, { x: 71, y: 50 }, { x: 92, y: 50 },
-        { x: 92, y: 71 }, { x: 71, y: 71 }, { x: 50, y: 71 }, { x: 29, y: 71 }, { x: 8, y: 71 },
-        { x: 8, y: 92 }, { x: 29, y: 92 }, { x: 50, y: 92 }, { x: 71, y: 92 }, { x: 92, y: 92 }
-    ];
+    const fullCalibrationPositions = CALIBRATION_POSITIONS;
     const positions = targeted ? targetedPositions : fullCalibrationPositions;
     
     const video = document.getElementById('precheckVideo');
     let i = 0;
-    const CLICKS_PER_POINT = targeted ? 3 : 2;
+    const CLICKS_PER_POINT = targeted ? 3 : CALIBRATION_CLICKS;
     const calibrationBuildTag = targeted
-        ? 'calib-targeted-repair-v1'
-        : 'calib-grid-5x5-v3-robustval';
+        ? 'calib-targeted-repair-v2-click-capture'
+        : 'calib-grid-5x5-v4-click-capture';
     window.__gazeCalibrationDebug = {
         build: calibrationBuildTag,
         moduleUrl: import.meta.url,
@@ -603,8 +595,14 @@ async function prepareCalibration(options) {
         `points=${positions.length}, clicksPerPoint=${CLICKS_PER_POINT}`
     );
     let clicksOnCurrentPoint = 0;
-    const screenDiag = Math.hypot(contentViewport.width, contentViewport.height);
-    let previousTarget = null;
+    const ownerTracker = state.runtime.gazeTracker;
+    const captureIsActive = () => state.runtime.gazeTracker === ownerTracker
+        && generation === calibrationGeneration && state.runtime.currentPhase === 'calibration'
+        && calibScreen.classList.contains('active') && !document.hidden
+        && isContinuousSessionAnalysisRunning()
+        && getContentViewport().width === contentViewport.width
+        && getContentViewport().height === contentViewport.height;
+    let clickPending = false;
     const pointFailureCounts = new Array(positions.length).fill(0);
     
     const updatePoint = () => {
@@ -615,183 +613,73 @@ async function prepareCalibration(options) {
     };
 
     // Обработчик клика на точку для калибровки
-    // 2 клика на точку, адаптивная стабилизация и отбор стабильных кадров.
+    // Два клика на точку; свежая серия открытых глаз с прежними pose limits.
     const handleCalibClick = async () => {
+        if (clickPending || !captureIsActive()) return;
+        clickPending = true;
         // Prevent double-clicks while collecting frames
         point.onclick = null;
         point.style.opacity = '0.5';
         try {
             // === GAZE CALIBRATION: собираем iris features с усреднением ===
-            if (state.runtime.gazeTracker && state.runtime.localAnalyzer && video) {
+            if (!ownerTracker || !state.runtime.localAnalyzer || !video) throw new Error('Calibration is not ready');
+            {
                 const currentPos = positions[i];
                 const target = targetCenterInContentViewport(point);
                 if (!target) throw new Error('Calibration target has no viewport bounds');
                 const screenX = target.x;
                 const screenY = target.y;
                 const failedClicksForPoint = pointFailureCounts[i] || 0;
-                const relaxedLevel = Math.min(2, failedClicksForPoint);
-                
-                // 1) Settling delay: учитываем сложность точки и длину предыдущего скачка.
-                const xPct = currentPos.x;
-                const yPct = currentPos.y;
-                const isExtremeX = xPct <= 10 || xPct >= 90;
-                const isExtremeY = yPct <= 10 || yPct >= 90;
-                const isCorner = isExtremeX && isExtremeY;
-                const isBottomBand = yPct >= 72.5;
-                const isTopBand = yPct <= 27.5;
-                const radialFromCenter = Math.min(1, Math.hypot(xPct - 50, yPct - 50) / 70.71); // 0..1
-                const jumpRatio = previousTarget
-                    ? Math.min(1, Math.hypot(screenX - previousTarget.x, screenY - previousTarget.y) / (screenDiag || 1))
-                    : 0.6;
-                let settlingDelay = 360
-                    + radialFromCenter * 170
-                    + jumpRatio * 220
-                    + (isCorner ? 70 : 0);
-                settlingDelay = Math.max(360, Math.min(850, Math.round(settlingDelay)));
-                await new Promise(r => setTimeout(r, settlingDelay));
-                
-                // 2) Адаптивный сбор нескольких новых кадров + фильтрация нестабильных.
-                const isEdge = isExtremeX || isExtremeY;
-                const framesToCollect = Math.round(12 + radialFromCenter * 5 + (isEdge ? 2 : 0) + (isCorner ? 2 : 0)); // 12..21
-                const frameDelay = isCorner ? 42 : isEdge ? 38 : 34;
-                const minStableRatio = Math.max(0.45, 0.65 - relaxedLevel * 0.1);
-                const minStableFrames = Math.max(6, Math.floor(framesToCollect * minStableRatio));
-                const fallbackMinFrames = Math.max(5, minStableFrames - 2);
-                const poseYawLimit = 12 + relaxedLevel * 4 + (isExtremeX ? 2 : 0);
-                const poseRollLimit = 10 + relaxedLevel * 3 + (isExtremeX ? 1 : 0);
-                const posePitchLimit = 12 + relaxedLevel * 5 + (isBottomBand ? 8 : (isTopBand ? 4 : 0));
-                const collectedLandmarks = [];
-                let lastSampledVideoTime = -1;
-                let lastResultTimestamp = -1;
-                let attempts = 0;
-                let repeatedSameFrameCount = 0;
-                
-                while (attempts < 2 && collectedLandmarks.length < minStableFrames) {
-                    const targetFramesThisAttempt = attempts === 0 ? framesToCollect : Math.ceil(framesToCollect * 0.7);
-
-                    for (let f = 0; f < targetFramesThisAttempt; f++) {
-                        const videoTime = getVideoTime(video);
-                        if (videoTime >= 0) {
-                            if (videoTime === lastSampledVideoTime) {
-                                repeatedSameFrameCount++;
-                                if (repeatedSameFrameCount <= 6) {
-                                    await new Promise(r => setTimeout(r, SAME_FRAME_RETRY_MS));
-                                    continue;
-                                }
-                                // После нескольких повторов не блокируемся:
-                                // используем текущий кадр, чтобы не зависнуть на точке.
-                            } else {
-                                repeatedSameFrameCount = 0;
-                                lastSampledVideoTime = videoTime;
-                            }
-                        }
-
-                        try {
-                            const result = isContinuousSessionAnalysisRunning()
-                                ? state.runtime.lastPrecheckResult
-                                : await state.runtime.localAnalyzer.analyzeFrame(video);
-                            if (
-                                isContinuousSessionAnalysisRunning()
-                                && Number.isFinite(result?.timestamp)
-                                && result.timestamp === lastResultTimestamp
-                            ) {
-                                await new Promise(r => setTimeout(r, SAME_FRAME_RETRY_MS));
-                                continue;
-                            }
-                            if (Number.isFinite(result?.timestamp)) lastResultTimestamp = result.timestamp;
-                            const hasLandmarks = !!(result && result.landmarks);
-                            const bothOpen = result?.eyes?.bothOpen;
-                            const leftOpen = result?.eyes?.left?.isOpen;
-                            const rightOpen = result?.eyes?.right?.isOpen;
-                            const oneEyeOpen = leftOpen !== false || rightOpen !== false;
-                            const eyesOk = (
-                                !result?.eyes ||
-                                bothOpen !== false ||
-                                ((isBottomBand || relaxedLevel > 0) && oneEyeOpen)
-                            );
-
-                            const pose = result?.pose;
-                            const hasPose = Number.isFinite(pose?.yaw) && Number.isFinite(pose?.pitch) && Number.isFinite(pose?.roll);
-                            let poseOk = !pose || pose.status !== 'error';
-                            if (poseOk && pose?.status === 'off_center') {
-                                // На нижних/повторных кликах не блокируем точку только из-за off_center:
-                                // iris нормализован относительно глаз, а head pose проверяется отдельным OOD gate.
-                                poseOk = isBottomBand || relaxedLevel > 0;
-                            }
-                            if (poseOk && hasPose) {
-                                poseOk = Math.abs(pose.yaw) <= poseYawLimit &&
-                                    Math.abs(pose.pitch) <= posePitchLimit &&
-                                    Math.abs(pose.roll) <= poseRollLimit;
-                            } else if (poseOk && pose?.status === 'tilted' && !hasPose) {
-                                poseOk = false;
-                            }
-
-                            if (hasLandmarks && eyesOk && poseOk) {
-                                collectedLandmarks.push(result.landmarks);
-                            }
-                        } catch (e) {
-                            // Ignore individual frame errors
-                        }
-                        if (f < targetFramesThisAttempt - 1) {
-                            await new Promise(r => setTimeout(r, frameDelay));
-                        }
+                const policy = calibrationCapturePolicy(currentPos);
+                const capture = await collectCalibrationClick({
+                    policy, getFrame: () => state.runtime.lastPrecheckResult, isActive: captureIsActive
+                });
+                if (capture.summary.cancelled || !captureIsActive()) {
+                    capture.frames.length = 0;
+                    if (generation === calibrationGeneration && state.runtime.currentPhase === 'calibration') {
+                        returnToMandatoryPreparation();
                     }
-
-                    attempts++;
-                    if (collectedLandmarks.length < minStableFrames) {
-                        await new Promise(r => setTimeout(r, 120));
-                    }
+                    return;
                 }
-                
-                // 3) Добавляем точку только если качество набора достаточное.
-                let accepted = false;
-                const fallbackAllowed = failedClicksForPoint >= 2 && collectedLandmarks.length >= fallbackMinFrames;
-                if (collectedLandmarks.length >= minStableFrames || fallbackAllowed) {
-                    const added = state.runtime.gazeTracker.addAveragedCalibrationPoint(
-                        collectedLandmarks, screenX, screenY
-                    );
-                    if (added) {
-                        accepted = true;
-                        pointFailureCounts[i] = 0;
-                        previousTarget = { x: screenX, y: screenY };
-                        if (fallbackAllowed && collectedLandmarks.length < minStableFrames) {
-                            console.warn(
-                                `[GazeTracker] Fallback acceptance for point ${i + 1}/${positions.length}: ` +
-                                `${collectedLandmarks.length}/${minStableFrames} stable frames after ${failedClicksForPoint + 1} failed clicks`
-                            );
-                        }
-                        console.log(`[GazeTracker] Калибровочная точка ${i + 1}/${positions.length} клик ${clicksOnCurrentPoint + 1}/${CLICKS_PER_POINT} (${screenX.toFixed(0)}, ${screenY.toFixed(0)}), ${collectedLandmarks.length} фреймов усреднено`);
-                    }
-                }
+                const accepted = capture.summary.accepted && ownerTracker.addAveragedCalibrationPoint(
+                    capture.frames, screenX, screenY, { minFrames: policy.minFrames }
+                );
+                capture.frames.length = 0;
+                recordSessionEvent('calibration_click_sampled', {
+                    captureVersion: CALIBRATION_CAPTURE_VERSION, pointIndex: i,
+                    clickIndex: clicksOnCurrentPoint, accepted, usableFrames: capture.summary.usableFrames,
+                    minFrames: policy.minFrames, invalidEyes: capture.summary.invalidEyes,
+                    invalidPose: capture.summary.invalidPose, staleFrames: capture.summary.sampling.beforeWindow,
+                    duplicateFrames: capture.summary.sampling.duplicate
+                });
+                if (accepted) pointFailureCounts[i] = 0;
 
                 if (!accepted) {
                     pointFailureCounts[i] = failedClicksForPoint + 1;
                     console.warn(
-                        `[GazeTracker] Недостаточно стабильных кадров (${collectedLandmarks.length}/${minStableFrames}), ` +
+                        `[GazeTracker] Недостаточно стабильных кадров (${capture.summary.usableFrames}/${policy.minFrames}), ` +
                         `повторяем точку ${i + 1}, неудачных кликов подряд: ${pointFailureCounts[i]}`
                     );
-                    instructionText.innerText = `${translations[state.currentLang].tip_pose_unstable} ${translations[state.currentLang].calib_click_instruction}`;
-                    setTimeout(() => {
-                        if (i < positions.length) {
-                            instructionText.innerText = translations[state.currentLang].calib_click_instruction;
-                        }
-                    }, 1200);
+                    instructionText.innerText = translations[state.currentLang].calib_click_instruction;
                     point.style.opacity = '1';
                     point.onclick = handleCalibClick;
                     return;
                 }
             }
         } catch (e) {
+            if (!captureIsActive()) return;
             console.error('[GazeTracker] Ошибка калибровки точки:', e);
             instructionText.innerText = `${participantMessage('runtime_generic_technical')} ${translations[state.currentLang].calib_click_instruction}`;
             setTimeout(() => {
-                if (i < positions.length) {
+                if (captureIsActive() && i < positions.length) {
                     instructionText.innerText = translations[state.currentLang].calib_click_instruction;
                 }
             }, 1200);
             point.style.opacity = '1';
             point.onclick = handleCalibClick;
             return;
+        } finally {
+            clickPending = false;
         }
         
         clicksOnCurrentPoint++;
@@ -826,7 +714,7 @@ async function prepareCalibration(options) {
             
             setTimeout(async () => {
                 // После калибровки запускаем валидацию точности
-                startGazeValidation();
+                if (captureIsActive()) startGazeValidation();
             }, 1500);
             return;
         }
@@ -884,25 +772,9 @@ export function startGazeValidation() {
     // 9 точек валидации (сетка 3×3, другие позиции чем калибровка)
     // v2.2.0: расширено с 5 до 9 точек, позиции 15%/50%/85% — 
     // ближе к краям для оценки угловой точности, но не совпадают с калибровочными
-    const correctionPositions = [
-        { x: 15, y: 15 },   // верх-лево
-        { x: 50, y: 15 },   // верх-центр
-        { x: 85, y: 15 },   // верх-право
-        { x: 15, y: 50 },   // центр-лево
-        { x: 50, y: 50 },   // центр
-        { x: 85, y: 50 },   // центр-право
-        { x: 15, y: 85 },   // низ-лево
-        { x: 50, y: 85 },   // низ-центр
-        { x: 85, y: 85 }    // низ-право
-    ];
-    // Independent targets are never used to fit or select the correction.
-    const benchmarkPositions = [
-        { x: 30, y: 22 },
-        { x: 70, y: 22 },
-        { x: 22, y: 70 },
-        { x: 78, y: 70 },
-        { x: 50, y: 63 }
-    ];
+    const correctionPositions = CORRECTION_POSITIONS;
+    // Independent targets are never used to fit the correction.
+    const benchmarkPositions = BENCHMARK_POSITIONS;
     recordSessionEvent('validation_start', {
         correctionPointCount: correctionPositions.length,
         benchmarkPointCount: benchmarkPositions.length
@@ -1106,64 +978,17 @@ export function startGazeValidation() {
     function finishCorrectionStage() {
         try {
             const rawValidationPoints = state.runtime.validationPoints;
-            const rawMetrics = calculateValidationMetrics(rawValidationPoints, validationViewport);
-            const filteredValidation = filterValidationPointsForMetrics(rawValidationPoints, 0.8);
-            const filteredValidationPoints = filteredValidation.points;
-            const filteredMetrics = calculateValidationMetrics(
-                filteredValidationPoints,
-                validationViewport
-            );
-            postCalibrationCorrection = {
-                fitted: false,
-                applied: false,
-                sampleFilter: filteredValidation.stats
-            };
-
-            const fittedCorrection = fitResidualBias(filteredValidationPoints, validationViewport);
-            if (fittedCorrection) {
-                const correctedPoints = applyResidualBiasCorrection(
-                    filteredValidationPoints,
-                    fittedCorrection
-                );
-                const correctedMetrics = calculateValidationMetrics(
-                    correctedPoints,
-                    validationViewport
-                );
-                const loocv = evaluateResidualBiasLOOCV(
-                    filteredValidationPoints,
-                    validationViewport
-                );
-                const shouldApply = correctedMetrics.accuracyPx <= filteredMetrics.accuracyPx
-                    && shouldApplyResidualBiasCorrection(loocv);
-                const correctionId = generateCorrectionId();
-                postCalibrationCorrection = {
-                    correctionId,
-                    fitted: true,
-                    applied: shouldApply,
-                    source: fittedCorrection.source,
-                    sampleCount: fittedCorrection.sampleCount,
-                    kind: fittedCorrection.kind,
-                    offsetX: Math.round(fittedCorrection.offsetX * 10) / 10,
-                    offsetY: Math.round(fittedCorrection.offsetY * 10) / 10,
-                    trajectory: fittedCorrection.trajectory,
-                    rawMetrics,
-                    filteredMetrics,
-                    correctedInSampleMetrics: correctedMetrics,
-                    loocv: loocv || { available: false }
-                };
-                if (shouldApply) {
-                    state.runtime.gazeTracker?.setPostCalibrationCorrection?.({
-                        ...fittedCorrection,
-                        correctionId
+            const fitted = fitValidationCorrection(rawValidationPoints, validationViewport);
+            const { rawMetrics, filteredMetrics } = fitted;
+            postCalibrationCorrection = fitted.postCalibrationCorrection;
+            if (postCalibrationCorrection.fitted) {
+                postCalibrationCorrection.correctionId = generateCorrectionId();
+                if (postCalibrationCorrection.applied) {
+                    const applied = state.runtime.gazeTracker?.setPostCalibrationCorrection?.({
+                        ...fitted.correction, correctionId: postCalibrationCorrection.correctionId
                     });
+                    postCalibrationCorrection.applied = applied === true;
                 }
-                dbg('gaze', 'loocv:evaluateResidualBiasLOOCV', {
-                    applied: shouldApply,
-                    loocvRmsHeldOutPx: loocv?.loocvRmsHeldOutPx ?? null,
-                    rawTargetRmsPx: loocv?.rawTargetRmsPx ?? null,
-                    worsenedTargetCount: loocv?.worsenedTargetCount ?? null,
-                    targetCount: loocv?.targetCount ?? null
-                });
             }
 
             correctionStageResult = {
@@ -1221,17 +1046,6 @@ export function startGazeValidation() {
             samplingDelayTimeout = null;
             showNextPoint();
         }, SETTLE_DELAY_MS);
-    }
-
-    function pointsForSignal(points, xKey, yKey) {
-        return (points || []).map(pointData => ({
-            ...pointData,
-            samples: (pointData.samples || []).map(sample => ({
-                ...sample,
-                gazeX: Number.isFinite(sample?.[xKey]) ? sample[xKey] : null,
-                gazeY: Number.isFinite(sample?.[yKey]) ? sample[yKey] : null
-            }))
-        }));
     }
 
     function finishValidationSafely() {
@@ -1319,19 +1133,10 @@ export function startGazeValidation() {
         state.runtime._validationGazeInterval = null;
 
         const benchmarkPoints = state.runtime.validationBenchmarkPoints;
-        const filteredBenchmark = filterValidationPointsForMetrics(benchmarkPoints, 0.8);
-        const correctedCandidatePoints = filteredBenchmark.points;
-        const baselinePoints = pointsForSignal(correctedCandidatePoints, 'rawX', 'rawY');
-        const displayPoints = pointsForSignal(correctedCandidatePoints, 'displayX', 'displayY');
-        const correctedCandidateMetrics = calculateValidationMetrics(
-            correctedCandidatePoints,
-            validationViewport
+        const { filteredBenchmark, correctedCandidatePoints, baselinePoints, rawMetrics,
+            correctedCandidateMetrics, displayMetrics, independentDecision } = assessCorrectionBenchmark(
+            benchmarkPoints, validationViewport, postCalibrationCorrection.applied
         );
-        const rawMetrics = calculateValidationMetrics(baselinePoints, validationViewport);
-        const displayMetrics = calculateValidationMetrics(displayPoints, validationViewport);
-        const independentDecision = postCalibrationCorrection.applied
-            ? evaluateIndependentCorrectionBenchmark(rawMetrics, correctedCandidateMetrics)
-            : { accepted: false, reason: 'correction_not_applied' };
         const useCorrected = postCalibrationCorrection.applied && independentDecision.accepted;
         const selectedPoints = useCorrected ? correctedCandidatePoints : baselinePoints;
         const metrics = useCorrected ? correctedCandidateMetrics : rawMetrics;
@@ -1547,97 +1352,7 @@ export function startGazeValidation() {
  * % диагонали — универсальная метрика, не зависящая от разрешения.
  */
 export function calculateValidationMetrics(points, viewport = getContentViewport()) {
-    if (!points || points.length === 0) {
-        return {
-            accuracyPx: Infinity,
-            accuracyPct: Infinity,
-            precisionPx: Infinity,
-            precisionPct: Infinity,
-            biasX: 0,
-            biasY: 0,
-            biasXPct: 0,
-            biasYPct: 0,
-            validSamples: 0,
-            totalSamples: 0
-        };
-    }
-    
-    // Диагональ экрана в px — универсальный нормализатор
-    const screenW = viewport.width;
-    const screenH = viewport.height;
-    const screenDiag = Math.sqrt(screenW * screenW + screenH * screenH);
-    
-    let allErrors = [];
-    let allBiasX = [];
-    let allBiasY = [];
-    let totalSamples = 0;
-    let validSamples = 0;
-    
-    points.forEach(pointData => {
-        const samples = pointData.samples || [];
-        totalSamples += samples.length;
-        
-        samples.forEach(s => {
-            if (Number.isFinite(s.gazeX) && Number.isFinite(s.gazeY)) {
-                validSamples++;
-                const errorX = s.gazeX - s.targetX;
-                const errorY = s.gazeY - s.targetY;
-                const error = Math.sqrt(errorX * errorX + errorY * errorY);
-                allErrors.push(error);
-                allBiasX.push(errorX);
-                allBiasY.push(errorY);
-            }
-        });
-    });
-    
-    if (allErrors.length === 0) {
-        return {
-            accuracyPx: Infinity,
-            accuracyPct: Infinity,
-            precisionPx: Infinity,
-            precisionPct: Infinity,
-            biasX: 0,
-            biasY: 0,
-            biasXPct: 0,
-            biasYPct: 0,
-            validSamples: 0,
-            totalSamples: totalSamples
-        };
-    }
-    
-    // Accuracy = средняя ошибка (mean error)
-    const accuracyPx = allErrors.reduce((a, b) => a + b, 0) / allErrors.length;
-    
-    // Precision = стандартное отклонение ошибки
-    const mean = accuracyPx;
-    const squaredDiffs = allErrors.map(e => Math.pow(e - mean, 2));
-    const precisionPx = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / squaredDiffs.length);
-    
-    // Bias = систематическое смещение (средний вектор ошибки)
-    const biasX = allBiasX.reduce((a, b) => a + b, 0) / allBiasX.length;
-    const biasY = allBiasY.reduce((a, b) => a + b, 0) / allBiasY.length;
-    
-    // % от диагонали экрана — универсальная метрика
-    const accuracyPct = (accuracyPx / screenDiag) * 100;
-    const precisionPct = (precisionPx / screenDiag) * 100;
-    const biasXPct = (biasX / screenW) * 100;
-    const biasYPct = (biasY / screenH) * 100;
-    
-    return {
-        accuracyPx: accuracyPx,
-        accuracyPct: Math.round(accuracyPct * 10) / 10,   // % диагонали
-        precisionPx: precisionPx,
-        precisionPct: Math.round(precisionPct * 10) / 10,  // % диагонали
-        biasX: biasX,
-        biasY: biasY,
-        biasXPct: Math.round(biasXPct * 10) / 10,          // % ширины
-        biasYPct: Math.round(biasYPct * 10) / 10,          // % высоты
-        validSamples: validSamples,
-        totalSamples: totalSamples,
-        validPct: totalSamples > 0 ? (validSamples / totalSamples * 100).toFixed(1) : '0.0',
-        screenDiag: Math.round(screenDiag),
-        screenSize: { width: screenW, height: screenH }
-    };
+    return sharedValidationMetrics(points, viewport);
 }
 
 function flattenValidationSamples(points) {
@@ -1658,55 +1373,6 @@ function flattenValidationSamples(points) {
     return samples;
 }
 
-function filterValidationPointsForMetrics(points, keepRatio = 0.8) {
-    const safeKeepRatio = Math.max(0.55, Math.min(0.95, keepRatio));
-    let totalSamples = 0;
-    let keptSamples = 0;
-    const filteredPoints = (points || []).map(pointData => {
-        const validSamples = (pointData?.samples || []).filter(sample =>
-            Number.isFinite(sample?.gazeX) && Number.isFinite(sample?.gazeY)
-        );
-        totalSamples += validSamples.length;
-
-        if (validSamples.length < 12) {
-            keptSamples += validSamples.length;
-            return {
-                ...pointData,
-                samples: validSamples
-            };
-        }
-
-        const centerX = validSamples.reduce((acc, sample) => acc + sample.gazeX, 0) / validSamples.length;
-        const centerY = validSamples.reduce((acc, sample) => acc + sample.gazeY, 0) / validSamples.length;
-        const rankedByDistance = validSamples
-            .map(sample => ({
-                sample,
-                dist: Math.hypot(sample.gazeX - centerX, sample.gazeY - centerY)
-            }))
-            .sort((a, b) => a.dist - b.dist);
-
-        const keepCount = Math.max(10, Math.round(validSamples.length * safeKeepRatio));
-        const filteredSamples = rankedByDistance.slice(0, keepCount).map(item => item.sample);
-        keptSamples += filteredSamples.length;
-
-        return {
-            ...pointData,
-            samples: filteredSamples
-        };
-    });
-
-    return {
-        points: filteredPoints,
-        stats: {
-            method: 'cluster_trim',
-            keepRatio: safeKeepRatio,
-            totalSamples,
-            keptSamples,
-            removedSamples: Math.max(0, totalSamples - keptSamples),
-            keptPct: totalSamples > 0 ? Math.round((keptSamples / totalSamples) * 1000) / 10 : 0
-        }
-    };
-}
 
 function generateCorrectionId() {
     const t = Date.now().toString(36);

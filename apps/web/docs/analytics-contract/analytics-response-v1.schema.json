@@ -390,6 +390,21 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 64
+        },
+        "spatialAccuracy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "validationStatus", "meanErrorPx", "meanErrorPct", "radialErrorSdPx", "scope", "driftStatus", "aoiSuitability"],
+          "properties": {
+            "version": { "const": "gaze_spatial_qc.v1" },
+            "validationStatus": { "enum": ["passed", "failed", "not_recorded"] },
+            "meanErrorPx": { "type": ["number", "null"], "minimum": 0 },
+            "meanErrorPct": { "type": ["number", "null"], "minimum": 0 },
+            "radialErrorSdPx": { "type": ["number", "null"], "minimum": 0 },
+            "scope": { "const": "pre_session_only" },
+            "driftStatus": { "const": "not_measured" },
+            "aoiSuitability": { "const": "not_established" }
+          }
         }
       },
       "additionalProperties": false

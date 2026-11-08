@@ -31,8 +31,8 @@ function makeLandmarks(irisX, irisY) {
   const leftIrisX = 0.7 + irisX * 0.1;
   const leftIrisY = 0.5 + irisY * 0.05;
   for (const [index, dx, dy] of [
-    [468, 0, 0], [469, -0.008, 0], [470, 0, -0.008],
-    [471, 0.008, 0], [472, 0, 0.008],
+    [473, 0, 0], [474, -0.008, 0], [475, 0, -0.008],
+    [476, 0.008, 0], [477, 0, 0.008],
   ]) set(index, leftIrisX + dx, leftIrisY + dy);
   set(133, 0.4, 0.5);
   set(33, 0.2, 0.5);
@@ -41,8 +41,8 @@ function makeLandmarks(irisX, irisY) {
   const rightIrisX = 0.3 + irisX * 0.1;
   const rightIrisY = 0.5 + irisY * 0.05;
   for (const [index, dx, dy] of [
-    [473, 0, 0], [474, -0.008, 0], [475, 0, -0.008],
-    [476, 0.008, 0], [477, 0, 0.008],
+    [468, 0, 0], [469, -0.008, 0], [470, 0, -0.008],
+    [471, 0.008, 0], [472, 0, 0.008],
   ]) set(index, rightIrisX + dx, rightIrisY + dy);
   set(1, 0.5, 0.58);
   set(234, 0.1, 0.55);

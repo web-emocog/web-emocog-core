@@ -7,7 +7,7 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { finishSession } from './tests-updated.js?v=20261104-4';
+import { finishSession } from './tests-updated.js?v=20261108-143l';
 import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
@@ -20,7 +20,7 @@ import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261104-4';
+} from '../session-runtime/index.js?v=20261108-143l';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues

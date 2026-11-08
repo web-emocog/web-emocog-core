@@ -7,11 +7,12 @@
 
 // Индексы MediaPipe Face Landmarker (модель с 478 landmarks и радужкой)
 export const LANDMARKS = {
-    // Точки landmarks радужки (по 5 точек на каждый глаз)
-    LEFT_IRIS: [468, 469, 470, 471, 472],
-    RIGHT_IRIS: [473, 474, 475, 476, 477],
-    LEFT_IRIS_CENTER: 468,
-    RIGHT_IRIS_CENTER: 473,
+    // Anatomical sides, SAME eye as its contour below. Mirroring the preview
+    // does not swap MediaPipe landmark indices (LEFT iris ring is 474..477).
+    LEFT_IRIS: [473, 474, 475, 476, 477],
+    RIGHT_IRIS: [468, 469, 470, 471, 472],
+    LEFT_IRIS_CENTER: 473,
+    RIGHT_IRIS_CENTER: 468,
 
     // Опорные точки глаз для нормализации
     LEFT_EYE_INNER: 362,
@@ -30,6 +31,10 @@ export const LANDMARKS = {
     FOREHEAD: 10,
     CHIN: 152
 };
+
+export const FEATURE_METHOD = 'same_eye_iris.v2';
+export const EXPERIMENTAL_FEATURE_METHOD = 'corner_width_iris.experimental.v1';
+export const CALIBRATION_SAMPLING = 'open_eye_calibration.v1';
 
 // Минимально необходимое число landmarks (478 = полная модель с радужкой)
 export const MIN_LANDMARKS = 478;

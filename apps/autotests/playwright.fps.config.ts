@@ -6,7 +6,7 @@ export default defineConfig({
   workers: 1, retries: 0, reporter: process.env.CI ? [['list'], ['github']] : 'list',
   outputDir: 'test-results/fps-diagnostics',
   use: { baseURL: 'http://127.0.0.1:4189', headless: true, trace: 'off', video: 'off', screenshot: 'off' },
-  webServer: { command: 'python3 -m http.server 4189 --bind 127.0.0.1 --directory ../../',
+  webServer: { command: 'python3 scripts/serve-static.py 4189',
     port: 4189, reuseExistingServer: false },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

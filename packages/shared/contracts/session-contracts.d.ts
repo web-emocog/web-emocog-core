@@ -147,7 +147,9 @@ export interface SessionFeatureV1 {
   };
   lifecycle: SessionLifecycleV1;
   events: SessionEventV1[];
-  meta?: Record<string, unknown> | null;
+  meta?: (Record<string, unknown> & {
+    tech?: (Record<string, unknown> & { gazeFeatureMethod?: 'same_eye_iris.v2'; gazeCalibrationSampling?: 'open_eye_calibration.v1'; gazeQcSignalMethod?: 'corrected_validity.v1' }) | null;
+  }) | null;
   precheck?: Record<string, unknown> | null;
   qcSummary?: Record<string, unknown> | null;
   attentionMetrics?: Record<string, unknown> | null;
