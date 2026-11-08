@@ -32,7 +32,7 @@ export const PoseLandmarker = { createFromOptions: async () => ({
 }) };
 `;
 
-async function boot(page: Page, stage = 'running', prefix = '', target = '/apps/web/developer/bpm-test.html') {
+async function boot(page: Page, stage = 'running', prefix = '', target = '/apps/web/developer/bpm-test.html', documentPolicy?: string) {
   let role = 'developer';
   await page.addInitScript(stage => {
     const w = window as any;
@@ -85,6 +85,10 @@ async function boot(page: Page, stage = 'running', prefix = '', target = '/apps/
     if (stage === 'module-missing' && url.pathname.endsWith('/bpm-test.js')) return route.abort();
     if (url.pathname.includes('/rppg_alg/index.js')) return route.fulfill({ contentType: 'text/javascript', body: engineModule });
     if (url.pathname.endsWith('/vision_bundle.mjs')) return route.fulfill({ contentType: 'text/javascript', body: visionModule });
+    if (documentPolicy && route.request().isNavigationRequest() && url.pathname === prefix + target) {
+      const response = await route.fetch({ url: origin + target + url.search });
+      return route.fulfill({ response, headers: { ...response.headers(), 'Permissions-Policy': documentPolicy } });
+    }
     if (prefix && url.pathname.startsWith(prefix + '/')) {
       const response = await route.fetch({ url: origin + url.pathname.slice(prefix.length) + url.search });
       return route.fulfill({ response });
@@ -297,6 +301,40 @@ test('server camera policy is reported accurately without weakening it or reques
   }));
   await start(page);
   await expect(page.locator('#status')).toContainText('политикой этого сервера');
+  expect(await page.evaluate(() => ({ models: (window as any).__models, camera: (window as any).__cameraCalls })))
+    .toEqual({ models: 0, camera: 0 });
+});
+
+test('Emotion Test starts after staff admission with a camera-only document policy and stops its track', async ({ page }) => {
+  await boot(page, 'running', '', '/apps/web/developer/emotion-test.html',
+    'camera=(self), microphone=(), geolocation=()');
+  await page.evaluate(() => (window as any).WecogDiagnosticAccess);
+  expect(await page.evaluate(() => (window as any).__cameraCalls)).toBe(0);
+  await page.locator('#startBtn').click();
+  await expect(page.locator('#profilePerformance')).toContainText('FPS');
+  expect(await page.evaluate(() => (window as any).__cameraCalls)).toBe(1);
+  await page.locator('#stopBtn').click();
+  expect(await page.evaluate(() => (window as any).__streams[0].track.stops)).toBe(1);
+});
+
+test('Emotion Test respects native Chromium document policy denial before models or device requests', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Native Permissions-Policy enforcement regression for Chrome/Edge engine');
+  await boot(page, 'running', '', '/apps/web/developer/emotion-test.html',
+    'camera=(), microphone=(), geolocation=()');
+  await page.evaluate(() => (window as any).WecogDiagnosticAccess);
+  await page.locator('#startBtn').click();
+  await expect(page.locator('#status')).toContainText('политикой этого сервера');
+  expect(await page.evaluate(() => ({ models: (window as any).__models, camera: (window as any).__cameraCalls })))
+    .toEqual({ models: 0, camera: 0 });
+});
+
+test('Emotion camera policy does not bypass a revoked developer role', async ({ page }) => {
+  const auth = await boot(page, 'running', '', '/apps/web/developer/emotion-test.html',
+    'camera=(self), microphone=(), geolocation=()');
+  await page.evaluate(() => (window as any).WecogDiagnosticAccess);
+  auth.setRole('researcher');
+  await page.locator('#startBtn').click();
+  await expect(page.locator('#status')).toContainText('доступ');
   expect(await page.evaluate(() => ({ models: (window as any).__models, camera: (window as any).__cameraCalls })))
     .toEqual({ models: 0, camera: 0 });
 });

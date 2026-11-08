@@ -94,6 +94,18 @@ expect_header() {
   fi
 }
 
+expect_permissions_policy() {
+  local path=$1 expected=$2 headers actual
+  headers=$(response_headers "${path}") || return
+  # A duplicate deny header can override the allow header in Chromium. Compare
+  # the entire set, not just the presence of the expected header substring.
+  actual=$(sed -n 's/^[Pp]ermissions-[Pp]olicy: *//p' <<< "${headers}")
+  if [[ ${actual} != "${expected}" ]]; then
+    echo "Unexpected Permissions-Policy for ${path}: ${actual}" >&2
+    return 1
+  fi
+}
+
 expect_javascript_mime() {
   local path=$1 headers
   headers=$(response_headers "${path}") || return
@@ -131,6 +143,30 @@ expect_header \
 expect_header \
   /apps/web/researcher.html \
   'Permissions-Policy: camera=(), microphone=(), geolocation=()'
+
+for diagnostic_path in \
+  /apps/web/developer/emotion-test.html \
+  '/apps/web/developer/emotion-test.html?v=policy-smoke'; do
+  expect_permissions_policy "${diagnostic_path}" \
+    'camera=(self), microphone=(), geolocation=()'
+  expect_header "${diagnostic_path}" 'Content-Type: text/html'
+  expect_header "${diagnostic_path}" 'X-Content-Type-Options: nosniff'
+  expect_header "${diagnostic_path}" 'Referrer-Policy: strict-origin-when-cross-origin'
+  expect_header "${diagnostic_path}" 'X-Frame-Options: SAMEORIGIN'
+  expect_header "${diagnostic_path}" "Content-Security-Policy: frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+done
+
+for staff_path in \
+  /apps/web/developer.html \
+  /apps/web/developer/login.html \
+  /apps/web/developer/accounts.html \
+  /apps/web/researcher.html \
+  /apps/web/developer/emotion-test.js \
+  /apps/web/developer/emotion-test.html/extra \
+  /apps/web/developer/not-emotion-test.html; do
+  expect_permissions_policy "${staff_path}" \
+    'camera=(), microphone=(), geolocation=()'
+done
 
 for private_path in \
   /.git/config \
