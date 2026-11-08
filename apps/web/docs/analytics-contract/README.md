@@ -31,6 +31,29 @@
 
 Каталог версии 1.1 содержит 39 записей, но это не означает 39 карточек на экране. В него входят визуализация heatmap, пользовательские outcomes, дополнительные export-показатели и обязательный технический QC-контекст. Конструктор группирует показатели в компактные пакеты; фоновым сигналам соответствует пакет continuous_signals.
 
+## Gaze spatial QC extension (2026-11-06)
+
+`qcResult.spatialAccuracy` is optional and versioned as `gaze_spatial_qc.v1`.
+For gaze it reports recorded pre-session `validationStatus`, `meanErrorPx`,
+`meanErrorPct` and `radialErrorSdPx`; missing/non-numeric measurements stay null.
+The last field is SD of radial errors, not 2D fixation jitter. Its scope is
+`pre_session_only`; `driftStatus` is `not_measured`, and `aoiSuitability` is
+`not_established`. No AOI-size threshold is invented from session availability.
+
+Availability/confidence values retain their meaning. Reasons
+`gaze_aoi_accuracy_unestablished`, `gaze_drift_not_measured` and, where applicable,
+`gaze_spatial_validation_missing` explain their limits. Explicit recorded failed
+validation makes gaze channel QC invalid and AOI values null with
+`insufficient_quality / gaze_spatial_validation_failed`; task QC is unaffected.
+Missing legacy validation is unknown, not an invented failure or zero error.
+Researcher AOI/heatmap and data-quality screens display the caveat in RU/EN.
+PDF capture preserves this measurement caveat while excluding transient progress.
+
+Analytics backend `analytics-api-1.2.0` and `qc-rules-1.1.0` invalidate the previous
+snapshot namespace. Stored sessions are not rewritten or re-fitted. Historical
+measurements cannot be repaired without the original observations. This API
+extension adds no raw-media fields, DB migration or in-block measurement targets.
+
 ## RT Connectedness Extension (2026-10-08)
 
 Session summaries optionally include `data.connectedness`, with the bounded

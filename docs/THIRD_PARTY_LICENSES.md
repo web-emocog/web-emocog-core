@@ -70,6 +70,39 @@ c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0  selfie_multicl
 EmoCog source code is distributed under Apache License 2.0; see repository
 `LICENSE`.
 
+### Experimental eye-appearance regression (#143)
+
+`gaze-tracker/eye-patch-features.mjs` and the dual-ridge extension are original
+EmoCog code under the repository's Apache-2.0 license. No WebGazer/TurkerGaze
+source code, weights or dataset is bundled or executed. The artificial eye-image
+test renderer is original test code, not a biometric recording or third-party
+stimulus. No new external runtime dependency/asset hash is introduced.
+
+Methodological attribution: Alexandra Papoutsaki et al., *WebGazer: Scalable
+Webcam Eye Tracking Using User Interactions*, IJCAI 2016, sections 3.2-3.3:
+https://ijcai.org/proceedings/2016/540
+https://jeffhuang.com/papers/WebGazer_IJCAI16.pdf
+
+The paper describes eye-image features with ridge regression. EmoCog's local
+prototype uses its own pixel-coordinate crop, contrast normalization, grouped
+calibration CV and optional central-support ablation. It does not reproduce
+WebGazer's implementation, performance claims, cursor learning or continual
+self-calibration. Explicit calibration is the only fit source; novel weights
+or datasets would require a separate license/source/version/hash review.
+
+### Experimental gradient-center eye signal (#143)
+
+`gaze-tracker/eye-gradient-features.mjs` is original Apache-2.0 EmoCog code,
+with no third-party source, weights or biometric dataset included. Methodological
+reference: Fabian Timm and Erhardt Barth, *Accurate Eye Centre Localisation by
+Means of Gradients*, VISAPP 2011, DOI: https://doi.org/10.5220/0003326101250130 ;
+author-hosted paper: https://www.inb.uni-luebeck.de/fileadmin/files/PUBPDFS/TiBa11b.pdf .
+The paper was read only, not redistributed in the repository or product.
+Our fixed corner-aligned grid, positive-gradient objective, lateral-support
+ablation, quantile weighting, coarse-to-fine search and calibrated screen mapping
+are an experimental adaptation, not a reproduction of the published accuracy.
+No BioID images, annotations or other new model assets were downloaded/bundled.
+
 ## Open Vocal Biomarkers core
 
 - Component: `Audio_detection/**`.
@@ -114,6 +147,25 @@ The exact package version and FFmpeg build configuration are recorded in
 distributing the image. LGPL/GPL terms depend on the package build; these tools
 are separate subprocesses, not a browser/Node-linked library. Local tests used
 Alpine FFmpeg 8.0.1. See root `THIRD_PARTY_LICENSES.md` for the scope of the notice.
+
+### Experimental horizontal black top-hat eye signal (#143)
+
+`gaze-tracker/eye-tophat-features.mjs` is original Apache-2.0 EmoCog code,
+versioned `eye_tophat_ridge.experimental.v1`. It implements horizontal
+grayscale closing minus the input on same-frame corner-aligned eye grids.
+The standard definition was checked against OpenCV's official morphology
+documentation: https://docs.opencv.org/4.13.0/d9/d61/tutorial_py_morphological_ops.html .
+No OpenCV code/package/images, model weights or datasets are included.
+MPIIGaze (https://arxiv.org/abs/1711.09017) was consulted as methodological
+context only; no MPIIGaze data/GazeNet code or weights were downloaded.
+This explicit local experiment is not a claim of webcam accuracy or drift
+robustness. Negative synthetic results and acceptance scope are recorded in
+`docs/reports/2026-11-08-issue143-eye-tophat.md`.
+
+The authenticated developer gaze benchmark reuses these original implementations
+and the same pinned MediaPipe assets. It adds no third-party code, weights or
+datasets. Downloaded aggregate reports do not contain eye images, feature vectors
+or model weights. Experimental methods remain outside participant ingest/defaults.
 
 ## Test tooling: js-yaml
 

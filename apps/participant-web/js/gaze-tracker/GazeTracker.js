@@ -11,16 +11,20 @@
  *
  * @license Apache-2.0
  */
-import { LANDMARKS, MIN_LANDMARKS, DEFAULTS } from './constants.js';
-import { extractFeatureGroups, estimateConfidence } from './features.js';
-import { ridgeRegression, dotProduct } from './ridge.js';
+import { LANDMARKS, MIN_LANDMARKS, DEFAULTS, FEATURE_METHOD, EXPERIMENTAL_FEATURE_METHOD, CALIBRATION_SAMPLING } from './constants.js?v=20261106-143';
+import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261108-143l';
+import { ridgeRegression, ridgeRegressionDual, dotProduct } from './ridge.js?v=20261107-143';
+import { EYE_PATCH_LENGTH, EYE_PATCH_METHOD, EYE_PATCH_SPEC, EYE_PATCH_CORE_LENGTH, EYE_PATCH_CORE_METHOD } from './eye-patch-features.mjs?v=20261107-143';
+import { EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD, EYE_GRADIENT_LENGTH, EYE_GRADIENT_SPEC } from './eye-gradient-features.mjs?v=20261107-143g';
+import { EYE_TOPHAT_METHOD, EYE_TOPHAT_LENGTH, EYE_TOPHAT_SPEC } from './eye-tophat-features.mjs?v=20261108-143l';
 import {
     AdaptiveGazeFilter,
     fitDistribution,
     distributionDistance,
     evaluateGazeGate,
+    MIN_GAZE_CONFIDENCE,
     scalePointBetweenViewports
-} from './signal-processing.mjs';
+} from './signal-processing.mjs?v=20261106-143';
 
 const IRIS_STD_FLOORS = [
     0.03, 0.04, 0.03, 0.04,
@@ -48,12 +52,12 @@ function averageVectors(vectors) {
     return result;
 }
 
-function featureStatistics(rawFeatures) {
+function featureStatistics(rawFeatures, floors) {
     const count = rawFeatures.length;
     const width = rawFeatures[0]?.length - 1;
     if (
         count < 2
-        || width !== IRIS_STD_FLOORS.length
+        || width !== floors.length
         || !rawFeatures.every(row => (
             Array.isArray(row)
             && row.length === width + 1
@@ -68,7 +72,7 @@ function featureStatistics(rawFeatures) {
             (sum, row) => sum + ((row[j] - mean[j]) ** 2),
             0
         ) / count;
-        std[j] = Math.max(Math.sqrt(variance), IRIS_STD_FLOORS[j]);
+        std[j] = Math.max(Math.sqrt(variance), floors[j]);
     }
     return { mean, std };
 }
@@ -91,17 +95,38 @@ function standardizeFeatureRow(row, mean, std) {
     return standardized;
 }
 
-function fitCalibrationRows(rows, lambda) {
-    const stats = featureStatistics(rows.map(row => row.irisFeatures));
+function fitCalibrationRows(rows, lambda, featureMethod, baseFloors = IRIS_STD_FLOORS, linearY = false, linearX = false) {
+    let floors = baseFloors;
+    if (featureMethod === EXPERIMENTAL_FEATURE_METHOD) {
+        // Convert the previous per-feature floors to eye-width units using
+        // training-only, target-independent aperture. A held-out fold does not
+        // supply even this nuisance scale. No numerical OOD gate is relaxed.
+        const apertures = rows.map(row => row.eyeAperture).sort((a, b) => a - b);
+        if (!apertures.length || !apertures.every(value => Number.isFinite(value) && value > 0)) return null;
+        const mid = Math.floor(apertures.length / 2);
+        const s = apertures.length % 2 ? apertures[mid] : (apertures[mid - 1] + apertures[mid]) / 2;
+        const scales = [1, s, 1, s, 1, s, 1, s, 1, s * s, s];
+        floors = IRIS_STD_FLOORS.map((value, i) => value * scales[i]);
+    }
+    const stats = featureStatistics(rows.map(row => row.irisFeatures), floors);
     if (!stats) return null;
     const matrix = rows.map(row => standardizeFeatureRow(row.irisFeatures, stats.mean, stats.std));
     if (!matrix.every(Boolean)) return null;
     const targetsX = rows.map(row => row.screenX);
     const targetsY = rows.map(row => row.screenY);
-    const modelX = ridgeRegression(matrix, targetsX, lambda);
-    const modelY = ridgeRegression(matrix, targetsY, lambda);
+    const lambdaX = typeof lambda === 'number' ? lambda : lambda.x;
+    const lambdaY = typeof lambda === 'number' ? lambda : lambda.y;
+    // Diagnostic per-axis bases preserve per-column train statistics. Zero-pad
+    // omitted nonlinear terms so predict keeps one target-blind feature vector.
+    const xMatrix = linearX ? matrix.map(row => [...row.slice(0, 8), 1]) : matrix;
+    const ridge = [EYE_PATCH_METHOD, EYE_PATCH_CORE_METHOD, EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD, EYE_TOPHAT_METHOD].includes(featureMethod) ? ridgeRegressionDual : ridgeRegression;
+    const xFit = ridge(xMatrix, targetsX, lambdaX);
+    const modelX = linearX && xFit ? [...xFit.slice(0, 8), 0, 0, 0, xFit[8]] : xFit;
+    const yMatrix = linearY ? matrix.map(row => [...row.slice(0, 8), 1]) : matrix;
+    const yFit = ridge(yMatrix, targetsY, lambdaY);
+    const modelY = linearY && yFit ? [...yFit.slice(0, 8), 0, 0, 0, yFit[8]] : yFit;
     if (!modelX?.every(Number.isFinite) || !modelY?.every(Number.isFinite)) return null;
-    return { ...stats, matrix, targetsX, targetsY, modelX, modelY };
+    return { ...stats, floors, matrix, targetsX, targetsY, modelX, modelY };
 }
 
 function targetGroups(rows) {
@@ -114,19 +139,21 @@ function targetGroups(rows) {
     return [...groups.values()];
 }
 
-function selectRidgeLambda(rows, candidates, fallback) {
+function selectRidgeLambda(rows, candidates, fallback, featureMethod, floors, linearY = false, linearX = false) {
     const groups = targetGroups(rows);
     if (groups.length < 6) return { lambda: fallback, targetCvRmsPx: null, targetCount: groups.length };
-    let best = null;
+    let best = null, bestX = null, bestY = null;
+    const curve = [];
     for (const lambda of candidates) {
         if (!Number.isFinite(lambda) || lambda < 0) continue;
         let sumSquared = 0;
+        let squaredX = 0, squaredY = 0;
         let sampleCount = 0;
         let failed = false;
         for (const heldOut of groups) {
             const heldOutSet = new Set(heldOut);
             const train = rows.filter(row => !heldOutSet.has(row));
-            const fitted = fitCalibrationRows(train, lambda);
+            const fitted = fitCalibrationRows(train, lambda, featureMethod, floors, linearY, linearX);
             if (!fitted) {
                 failed = true;
                 break;
@@ -140,26 +167,99 @@ function selectRidgeLambda(rows, candidates, fallback) {
                 const dx = dotProduct(features, fitted.modelX) - row.screenX;
                 const dy = dotProduct(features, fitted.modelY) - row.screenY;
                 sumSquared += dx * dx + dy * dy;
+                squaredX += dx * dx; squaredY += dy * dy;
                 sampleCount += 1;
             }
             if (failed) break;
         }
         if (failed || sampleCount === 0) continue;
         const rms = Math.sqrt(sumSquared / sampleCount);
+        const rmsX = Math.sqrt(squaredX / sampleCount), rmsY = Math.sqrt(squaredY / sampleCount);
+        curve.push({ lambda, rmsXPx: rmsX, rmsYPx: rmsY, rmsPx: rms });
+        if (!bestX || rmsX < bestX.rms) bestX = { lambda, rms: rmsX };
+        if (!bestY || rmsY < bestY.rms) bestY = { lambda, rms: rmsY };
         if (!best || rms < best.targetCvRmsPx) {
-            best = { lambda, targetCvRmsPx: rms, targetCount: groups.length };
+            best = { lambda, targetCvRmsPx: rms, targetCount: groups.length,
+                rmsXPx: rmsX, rmsYPx: rmsY };
         }
     }
-    return best || { lambda: fallback, targetCvRmsPx: null, targetCount: groups.length };
+    if (linearY && bestX && bestY) return { lambda: bestX.lambda, lambdaY: bestY.lambda,
+        targetCvRmsPx: Math.hypot(bestX.rms, bestY.rms), targetCount: groups.length,
+        rmsXPx: bestX.rms, rmsYPx: bestY.rms, curve };
+    return best ? { ...best, curve } : { lambda: fallback, targetCvRmsPx: null, targetCount: groups.length };
+}
+
+function selectAxisBases(rows, candidates, fallback, featureMethod, floors) {
+    // Model/regularization selection uses calibration target groups only. These
+    // CV minima are selection diagnostics, not independent validation accuracy.
+    const curve = ['quadratic', 'linear'].flatMap(basis => {
+        const linear = basis === 'linear';
+        const result = selectRidgeLambda(rows, candidates, fallback, featureMethod, floors, linear, linear);
+        return (result.curve || []).map(row => ({ ...row, basis }));
+    });
+    const targetCount = targetGroups(rows).length;
+    if (!curve.length) return { lambda: fallback, lambdaY: fallback, basisX: 'quadratic', basisY: 'quadratic',
+        targetCvRmsPx: null, targetCount, curve };
+    const x = curve.reduce((best, row) => row.rmsXPx < best.rmsXPx ? row : best);
+    const y = curve.reduce((best, row) => row.rmsYPx < best.rmsYPx ? row : best);
+    return { lambda: x.lambda, lambdaY: y.lambda, basisX: x.basis, basisY: y.basis,
+        rmsXPx: x.rmsXPx, rmsYPx: y.rmsYPx, targetCvRmsPx: Math.hypot(x.rmsXPx, y.rmsYPx), targetCount, curve };
 }
 
 export default class GazeTracker {
     constructor(options = {}) {
+        if (options.experimentalGeometry !== undefined && options.experimentalGeometry !== 'corner_width') {
+            throw new RangeError('Unknown experimental gaze geometry');
+        }
+        this._featureMethod = options.experimentalGeometry === 'corner_width' ? EXPERIMENTAL_FEATURE_METHOD : FEATURE_METHOD;
+        this._extractGroups = options.experimentalGeometry === 'corner_width' ? extractCornerFeatureGroups : extractFeatureGroups;
+        this._featureFloors = IRIS_STD_FLOORS;
+        this._ablation = null;
+        this._eyePatch = null;
+        if (options.experimentalModel !== undefined) {
+            const config = options.experimentalModel;
+            if (!config || options.experimentalGeometry !== undefined
+                || !['normalized', 'camera_pixel'].includes(config.geometry)
+                || !['quadratic', 'linear', 'axis_mixed', 'axis_auto'].includes(config.basis)
+                || ![config.frameWidth, config.frameHeight].every(v => Number.isSafeInteger(v) && v > 0 && v <= 16384)) {
+                throw new RangeError('Invalid explicit experimental gaze model');
+            }
+            this._ablation = Object.freeze({ geometry: config.geometry, basis: config.basis,
+                frameWidth: config.frameWidth, frameHeight: config.frameHeight });
+            this._featureMethod = `${config.geometry}_${config.basis}.experimental.v1`;
+            this._featureFloors = config.basis === 'linear' ? IRIS_STD_FLOORS.slice(0, 8) : IRIS_STD_FLOORS;
+            this._extractGroups = points => extractAblationFeatureGroups(points, this._ablation);
+        }
+        if (options.experimentalEyePatch !== undefined) {
+            const config = options.experimentalEyePatch;
+            if (!config || options.experimentalModel !== undefined || options.experimentalGeometry !== undefined
+                || typeof config.readFeatures !== 'function'
+                || !['full', 'core', 'gradient', 'gradient_all', 'tophat'].includes(config.region ?? 'full')
+                || ![config.frameWidth, config.frameHeight].every(v => Number.isSafeInteger(v) && v > 0 && v <= 16384)) {
+                throw new RangeError('Invalid explicit experimental eye-patch model');
+            }
+            const region = config.region ?? 'full', gradient = region.startsWith('gradient'), tophat = region === 'tophat';
+            const count = tophat ? EYE_TOPHAT_LENGTH : gradient ? EYE_GRADIENT_LENGTH : region === 'core' ? EYE_PATCH_CORE_LENGTH : EYE_PATCH_LENGTH;
+            this._eyePatch = Object.freeze({ geometry: gradient ? 'eye_gradient' : 'eye_patch', basis: gradient ? 'center_linear' : 'appearance_linear', region, featureCount: count,
+                frameWidth: config.frameWidth, frameHeight: config.frameHeight, maxTrainingRows: 50,
+                crop: tophat ? EYE_TOPHAT_SPEC : gradient ? Object.freeze({ ...EYE_GRADIENT_SPEC, support: region === 'gradient_all' ? 'all' : 'lateral' }) : EYE_PATCH_SPEC });
+            this._featureMethod = tophat ? EYE_TOPHAT_METHOD : region === 'gradient' ? EYE_GRADIENT_METHOD : region === 'gradient_all' ? EYE_GRADIENT_ALL_METHOD
+                : region === 'core' ? EYE_PATCH_CORE_METHOD : EYE_PATCH_METHOD;
+            this._featureFloors = new Array(count).fill(gradient ? .03 : .05);
+            const readFeatures = config.readFeatures;
+            this._extractGroups = landmarks => {
+                const baseline = extractFeatureGroups(landmarks), values = readFeatures(landmarks);
+                if (!baseline || !Array.isArray(values) || values.length !== count || !values.every(Number.isFinite)) return null;
+                return { ...baseline, iris: [...values, 1], gateIris: baseline.iris };
+            };
+        }
+        this._calibrationFrames = { attempted: 0, accepted: 0, rejected: 0 };
         this._isCalibrated = false;
         this._isTracking = false;
         this._ridgeLambda = options.ridgeLambda ?? DEFAULTS.ridgeLambda;
         this._autoTuneRidge = options.ridgeLambda == null;
         this._calibrationData = [];
+        this._calibrationCvDiagnostics = null;
         this._modelX = null;
         this._modelY = null;
         this._featureMean = null;
@@ -193,11 +293,15 @@ export default class GazeTracker {
     }
 
     addCalibrationPoint(landmarks, screenX, screenY) {
-        const groups = extractFeatureGroups(landmarks);
-        if (!groups || !Number.isFinite(screenX) || !Number.isFinite(screenY)) return false;
+        if (this._eyePatch && (this._isCalibrated || this._calibrationData.length >= 50)) return false;
+        if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return false;
+        const groups = this._calibrationGroups(landmarks);
+        if (!groups) return false;
         this._calibrationData.push({
             irisFeatures: groups.iris,
+            ...(groups.gateIris ? { gateIris: groups.gateIris } : {}),
             headFeatures: groups.head,
+            eyeAperture: (groups.eye.leftEAR + groups.eye.rightEAR) / 2,
             screenX,
             screenY,
             timestamp: Date.now()
@@ -206,20 +310,32 @@ export default class GazeTracker {
         return true;
     }
 
-    addAveragedCalibrationPoint(landmarksArray, screenX, screenY) {
+    _calibrationGroups(landmarks) {
+        const groups = this._extractGroups(landmarks);
+        const accepted = groups && confidenceFromFeatureGroups(groups) >= MIN_GAZE_CONFIDENCE;
+        this._calibrationFrames.attempted++;
+        this._calibrationFrames[accepted ? 'accepted' : 'rejected']++;
+        return accepted ? groups : null;
+    }
+
+    addAveragedCalibrationPoint(landmarksArray, screenX, screenY, { minFrames = 1 } = {}) {
+        if (this._eyePatch && (this._isCalibrated || this._calibrationData.length >= 50)) return false;
         if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return false;
-        const groups = (landmarksArray || [])
-            .filter(landmarks => Array.isArray(landmarks) && landmarks.length >= MIN_LANDMARKS)
-            .map(extractFeatureGroups)
+        if (!Number.isInteger(minFrames) || minFrames < 1) return false;
+        if (!Array.isArray(landmarksArray)) return false;
+        const groups = landmarksArray
+            .map(landmarks => this._calibrationGroups(landmarks))
             .filter(Boolean);
-        if (!groups.length) return false;
+        if (groups.length < minFrames) return false;
         const irisFeatures = averageVectors(groups.map(group => group.iris));
         const headFeatures = averageVectors(groups.map(group => group.head));
         if (!irisFeatures || !headFeatures) return false;
         irisFeatures[irisFeatures.length - 1] = 1;
         this._calibrationData.push({
             irisFeatures,
+            ...(groups[0]?.gateIris ? { gateIris: averageVectors(groups.map(group => group.gateIris)) } : {}),
             headFeatures,
+            eyeAperture: groups.reduce((sum, group) => sum + (group.eye.leftEAR + group.eye.rightEAR) / 2, 0) / groups.length,
             screenX,
             screenY,
             timestamp: Date.now()
@@ -235,7 +351,7 @@ export default class GazeTracker {
             const rawFeatures = this._calibrationData.map(row => row.irisFeatures);
             const width = rawFeatures[0].length - 1;
             if (
-                width !== IRIS_STD_FLOORS.length
+                width !== this._featureFloors.length
                 || !rawFeatures.every(row =>
                     Array.isArray(row)
                     && row.length === width + 1
@@ -249,18 +365,30 @@ export default class GazeTracker {
                     && Number.isFinite(row.screenY)
                 )
             ) return false;
-            const lambdaSelection = this._autoTuneRidge
+            const mixed = this._ablation?.basis === 'axis_mixed';
+            const axisAuto = this._ablation?.basis === 'axis_auto';
+            const lambdaSelection = axisAuto
+                ? selectAxisBases(this._calibrationData,
+                    this._autoTuneRidge ? DEFAULTS.ridgeLambdaCandidates : [this._ridgeLambda],
+                    this._ridgeLambda, this._featureMethod, this._featureFloors)
+                : this._autoTuneRidge
                 ? selectRidgeLambda(
                     this._calibrationData,
-                    DEFAULTS.ridgeLambdaCandidates,
-                    this._ridgeLambda
+                    this._eyePatch ? [.01, .1, 1, 10, 100] : DEFAULTS.ridgeLambdaCandidates,
+                    this._ridgeLambda,
+                    this._featureMethod, this._featureFloors, mixed
                 )
                 : {
                     lambda: this._ridgeLambda,
                     targetCvRmsPx: null,
                     targetCount: targetGroups(this._calibrationData).length
                 };
-            const fitted = fitCalibrationRows(this._calibrationData, lambdaSelection.lambda);
+            const selectedLambdaY = lambdaSelection.lambdaY ?? lambdaSelection.lambda;
+            const linearX = axisAuto && lambdaSelection.basisX === 'linear';
+            const linearY = mixed || (axisAuto && lambdaSelection.basisY === 'linear');
+            const fitted = fitCalibrationRows(this._calibrationData,
+                mixed || axisAuto ? { x: lambdaSelection.lambda, y: selectedLambdaY } : lambdaSelection.lambda,
+                this._featureMethod, this._featureFloors, linearY, linearX);
             if (!fitted) return false;
             const {
                 mean: featureMean,
@@ -272,8 +400,8 @@ export default class GazeTracker {
                 modelY
             } = fitted;
             const irisDistribution = fitDistribution(
-                rawFeatures.map(row => row.slice(0, -1)),
-                IRIS_STD_FLOORS
+                this._calibrationData.map(row => (row.gateIris || row.irisFeatures).slice(0, -1)),
+                this._ablation || this._eyePatch ? IRIS_STD_FLOORS : fitted.floors
             );
             const headDistribution = fitDistribution(
                 this._calibrationData.map(row => row.headFeatures),
@@ -301,6 +429,15 @@ export default class GazeTracker {
             this._stats.calibrationTargetCvRmsPx = Number.isFinite(lambdaSelection.targetCvRmsPx)
                 ? Math.round(lambdaSelection.targetCvRmsPx * 10) / 10
                 : null;
+            this._calibrationCvDiagnostics = {
+                policy: axisAuto ? 'per_axis_basis_target_group_cv'
+                    : mixed && this._autoTuneRidge ? 'per_axis_target_group_cv' : this._autoTuneRidge ? 'joint_xy_target_group_cv' : 'fixed',
+                basisX: this._eyePatch ? this._eyePatch.basis : lambdaSelection.basisX ?? (this._ablation?.basis === 'linear' ? 'linear' : 'quadratic'),
+                basisY: this._eyePatch ? this._eyePatch.basis : lambdaSelection.basisY ?? (mixed || this._ablation?.basis === 'linear' ? 'linear' : 'quadratic'),
+                lambdaX: lambdaSelection.lambda, lambdaY: selectedLambdaY,
+                rmsXPx: lambdaSelection.rmsXPx ?? null, rmsYPx: lambdaSelection.rmsYPx ?? null,
+                curve: lambdaSelection.curve || [], independentTargetsUsed: 0
+            };
 
             const trainErrors = matrix.map((features, index) => ({
                 x: dotProduct(features, this._modelX) - targetsX[index],
@@ -310,6 +447,9 @@ export default class GazeTracker {
                 x: trainErrors.reduce((sum, row) => sum + Math.abs(row.x), 0) / count,
                 y: trainErrors.reduce((sum, row) => sum + Math.abs(row.y), 0) / count
             };
+            // Low-resolution eye appearance is sensitive too. Release its
+            // training rows before a callback can throw or retain this tracker.
+            if (this._eyePatch) this._calibrationData = [];
             this.onCalibrationComplete?.({
                 points: count,
                 timestamp: Date.now(),
@@ -317,7 +457,9 @@ export default class GazeTracker {
                 ridgeLambda: this._ridgeLambda,
                 targetCvRmsPx: this._stats.calibrationTargetCvRmsPx,
                 targetCvTargetCount: lambdaSelection.targetCount,
-                predictor: 'iris_only_ridge',
+                predictor: this._eyePatch?.geometry === 'eye_gradient' ? 'eye_gradient_ridge' : this._eyePatch ? 'eye_patch_ridge' : 'iris_only_ridge',
+                featureMethod: this._featureMethod,
+                calibrationSampling: CALIBRATION_SAMPLING,
                 targetBlind: true
             });
             return true;
@@ -359,7 +501,7 @@ export default class GazeTracker {
             return null;
         }
         const started = performance.now();
-        const groups = extractFeatureGroups(landmarks);
+        const groups = this._extractGroups(landmarks);
         if (!groups) return null;
         const standardized = this._standardizeFeatures(groups.iris);
         if (!standardized) return null;
@@ -376,10 +518,10 @@ export default class GazeTracker {
             rawInCalibrationViewport.x,
             rawInCalibrationViewport.y
         );
-        const irisDistance = distributionDistance(groups.iris.slice(0, -1), this._irisDistribution);
+        const irisDistance = distributionDistance((groups.gateIris || groups.iris).slice(0, -1), this._irisDistribution);
         const headDistance = distributionDistance(groups.head, this._headDistribution);
         let gate = evaluateGazeGate({
-            baseConfidence: estimateConfidence(landmarks),
+            baseConfidence: confidenceFromFeatureGroups(groups),
             irisDistance,
             headDistance
         });
@@ -429,6 +571,8 @@ export default class GazeTracker {
             modelY: Number.isFinite(raw?.y) ? Math.round(raw.y) : null,
             valid: gate.accepted,
             targetBlind: true,
+            featureMethod: this._featureMethod,
+            calibrationSampling: CALIBRATION_SAMPLING,
             onScreen: gate.accepted && onScreen,
             clipped: !onScreen,
             rejectionReason: gate.rejectionReason,
@@ -514,9 +658,14 @@ export default class GazeTracker {
             isTracking: this._isTracking,
             ...this._stats,
             avgFeatureExtractionMs: Math.round(this._stats.avgFeatureExtractionMs * 100) / 100,
-            predictor: 'iris_only_ridge',
+            predictor: this._eyePatch?.geometry === 'eye_gradient' ? 'eye_gradient_ridge' : this._eyePatch ? 'eye_patch_ridge' : 'iris_only_ridge',
+            featureMethod: this._featureMethod,
+            calibrationSampling: CALIBRATION_SAMPLING,
+            calibrationFrames: { ...this._calibrationFrames },
             targetBlind: true,
             confidenceGate: 'iris_head_ood',
+            ...(this._ablation ? { experimentalModel: { ...this._ablation }, gateInputMethod: FEATURE_METHOD } : {}),
+            ...(this._eyePatch ? { experimentalModel: { ...this._eyePatch }, gateInputMethod: FEATURE_METHOD } : {}),
             postCalibrationCorrection: this._postCalibrationCorrection
                 ? { ...this._postCalibrationCorrection }
                 : { enabled: false },
@@ -531,14 +680,22 @@ export default class GazeTracker {
         this._displayFilter.reset();
     }
 
+    // Local diagnostics only; no weights, calibration feature rows or targets.
+    getCalibrationDiagnostics() {
+        return this._calibrationCvDiagnostics ? { ...this._calibrationCvDiagnostics,
+            curve: this._calibrationCvDiagnostics.curve.map(row => ({ ...row })) } : null;
+    }
+
     clearCalibrationData() {
         this._calibrationData = [];
+        this._calibrationCvDiagnostics = null;
         this._stats.calibrationPoints = 0;
+        this._calibrationFrames = { attempted: 0, accepted: 0, rejected: 0 };
     }
 
     reset() {
         this._isCalibrated = false;
-        this._calibrationData = [];
+        this.clearCalibrationData();
         this._modelX = null;
         this._modelY = null;
         this._featureMean = null;

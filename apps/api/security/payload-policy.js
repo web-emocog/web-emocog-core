@@ -558,6 +558,18 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   ) {
     addError(errors, '/meta/tech', 'type', 'meta.tech must be an object or null');
   }
+  if (payload.meta?.tech?.gazeFeatureMethod !== undefined
+    && payload.meta.tech.gazeFeatureMethod !== 'same_eye_iris.v2') {
+    addError(errors, '/meta/tech/gazeFeatureMethod', 'const', 'unsupported gaze feature method');
+  }
+  if (payload.meta?.tech?.gazeCalibrationSampling !== undefined
+    && payload.meta.tech.gazeCalibrationSampling !== 'open_eye_calibration.v1') {
+    addError(errors, '/meta/tech/gazeCalibrationSampling', 'const', 'unsupported gaze calibration sampling');
+  }
+  if (payload.meta?.tech?.gazeQcSignalMethod !== undefined
+    && payload.meta.tech.gazeQcSignalMethod !== 'corrected_validity.v1') {
+    addError(errors, '/meta/tech/gazeQcSignalMethod', 'const', 'unsupported gaze QC signal method');
+  }
   validateOptionalString(
     payload.meta?.user?.interfaceLanguage,
     '/meta/user/interfaceLanguage',

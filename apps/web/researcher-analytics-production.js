@@ -314,6 +314,10 @@
     const code = String(value || '').trim().toLowerCase();
     const labels = {
       low_valid_gaze_fraction: ['Недостаточная доля валидного взгляда', 'Low valid-gaze fraction'],
+      gaze_spatial_validation_failed: ['Проверка пространственной точности не пройдена; AOI-метрики недоступны', 'Spatial validation failed; AOI metrics are unavailable'],
+      gaze_spatial_validation_missing: ['Нет сохранённого результата проверки пространственной точности', 'No recorded spatial-validation outcome'],
+      gaze_aoi_accuracy_unestablished: ['Пригодность точности для размеров этих AOI не установлена', 'Accuracy suitability for these AOI sizes is not established'],
+      gaze_drift_not_measured: ['Дрейф взгляда во время задания не измерялся', 'Gaze drift during the task was not measured'],
       protocol_qc_gazevalid: ['Доля валидного взгляда ниже порога протокола', 'Valid-gaze fraction is below the protocol threshold'],
       protocol_qc_fpsstable: ['Частота анализа ниже порога протокола', 'Analysis frame rate is below the protocol threshold'],
       protocol_qc_facedetected: ['Лицо недостаточно видно для требований протокола', 'Face visibility is below the protocol threshold'],
@@ -2093,6 +2097,21 @@
     </article>`;
   }
 
+  function gazeSpatialNoticeHtml(state) {
+    const channels = state.summaryResponse?.data?.qcChannels || [];
+    const accuracy = channels.find(channel => channel.channel === 'gaze')?.spatialAccuracy;
+    const meanPx = typeof accuracy?.meanErrorPx === 'number' && Number.isFinite(accuracy.meanErrorPx)
+      ? `${accuracy.meanErrorPx.toFixed(1)} px` : tr('нет данных', 'not recorded');
+    const meanPct = typeof accuracy?.meanErrorPct === 'number' && Number.isFinite(accuracy.meanErrorPct)
+      ? ` (${accuracy.meanErrorPct.toFixed(1)}%)` : '';
+    return `<aside role="status" data-gaze-spatial-qc style="padding:12px 18px;background:rgba(245,158,11,.08);color:var(--text);font-size:11px;line-height:1.6;">
+      <strong>${tr('Доступность сигнала ≠ пространственная точность', 'Signal availability ≠ spatial accuracy')}</strong><br>
+      ${tr('Средняя ошибка проверки перед сессией', 'Mean pre-session validation error')}: ${escapeHtml(meanPx + meanPct)}.<br>
+      ${tr('Процент валидного взгляда и QC «Валидно» не подтверждают точность AOI. Прохождение общей проверки не гарантирует пригодность для конкретного размера AOI. Дрейф во время задания не измерялся; TTFF, доли и фиксации интерпретируйте с этим ограничением.', 'Valid-gaze percentage and “Valid” QC do not establish AOI accuracy. Passing general validation does not guarantee suitability for a particular AOI size. Drift during the task was not measured; interpret TTFF, dwell fractions and fixations with this limitation.')}
+      ${accuracy?.validationStatus === 'failed' ? `<br><strong>${escapeHtml(reasonLabel('gaze_spatial_validation_failed'))}</strong>` : ''}
+    </aside>`;
+  }
+
   function sessionVisualAnalyticsHtml(state) {
     if (state.visualStatus === 'loading' || state.visualStatus === 'idle') return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);font-size:10px;color:var(--muted);">${tr('Загружаем все тепловые карты участника…','Loading all participant heatmaps…')}</section>`;
     if (state.visualStatus === 'error') return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:700;color:var(--bad);">${tr('Не удалось загрузить AOI/тепловые карты','Could not load AOI/heatmaps')}</div><div style="font-size:9px;color:var(--muted);margin-top:5px;">${escapeHtml(state.visualError && state.visualError.message || '')}</div><button id="analyticsVisualRetry" class="quick-btn" type="button" style="margin-top:9px;">${tr('Повторить','Retry')}</button></section>`;
@@ -2100,7 +2119,7 @@
     const contexts = Array.isArray(data?.contexts) ? data.contexts : [];
     if (!contexts.length) return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')}</div><div style="font-size:10px;color:var(--muted);margin-top:6px;">${tr('В протоколе нет стимулов с размеченными AOI.','The protocol has no stimuli with AOI annotations.')}</div></section>`;
     const participant = data.participantAlias || selectedSession(state)?.participant_id || '—';
-    return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><details open><summary style="cursor:pointer;font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')} ${escapeHtml(participant)} · ${contexts.length}</summary><div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''}> ${tr('Фиксации','Fixations')}</label></div>${data.reason ? `<p role="status" style="color:var(--warn);font-size:11px;">${escapeHtml(reasonLabel(data.reason))}</p>` : ''}${contexts.map((context, index) => visualContextHtml(context, state, index)).join('')}</details></section>`;
+    return `<section style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><details open><summary style="cursor:pointer;font-size:13px;font-weight:750;color:var(--text);">${tr('Тепловые карты участника','Participant heatmaps')} ${escapeHtml(participant)} · ${contexts.length}</summary>${gazeSpatialNoticeHtml(state)}<div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--text);"><label><input class="analytics-layer-toggle" data-layer="heatmap" type="checkbox" ${state.layers.heatmap ? 'checked' : ''}> Heatmap</label><label><input class="analytics-layer-toggle" data-layer="aoi" type="checkbox" ${state.layers.aoi ? 'checked' : ''}> AOI</label><label><input class="analytics-layer-toggle" data-layer="fixations" type="checkbox" ${state.layers.fixations ? 'checked' : ''}> ${tr('Фиксации','Fixations')}</label></div>${data.reason ? `<p role="status" style="color:var(--warn);font-size:11px;">${escapeHtml(reasonLabel(data.reason))}</p>` : ''}${contexts.map((context, index) => visualContextHtml(context, state, index)).join('')}</details></section>`;
   }
 
   function resolutionLabel(value) {
@@ -2509,7 +2528,7 @@
       ['poseOk', tr('Положение головы','Head position')],
       ['illuminationOk', tr('Освещение','Lighting')],
       ['eyesOpen', tr('Глаза доступны','Eyes available')],
-      ['gazeValid', tr('Валидный взгляд','Valid gaze')],
+      ['gazeValid', tr('Доступный сигнал взгляда','Available gaze signal')],
       ['gazeOnScreen', tr('Взгляд на экране','Gaze on screen')],
       ['lowFps', tr('Кадры с низким FPS','Low-FPS frames')]
     ].filter(([key]) => Number.isFinite(Number(quality.percentages && quality.percentages[key])));
@@ -2517,13 +2536,14 @@
       ? `${Math.round(Number(quality.durationMs) / 1000)} ${tr('с','s')}`
       : tr('Нет данных','No data');
     const overview = [
-      [tr('Статус','Status'), statusLabel(quality.status)],
+      [tr('QC условий записи','Recording-condition QC'), statusLabel(quality.status)],
       [tr('QC-оценка','QC score'), Number.isFinite(Number(quality.score)) ? `${quality.score}%` : tr('Нет данных','No data')],
       [tr('Пройдено проверок','Checks passed'), quality.passedChecks != null && quality.totalChecks != null ? `${quality.passedChecks}/${quality.totalChecks}` : tr('Нет данных','No data')],
       [tr('Длительность','Duration'), duration]
     ];
     return `<div class="card" style="padding:0;overflow:hidden;">
       <header style="padding:16px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:10px;color:var(--muted);">${tr('Сессия','Session')} ${escapeHtml(session.sessionId)}</div><h2 style="font-size:17px;color:var(--text);margin:4px 0 0;">${tr('Качество данных','Data quality')}</h2></header>
+      ${gazeSpatialNoticeHtml(state)}
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;">${overview.map(([label,value], index) => `<article style="padding:12px;border:1px solid var(--stroke);border-radius:11px;background:${index === 0 ? qcTone(quality.status).bg : 'rgba(100,116,139,.04)'};"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:18px;font-weight:770;color:${index === 0 ? qcTone(quality.status).color : 'var(--text)'};margin-top:5px;">${escapeHtml(value)}</div></article>`).join('')}</div></section>
       <section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('QC по каналам','QC by channel')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); return `<article style="padding:11px;border:1px solid var(--stroke);border-radius:11px;background:${tone.bg};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;color:${tone.color};"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;color:var(--muted);margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? tr('Нет данных','No data') : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${(channel.reasons || []).length ? `<div style="font-size:9px;color:${tone.color};margin-top:5px;">${escapeHtml(channel.reasons.map(reasonLabel).join('; '))}</div>` : ''}</article>`; }).join('') || `<div style="font-size:10px;color:var(--muted);">${tr('Каналы QC не выбраны','No QC channels selected')}</div>`}</div></section>
       ${percentages.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Доля качественных кадров','Share of quality frames')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">${percentages.map(([key,label]) => { const value = Number(quality.percentages[key]); const inverse = key === 'lowFps'; const good = inverse ? value <= 5 : value >= 80; return `<article style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="display:flex;justify-content:space-between;gap:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(label)}</span><strong style="color:${good ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(value)}%</strong></div><div style="height:6px;border-radius:999px;background:rgba(100,116,139,.12);margin-top:7px;overflow:hidden;"><span style="display:block;height:100%;width:${Math.max(0,Math.min(100,value))}%;background:${good ? 'var(--good)' : 'var(--warn)'};"></span></div></article>`; }).join('')}</div></section>` : ''}

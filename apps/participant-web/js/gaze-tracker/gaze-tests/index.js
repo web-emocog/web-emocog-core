@@ -13,8 +13,8 @@ import {
     startGazeTestsAnalysisLoop,
     stopGazeTestsAnalysisLoop,
     isGazeTestsAnalysisLoopRunning
-} from './common/analysis-loop.js?v=20261104-4';
-import { getSessionRuntime } from '../../session-runtime/index.js?v=20261104-4';
+} from './common/analysis-loop.js?v=20261108-143l';
+import { getSessionRuntime } from '../../session-runtime/index.js?v=20261108-143l';
 
 let hubBusy = false;
 let hubEmotionTimer = null;

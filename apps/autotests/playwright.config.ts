@@ -26,7 +26,7 @@ export default defineConfig({
 
   outputDir: 'test-results',
   webServer: {
-    command: 'python3 -m http.server 4173 --bind 127.0.0.1 --directory ../../',
+    command: 'python3 scripts/serve-static.py 4173',
     port: 4173,
     reuseExistingServer: false,
     timeout: 120_000,

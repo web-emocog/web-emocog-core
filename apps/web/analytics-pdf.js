@@ -71,7 +71,8 @@
     const clone = body.cloneNode(true);
     // Filters are represented by the immutable queryEcho, not live form values.
     clone.firstElementChild?.remove();
-    clone.querySelectorAll('button, input, select, textarea, nav, svg, canvas, video, img, [role="status"]').forEach(node => node.remove());
+    // Transient progress is not report data; the spatial QC limitation is.
+    clone.querySelectorAll('button, input, select, textarea, nav, svg, canvas, video, img, [role="status"]:not([data-gaze-spatial-qc])').forEach(node => node.remove());
     clone.querySelectorAll('table').forEach(table => {
       const text = global.document.createElement('div');
       text.textContent = [...table.rows].map(row => [...row.cells].map(cell => cell.textContent.trim()).join(' | ')).join('\n');

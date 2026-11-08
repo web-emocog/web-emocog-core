@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:">
+<title>Issue 143 — локальная проверка взгляда</title>
+<style>
+body { margin:0; font:18px system-ui; color:#17392d; background:#fafbf8 }
+main { max-width:850px; margin:5vh auto; padding:25px; line-height:1.6 }
+button { font:inherit; padding:10px 16px; margin:8px; border-radius:12px; border:1px solid #436d55; background:#edf5ef }
+#stop { position:fixed; right:12px; top:8px; z-index:4; margin:0; padding:6px 8px; font-size:14px; line-height:1.2 }
+#status { white-space:pre-wrap }
+#target { position:fixed; width:40px; height:40px; padding:0; margin:0; border:0; background:#DC2626; border-radius:50%; transform:translate(-50%,-50%); z-index:3; transition:none; box-shadow:none }
+video { max-width:400px; transform:scaleX(-1) }
+pre { font:13px monospace; white-space:pre-wrap; overflow-wrap:anywhere }
+.running main { margin:0 auto; font-size:16px; max-width:700px }
+.running { color:white; background:#1a1a2e }
+.running #instructions { display:none }
+.running #status { position:fixed; bottom:8px; left:12px; right:12px; margin:0; font-size:12px; line-height:1.15; pointer-events:none }
+</style>
+<main>
+<section id="instructions">
+<h1>Проверка взгляда — issue 143</h1>
+<p>Только локальный диагностический тест. Это не исследовательская сессия, не QC-сертификат и не замена повтору полного протокола.</p>
+<p id="modelDescription">Одна модель с теми же двумя кликами, отбором кадров и коррекцией, что в основном проекте. Исходный и скорректированный прогноз оцениваются раздельно на одних кадрах. Отправки на API нет. Видео, сырые landmarks и ряды координат взгляда не сохраняются; JSON содержит только сводки.</p>
+<p>В Safari установите масштаб 100%, не меняйте размер окна и положение камеры. Сядьте удобно и держите голову естественно. Смотрите на каждый красный круг и нажмите на него два раза. Между нажатиями продолжайте смотреть в центр круга. Можно моргать между переходами к следующей точке и перед следующим нажатием. Во время нажатия держите глаза открытыми и смотрите в центр круга.</p>
+<p id="durationDescription">После 25 точек — подготовка и независимая проверка коррекции, затем две проверки по 9 точкам с непрерывным интервалом 4 минуты. Между проверками переводите взгляд по экрану естественно. Тест займёт около 7–8 минут. Это отдельная диагностика, не полный многомодальный протокол.</p>
+<button id="start">Разрешить камеру</button><button id="calibrate" hidden>Начать калибровку</button>
+<video id="video" autoplay muted playsinline></video>
+</section>
+<section id="poseStep" aria-labelledby="poseInstruction" hidden>
+<p id="poseInstruction"></p>
+<button id="poseContinue">Готово, показать точки</button>
+</section>
+<p id="status" role="status">Камера выключена.</p><pre id="result"></pre>
+<button id="download" hidden>Скачать сводку JSON</button>
+</main>
+<button id="stop" disabled>Остановить и выключить камеру</button>
+<button id="target" aria-label="Калибровочная точка" hidden></button>
+<script type="module" src="./issue143-gaze.mjs?v=20261108-143m"></script>
+</html>

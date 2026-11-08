@@ -1,0 +1,16 @@
+body { margin:0; font:18px system-ui; color:#17392d; background:#fafbf8 }
+a { color:#246248 }
+main { max-width:850px; margin:5vh auto; padding:25px; line-height:1.6 }
+button, select { font:inherit; padding:10px 16px; margin:8px; border-radius:12px; border:1px solid #436d55; background:#edf5ef }
+select { max-width:100%; margin-left:0 }
+label { display:block } input { width:20px; height:20px }
+button:disabled { opacity:.5 } button:not(:disabled) { cursor:pointer }
+#stop { position:fixed; right:12px; top:8px; z-index:4; margin:0; padding:6px 8px; font-size:14px; line-height:1.2 }
+#status { white-space:pre-wrap }
+#target { position:fixed; width:40px; height:40px; padding:0; margin:0; border:0; background:#DC2626; border-radius:50%; transform:translate(-50%,-50%); z-index:3; transition:none; box-shadow:none }
+video { max-width:min(400px,100%); transform:scaleX(-1) }
+pre { font:13px monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:450px; overflow:auto }
+.running main { margin:0 auto; font-size:16px; max-width:700px }
+.running { color:white; background:#1a1a2e }
+.running #instructions { display:none }
+.running #status { position:fixed; bottom:8px; left:12px; right:12px; margin:0; font-size:12px; line-height:1.15; pointer-events:none }
