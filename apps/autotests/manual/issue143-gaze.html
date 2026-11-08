@@ -28,10 +28,14 @@ pre { font:13px monospace; white-space:pre-wrap; overflow-wrap:anywhere }
 <button id="start">Разрешить камеру</button><button id="calibrate" hidden>Начать калибровку</button>
 <video id="video" autoplay muted playsinline></video>
 </section>
+<section id="poseStep" aria-labelledby="poseInstruction" hidden>
+<p id="poseInstruction"></p>
+<button id="poseContinue">Готово, показать точки</button>
+</section>
 <p id="status" role="status">Камера выключена.</p><pre id="result"></pre>
 <button id="download" hidden>Скачать сводку JSON</button>
 </main>
 <button id="stop" disabled>Остановить и выключить камеру</button>
 <button id="target" aria-label="Калибровочная точка" hidden></button>
-<script type="module" src="./issue143-gaze.mjs?v=20261107-143i"></script>
+<script type="module" src="./issue143-gaze.mjs?v=20261108-143m"></script>
 </html>

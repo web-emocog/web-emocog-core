@@ -161,7 +161,7 @@ for (const lang of ['ru', 'en']) {
         shared.currentLang = lang;
         shared.runtime.sessionRuntime.policyShown = true;
         const { loadAndStartCognitiveTask } = await import(new URL(
-          'js/web-page/experimental_task-updated.js?v=20261107-143i', location.href).href);
+          'js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
           version: 'instruction-regression', blocks: [
             { id: 'instruction', type: 'instruction', content: { title: 'Инструкция: Simple RT - тренировка', text: 'Нажмите Пробел.' } },
@@ -185,7 +185,7 @@ test('choice rules use trial mappings, custom placeholders survive, and all ten 
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
     const { loadAndStartCognitiveTask } = await import(new URL(
-      'js/web-page/experimental_task-updated.js?v=20261107-143i', location.href).href);
+      'js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
     const rows: Array<{ lang: string; task: string; text: string }> = [];
     for (const lang of ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur']) {
       shared.currentLang = lang;

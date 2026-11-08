@@ -1,5 +1,5 @@
 import { createValidationSamplingWindow } from './validation-sampling.mjs';
-import { extractFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261107-143i';
+import { extractFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261108-143l';
 import { MIN_GAZE_CONFIDENCE } from './signal-processing.mjs?v=20261106-143';
 
 export const CALIBRATION_CAPTURE_VERSION = 'click_capture.v1';

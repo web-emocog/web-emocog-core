@@ -17,6 +17,7 @@ gaze-tracker/
   qc-signal.mjs                accepted corrected signal для live QC, не display
   eye-patch-features.mjs        local-only experimental eye appearance, без recapture
   eye-gradient-features.mjs     local-only gradient-center eye signal, same-frame pixels
+  eye-tophat-features.mjs       local-only horizontal black top-hat, same-frame pixels
   attention-metrics.js         blinks, PERCLOS и research-only метрики
 ```
 
@@ -160,6 +161,15 @@ pass. Не выбирать вариант по synthetic результату �
 без real-device/full-protocol приёмки. Блики и near-closure остаются ограничениями.
 Подробности: [отчёт v7](../../../../docs/reports/2026-11-07-issue143-eye-gradient.md).
 
+Локальный `?models=tophat&pose=1` — v10: baseline, full patch, Gradient All и
+`eye_tophat_ridge.experimental.v1`. Горизонтальный black top-hat на
+corner-aligned grid 32×20, pooling 2×2, 320 признаков; `region:'tophat'` —
+только explicit constructor opt-in. Общий subset калибровки full/all/tophat,
+прежние head/iris gates, correction и target-group CV. Протокол не выбирает
+этот метод, ingest его отвергает, production default не меняется. Есть
+synthetic regressions на texture/near-closure; данных webcam acceptance нет.
+Сценарий A–B–A и результаты: [отчёт v10](../../../../docs/reports/2026-11-08-issue143-eye-tophat.md).
+
 ## Content viewport coordinates
 
 Калибровка и prediction используют CSS pixels внутри видимой области страницы:
@@ -284,6 +294,13 @@ negative nonlinear-Y case. Принудительный mixed не универ�
   на протяжении блока; SD радиальных ошибок не равна пространственному jitter.
 
 ## Лицензии и источники
+
+Отдельное сравнение в developer panel: `apps/participant-web/tools/gaze-benchmark.html`.
+Baseline/full patch/Gradient All/top-hat получают общие кадры; fixed spatial,
+posture и temporal программы. Локальный JSON, без автоматической отправки;
+camera требует согласия и свежего admin/developer auth. Это не новый default и
+не приёмка accuracy. Методика/приватность/rollout:
+`docs/reports/2026-11-08-issue143-developer-benchmark.md`.
 
 - MediaPipe: Apache-2.0.
 - Код проекта: Apache-2.0.

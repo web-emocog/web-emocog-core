@@ -92,6 +92,7 @@ test('new feature-method provenance survives aggregate compaction without raw fa
     'eye_patch_core_ridge.experimental.v1',
     'eye_gradient_iris.experimental.v1',
     'eye_gradient_all_iris.experimental.v1',
+    'eye_tophat_ridge.experimental.v1',
     'same_eye_iris.v2 '.repeat(1000)]) {
     payload.meta.tech.gazeFeatureMethod = invalid;
     const invalidErrors = validateSessionFeaturePayload(payload);

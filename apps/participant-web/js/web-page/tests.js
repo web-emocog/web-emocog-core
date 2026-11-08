@@ -13,7 +13,7 @@ import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from
 import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261104-4';
 import { buildHeatmaps } from './heatmap.js?v=20261102-1';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
-import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261107-143i';
+import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261108-143l';
 import { extractEyeSignalSample } from './eye-signal.js';
 
 

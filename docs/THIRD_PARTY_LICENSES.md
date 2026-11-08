@@ -148,6 +148,25 @@ distributing the image. LGPL/GPL terms depend on the package build; these tools
 are separate subprocesses, not a browser/Node-linked library. Local tests used
 Alpine FFmpeg 8.0.1. See root `THIRD_PARTY_LICENSES.md` for the scope of the notice.
 
+### Experimental horizontal black top-hat eye signal (#143)
+
+`gaze-tracker/eye-tophat-features.mjs` is original Apache-2.0 EmoCog code,
+versioned `eye_tophat_ridge.experimental.v1`. It implements horizontal
+grayscale closing minus the input on same-frame corner-aligned eye grids.
+The standard definition was checked against OpenCV's official morphology
+documentation: https://docs.opencv.org/4.13.0/d9/d61/tutorial_py_morphological_ops.html .
+No OpenCV code/package/images, model weights or datasets are included.
+MPIIGaze (https://arxiv.org/abs/1711.09017) was consulted as methodological
+context only; no MPIIGaze data/GazeNet code or weights were downloaded.
+This explicit local experiment is not a claim of webcam accuracy or drift
+robustness. Negative synthetic results and acceptance scope are recorded in
+`docs/reports/2026-11-08-issue143-eye-tophat.md`.
+
+The authenticated developer gaze benchmark reuses these original implementations
+and the same pinned MediaPipe assets. It adds no third-party code, weights or
+datasets. Downloaded aggregate reports do not contain eye images, feature vectors
+or model weights. Experimental methods remain outside participant ingest/defaults.
+
 ## Test tooling: js-yaml
 
 The existing Node test helper dependency is updated from 4.3.1 to 4.3.2 to fix

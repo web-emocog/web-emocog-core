@@ -6,10 +6,10 @@ import {
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261025-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261107-143i';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261108-143l';
 import { stopPreCheck } from './precheck-updated.js?v=20261104-4';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261107-143i';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261108-143l';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -20,11 +20,11 @@ import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261107-143i';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261108-143l';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
     CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
-} from '../gaze-tracker/calibration-capture.mjs?v=20261107-143i';
+} from '../gaze-tracker/calibration-capture.mjs?v=20261108-143l';
 import { calculateValidationMetrics as sharedValidationMetrics,
     fitValidationCorrection, assessCorrectionBenchmark } from '../gaze-tracker/validation-metrics.mjs';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../gaze-tracker/validation-sampling.mjs';
@@ -44,7 +44,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261107-143i';
+} from '../session-runtime/index.js?v=20261108-143l';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,

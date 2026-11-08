@@ -494,6 +494,49 @@ same-frame pixels/corners, не iris landmark, stimulus или prediction histor
 method tag не допускается ingest. Методика, нагрузка и приёмка — в
 `docs/reports/2026-11-07-issue143-eye-gradient.md`.
 
+Явный `?models=gradient&temporal=1` — отдельная локальная v8: те же модели и
+две одинаковые 9-target серии по сторонам интервала 240000 ms без целей.
+Модель и correction заморожены. Counts интервала не удостоверяют точность
+внутри него; before/after сравнивать по цели, не выдавать за общие кадры.
+Офлайн quadratic снизил edge error, но ухудшил off-screen specificity, поэтому
+в браузер не подключён. См. `docs/reports/2026-11-07-issue143-gradient-mapping-temporal.md`.
+
+`?models=gradient&pose=1` — локальная v9 (A–B–A, 5 совпадающих целей):
+исходная посадка, чуть ниже, возврат. Явная кнопка до каждой серии, timeout
+60 s и teardown. Нет целей во время смены посадки, подстройки модели или
+вмешательства в опубликованный блок. Head proxies — не ground truth;
+не путать v9 с проверкой длительного дрейфа v8. Смысл фиксированной
+X/Y-поправки и критерии: `docs/reports/2026-11-07-issue143-posture-probe.md`.
+Первый human A–B–A подтверждает чувствительность, но не причинность или
+решённый drift. Offline within-click covariance loss ухудшил lid-shift oracle;
+`scripts/reference-data/issue143-click-scatter.mjs` не подключать в participant
+как улучшение по одному числовому тесту. API/пороги и default не менялись.
+
+Локальная v10 `?models=tophat&pose=1` сравнивает baseline/full/Gradient All
+и `eye_tophat_ridge.experimental.v1`: original horizontal black top-hat,
+320 same-frame eye features, без head→target fit. Новый region только opt-in,
+API его отвергает. Все модели получают пересечение full/all/tophat calibration
+captures. Есть negative texture/near-closure results; нельзя продвигать по
+lid-shift fixture. Cache tags singleton-consumers `20261108-143l`, pixel-owner
+module один. Приёмка: `docs/reports/2026-11-08-issue143-eye-tophat.md`.
+Первый human v10: top-hat меньше повторил return-сдвиг full patch, но хуже
+initial accuracy/jitter и сильно ошибается внизу. Не продвигать по стабильной
+mean error; v10 analysis — `issue143_gradient_analysis.v4`, не новая модель.
+
+`/apps/participant-web/tools/gaze-benchmark.html` — отдельный developer benchmark
+из панели, не participant entrypoint и не публичный bypass. Admin/developer
+подтверждаются cookie `/auth/me` и заново перед камерой; измерения только после
+согласия/кнопки. Четыре кандидата baseline/full/Gradient All/top-hat на общих
+кадрах, fixed программы spatial/posture/temporal v1. Контроллер/модели/агрегаты
+общие с localhost harness в `apps/web/developer/gaze-benchmark*.mjs`, без зависимости
+deployed assets от autotests. JSON `gaze_benchmark.v1` — bounded aggregates,
+coarse browser/OS/viewport/camera, времена, completed/failure; без raw media,
+признаков/весов/рядов, аккаунтов или автоматической отправки. Failed run не pass.
+Не выдавать всем developer ради выборки: отдельный tester access требует решения.
+Политика камеры не расширена; static assets не являются серверной авторизацией.
+См. `docs/reports/2026-11-08-issue143-developer-benchmark.md`. Эксперименты не
+продвигаются по синтетике/одному человеку, не допускаются participant ingest.
+
 `session-runtime/gaze-history.mjs` накапливает карты до обрезки raw gaze buffer.
 Локальный `heatmapState` входит в checkpoint, но не в ingest. Worker и final
 используют один accumulator; при reload незавершённая фиксация не дублируется.

@@ -125,6 +125,28 @@ test('shared correction math agrees with original functions, and independent wor
   assert.equal(fitValidationCorrection([], viewport).postCalibrationCorrection.applied, false);
 });
 
+test('constant-bias correction depends on generalization, not poor absolute accuracy', async () => {
+  const { fitValidationCorrection, assessCorrectionBenchmark } = await load('validation-metrics.mjs');
+  const viewport = { width: 1000, height: 800 };
+  const points = offsets => [150, 500, 850].flatMap((targetX, col) => [120, 400, 680].map(targetY => ({
+    samples: Array.from({ length: 20 }, () => ({ targetX, targetY, gazeX: targetX + offsets[col], gazeY: targetY - 4 })) })));
+  const smallUniform = fitValidationCorrection(points([7, 7, 7]), viewport);
+  assert.ok(smallUniform.rawMetrics.accuracyPx < 10);
+  assert.equal(smallUniform.postCalibrationCorrection.applied, true);
+  assert.deepEqual([smallUniform.correction.offsetX, smallUniform.correction.offsetY], [-7, 4]);
+
+  const largeNonUniform = fitValidationCorrection(points([-150, 0, 150]), viewport);
+  assert.ok(largeNonUniform.rawMetrics.accuracyPx > 100);
+  assert.equal(largeNonUniform.postCalibrationCorrection.fitted, true);
+  assert.equal(largeNonUniform.postCalibrationCorrection.applied, false);
+
+  // Different locations never enter fit: they can only retain/reject the offset.
+  const independent = [300, 600].flatMap(targetX => [200, 500, 600].map(targetY => ({
+    samples: Array.from({ length: 20 }, () => ({ targetX, targetY,
+      rawX: targetX + 7, rawY: targetY - 4, gazeX: targetX, gazeY: targetY })) })));
+  assert.equal(assessCorrectionBenchmark(independent, viewport, true).independentDecision.accepted, true);
+});
+
 test('raw/corrected summaries use distinct coordinates and distinct on-screen counts', async () => {
   const { createMatchedWindow, observeMatchedWindow, finishMatchedWindow } = await import(pathToFileURL(path.resolve(__dirname, '../../autotests/manual/issue143-summary.mjs')));
   const window = createMatchedWindow({ x: 50, y: 50 }, 0, ['raw', 'corrected'],

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>wecog — сравнение моделей взгляда</title>
+  <link rel="icon" href="../../web/assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../web/developer/gaze-benchmark.css?v=20261108-143m">
+  <script src="../../web/api-base.js?v=20260819-1"></script>
+  <script src="../../web/http-client.js?v=20261027-1"></script>
+  <script src="../../web/account-storage.js?v=20261019-5"></script>
+  <script src="../../web/staff-session.js?v=20261027-1"></script>
+  <script src="../../web/auth-guard.js?v=20261027-1"></script>
+</head>
+<body>
+<main>
+  <section id="instructions">
+    <a href="../../web/developer.html">← Панель разработчика</a>
+    <h1>Сравнение моделей взгляда</h1>
+    <p>Отдельная добровольная диагностика для проверки на разных людях, браузерах и устройствах. Не исследовательская сессия, не медицинский тест и не подтверждение точности AOI.</p>
+    <p id="modelDescription"></p>
+    <label for="protocol">Программа проверки</label>
+    <select id="protocol">
+      <option value="spatial">Пространственная точность — короткая</option>
+      <option value="posture">Посадка: исходная → чуть ниже → возврат</option>
+      <option value="temporal">Длительность: до → 4 минуты → после</option>
+    </select>
+    <p id="durationDescription"></p>
+    <p>Используйте привычный браузер и масштаб 100%. Сядьте удобно и держите голову естественно. Не меняйте окно, масштаб или положение камеры во время запуска. Смотрите на каждый красный круг и нажмите на него два раза. Между нажатиями продолжайте смотреть в центр круга. Можно моргать между переходами к следующей точке и перед следующим нажатием. Во время нажатия держите глаза открытыми и смотрите в центр круга. На зелёные точки нажимать не нужно.</p>
+    <p>Видео, звук, изображения глаз, landmarks, веса модели и покадровые ряды взгляда не сохраняются и не отправляются. В JSON — агрегаты ошибок, разброса, пропусков, усреднённых признаков головы/глаз, тайминги и технические параметры браузера/камеры/окна. Даже незавершённый запуск можно скачать, чтобы не потерять сведения об отказах. JSON может содержать чувствительные производные измерения: передавайте только согласованному получателю.</p>
+    <label><input id="consent" type="checkbox"> Я согласен(на) на локальную проверку и понимаю состав JSON. Файл скачиваю и передаю вручную.</label>
+    <div><button id="start" disabled>Разрешить камеру</button><button id="calibrate" hidden>Начать калибровку</button></div>
+    <video id="video" autoplay muted playsinline></video>
+  </section>
+  <section id="poseStep" aria-labelledby="poseInstruction" hidden>
+    <p id="poseInstruction"></p><button id="poseContinue">Готово, показать точки</button>
+  </section>
+  <p id="status" role="status">Камера выключена. Проверяем доступ.</p>
+  <button id="download" hidden>Скачать сводку JSON</button><pre id="result"></pre>
+</main>
+<button id="stop" disabled>Остановить и выключить камеру</button>
+<button id="target" aria-label="Калибровочная точка" hidden></button>
+<script type="module" src="../../web/developer/gaze-benchmark-bootstrap.mjs?v=20261108-143m"></script>
+</body>
+</html>

@@ -12,10 +12,11 @@
  * @license Apache-2.0
  */
 import { LANDMARKS, MIN_LANDMARKS, DEFAULTS, FEATURE_METHOD, EXPERIMENTAL_FEATURE_METHOD, CALIBRATION_SAMPLING } from './constants.js?v=20261106-143';
-import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261107-143i';
+import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261108-143l';
 import { ridgeRegression, ridgeRegressionDual, dotProduct } from './ridge.js?v=20261107-143';
 import { EYE_PATCH_LENGTH, EYE_PATCH_METHOD, EYE_PATCH_SPEC, EYE_PATCH_CORE_LENGTH, EYE_PATCH_CORE_METHOD } from './eye-patch-features.mjs?v=20261107-143';
 import { EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD, EYE_GRADIENT_LENGTH, EYE_GRADIENT_SPEC } from './eye-gradient-features.mjs?v=20261107-143g';
+import { EYE_TOPHAT_METHOD, EYE_TOPHAT_LENGTH, EYE_TOPHAT_SPEC } from './eye-tophat-features.mjs?v=20261108-143l';
 import {
     AdaptiveGazeFilter,
     fitDistribution,
@@ -118,7 +119,7 @@ function fitCalibrationRows(rows, lambda, featureMethod, baseFloors = IRIS_STD_F
     // Diagnostic per-axis bases preserve per-column train statistics. Zero-pad
     // omitted nonlinear terms so predict keeps one target-blind feature vector.
     const xMatrix = linearX ? matrix.map(row => [...row.slice(0, 8), 1]) : matrix;
-    const ridge = [EYE_PATCH_METHOD, EYE_PATCH_CORE_METHOD, EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD].includes(featureMethod) ? ridgeRegressionDual : ridgeRegression;
+    const ridge = [EYE_PATCH_METHOD, EYE_PATCH_CORE_METHOD, EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD, EYE_TOPHAT_METHOD].includes(featureMethod) ? ridgeRegressionDual : ridgeRegression;
     const xFit = ridge(xMatrix, targetsX, lambdaX);
     const modelX = linearX && xFit ? [...xFit.slice(0, 8), 0, 0, 0, xFit[8]] : xFit;
     const yMatrix = linearY ? matrix.map(row => [...row.slice(0, 8), 1]) : matrix;
@@ -233,16 +234,16 @@ export default class GazeTracker {
             const config = options.experimentalEyePatch;
             if (!config || options.experimentalModel !== undefined || options.experimentalGeometry !== undefined
                 || typeof config.readFeatures !== 'function'
-                || !['full', 'core', 'gradient', 'gradient_all'].includes(config.region ?? 'full')
+                || !['full', 'core', 'gradient', 'gradient_all', 'tophat'].includes(config.region ?? 'full')
                 || ![config.frameWidth, config.frameHeight].every(v => Number.isSafeInteger(v) && v > 0 && v <= 16384)) {
                 throw new RangeError('Invalid explicit experimental eye-patch model');
             }
-            const region = config.region ?? 'full', gradient = region.startsWith('gradient');
-            const count = gradient ? EYE_GRADIENT_LENGTH : region === 'core' ? EYE_PATCH_CORE_LENGTH : EYE_PATCH_LENGTH;
+            const region = config.region ?? 'full', gradient = region.startsWith('gradient'), tophat = region === 'tophat';
+            const count = tophat ? EYE_TOPHAT_LENGTH : gradient ? EYE_GRADIENT_LENGTH : region === 'core' ? EYE_PATCH_CORE_LENGTH : EYE_PATCH_LENGTH;
             this._eyePatch = Object.freeze({ geometry: gradient ? 'eye_gradient' : 'eye_patch', basis: gradient ? 'center_linear' : 'appearance_linear', region, featureCount: count,
                 frameWidth: config.frameWidth, frameHeight: config.frameHeight, maxTrainingRows: 50,
-                crop: gradient ? Object.freeze({ ...EYE_GRADIENT_SPEC, support: region === 'gradient_all' ? 'all' : 'lateral' }) : EYE_PATCH_SPEC });
-            this._featureMethod = region === 'gradient' ? EYE_GRADIENT_METHOD : region === 'gradient_all' ? EYE_GRADIENT_ALL_METHOD
+                crop: tophat ? EYE_TOPHAT_SPEC : gradient ? Object.freeze({ ...EYE_GRADIENT_SPEC, support: region === 'gradient_all' ? 'all' : 'lateral' }) : EYE_PATCH_SPEC });
+            this._featureMethod = tophat ? EYE_TOPHAT_METHOD : region === 'gradient' ? EYE_GRADIENT_METHOD : region === 'gradient_all' ? EYE_GRADIENT_ALL_METHOD
                 : region === 'core' ? EYE_PATCH_CORE_METHOD : EYE_PATCH_METHOD;
             this._featureFloors = new Array(count).fill(gradient ? .03 : .05);
             const readFeatures = config.readFeatures;
