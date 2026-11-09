@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { installGazeAccess } from '../fixtures/gaze-benchmark-auth';
+import { landmarksForGaze } from '../../api/tests/fixtures/gaze-topology';
 const url = '/apps/participant-web/tools/gaze-benchmark.html';
 
 async function pendingCamera(page: Page) {
@@ -11,6 +12,100 @@ async function pendingCamera(page: Page) {
     } } });
   });
 }
+
+async function prepareCalibration(page: Page) {
+  await installGazeAccess(page);
+  await page.addInitScript(landmarks => {
+    const w = window as any;
+    w.calibrationLandmarks = landmarks; w.completedCaptures = 0; w.stoppedTracks = 0;
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({
+      getTracks: () => [{ addEventListener() {}, stop() { w.stoppedTracks++; } }],
+    }) } });
+    Object.defineProperties(HTMLVideoElement.prototype, {
+      srcObject: { configurable: true, get() { return (this as any).testStream; }, set(v) { (this as any).testStream = v; } },
+      videoWidth: { configurable: true, get: () => 640 }, videoHeight: { configurable: true, get: () => 480 },
+    });
+    HTMLMediaElement.prototype.play = async () => {};
+  }, landmarksForGaze(.2, -.3));
+  await page.route('**/precheck-analyzer/PrecheckAnalyzer.js?*', route => route.fulfill({ contentType: 'text/javascript', body: `
+    import { rememberFramePixels } from '/apps/participant-web/js/session-runtime/frame-pixels.mjs';
+    import { syntheticEyeImage } from '/apps/autotests/fixtures/issue143-eye-image.mjs';
+    const landmarks = window.calibrationLandmarks, pixels = syntheticEyeImage(landmarks, { gazeX: .2, gazeY: -.3 });
+    export default class Analyzer {
+      async initialize() { return true; } dispose() {}
+      async analyzeFrame() {
+        window.completedCaptures++;
+        return rememberFramePixels({ landmarks, timestamp: performance.now(), frameSize: { width: 640, height: 480 } }, pixels);
+      }
+    }` }));
+  await page.route('**/session-runtime/video-frames.mjs?*', route => route.fulfill({ contentType: 'text/javascript', body: `
+    export function observeVideoFrames(video, callback) {
+      const id = setInterval(() => callback(performance.now()), 33);
+      return { stop() { clearInterval(id); } };
+    }` }));
+  await page.goto(url);
+  await expect(page.locator('#status')).toContainText('Доступ подтверждён');
+  await page.locator('#consent').check(); await page.locator('#start').click();
+  await expect(page.locator('#calibrate')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).completedCaptures)).toBeGreaterThan(0);
+}
+
+test('calibration starts when hiding the preview removes a classic scrollbar', async ({ playwright, browserName, baseURL }) => {
+  test.skip(browserName !== 'chromium', 'Native classic scrollbar regression in Chromium');
+  const browser = await playwright.chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'],
+    args: ['--disable-features=OverlayScrollbar,OverlayScrollbars'] });
+  try {
+    const page = await browser.newPage({ baseURL, viewport: { width: 1536, height: 826 }, deviceScaleFactor: 1.25 });
+    await prepareCalibration(page);
+    await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px } #instructions { min-height: 1800px }' });
+    expect(await page.evaluate(() => innerWidth - visualViewport!.width)).toBeGreaterThan(0);
+    await page.locator('#calibrate').click();
+    // Let the browser deliver the native visualViewport resize, not just the click task.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.locator('#status')).toContainText('Калибровка 1/25');
+    await expect(page.locator('#target')).toBeVisible();
+    expect(await page.evaluate(() => visualViewport!.width)).toBe(1536);
+    expect(await page.evaluate(() => (window as any).stoppedTracks)).toBe(0);
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => (window as any).stoppedTracks)).toBe(1);
+    expect(await page.evaluate(() => innerWidth - visualViewport!.width)).toBeGreaterThan(0);
+  } finally { await browser.close(); }
+});
+
+test('calibration accepts unchanged geometry events but stops for a real resize', async ({ page }) => {
+  await prepareCalibration(page);
+  // The window can be resized while preview is open, before a single click is measured.
+  await page.setViewportSize({ width: 1100, height: 750 });
+  await page.locator('#calibrate').click();
+  await expect(page.locator('#target')).toBeVisible();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('resize'));
+    visualViewport?.dispatchEvent(new Event('resize'));
+  });
+  await expect(page.locator('#status')).toContainText('Калибровка 1/25');
+  await page.setViewportSize({ width: 1050, height: 720 });
+  await expect(page.locator('#download')).toBeVisible();
+  await expect(page.locator('#target')).toBeHidden();
+  const { benchmark } = JSON.parse((await page.locator('#result').textContent())!);
+  expect(benchmark).toMatchObject({ reason: 'viewport_changed', completed: false, phase: 'calibration',
+    environment: { viewport: { width: 1100, height: 750 } } });
+  expect(await page.evaluate(() => (window as any).stoppedTracks)).toBe(1);
+});
+
+test('a visual zoom change during calibration stops the camera and keeps the original scale in the report', async ({ page }) => {
+  await prepareCalibration(page);
+  await page.locator('#calibrate').click();
+  await expect(page.locator('#target')).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(visualViewport!, 'scale', { value: 1.25 });
+    visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect(page.locator('#download')).toBeVisible();
+  await expect(page.locator('#target')).toBeHidden();
+  const { benchmark } = JSON.parse((await page.locator('#result').textContent())!);
+  expect(benchmark).toMatchObject({ reason: 'viewport_changed', completed: false, environment: { viewportScale: 1 } });
+  expect(await page.evaluate(() => (window as any).stoppedTracks)).toBe(1);
+});
 
 test('developer benchmark requires explicit consent/start and Stop closes late camera without transmitting measurements', async ({ page }) => {
   await installGazeAccess(page); await pendingCamera(page);
