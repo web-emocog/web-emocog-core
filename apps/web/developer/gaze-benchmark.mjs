@@ -1,13 +1,14 @@
 // Explicit diagnostic mount only; never called by the participant flow.
 // The local harness and authenticated developer page share this implementation.
 import { createMatchedWindow, observeMatchedWindow, finishMatchedWindow } from './gaze-benchmark-summary.mjs?v=20261108-143m';
-import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-report.mjs?v=20261108-143m';
+import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-report.mjs?v=20261109-143n';
 import { DiagnosticRun, SerialDiagnosticStage } from './diagnostic-run.mjs?v=20261104-4';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS, CORRECTION_POSITIONS,
   BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick, compareCalibrationClicks
 } from '../../participant-web/js/gaze-tracker/calibration-capture.mjs?v=20261108-143l';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../../participant-web/js/gaze-tracker/validation-sampling.mjs';
 import { fitValidationCorrection, assessCorrectionBenchmark } from '../../participant-web/js/gaze-tracker/validation-metrics.mjs';
+import { getContentViewport, targetCenterInContentViewport } from '../../participant-web/js/gaze-tracker/viewport-coordinates.mjs';
 import { createModelComparison, commonAppearanceCalibrationFrames, commonGradientCalibrationFrames, commonTophatCalibrationFrames, comparisonSignals, comparisonSignalKeys, comparisonPairs } from './gaze-benchmark-models.mjs?v=20261108-143m';
 import { eyePatchFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-patch-features.mjs?v=20261107-143';
 import { eyeGradientFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-gradient-features.mjs?v=20261107-143g';
@@ -39,7 +40,8 @@ function metadata(owned, completed, reason = null) {
     viewport: owned.viewport, camera: owned.camera, backend: owned.analyzer?.backend,
     frameCount: owned.count, frameErrors: owned.rejected,
     calibrationAttempts: owned.calibrationAttempts || 0, calibrationAccepted: owned.calibrationAccepted || 0,
-    userAgent: navigator.userAgent, devicePixelRatio, viewportScale: globalThis.visualViewport?.scale });
+    userAgent: navigator.userAgent, devicePixelRatio: owned.geometry?.dpr ?? devicePixelRatio,
+    viewportScale: owned.geometry?.scale ?? globalThis.visualViewport?.scale });
 }
 
 function failureDiagnostics(owned) {
@@ -72,6 +74,7 @@ function stop(message = 'Остановлено. Камера выключена
   delete document.body.dataset.posePhase;
   byId('calibrate').hidden = true; byId('stop').disabled = true;
   byId('start').disabled = !canStart(); document.body.classList.remove('running');
+  document.documentElement.classList.remove('gaze-benchmark-measuring');
   if (byId('protocol')) byId('protocol').disabled = false;
   if (byId('consent')) byId('consent').disabled = false;
   status(message);
@@ -100,8 +103,30 @@ async function deadline(promise, ms, owned) {
 
 function position(x, y) {
   const target = byId('target'); target.style.left = `${x}%`; target.style.top = `${y}%`; target.hidden = false;
-  const rect = target.getBoundingClientRect();
-  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  return targetCenterInContentViewport(target);
+}
+
+function measurementGeometry() {
+  return { ...getContentViewport(), windowWidth: innerWidth, windowHeight: innerHeight, dpr: devicePixelRatio };
+}
+
+function lockMeasurementGeometry(owned) {
+  // Read layout AFTER hiding the preview and removing root scrollbars. Some
+  // browsers deliver that resize in the next rendering step, after this click.
+  const geometry = owned.geometry = measurementGeometry();
+  owned.viewport = { width: geometry.width, height: geometry.height };
+  const options = { signal: owned.abort.signal };
+  const checkGeometry = () => {
+    if (run !== owned) return;
+    const current = measurementGeometry();
+    if (Object.keys(geometry).some(key => geometry[key] !== current[key])) {
+      stop('Размер окна, видимая область или масштаб изменились. Камера выключена; начните заново.', 'viewport_changed');
+    }
+  };
+  addEventListener('resize', checkGeometry, options);
+  globalThis.visualViewport?.addEventListener('resize', checkGeometry, options);
+  globalThis.visualViewport?.addEventListener('scroll', checkGeometry, options);
+  matchMedia(`(resolution: ${geometry.dpr}dppx)`).addEventListener('change', checkGeometry, options);
 }
 
 async function start() {
@@ -163,9 +188,6 @@ async function start() {
     owned.eyePatchTiming = { frames: 0, totalMs: 0, maxMs: 0 };
     owned.featureTiming = {};
     owned.calibrationTiming = {};
-    owned.trackers = createModelComparison(owned.viewport, owned.camera, tophatMode ? 'tophat' : gradientMode ? 'gradient' : appearanceMode ? 'appearance' : axisMode ? 'axis' : ablation,
-      eyeImageMode ? (landmarks, region) => owned.eyePatchFeatures?.get(landmarks)?.[region] : null);
-    owned.modelTiming = Object.fromEntries(Object.keys(owned.trackers).map(name => [name, { predictions: 0, totalMs: 0, maxMs: 0, errors: 0 }]));
     owned.latency = { n: 0, totalMs: 0, maxMs: 0 };
     owned.cadence = { notifications: 0, sourceFrames: 0, busySkipped: 0, budgetSkipped: 0, method: null };
     owned.observer = observeVideoFrames(video, async (now, count = 1, method = 'unknown') => {
@@ -223,6 +245,7 @@ async function start() {
           const age = analyzerCompletedAt - frame.timestamp;
           if (age >= 0) { owned.latency.n++; owned.latency.totalMs += age; owned.latency.maxMs = Math.max(owned.latency.maxMs, age); }
         }
+        if (!owned.trackers) return; // Preview checks descriptors, not gaze predictions.
         // Each regression sees the SAME completed inference. Never re-run
         // camera/MediaPipe per candidate; targets cannot enter predict context.
         const predictions = {};
@@ -338,8 +361,13 @@ async function calibrate() {
   owned.calibrating = true; byId('calibrate').hidden = true; byId('video').hidden = true;
   owned.phase = 'calibration';
   document.body.classList.add('running'); byId('target').style.backgroundColor = '#DC2626';
+  document.documentElement.classList.add('gaze-benchmark-measuring');
   const clickSummaries = [], repeatability = [];
   try {
+    lockMeasurementGeometry(owned);
+    owned.trackers = createModelComparison(owned.viewport, owned.camera, tophatMode ? 'tophat' : gradientMode ? 'gradient' : appearanceMode ? 'appearance' : axisMode ? 'axis' : ablation,
+      eyeImageMode ? (landmarks, region) => owned.eyePatchFeatures?.get(landmarks)?.[region] : null);
+    owned.modelTiming = Object.fromEntries(Object.keys(owned.trackers).map(name => [name, { predictions: 0, totalMs: 0, maxMs: 0, errors: 0 }]));
     for (let i = 0; i < CALIBRATION_POSITIONS.length; i++) {
       const pos = CALIBRATION_POSITIONS[i], target = position(pos.x, pos.y);
       let firstFeatures = null;
@@ -504,8 +532,6 @@ byId('download').onclick = () => {
 addEventListener('pagehide', () => stop());
 addEventListener('keydown', event => { if (run && event.key === 'Escape') stop(); });
 document.addEventListener('visibilitychange', () => { if (run && document.hidden) stop('Вкладка скрыта. Проверка остановлена, камера выключена.', 'page_hidden'); });
-addEventListener('resize', () => { if (run?.calibrating) stop('Размер окна изменился. Тест остановлен, камеру выключили. Начните заново с неизменным окном.', 'viewport_changed'); });
-globalThis.visualViewport?.addEventListener('resize', () => { if (run?.calibrating) stop('Масштаб или видимая область изменились. Нужна новая калибровка.', 'viewport_changed'); });
 if (ablation) document.getElementById('modelDescription').textContent = 'Четыре варианта модели на одних кадрах: текущая/пиксельная геометрия × квадратичная/линейная формула. У всех одинаковая калибровка, confidence/head/OOD gate, отдельная коррекция. В JSON только сводки ошибок, усреднённых признаков радужек/головы и технических счётчиков — без видео, landmarks и покадровых рядов. Модель автоматически не выбирается; на API ничего не отправляется.';
 if (axisMode) document.getElementById('modelDescription').textContent = 'Проверка регуляризации и формулы каждой оси: текущая модель, линейная, фиксированные λ 0.001/0.01/0.1/1 для обеих формул, смешанный X-quadratic/Y-linear и вариант с независимым выбором формулы и λ для X/Y только на калибровке. Всего 12 регрессий на одних кадрах одной камеры. На контрольных целях ничего не обучается. В JSON только агрегаты ошибок/признаков и кривые калибровочного CV, без видео, landmarks и покадровых рядов. На API ничего не отправляется.';
 if (appearanceMode) document.getElementById('modelDescription').textContent = 'Четыре экспериментальных варианта: исходная iris-модель, раздельная формула X/Y и два варианта по изображениям глаз — полный patch и центральная область с меньшим влиянием периферии век. Устойчивость к векам не гарантирована. Один camera/MediaPipe кадр для всех, обработка только локальная. Fit только на калибровке, без подстройки по контрольным целям или времени. В памяти — текущие признаки и ограниченный калибровочный набор; набор удаляется после fit. JSON содержит только агрегаты, покрытие и CV-кривые, без изображений, patch-векторов, landmarks и покадровых рядов. Missing patch не заменяется старым прогнозом. Отправки на API нет.';
