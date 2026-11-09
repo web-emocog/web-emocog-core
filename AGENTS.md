@@ -532,6 +532,9 @@ mean error; v10 analysis — `issue143_gradient_analysis.v4`, не новая м
 deployed assets от autotests. JSON `gaze_benchmark.v1` — bounded aggregates,
 coarse browser/OS/viewport/camera, времена, completed/failure; без raw media,
 признаков/весов/рядов, аккаунтов или автоматической отправки. Failed run не pass.
+Измерительный viewport фиксируется после скрытия preview и снятия scrollbar.
+Событие `resize` без изменения геометрии не прерывает тест; реальное изменение
+размера, масштаба, видимой области или DPR требует нового запуска.
 Не выдавать всем developer ради выборки: отдельный tester access требует решения.
 Политика камеры не расширена; static assets не являются серверной авторизацией.
 См. `docs/reports/2026-11-08-issue143-developer-benchmark.md`. Эксперименты не

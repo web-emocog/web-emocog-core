@@ -1,4 +1,4 @@
-export const GAZE_BENCHMARK_REVISION = '20261108-143m';
+export const GAZE_BENCHMARK_REVISION = '20261109-143n';
 export const GAZE_BENCHMARK_PROTOCOLS = Object.freeze(['spatial.v1', 'posture.v1', 'temporal.v1']);
 const phases = ['setup', 'access', 'camera_permission', 'model_initialization', 'ready', 'calibration', 'correction', 'independent', 'spatial_before', 'interval',
   'spatial_after', 'pose_natural', 'pose_lowered', 'pose_returned', 'completed'];
