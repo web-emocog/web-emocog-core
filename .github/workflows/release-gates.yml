@@ -241,7 +241,9 @@ jobs:
   frame-pipeline-regression:
     name: Frame pipeline and FPS diagnostics (ubuntu-24.04)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The complete worker, media, staff and audit suites exceed 20 minutes.
+    # Individual test deadlines and measurement thresholds are unchanged.
+    timeout-minutes: 30
     env:
       WECOG_TEST_HEADED: '1'
       WECOG_TEST_ENGINES: chromium,firefox

@@ -31,6 +31,10 @@ The changes address failed CI checks and the CodeQL findings on this PR.
   selects its layout from own routing properties, not an apparent login gate.
 - The signup integration fixture accepts only its enumerated API routes on its
   own loopback server, with cross-origin targets and redirects forbidden.
+- The frame/audit CI job gets 30 minutes instead of 20 for the aggregate suite.
+  GitHub run 42917910449 confirmed a job timeout in the last audit step after
+  worker, FPS, staff and media steps passed. No per-test deadline, quality
+  threshold, required check or assertion is relaxed.
 
 ## Local evidence
 

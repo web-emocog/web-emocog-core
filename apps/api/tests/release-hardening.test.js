@@ -112,6 +112,7 @@ describe('S3-01 release hardening', () => {
     const frameJob = workflow.split('  frame-pipeline-regression:')[1].split('  release-gate:')[0];
     const scripts = require('../../autotests/package.json').scripts;
     assert.match(frameJob, /runs-on: ubuntu-24\.04/);
+    assert.match(frameJob, /timeout-minutes: 30/);
     assert.doesNotMatch(workflow, /macos-|macos-webkit\.yml/);
     assert.match(webkitWorkflow, /^on:\n  workflow_dispatch:\n\npermissions:\n  contents: read$/m);
     assert.match(webkitWorkflow, /runs-on: macos-15/);
