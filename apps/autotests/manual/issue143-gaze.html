@@ -13,10 +13,15 @@ button { font:inherit; padding:10px 16px; margin:8px; border-radius:12px; border
 #target { position:fixed; width:40px; height:40px; padding:0; margin:0; border:0; background:#DC2626; border-radius:50%; transform:translate(-50%,-50%); z-index:3; transition:none; box-shadow:none }
 video { max-width:400px; transform:scaleX(-1) }
 pre { font:13px monospace; white-space:pre-wrap; overflow-wrap:anywhere }
+html.gaze-benchmark-measuring { overflow:hidden }
 .running main { margin:0 auto; font-size:16px; max-width:700px }
 .running { color:white; background:#1a1a2e }
 .running #instructions { display:none }
-.running #status { position:fixed; bottom:8px; left:12px; right:12px; margin:0; font-size:12px; line-height:1.15; pointer-events:none }
+.running #status { position:fixed; bottom:8px; left:12px; right:12px; margin:0; font-size:12px; line-height:1.15; pointer-events:none; z-index:2 }
+.running[data-eye-gate-cue] #status { top:31%; bottom:auto; text-align:center; font-size:20px }
+#aoiBoard { position:fixed; inset:0; z-index:1; pointer-events:none; background:#1a1a2e }
+.aoiFrame { position:absolute; box-sizing:border-box; border:2px solid #aaa8c0; background:#262640 }
+#aoiCue { position:absolute; width:18px; height:18px; border-radius:50%; transform:translate(-50%,-50%); background:#ffe071 }
 </style>
 <main>
 <section id="instructions">
@@ -37,5 +42,8 @@ pre { font:13px monospace; white-space:pre-wrap; overflow-wrap:anywhere }
 </main>
 <button id="stop" disabled>Остановить и выключить камеру</button>
 <button id="target" aria-label="Калибровочная точка" hidden></button>
-<script type="module" src="./issue143-gaze.mjs?v=20261108-143m"></script>
+<div id="aoiBoard" aria-hidden="true" hidden>
+<div id="aoiLeft" class="aoiFrame"></div><div id="aoiRight" class="aoiFrame"></div><div id="aoiCue"></div>
+</div>
+<script type="module" src="./issue143-gaze.mjs?v=20261110-integration1"></script>
 </html>

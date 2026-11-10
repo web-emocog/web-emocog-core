@@ -1,6 +1,6 @@
-import { getEmotionSummary } from './emotion-stub-new.js?v=20261109-issues2';
+import { getEmotionSummary } from './emotion-stub-new.js?v=20261110-integration1';
 import '../../shared/rt-alignment.js?v=20261025-1';
-import '../../shared/metric-quality.js?v=20261109-issues2';
+import '../../shared/metric-quality.js?v=20261110-integration1';
 import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs';
 
 /**

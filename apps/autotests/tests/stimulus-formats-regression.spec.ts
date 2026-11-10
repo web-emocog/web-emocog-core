@@ -73,7 +73,7 @@ for (const [name, mime, bytes] of [['WAV', 'audio/x-wav', wave()], ['MP3', 'audi
       const s = (window as any).__WECOG_STATE__;
       s.runtime.sessionRuntime.policyShown = true;
       s.runtime.invitationStimuliMap = { 42: { id: '42', mime_type: mime, metadata: { source_url: base + '/format-audio' } } };
-      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
+      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2.0_universal', blocks: [{ id: 'audio', type: 'cognitive_task', taskType: 'simple_rt',
         blockConfig: { useFixation: false, rtWindow: 5000 }, trials: [{ stimulusId: '42', duration: 5000, action: 'Space' },
           { stimulusId: 'std_simple_black_square', duration: 5000, action: 'Space' }] }] } });
@@ -95,7 +95,7 @@ for (const [name, mime, bytes] of [['WAV', 'audio/x-wav', wave()], ['MP3', 'audi
     if (await allow.isVisible()) await allow.click();
     await expect.poll(() => page.locator('#cogAudio').evaluate((a: HTMLAudioElement) => a.currentTime)).toBeGreaterThan(0);
     expect(await page.locator('#cogAudio').evaluate((a: HTMLAudioElement) => a.muted)).toBe(false);
-    const rect = await page.evaluate(async () => (await import(new URL('js/web-page/app-updated.js?v=20261109-issues2', location.href).href)).currentStimulusContentRect());
+    const rect = await page.evaluate(async () => (await import(new URL('js/web-page/app-updated.js?v=20261110-integration1', location.href).href)).currentStimulusContentRect());
     expect(rect).toBe(null);
     if (mode === 'decode-error') await page.locator('#cogAudio').evaluate(a => a.dispatchEvent(new Event('error')));
     else await page.keyboard.press('Space');
@@ -117,7 +117,7 @@ test('passive audio ignores response keys, advances by duration and stores no fi
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
     shared.runtime.invitationStimuliMap = { 42: { id: '42', mime_type: 'audio/wav', metadata: { source_url: base + '/passive-audio' } } };
-    const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2.0_universal', blocks: [{
       id: 'passive', type: 'passive', blockConfig: { useFixation: false, useAOI: false },
       trials: [{ stimulusId: '42', duration: 1500 }, { stimulusId: 'std_simple_black_square', duration: 1000 }],
@@ -157,7 +157,7 @@ test('resolved play without an advancing audio clock cannot start or score a tri
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
     shared.runtime.invitationStimuliMap = { 42: { id: '42', mime_type: 'audio/wav', metadata: { source_url: base + '/stalled-audio' } } };
-    const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2.0_universal', blocks: [{
       id: 'stalled', type: 'cognitive_task', taskType: 'simple_rt', blockConfig: { useFixation: false },
       trials: [{ stimulusId: '42', duration: 5000, action: 'Space' }],
@@ -186,7 +186,7 @@ test('provided MP4 plays with a native decoder or explicitly blocks preparation 
     const s = (window as any).__WECOG_STATE__;
     s.runtime.sessionRuntime.policyShown = true;
     s.runtime.invitationStimuliMap = { 42: { id: '42', mime_type: 'video/mp4', metadata: { source_url: base + '/private-format-mp4' } } };
-    const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2.0_universal', blocks: [{ id: 'mp4', type: 'cognitive_task', taskType: 'simple_rt',
       blockConfig: { useFixation: false, rtWindow: 8000 }, trials: [{ stimulusId: '42', duration: 8000, action: 'Space' }] }] } });
   }, baseURL);

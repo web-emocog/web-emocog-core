@@ -12,7 +12,7 @@ import { EMOTION_CONFIG }                        from './emotion-config.js';
 import { buildInternalMask, extractActionUnits } from './au-extractor.js';
 import { classifyFACS, calcAffective }           from './facs-classifier.js';
 import { computeAggregatedMetrics }              from './emotion-aggregator.js';
-import { participantDebugError } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+import { participantDebugError } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
@@ -164,7 +164,7 @@ export class EmotionAnalyzer {
      * @returns {{ scores, valence, arousal, dominant, confidence }}
      */
     analyzeLandmarks(landmarks) {
-        if (!this._validateLandmarks(landmarks)) return this._neutralResult();
+        if (!this._validateLandmarks(landmarks)) return this._missingResult();
 
         try {
             const mask      = this._getMask(landmarks);
@@ -193,7 +193,7 @@ export class EmotionAnalyzer {
             };
         } catch (_) {
             participantDebugError('expression', 'landmarks:analysis-failed');
-            return this._neutralResult();
+            return this._missingResult();
         }
     }
 
@@ -263,7 +263,13 @@ export class EmotionAnalyzer {
     }
 
     _validateLandmarks(lm) {
-        return Array.isArray(lm) && lm.length >= this.config.minLandmarks;
+        if (!Array.isArray(lm) || lm.length < this.config.minLandmarks) return false;
+        for (let i = 0; i < lm.length; i++) {
+            const point = lm[i];
+            if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)
+                || (point.z !== undefined && !Number.isFinite(point.z))) return false;
+        }
+        return true;
     }
 
     _dominant(scores) {
@@ -376,10 +382,11 @@ export class EmotionAnalyzer {
         return { ready: true, actionUnits: adjusted };
     }
 
-    _neutralResult() {
+    _missingResult() {
         return {
-            scores: { neutral: 1, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
-            valence: 0, arousal: 0, dominant: 'neutral', confidence: 0,
+            scores: { neutral: 0, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
+            valence: null, arousal: null, dominant: 'unknown', confidence: 0,
+            calibrationReady: false, missingData: true, emotionInferred: false, degraded: true,
         };
     }
 

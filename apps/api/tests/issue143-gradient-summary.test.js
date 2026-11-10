@@ -231,3 +231,116 @@ test('developer benchmark analyzes each frozen protocol and refuses incomplete o
   mismatched.version = 'gaze_benchmark.v1'; mismatched.benchmark = { completed: true, protocol: 'spatial.v1' };
   assert.throws(() => summarizeGradientReport(mismatched), /invalid_gradient_summary/);
 });
+
+function zonesFixture(temporal) {
+  const source = temporal ? temporalFixture() : fixture();
+  source.viewport = { width: 800, height: 600 };
+  const coordinates = [[30, 22], [70, 22], [22, 70], [78, 70], [50, 63], [12, 12], [88, 12], [12, 88], [88, 88]];
+  for (const row of [...source.before, ...source.after]) {
+    const [x, y] = coordinates[row.targetIndex];
+    row.targetPercent = { x, y };
+  }
+  return source;
+}
+
+test('zonal summary uses fixed coordinates, preserves missingness and separates paired weights', async () => {
+  const { summarizeGradientZones } = await load(), source = zonesFixture(false);
+  const [lowerLeft, lowerRight] = source.before.slice(-2);
+  for (const [row, n, delta] of [[lowerLeft, 1, -8], [lowerRight, 3, 4]]) {
+    for (const key of ['baseline.raw', 'eye_patch.raw']) row.signals[key].accepted = n;
+    const pair = row.comparisons.find(p => p.candidate === 'eye_patch.raw');
+    Object.assign(pair, { commonAccepted: n, candidateMinusBaselineMeanErrorPx: delta });
+  }
+  source.before.reverse();
+  source.untrusted = 'PRIVATE_SENTINEL';
+  const result = summarizeGradientZones(source);
+  const lower = result.zones.lower_corners, pair = lower.before.comparisons.find(p => p.candidate === 'eye_patch.raw');
+  assert.equal(result.viewportDiagonalPx, 1000);
+  assert.equal(result.zones.corners.targetCount, 4);
+  assert.equal(result.zones.interior.targetCount, 5);
+  assert.equal(result.zones.lower_targets.targetCount, 4);
+  assert.equal(lower.before.signals['eye_patch.raw'].missingFraction, .5);
+  assert.equal(lower.before.signals['eye_patch.raw'].measuredTargets, 2);
+  assert.equal(pair.commonAccepted, 4);
+  assert.equal(pair.equalTargetCommonErrorDeltaPx, -2);
+  assert.equal(pair.candidateMinusBaselineMeanErrorPx, 1);
+  assert.equal(lower.after, null); assert.equal(lower.shift, null);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_SENTINEL/);
+});
+
+test('zonal temporal shift separates a uniform offset from opposing target shifts', async () => {
+  const { summarizeGradientZones } = await load(), source = zonesFixture(true);
+  for (const row of source.after) {
+    const s = row.signals['baseline.raw'];
+    s.biasXPx += 12;
+    s.biasYPx += row.targetIndex === 7 ? -14 : row.targetIndex === 8 ? 6 : 0;
+    if (row.targetIndex === 8) {
+      const patch = row.signals['eye_patch.raw'];
+      patch.accepted = 0;
+      const pair = row.comparisons.find(p => p.candidate === 'eye_patch.raw');
+      Object.assign(pair, { commonAccepted: 0, candidateMinusBaselineMeanErrorPx: null });
+    }
+  }
+  const result = summarizeGradientZones(source);
+  assert.equal(result.zones.lower_corners.temporalComparison.withinIntervalAccuracyAvailable, false);
+  assert.deepEqual(result.zones.lower_corners.shift['baseline.raw'], { matchedTargets: 2, uniformShiftXPx: 12,
+    uniformShiftYPx: -4, nonUniformShiftRmsPx: 10 });
+  assert.equal(result.zones.upper_corners.shift['baseline.raw'].nonUniformShiftRmsPx, 0);
+  assert.equal(result.zones.lower_corners.shift['eye_patch.raw'].matchedTargets, 1);
+  assert.equal(result.zones.lower_corners.shift['eye_patch.raw'].nonUniformShiftRmsPx, null);
+  assert.equal(result.zones.lower_corners.after.signals['eye_patch.raw'].measuredTargets, 1);
+  assert.equal(result.zones.lower_corners.temporalComparison.signals['eye_patch.raw'].matchedTargets, 1);
+});
+
+test('zonal summary refuses other layouts, posture and incomplete runs', async () => {
+  const { summarizeGradientZones } = await load();
+  assert.throws(() => summarizeGradientZones(poseFixture()), /invalid_gradient_summary/);
+  const shifted = zonesFixture(true);
+  for (const row of [...shifted.before, ...shifted.after]) row.targetPercent.x += 1;
+  assert.throws(() => summarizeGradientZones(shifted), /invalid_gradient_summary/);
+  const source = zonesFixture(false);
+  source.version = 'gaze_benchmark.v1'; source.benchmark = { completed: false, protocol: 'spatial.v1' };
+  assert.throws(() => summarizeGradientZones(source), /invalid_gradient_summary/);
+});
+
+test('aggregate fusion bounds require identical accepted frames and never infer covariance', async () => {
+  const { summarizeBlendBounds } = await import('../../../scripts/reference-data/issue143-blend-bounds.mjs');
+  const source = zonesFixture(false);
+  for (const row of source.before) {
+    const set = (key, x, y, sdX, sdY) => Object.assign(row.signals[key],
+      { accepted: 2, offScreen: 0, biasXPx: x, biasYPx: y, rmsErrorPx: Math.hypot(x, y, sdX, sdY),
+        withinTargetSdXPx: sdX, withinTargetSdYPx: sdY });
+    set('baseline.raw', 10, 0, 4, 0);
+    set('eye_patch.raw', -10, 0, 2, 0);
+    set('eye_gradient_all.raw', 20, 0, 0, 0);
+    // Two different models have the same count as baseline, but only gradient
+    // and patch are proven to have the same accepted set via the baseline.
+    for (const p of row.comparisons.filter(p => ['eye_patch.raw', 'eye_gradient_all.raw'].includes(p.candidate))) p.commonAccepted = 2;
+  }
+  const [baseline, gradient] = summarizeBlendBounds(source).phases.before.all;
+  assert.deepEqual([baseline.matchedTargets, baseline.lowerRmsPx, baseline.upperRmsPx, baseline.relativeToLeft], [9, 1, 3, 'lower']);
+  assert.equal(gradient.matchedTargets, 9);
+  assert.equal(gradient.lowerRmsPx, Math.sqrt(26));
+  assert.equal(gradient.lowerRmsPx, gradient.upperRmsPx);
+  const unmatched = source.before[7].comparisons.find(p => p.candidate === 'eye_gradient_all.raw');
+  unmatched.commonAccepted = 1;
+  const g = summarizeBlendBounds(source).phases.before.lower[1];
+  assert.equal(g.matchedTargets, 3);
+  assert.equal(g.relativeToLeft, 'unavailable');
+});
+
+test('posture geometry audit compares envelopes and refuses missing or invalid aggregates', async () => {
+  const { summarizeGeometrySeparation } = await import('../../../scripts/reference-data/issue143-geometry-audit.mjs');
+  const source = poseFixture();
+  assert.throws(() => summarizeGeometrySeparation(source), /missing_geometry_summary/);
+  for (const [i, stage] of source.poseProbe.stages.entries()) for (const row of stage.rows) {
+    row.baselineNuisance = { frames: 40, fields: ['eyeMidY'], mean: [i === 1 ? .56 : .50], sd: [.002],
+      additional: 'PRIVATE_SENTINEL' };
+  }
+  const result = summarizeGeometrySeparation(source);
+  assert.ok(Math.abs(result.guardedGap - .052) < 1e-12);
+  assert.equal(result.loweredMinusNaturalEnvelopeGap, result.loweredMinusReturnedEnvelopeGap);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_SENTINEL/);
+  source.poseProbe.stages[1].rows[0].baselineNuisance.frames = 0;
+  assert.throws(() => summarizeGeometrySeparation(source), /missing_geometry_summary/);
+});

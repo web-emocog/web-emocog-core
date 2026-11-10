@@ -5,23 +5,23 @@ import {
     SESSION_STATES
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
-import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261109-issues2';
+import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261110-integration1';
 import { LongSessionContinuity } from './long-session-continuity.mjs';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261109-issues2';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261109-issues2';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261110-integration1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261110-integration1';
 import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
-import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261109-issues2';
-import { SessionAudioCollector } from '../audio/session-audio.js?v=20261109-issues2';
+import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261110-integration1';
+import { SessionAudioCollector } from '../audio/session-audio.js?v=20261110-integration1';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 import { SessionDelivery } from './delivery.mjs?v=20261025-1';
 import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261102-1';
 import { combineSignalSummaries } from './signal-history.mjs?v=20261107-resp1';
 import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261107-provenance1';
-import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261109-issues2';
-import { showPersistenceNotice } from './persistence-ui.mjs?v=20261109-issues2';
-import { recordedConsentReceipt, sendSessionFeature } from './ingest-transport.mjs?v=20261109-issues2';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261110-integration1';
+import { showPersistenceNotice } from './persistence-ui.mjs?v=20261110-integration1';
+import { recordedConsentReceipt, sendSessionFeature } from './ingest-transport.mjs?v=20261110-integration1';
 import '../../../shared/protocol-quality.js?v=20261025-1';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
@@ -250,7 +250,7 @@ class ParticipantSessionRuntime {
             this.finalRetryTimer = null;
             this.finalRetryListener = null;
             if (this.pageExited) return;
-            import('../web-page/tests-updated.js?v=20261109-issues2')
+            import('../web-page/tests-updated.js?v=20261110-integration1')
                 .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };

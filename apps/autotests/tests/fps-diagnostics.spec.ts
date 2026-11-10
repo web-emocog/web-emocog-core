@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test('transferred PCM is not copied again and a stalled audio queue stays bounded without requesting a microphone', async ({ page }) => {
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async () => {
-    const modulePath = '/apps/participant-web/js/audio/session-audio.js?v=20261109-issues2';
+    const modulePath = '/apps/participant-web/js/audio/session-audio.js?v=20261110-integration1';
     const { SessionAudioCollector } = await import(modulePath);
     let time = 1000;
     const events: any[] = [], releases: Array<(value: null) => void> = [];

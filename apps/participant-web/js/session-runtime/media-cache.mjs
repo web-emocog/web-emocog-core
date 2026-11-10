@@ -1,6 +1,6 @@
 import {
     preloadMediaBlob, readMediaResponse, throwIfMediaAborted, mediaAbortError, withMediaAbort
-} from './media-preload.mjs?v=20261109-issues2';
+} from './media-preload.mjs?v=20261110-integration1';
 
 // Managed encoded bytes, including a conservative 3x download/Blob/hash workspace.
 // Browser decoder/GPU memory is not observable or bounded by this counter.

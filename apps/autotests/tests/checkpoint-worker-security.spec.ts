@@ -14,7 +14,7 @@ test('real dedicated worker preserves new and already-open-page checkpoint reque
     const { createCheckpointRequest, isCheckpointResponse } = await import(`${base}checkpoint-messages.mjs?v=20261025-1`);
     const source = { ids: { session: 'synthetic-worker-session', participant: 'synthetic-participant' },
       checkpointViewport: { width: 1280, height: 720 }, events: [] };
-    const worker = new Worker(`${base}aggregate-worker.mjs?v=20261109-issues2`, { type: 'module' });
+    const worker = new Worker(`${base}aggregate-worker.mjs?v=20261110-integration1`, { type: 'module' });
     const exchange = (request: any) => new Promise<any>((resolve, reject) => {
       const deadline = setTimeout(() => reject(new Error('worker-response-timeout')), 5000);
       worker.onmessage = event => { clearTimeout(deadline); resolve({ data: event.data, trusted: event.isTrusted }); };
@@ -38,7 +38,7 @@ test('importing the worker entry in a page never installs a window message handl
   const unchanged = await page.evaluate(async () => {
     const before = window.onmessage;
     // @ts-ignore Browser-native ESM loaded from the static test server.
-    await import('/apps/participant-web/js/session-runtime/aggregate-worker.mjs?v=20261109-issues2');
+    await import('/apps/participant-web/js/session-runtime/aggregate-worker.mjs?v=20261110-integration1');
     return window.onmessage === before;
   });
   expect(unchanged).toBe(true);

@@ -1,6 +1,6 @@
 import { SESSION_CONTRACT_VERSION } from './contracts.mjs';
-import { resolveParticipantApiBase } from './api-base.mjs?v=20261109-issues2';
-import { fetchWithDeadline, throwIfRequestAborted, waitForRequestDelay } from './http.mjs?v=20261109-issues2';
+import { resolveParticipantApiBase } from './api-base.mjs?v=20261110-integration1';
+import { fetchWithDeadline, throwIfRequestAborted, waitForRequestDelay } from './http.mjs?v=20261110-integration1';
 
 const DEFAULT_RETRIES = 4;
 const DEFAULT_BACKOFF_MS = 1500;

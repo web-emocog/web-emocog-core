@@ -14,7 +14,7 @@ import { createGazeState, addGazePoint, accumulateGazeTime } from './gaze-tracki
 import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261025-1';
 import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
 import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261104-4';
-import { participantDebug as dbg } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+import { participantDebug as dbg } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class QCMetrics {
     constructor(options = {}) {

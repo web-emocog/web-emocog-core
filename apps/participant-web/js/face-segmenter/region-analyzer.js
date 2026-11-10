@@ -7,7 +7,7 @@
  */
 
 import { CLASS_INDICES, LANDMARK_INDICES } from './constants.js?v=20261025-1';
-import { getAreaThresholds } from './thresholds.js?v=20261109-issues2';
+import { getAreaThresholds } from './thresholds.js?v=20261110-integration1';
 import { createFaceSupport, getFaceSupport, isFacePixel, FACE_VISIBILITY_METHOD } from './face-support.mjs?v=20261028-139';
 
 /**

@@ -4,7 +4,7 @@
  * MediaPipe Tasks Vision and Pose Landmarker are Apache-2.0 licensed. The
  * collector stores normalized kinematics, not video frames.
  */
-import { VisionWorkerClient } from './vision-worker-client.mjs?v=20261109-issues2';
+import { VisionWorkerClient } from './vision-worker-client.mjs?v=20261110-integration1';
 
 const MODEL_URL = new URL(
     '../vendor/mediapipe/models/pose_landmarker_lite.task',

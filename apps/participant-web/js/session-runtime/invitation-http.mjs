@@ -1,5 +1,5 @@
 import { fetchWithDeadline, throwIfRequestAborted, requestAbortError,
-    withRequestAbort, waitForRequestDelay } from './http.mjs?v=20261109-issues2';
+    withRequestAbort, waitForRequestDelay } from './http.mjs?v=20261110-integration1';
 
 export function pinnedInvitationContentUrl(base, code, id, advertisedPath) {
     if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(code)

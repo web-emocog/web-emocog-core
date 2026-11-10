@@ -5,8 +5,8 @@ process.env.PAGE_URL = 'http://127.0.0.1:4188/apps/participant-web/mvp_with_prec
 
 export default defineConfig({
   testDir: './tests', testMatch: process.env.RUN_WORKER_REGRESSION === '1'
-    ? /(?:vision-workers|developer-native-models|session-runtime|security-performance|diagnostics-lifecycle|classic-model-loaders|issue139-face-visibility|issue157-calibration-ui)\.spec\.ts/
-    : /(?:vision-workers|developer-native-models|security-performance|diagnostics-lifecycle|classic-model-loaders|issue139-face-visibility|issue157-calibration-ui)\.spec\.ts/, timeout: 90_000,
+    ? /(?:vision-workers|sprint3-audio-multimodal|developer-native-models|session-runtime|security-performance|diagnostics-lifecycle|classic-model-loaders|issue139-face-visibility|issue157-calibration-ui)\.spec\.ts/
+    : /(?:vision-workers|sprint3-audio-multimodal|developer-native-models|security-performance|diagnostics-lifecycle|classic-model-loaders|issue139-face-visibility|issue157-calibration-ui)\.spec\.ts/, timeout: 90_000,
   workers: 1, retries: 0, reporter: process.env.CI ? [['list'], ['github']] : 'list',
   use: { baseURL: 'http://127.0.0.1:4188', headless: process.env.WECOG_TEST_HEADED !== '1', trace: 'retain-on-failure' },
   webServer: { command: 'python3 -m http.server 4188 --bind 127.0.0.1 --directory ../../',

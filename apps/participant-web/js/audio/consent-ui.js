@@ -1,4 +1,4 @@
-import { resolveSessionFeatureFlags } from '../session-runtime/feature-flags.mjs?v=20261109-issues2';
+import { resolveSessionFeatureFlags } from '../session-runtime/feature-flags.mjs?v=20261110-integration1';
 
 const CONSENT_VERSION = 'audio_consent.v1';
 

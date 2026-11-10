@@ -93,7 +93,7 @@ test('the actual v2 precheck accepts intermittent failures but rejects stale vid
   await page.goto(baseURL + '/apps/participant-web/mvp_with_precheck_1-updated.html');
   const result = await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__;
-    const { checkAllIndicators } = await import(location.origin + '/apps/participant-web/js/web-page/precheck-updated.js?v=20261109-issues2');
+    const { checkAllIndicators } = await import(location.origin + '/apps/participant-web/js/web-page/precheck-updated.js?v=20261110-integration1');
     shared.runtime.invitationProtocolDefinition = { settings: { signalProfileId: 'protocol_signals.v2' } };
     let now = 10000;
     Object.defineProperty(performance, 'now', { configurable: true, value: () => now });
@@ -128,7 +128,7 @@ for (const profile of ['protocol_signals.v1', 'protocol_signals.v2']) {
         const result = await page.evaluate(async ({ profile, lang, source }) => {
           const w = window as any, shared = w.__WECOG_STATE__;
           w.setLanguage(lang);
-          const { checkAllIndicators } = await import(location.origin + '/apps/participant-web/js/web-page/precheck-updated.js?v=20261109-issues2');
+          const { checkAllIndicators } = await import(location.origin + '/apps/participant-web/js/web-page/precheck-updated.js?v=20261110-integration1');
           shared.runtime.invitationProtocolDefinition = { settings: { signalProfileId: profile } };
           shared.runtime.successFrames = 20;
           shared.indicatorsStatus = { illumination: 'passed', face: 'passed', pose: 'passed', visibility: 'passed' };

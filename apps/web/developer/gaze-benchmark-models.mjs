@@ -1,5 +1,5 @@
 // Diagnostic comparisons only: no factory is called by participant production flow.
-import Tracker from '../../participant-web/js/gaze-tracker/GazeTracker.js?v=20261109-issues2';
+import Tracker from '../../participant-web/js/gaze-tracker/GazeTracker.js?v=20261110-integration1';
 import { DEFAULTS } from '../../participant-web/js/gaze-tracker/constants.js?v=20261106-143';
 
 // All compared regressions must average exactly the same calibration captures.
@@ -16,14 +16,36 @@ export function commonTophatCalibrationFrames(frames, readEyeFeatures) {
   return frames.filter(frame => ['full', 'gradient_all', 'tophat'].every(region => readEyeFeatures(frame, region)));
 }
 
+export function commonMaskedCalibrationFrames(frames, readEyeFeatures) {
+  return frames.filter(frame => ['full', 'gradient_all', 'masked'].every(region => readEyeFeatures(frame, region)));
+}
+
+export function commonNuisanceCalibrationFrames(frames, readEyeFeatures) {
+  return frames.filter(frame => ['full', 'rows', 'nuisance'].every(region => readEyeFeatures(frame, region)));
+}
+
 export function createModelComparison(viewport, camera, ablation = false, readEyeFeatures = null) {
-  if (![false, true, 'axis', 'appearance', 'gradient', 'tophat'].includes(ablation)) throw new RangeError('Unknown local model comparison');
+  if (![false, true, 'axis', 'appearance', 'gradient', 'tophat', 'masked', 'nuisance', 'aoi-continuous'].includes(ablation)) throw new RangeError('Unknown local model comparison');
   const options = { screenWidth: viewport.width, screenHeight: viewport.height };
   const models = { baseline: new Tracker(options) };
-  if (ablation === 'gradient' || ablation === 'tophat') {
+  if (ablation === 'aoi-continuous') {
+    if (typeof readEyeFeatures !== 'function') throw new RangeError('Missing local eye feature reader');
+    models.eye_patch = new Tracker({ ...options, experimentalEyePatch: { region: 'full',
+      readFeatures: face => readEyeFeatures(face, 'full'), frameWidth: camera.width, frameHeight: camera.height } });
+    return models;
+  }
+  if (ablation === 'nuisance') {
+    if (typeof readEyeFeatures !== 'function') throw new RangeError('Missing local eye feature reader');
+    for (const [name, region] of [['eye_patch', 'full'], ['eye_patch_rows', 'rows'], ['eye_patch_nuisance', 'nuisance']]) {
+      models[name] = new Tracker({ ...options, experimentalEyePatch: { region,
+        readFeatures: face => readEyeFeatures(face, region), frameWidth: camera.width, frameHeight: camera.height } });
+    }
+    return models;
+  }
+  if (['gradient', 'tophat', 'masked'].includes(ablation)) {
     if (typeof readEyeFeatures !== 'function') throw new RangeError('Missing local eye feature reader');
     for (const [name, region] of [['eye_patch', 'full'], ['eye_gradient_all', 'gradient_all'],
-      ablation === 'tophat' ? ['eye_tophat','tophat'] : ['eye_gradient', 'gradient']]) {
+      ablation === 'masked' ? ['eye_masked', 'masked'] : ablation === 'tophat' ? ['eye_tophat', 'tophat'] : ['eye_gradient', 'gradient']]) {
       models[name] = new Tracker({ ...options, experimentalEyePatch: { region,
         readFeatures: face => readEyeFeatures(face, region), frameWidth: camera.width, frameHeight: camera.height } });
     }
@@ -74,6 +96,11 @@ export function comparisonSignalKeys(models) {
 }
 
 export function comparisonPairs(models) {
-  return Object.keys(models).filter(name => name !== 'baseline').flatMap(name =>
+  const pairs = Object.keys(models).filter(name => name !== 'baseline').flatMap(name =>
     ['raw', 'corrected'].map(signal => ({ baseline: `baseline.${signal}`, candidate: `${name}.${signal}` })));
+  const candidate = models.eye_masked ? 'eye_masked' : models.eye_patch_nuisance ? 'eye_patch_nuisance' : null;
+  if (candidate) for (const name of ['eye_patch', models.eye_masked ? 'eye_gradient_all' : 'eye_patch_rows']) {
+    for (const signal of ['raw', 'corrected']) pairs.push({ baseline: `${name}.${signal}`, candidate: `${candidate}.${signal}` });
+  }
+  return pairs;
 }

@@ -1,5 +1,20 @@
 import { test, expect } from '@playwright/test';
 
+test('invalid face coordinates cannot become neutral-expression measurements in the browser', async ({ page }) => {
+  await page.goto('/apps/participant-web/documents/privacy-policy-v1.0.html');
+  const result = await page.evaluate(async () => {
+    const source = '/apps/participant-web/js/emotion/public-api.js?v=20261110-integration1';
+    const { analyzer, getEmotionSample, appendEmotionSample, getEmotionSummary } = await import(source);
+    analyzer.startSession('synthetic-invalid-face');
+    const sample = getEmotionSample({ landmarks: Array.from({ length: 478 }, () => ({ x: NaN, y: 0, z: 0 })) });
+    const state = { sessionData: {} };
+    appendEmotionSample(state, sample);
+    return { dominant: sample.dominant, valence: sample.valence, missing: sample.missingData,
+      quality: sample.dataQuality, n: getEmotionSummary(state.sessionData).n, baselineFrames: analyzer._auBaselineFrames };
+  });
+  expect(result).toEqual({ dominant: 'unknown', valence: null, missing: true, quality: 'missing', n: 0, baselineFrames: 0 });
+});
+
 test('developer diagnostics start and release the real local vision models and camera track', async ({ page, baseURL, browserName }, info) => {
   await page.route('http://127.0.0.1:3000/**', async route => {
     const headers = { 'Access-Control-Allow-Origin': baseURL!, 'Access-Control-Allow-Credentials': 'true',

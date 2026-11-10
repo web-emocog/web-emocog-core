@@ -1,4 +1,4 @@
-import { fetchWithDeadline, withRequestAbort } from './http.mjs?v=20261109-issues2';
+import { fetchWithDeadline, withRequestAbort } from './http.mjs?v=20261110-integration1';
 
 // Bound the whole preparation, not only the fetch: decoded probes consume memory too.
 export async function mapMediaPreloads(rows, mapper, concurrency = 3) {

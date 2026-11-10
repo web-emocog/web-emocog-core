@@ -31,8 +31,8 @@ test('attempt cards and exclusions retain identity, counts and literal labels in
   await expect(badges).toHaveCount(2);
   await expect(badges.nth(0)).toContainText('Excluded from default metrics');
   await expect(badges.nth(1)).toContainText('Attempt 2 (repeat)');
-  await expect(page.locator('body')).toContainText('Valid: 1');
-  await page.getByText('Show exclusion reasons').click();
+  await expect(page.locator('.ab-report-intro .ab-kpis > div').filter({ has: page.getByText('Eligible trials', { exact: true }) }).locator('dd')).toHaveText('1');
+  await page.getByText('Trials and exclusion reasons', { exact: true }).click();
   await expect(page.locator('body')).toContainText('Trial 9');
   await expect(page.locator('body')).toContainText('Valid-gaze fraction is below the protocol threshold');
   await expect(page.locator('body')).toContainText('Attempt was interrupted by a page reload');

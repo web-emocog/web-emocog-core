@@ -4,7 +4,7 @@
  * previously produced different smoothing and calibration semantics.
  */
 (function loadCanonicalGazeTracker() {
-    const loading = import('./gaze-tracker/index.js?v=20261109-issues2')
+    const loading = import('./gaze-tracker/index.js?v=20261110-integration1')
         .then(module => {
             const Tracker = module.GazeTracker || module.default;
             if (typeof Tracker !== 'function') throw new Error('gaze_export_missing');
@@ -12,7 +12,7 @@
             return 'module';
         })
         .catch(() => {
-            void import('./session-runtime/participant-diagnostic.mjs?v=20261109-issues2').then(
+            void import('./session-runtime/participant-diagnostic.mjs?v=20261110-integration1').then(
                 diagnostic => diagnostic.participantDebugError('gaze', 'module:unavailable'),
                 () => { /* Diagnostics are optional. */ }
             );

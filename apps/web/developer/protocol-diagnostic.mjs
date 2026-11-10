@@ -1,13 +1,13 @@
-import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261109-issues2';
-import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261109-issues2';
-import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261109-issues2';
-import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261109-issues2';
+import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1';
+import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261110-integration1';
+import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261110-integration1';
+import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261110-integration1';
 import { MultimodalSessionCollector } from '../../participant-web/js/multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';
-import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261109-issues2';
+import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { prepareNeutralCalibration } from '../../participant-web/js/session-runtime/neutral-calibration-ui.js';
 import { measureVideoFps } from '../../participant-web/js/session-runtime/video-frames.mjs?v=20261104-4';
-import { resolveSessionFeatureFlags } from '../../participant-web/js/session-runtime/feature-flags.mjs?v=20261109-issues2';
+import { resolveSessionFeatureFlags } from '../../participant-web/js/session-runtime/feature-flags.mjs?v=20261110-integration1';
 import { getContentViewport } from '../../participant-web/js/gaze-tracker/viewport-coordinates.mjs';
 import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './diagnostic-run.mjs?v=20261028-1';
 

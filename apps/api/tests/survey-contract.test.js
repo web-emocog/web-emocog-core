@@ -286,7 +286,7 @@ describe('survey browser integration contract', () => {
     assert.match(calibration, /calibration_instruction_acknowledged/);
     assert.match(
       calibration,
-      /const acknowledged = await waitForCalibrationIntroduction\(\{ targeted \}\);\s*if \(!acknowledged \|\| state\.runtime\.participantPageExited\) return;[\s\S]{0,180}point\.style\.display = 'block';/
+      /const acknowledged = await waitForCalibrationIntroduction\(\{ targeted, viewportChanged: options\.viewportChanged === true \}\);\s*if \(!acknowledged \|\| state\.runtime\.participantPageExited[\s\S]{0,300}return;[\s\S]{0,180}point\.style\.display = 'block';/
     );
     assert.match(calibrationPointRule, /transition:\s*none/);
     assert.match(calibrationPointRule, /animation:\s*none/);

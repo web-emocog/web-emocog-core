@@ -16,10 +16,10 @@ import { analyzePose, checkStability, checkEyesCentering, addToHistory } from '.
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261109-issues2';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261110-integration1';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
-    notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+    notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class PrecheckAnalyzer {
     constructor(options = {}) {

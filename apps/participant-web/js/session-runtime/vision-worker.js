@@ -14,12 +14,12 @@ self.onmessage = async ({ data }) => {
                 FaceLandmarker: vision.FaceLandmarker, ImageSegmenter: vision.ImageSegmenter });
             if (task === 'face') {
                 ({ getFramePixels } = await import('./frame-pixels.mjs'));
-                const { PrecheckAnalyzer } = await import('../precheck-analyzer/PrecheckAnalyzer.js?v=20261109-issues2');
+                const { PrecheckAnalyzer } = await import('../precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1');
                 analyzer = new PrecheckAnalyzer({ ...data.options, worker: false });
                 if (data.options.thresholds) analyzer.thresholds = data.options.thresholds;
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'segment') {
-                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261109-issues2');
+                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261110-integration1');
                 analyzer = new FaceSegmenter({ ...data.options, worker: false });
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'pose') {

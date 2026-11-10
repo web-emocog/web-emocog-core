@@ -11,7 +11,7 @@ import {
     getEmotionSummary,
     appendEmotionSample,
     resetEmotionAnalyzerState,
-} from './emotion/public-api.js?v=20261109-issues2';
+} from './emotion/public-api.js?v=20261110-integration1';
 
 export { getEmotionSummary, appendEmotionSample };
 

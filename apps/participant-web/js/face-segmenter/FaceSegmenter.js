@@ -28,16 +28,16 @@
  */
 
 import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
-import { createSegmentThresholds } from './thresholds.js?v=20261109-issues2';
+import { createSegmentThresholds } from './thresholds.js?v=20261110-integration1';
 import { analyzeMasks } from './mask-analyzer.js?v=20261104-4';
-import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261109-issues2';
+import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261110-integration1';
 import { createVisualizationMask } from './visualization.js?v=20261104-4';
 import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261109-issues2';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261110-integration1';
 import { segmentationDelegate } from './delegate-policy.mjs';
 import { MaskReader } from './mask-reader.mjs';
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
-    notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+    notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class FaceSegmenter {
     constructor(options = {}) {

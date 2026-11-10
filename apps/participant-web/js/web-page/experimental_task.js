@@ -8,9 +8,9 @@ import {
 } from './state.js?v=20261025-1';
 console.warn('[DEPRECATED] js/web-page/experimental_task.js — use experimental_task-updated.js');
 
-import { finishSession } from './tests.js?v=20261109-issues2';
+import { finishSession } from './tests.js?v=20261110-integration1';
 import { extractEyeSignalSample } from './eye-signal.js';
-import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261109-issues2';
+import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261110-integration1';
 
 const TARGET_LOOP_INTERVAL_MS = 33;
 const SAME_FRAME_RETRY_MS = 8;

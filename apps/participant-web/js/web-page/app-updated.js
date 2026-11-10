@@ -1,6 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
-import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261025-1';
 import { 
     setLanguage, 
@@ -16,15 +16,16 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261109-issues2';
+} from './ui-updated.js?v=20261110-integration1';
 
-import { startPreCheck } from './precheck-updated.js?v=20261109-issues2';
+import { startPreCheck } from './precheck-updated.js?v=20261110-integration1';
 
 import { 
     startCalibration, 
+    finishSession,
     stopParticipantTestLoops,
     stopSessionMediaResources
-} from './tests-updated.js?v=20261109-issues2';
+} from './tests-updated.js?v=20261110-integration1';
 
 import {
     deriveInvitationHubMetrics,
@@ -33,23 +34,23 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261109-issues2';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261110-integration1';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
-import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs?v=20261109-issues2';
-import { createInvitationRequestPool, pinnedInvitationContentUrl } from '../session-runtime/invitation-http.mjs?v=20261109-issues2';
-import { fetchMediaWithDeadline } from '../session-runtime/media-preload.mjs?v=20261109-issues2';
-import { createBlockMediaPreparation, invitationMediaDescriptor, invitationMediaScope } from '../session-runtime/block-media-preparation.mjs?v=20261109-issues2';
-import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261109-issues2';
+import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs?v=20261110-integration1';
+import { createInvitationRequestPool, pinnedInvitationContentUrl } from '../session-runtime/invitation-http.mjs?v=20261110-integration1';
+import { fetchMediaWithDeadline } from '../session-runtime/media-preload.mjs?v=20261110-integration1';
+import { createBlockMediaPreparation, invitationMediaDescriptor, invitationMediaScope } from '../session-runtime/block-media-preparation.mjs?v=20261110-integration1';
+import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
 import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261102-1';
 import { mediaContentRect } from './stimulus-geometry.mjs?v=20261025-1';
 import { qcGazeSignal, QC_GAZE_SIGNAL_METHOD } from '../gaze-tracker/qc-signal.mjs';
 import {
     captureAudioConsent,
     configureAudioConsentUI
-} from '../audio/consent-ui.js?v=20261109-issues2';
+} from '../audio/consent-ui.js?v=20261110-integration1';
 
 const RETAINED_GAZE_TARGET = 30_000;
 const RETAINED_GAZE_HARD_CAP = 32_000;

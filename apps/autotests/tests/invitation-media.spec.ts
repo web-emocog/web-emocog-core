@@ -110,7 +110,7 @@ test.describe('Large invitation media hotfix', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const url = new URL('js/web-page/experimental_task-updated.js?v=20261109-issues2', window.location.href).href;
+        const url = new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', window.location.href).href;
         const { loadAndStartCognitiveTask } = await import(url);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
@@ -173,7 +173,7 @@ test.describe('Large invitation media hotfix', () => {
 test('temporary image/video probes release their sources while cached media remains readable', async ({ page }) => {
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async png => {
-    const modulePath = '/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261109-issues2';
+    const modulePath = '/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261110-integration1';
     const { preloadMediaBlob } = await import(modulePath);
     const videos: HTMLVideoElement[] = [], images: HTMLImageElement[] = [];
     const create = document.createElement.bind(document), decode = HTMLImageElement.prototype.decode;

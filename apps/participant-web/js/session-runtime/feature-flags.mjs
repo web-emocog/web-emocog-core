@@ -1,4 +1,4 @@
-import { resolveSignalProfile } from './protocol-profile.mjs?v=20261109-issues2';
+import { resolveSignalProfile } from './protocol-profile.mjs?v=20261110-integration1';
 
 export const DEFAULT_SESSION_FEATURE_FLAGS = Object.freeze({
     audio: false,

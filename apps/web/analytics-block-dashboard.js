@@ -357,7 +357,8 @@
       const note = trial ? tr('Отдельные RT-попытки; приглушённые точки не прошли проверку качества.', 'Individual RT attempts; muted points failed quality checks.')
         + (data.connectedness?.truncated ? tr(' Хранится только часть попыток.', ' Only a subset of attempts is retained.') : '')
         : tr('Интервальные оценки, не исходный сигнал. Попытки после проверки качества не являются запланированными повторами.',
-          'Interval estimates, not a raw signal. QC retries are not planned repetitions.');
+          'Interval estimates, not a raw signal. QC retries are not planned repetitions.')
+          + (intervals?.truncated ? tr(' Хранится только часть интервалов.', ' Only a subset of intervals is retained.') : '');
       const plot = chartPanel(controls, graph, note, pointNavigation(index, items.length, tr));
       return shell('session', tr('Динамика сессии', 'Session dynamics'), tr('Нажмите на точку или полосу, чтобы посмотреть наблюдение.', 'Click a point or interval bar to inspect the observation.'),
         rowsFor.minutes.length || rowsFor.blocks.length

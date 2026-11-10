@@ -43,7 +43,7 @@ for (const diagnosticMode of ['disabled', 'enabled', 'throws', 'unavailable']) {
         if (mode === 'throws') throw new Error('SYNTHETIC-PRIVATE-SINK');
       } };
     }, diagnosticMode);
-    for (const [file] of loaders) await page.addScriptTag({ url: root + file + '.js?v=20261109-issues2' });
+    for (const [file] of loaders) await page.addScriptTag({ url: root + file + '.js?v=20261110-integration1' });
     const hasDiagnostics = ['enabled', 'throws'].includes(diagnosticMode);
     if (hasDiagnostics) {
       await expect.poll(() => page.evaluate(() => (window as any).classicModelEvents.length)).toBe(4);
@@ -109,7 +109,7 @@ for (const diagnosticMode of ['disabled', 'enabled', 'throws', 'unavailable']) {
 test('a model that resolves after disposal is closed and cannot overwrite a new model', async ({ page }) => {
   for (const [file] of loaders.slice(0, 2)) await page.route(`**/${file}/index.js*`, route => route.abort());
   await page.goto('/apps/participant-web/tools/session-report.html');
-  for (const [file] of loaders.slice(0, 2)) await page.addScriptTag({ url: root + file + '.js?v=20261109-issues2' });
+  for (const [file] of loaders.slice(0, 2)) await page.addScriptTag({ url: root + file + '.js?v=20261110-integration1' });
   const result = await page.evaluate(async () => {
     const w = window as any;
     await Promise.all([w.PrecheckAnalyzerReady, w.FaceSegmenterReady]);

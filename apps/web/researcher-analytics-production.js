@@ -152,7 +152,7 @@
       )) : source.events };
     }
     const moduleUrl = new URL(
-      '../participant-web/js/unified-aggregates-new.js?v=20261109-issues2',
+      '../participant-web/js/unified-aggregates-new.js?v=20261110-integration1',
       global.location.href
     );
     const aggregates = await import(moduleUrl.href);

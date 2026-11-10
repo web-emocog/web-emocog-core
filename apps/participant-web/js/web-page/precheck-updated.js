@@ -1,11 +1,11 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
-import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import { state, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261109-issues2';
+import { translations } from '../../translations.js?v=20261110-integration1';
 import { measureCameraFPS } from './camera.js?v=20261104-4';
-import { protocolCameraConstraints } from '../session-runtime/protocol-profile.mjs?v=20261109-issues2';
+import { protocolCameraConstraints } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { getFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261109-issues2';
+import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { PrecheckWindow } from '../session-runtime/precheck-window.mjs';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {

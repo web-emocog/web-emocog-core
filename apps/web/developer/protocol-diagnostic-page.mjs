@@ -1,5 +1,5 @@
-import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261109-issues2';
-import { PROTOCOL_PROFILE_ID, NEW_PROTOCOL_PROFILE_ID, resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261109-issues2';
+import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261110-integration1';
+import { PROTOCOL_PROFILE_ID, NEW_PROTOCOL_PROFILE_ID, resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
 
 const fmt = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : '\u2014';
 const fpsLabel = measurement => measurement?.status === 'measured'

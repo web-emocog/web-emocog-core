@@ -1,5 +1,5 @@
-import { createMediaCache, MediaPreparationError, mediaContentKey } from './media-cache.mjs?v=20261109-issues2';
-import { mediaAbortError } from './media-preload.mjs?v=20261109-issues2';
+import { createMediaCache, MediaPreparationError, mediaContentKey } from './media-cache.mjs?v=20261110-integration1';
+import { mediaAbortError } from './media-preload.mjs?v=20261110-integration1';
 
 const normalizedId = id => String(id ?? '').replace(/^api:/, '');
 

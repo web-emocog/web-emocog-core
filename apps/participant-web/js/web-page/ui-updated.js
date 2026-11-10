@@ -4,16 +4,16 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
-import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import { state, recordSessionEvent } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261109-issues2';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261109-issues2';
+import { translations } from '../../translations.js?v=20261110-integration1';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261110-integration1';
 import { measureRenderFPS } from './camera.js?v=20261104-4';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261109-issues2';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261110-integration1';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
-import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261109-issues2';
-import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261109-issues2';
+import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261110-integration1';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261110-integration1';
 
 const MVP_STEP = {
     INTRO: 1,
@@ -75,7 +75,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261109-issues2');
+        const mod = await import('./tests-updated.js?v=20261110-integration1');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             return (await mod.continueInvitationSessionAfterShell()) !== false;
         }

@@ -1,6 +1,6 @@
 import { extractEyeSignalSample } from '../web-page/eye-signal.js';
 import { updateFromMetrics as updateQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { SessionQualityDetector } from './quality-detector.mjs?v=20261109-issues2';
+import { SessionQualityDetector } from './quality-detector.mjs?v=20261110-integration1';
 import { ERROR_KINDS } from './contracts.mjs';
 import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261107-resp2';
 import {
@@ -10,14 +10,14 @@ import {
     getEmotionSummary,
     setExplicitNeutralBaseline,
     startEmotionSession
-} from '../emotion-stub-new.js?v=20261109-issues2';
+} from '../emotion-stub-new.js?v=20261110-integration1';
 import { NeutralCalibration } from '../emotion/neutral-calibration.mjs';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261109-issues2';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261110-integration1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
 import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
-import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261109-issues2';
+import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
 
 const SAME_FRAME_RETRY_MS = 8;
 const PRIMARY_STAGES = ['face', 'guideGazeEyes', 'emotionMultimodal', 'quality', 'bpm', 'auxiliaryDispatch'];

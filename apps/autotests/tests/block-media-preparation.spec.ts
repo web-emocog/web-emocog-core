@@ -51,7 +51,7 @@ async function startRunner(page: Page) {
   await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
-    const runner = await import(new URL('js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
+    const runner = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
     await runner.loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
   });
 }
@@ -116,8 +116,8 @@ test('an oversized active block explains the budget before any trial, with no di
   await page.evaluate(async budget => {
     const shared = (window as any).__WECOG_STATE__;
     const { createBlockMediaPreparation } = await import(new URL('/apps/participant-web/js/session-runtime/block-media-preparation.mjs', location.href).href);
-    const { createInvitationRequestPool } = await import(new URL('/apps/participant-web/js/session-runtime/invitation-http.mjs?v=20261109-issues2', location.href).href);
-    const { fetchMediaWithDeadline } = await import(new URL('/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261109-issues2', location.href).href);
+    const { createInvitationRequestPool } = await import(new URL('/apps/participant-web/js/session-runtime/invitation-http.mjs?v=20261110-integration1', location.href).href);
+    const { fetchMediaWithDeadline } = await import(new URL('/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261110-integration1', location.href).href);
     shared.runtime.invitationMediaPreparation.dispose();
     shared.runtime.invitationMediaPreparation = createBlockMediaPreparation({ scope: 'budget-test',
       budgetBytes: budget, rows: shared.runtime.invitationStimuliMap,
@@ -139,7 +139,7 @@ test('many real video probes release decoders while byte-budget eviction revokes
   await page.route('**/synthetic-video/**', route => route.fulfill({ body: VIDEO, contentType: 'video/webm' }));
   const result = await page.evaluate(async size => {
     const { createMediaCache } = await import(new URL('/apps/participant-web/js/session-runtime/media-cache.mjs', location.href).href);
-    const { fetchMediaWithDeadline } = await import(new URL('/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261109-issues2', location.href).href);
+    const { fetchMediaWithDeadline } = await import(new URL('/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261110-integration1', location.href).href);
     const videos: HTMLVideoElement[] = [];
     const original = document.createElement;
     (document as any).createElement = function (...args: any[]) {
@@ -172,7 +172,7 @@ test('three blocks prepare only at instruction boundaries and teardown releases 
   await page.evaluate(async budget => {
     const shared = (window as any).__WECOG_STATE__;
     const { createBlockMediaPreparation } = await import(new URL('/apps/participant-web/js/session-runtime/block-media-preparation.mjs', location.href).href);
-    const { fetchMediaWithDeadline } = await import(new URL('/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261109-issues2', location.href).href);
+    const { fetchMediaWithDeadline } = await import(new URL('/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261110-integration1', location.href).href);
     shared.runtime.invitationMediaPreparation.dispose();
     shared.runtime.invitationMediaPreparation = createBlockMediaPreparation({ scope: 'transition-test', budgetBytes: budget,
       rows: shared.runtime.invitationStimuliMap, request: fetchMediaWithDeadline });

@@ -71,6 +71,9 @@ test('the session shows coverage, missing measurements and separate attempts in 
     store.emit();
   });
   const panel = page.locator('#analyticsPhysiologyIntervals');
+  const section = page.locator('.ab-disclosure').filter({ has: panel });
+  await section.locator(':scope > summary').click();
+  await expect(panel).toBeVisible();
   await expect(panel).toContainText('Interval history is incomplete');
   await expect(panel.locator('[data-physiology-limitation]')).toContainText('only the covered part');
   await expect(panel.locator('[data-physiology-limitation]')).toContainText('brightness');
@@ -88,6 +91,7 @@ test('the session shows coverage, missing measurements and separate attempts in 
   await expect(panel.getByText('Attempt 2 · Accepted')).toBeVisible();
   await expect(panel.locator('[onerror]')).toHaveCount(0);
   await page.evaluate(() => { const w = window as any; w.setLang('ru'); w.EmocogAnalyticsProduction.store.emit(); });
+  await section.locator(':scope > summary').click();
   await panel.getByText('По блокам и попыткам').click();
   await expect(panel.getByText('Попытка 1 · Потребовался повтор')).toBeVisible();
   await expect(panel.locator('[data-physiology-limitation]')).toContainText('только покрытую часть');

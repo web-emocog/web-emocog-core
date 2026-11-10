@@ -25,7 +25,7 @@ import {
 import { 
     startCalibration, 
     finishSession 
-} from './tests.js?v=20261109-issues2';
+} from './tests.js?v=20261110-integration1';
 
 // Функции доступные для HTML
 window.setLanguage = setLanguage;

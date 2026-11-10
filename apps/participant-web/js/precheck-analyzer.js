@@ -394,7 +394,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof window !== 'undefined') {
     window.PrecheckAnalyzer = PrecheckAnalyzerInline;
-    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261109-issues2')
+    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261110-integration1')
         .then(module => {
             const Model = module.PrecheckAnalyzer || module.default;
             if (typeof Model !== 'function') throw new Error('face_export_missing');
@@ -402,7 +402,7 @@ if (typeof window !== 'undefined') {
             return 'module';
         })
         .catch(() => {
-            void import('./session-runtime/participant-diagnostic.mjs?v=20261109-issues2').then(
+            void import('./session-runtime/participant-diagnostic.mjs?v=20261110-integration1').then(
                 diagnostic => {
                     faceInlineDiagnostic = diagnostic;
                     diagnostic.participantDebugError('face', 'module:inline-fallback');

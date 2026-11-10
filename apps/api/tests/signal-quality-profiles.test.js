@@ -170,7 +170,7 @@ test('v2 auxiliary and emotion schedules are bounded by time, not delivered fram
 
 test('the actual pipeline publishes no calibration samples and commits only a complete explicit baseline', async t => {
   const { SessionFramePipeline } = await load('session-runtime/frame-pipeline.js');
-  const { startEmotionSession } = await load('emotion-stub-new.js?v=20261109-issues2');
+  const { startEmotionSession } = await load('emotion-stub-new.js?v=20261110-integration1');
   const nativePerformance = global.performance;
   let now = 0;
   Object.defineProperty(global, 'performance', { configurable: true, value: { now: () => now } });
