@@ -49,6 +49,8 @@ test('canonical API: captured signup mail, workspace isolation, media recovery a
     const form = body instanceof FormData;
     const headers = { ...(token ? { Authorization: 'Bearer ' + token } : {}) };
     if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
+    // Captured mail contains synthetic one-time fixture tokens. Only this
+    // test's loopback server receives them; redirects cannot forward them.
     const response = await fetch(target, { headers, redirect: 'error', method: body === undefined ? 'GET' : 'POST',
       body: body === undefined || form ? body : JSON.stringify(body) });
     assert.equal(response.status, status, route.split('?')[0]);
@@ -63,7 +65,11 @@ test('canonical API: captured signup mail, workspace isolation, media recovery a
         const message = JSON.parse(await fs.readFile(path.join(capture, name), 'utf8'));
         if (!message.to.some(entry => entry.address === email) || message.subject !== subject) continue;
         const link = new URL(message.text.match(/http[^\s]+/)[0]);
-        return new URLSearchParams(link.hash.slice(1)).get('token');
+        assert.equal(link.origin, 'http://127.0.0.1:3000');
+        const token = new URLSearchParams(link.hash.slice(1)).get('token');
+        assert.equal(typeof token, 'string');
+        assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+        return token;
       }
       await new Promise(resolve => setTimeout(resolve, 50));
     }

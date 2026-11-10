@@ -32,11 +32,12 @@ function runNativeProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     // Converter arguments are data on a dedicated descriptor, never Python
     // interpreter arguments. stdin remains owned by the RT analyzer's input.
-    const child = spawn(limited ? 'python3' : command, limited ? [
-      path.join(__dirname, '../scripts/conversion-runner.py'),
-      String(Math.max(1, Math.ceil(timeoutMs / 1000))),
-    ] : args, { cwd: options.cwd, env, detached: process.platform !== 'win32',
-      stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(limited ? ['pipe'] : [])], shell: false });
+    const spawnOptions = { cwd: options.cwd, env, detached: process.platform !== 'win32',
+      stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(limited ? ['pipe'] : [])], shell: false };
+    const child = limited
+      ? spawn('python3', [path.join(__dirname, '../scripts/conversion-runner.py'),
+        String(Math.max(1, Math.ceil(timeoutMs / 1000)))], spawnOptions)
+      : spawn(command, args, spawnOptions);
     let settled = false;
     let failure = null;
     const output = { stdout: [], stderr: [] };
