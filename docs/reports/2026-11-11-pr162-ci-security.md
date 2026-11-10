@@ -34,9 +34,11 @@ The changes address failed CI checks and the CodeQL findings on this PR.
 
 ## Local evidence
 
-- Full API suite: 1,051 passed, 9 conditional skips, 0 failures (1,060 tests).
+- Full API suite: 1,052 passed, 9 conditional skips, 0 failures (1,061 tests).
 - Disposable PostgreSQL integration: 83 passed, 0 failures.
 - Linux native-process/media tests: 13 passed, 2 conditional skips, 0 failures.
+- The final native-process-only rerun passed all 5 Linux tests, including direct
+  argument-boundary preservation with quotes, spaces and shell metacharacters.
 - Real Linux Poppler conversion: 3 pages, 1,275 x 1,650 pixels, resource limits
   verified. No biometric media or real account data is used by these fixtures.
 - Targeted login tests: 6 passed across Chromium, Firefox and WebKit.

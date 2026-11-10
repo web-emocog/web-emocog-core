@@ -37,7 +37,7 @@ function runNativeProcess(command, args, options = {}) {
     const child = limited
       ? spawn('python3', [path.join(__dirname, '../scripts/conversion-runner.py'),
         String(Math.max(1, Math.ceil(timeoutMs / 1000)))], spawnOptions)
-      : spawn(command, args, spawnOptions);
+      : spawn(command, [...args], spawnOptions);
     let settled = false;
     let failure = null;
     const output = { stdout: [], stderr: [] };

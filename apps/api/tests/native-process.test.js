@@ -54,3 +54,10 @@ test('Linux limited invocation keeps data arguments and stdin separate without s
   { input: 'bounded RT input', resourceLimits: true });
   assert.deepEqual(JSON.parse(result.stdout), { argument, stdin: 'bounded RT input' });
 });
+
+test('direct invocation preserves argument boundaries and never expands shell syntax', async () => {
+  const args = ['a file with spaces.wav', '; echo SHOULD_NOT_EXECUTE', '$(printf nope)', '"quoted"'];
+  const result = await runNativeProcess(process.execPath, ['-e',
+    'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...args]);
+  assert.deepEqual(JSON.parse(result.stdout), args);
+});
