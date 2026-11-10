@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 
 const participant = `${process.env.WECOG_TEST_BASE_URL || 'http://127.0.0.1:4173'}/apps/participant-web/mvp_with_precheck_1-updated.html`;
-const moduleVersion = '20261104-4';
+const moduleVersion = '20261110-157';
 const code = 'recovery-invitation';
 const definition = { version: 'v2.0_universal', participantShell: { consent: true, questionnaire: true, precheck: true, calibration: true },
   blocks: [

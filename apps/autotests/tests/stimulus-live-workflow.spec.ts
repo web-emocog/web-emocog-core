@@ -80,7 +80,7 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-157', location.href).href);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
       await page.locator('#cogStartBtn').click();
