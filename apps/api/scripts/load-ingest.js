@@ -1,6 +1,10 @@
 const { randomBytes } = require('node:crypto');
 const { Pool } = require('pg');
 
+const fixtureConsentReceipt = Object.freeze({
+  informedConsentVersion: 'informed-consent-v1.0', privacyPolicyVersion: 'privacy-policy-v1.0',
+});
+
 const databaseUrl = process.env.DATABASE_URL;
 const baseUrl = String(process.env.LOAD_TEST_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
 const requests = Math.min(500, Math.max(10, Number.parseInt(process.env.LOAD_TEST_REQUESTS || '100', 10)));
@@ -105,7 +109,7 @@ async function main() {
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ session_id: sessionId }),
+            body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt }),
           },
           timings
         );

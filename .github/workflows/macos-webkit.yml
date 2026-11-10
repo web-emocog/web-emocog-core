@@ -50,6 +50,14 @@ jobs:
           npm run test:staff-http -- --project=webkit
           npm run test:html-security -- --project=webkit
           npm run test:staff-regression -- --project=webkit
+      - name: Verify corrected VPC metrics and real stimulus presentation
+        run: npx playwright test -c playwright.metrics.config.ts --project=webkit
+      - name: Verify audit data boundaries and cancelled protocol loads
+        run: |
+          npx playwright test -c playwright.old-audit-builder.config.ts --project=webkit
+          npx playwright test -c playwright.old-audit-stimuli-security.config.ts --project=webkit
+          npx playwright test -c playwright.old-audit-analytics.config.ts --project=webkit
+          npx playwright test -c playwright.old-audit-network.config.ts --project=webkit
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

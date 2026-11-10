@@ -1,4 +1,4 @@
-const WORKER_URL = new URL('./vision-worker.js?v=20261104-4', import.meta.url);
+const WORKER_URL = new URL('./vision-worker.js?v=20261109-issues2', import.meta.url);
 
 export class VisionWorkerClient {
     static supported() {
@@ -57,6 +57,11 @@ export class VisionWorkerClient {
         try {
             const timestamp = performance.now();
             const wallTimestamp = Date.now();
+            if (this.task !== 'face' && typeof ImageData === 'function' && source instanceof ImageData) {
+                // The primary frame still owns these pixels for rPPG. Clone
+                // across the Worker boundary; never detach the shared buffer.
+                return await this._request({ type: 'frame', imageData: source, timestamp, wallTimestamp, ...context });
+            }
             bitmap = await this._capture(source);
             if (this.closed) throw new Error('vision_worker_closed');
             return await this._request({ type: 'frame', bitmap, timestamp, wallTimestamp, ...context }, [bitmap]);

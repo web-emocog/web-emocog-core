@@ -2,6 +2,7 @@
 let analyzer;
 let task;
 let pose;
+let getFramePixels;
 self.onmessage = async ({ data }) => {
     const { id, type } = data;
     let bitmap = data.bitmap;
@@ -12,12 +13,13 @@ self.onmessage = async ({ data }) => {
             Object.assign(self, { FilesetResolver: vision.FilesetResolver,
                 FaceLandmarker: vision.FaceLandmarker, ImageSegmenter: vision.ImageSegmenter });
             if (task === 'face') {
-                const { PrecheckAnalyzer } = await import('../precheck-analyzer/PrecheckAnalyzer.js?v=20261104-4');
+                ({ getFramePixels } = await import('./frame-pixels.mjs'));
+                const { PrecheckAnalyzer } = await import('../precheck-analyzer/PrecheckAnalyzer.js?v=20261109-issues2');
                 analyzer = new PrecheckAnalyzer({ ...data.options, worker: false });
                 if (data.options.thresholds) analyzer.thresholds = data.options.thresholds;
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'segment') {
-                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261104-4');
+                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261109-issues2');
                 analyzer = new FaceSegmenter({ ...data.options, worker: false });
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'pose') {
@@ -43,29 +45,31 @@ self.onmessage = async ({ data }) => {
                 if (frame.error) throw new Error('vision_worker_warmup_failed');
                 analyzer.reset();
             } else pose.detectForVideo(warmup, 0);
-            self.postMessage({ id, result: task === 'segment'
+            self.postMessage({ id, result: task === 'segment' || task === 'face'
                 ? { ready: true, inferenceDelegate: analyzer.inferenceDelegate,
                     delegateFallbackReason: analyzer.cpuFallbackReason || null } : true });
         } else if (type === 'reset') {
             analyzer?.reset();
         } else if (type === 'frame') {
             let result;
+            const input = data.imageData || bitmap;
             if (task === 'face') {
-                const { getFramePixels } = await import('./frame-pixels.mjs');
                 const frame = await analyzer.analyzeFrame(bitmap, data);
                 frame.timestamp = data.timestamp;
                 frame.wallTimestamp = data.wallTimestamp;
+                frame.inferenceDelegate = analyzer.inferenceDelegate;
+                frame.delegateFallbackReason = analyzer.cpuFallbackReason || null;
                 const imageData = getFramePixels(frame);
                 self.postMessage({ id, result: { frame, imageData } }, imageData ? [imageData.data.buffer] : []);
                 return;
             } else if (task === 'segment') {
-                result = await analyzer.segmentFrame(bitmap, data.landmarks, data.timestamp);
+                result = await analyzer.segmentFrame(input, data.landmarks, data.timestamp);
                 result.inferenceDelegate = analyzer.inferenceDelegate;
                 result.delegateFallbackReason = analyzer.cpuFallbackReason || null;
                 // QC needs derived regions, not a raw per-pixel mask on the UI thread.
                 if (result.maskAnalysis) result.maskAnalysis._rawMaskData = null;
             } else {
-                result = pose.detectForVideo(bitmap, data.timestamp);
+                result = pose.detectForVideo(input, data.timestamp);
             }
             self.postMessage({ id, result });
         }

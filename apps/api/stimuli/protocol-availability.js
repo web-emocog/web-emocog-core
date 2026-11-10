@@ -37,8 +37,14 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
       unavailable.push({ id, code: 'stimulus_record_missing', name: null });
       continue;
     }
-    if (visualIds.has(id) && row.mime_type && !/^(image|video)\//.test(row.mime_type)) {
+    if (visualIds.has(id) && row.mime_type && !/^(image|video|audio)\//.test(row.mime_type)) {
       unavailable.push({ id, code: 'stimulus_media_type_unsupported', name: row.name || null });
+      continue;
+    }
+    if (row.mime_type?.startsWith('audio/') && (definition.blocks || []).some(block =>
+      [block.blockConfig, block.content].some(config => Array.isArray(config?.aoiDefinitions?.[String(id)])
+        && config.aoiDefinitions[String(id)].length))) {
+      unavailable.push({ id, code: 'audio_spatial_aoi_unsupported', name: row.name || null });
       continue;
     }
     const resolved = await resolveReadableServerOwnedUploadPath(
@@ -71,7 +77,9 @@ function rejectUnavailableProtocolStimuli(res, report) {
   res.status(422).json({
     error: 'Protocol references unavailable stimulus files',
     message: report.unavailable.some(item => item.code === 'stimulus_media_type_unsupported')
-      ? `Визуальные блоки поддерживают изображения и видео, но не выбранный тип файла: ${labels}. Замените стимул перед публикацией.`
+      ? `Предъявление поддерживает изображения, видео и аудио, но не выбранный тип файла: ${labels}. Замените стимул перед публикацией.`
+      : report.unavailable.some(item => item.code === 'audio_spatial_aoi_unsupported')
+      ? `Для аудио нельзя задать экранные зоны AOI: ${labels}. Уберите эти зоны; аудиофайл удалять не нужно.`
       : `Недоступны файлы стимулов: ${labels}. Восстановите их в библиотеке перед публикацией протокола.`,
     code: 'protocol_stimulus_unavailable',
     details: report.unavailable,

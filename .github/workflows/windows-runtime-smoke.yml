@@ -1,0 +1,34 @@
+name: Windows runtime smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-browser-checks:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/autotests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/autotests/package-lock.json
+      - name: Install dependencies
+        run: |
+          python --version
+          npm ci
+          npx playwright install chromium firefox
+      - name: Check frame processing and login behavior
+        run: |
+          npm run test:fps -- --project=chromium --project=firefox
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:staff-http -- --project=chromium --project=firefox

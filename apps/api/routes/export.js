@@ -15,6 +15,9 @@ router.use(requireAuth);
 router.use(requireRole('admin', 'PI', 'researcher', 'analyst', 'developer'));
 router.use(requireOperation(OPERATIONS.EXPORT_READ));
 
+// Additive research package; the legacy summary export below stays compatible.
+router.get('/reproducibility', require('../export/reproducibility-route').createReproducibilityHandler({ pool }));
+
 function scopedJoinAndWhere(userParamIdx, user) {
   if (isPlatformAdmin(user)) return '';
   return `

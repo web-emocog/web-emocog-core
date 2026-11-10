@@ -1,4 +1,4 @@
-import { TEST_HUB_VERSION } from './constants.js';
+import { TEST_HUB_VERSION } from './constants.js?v=20261106-metrics1';
 
 export function ensureTestHubSessionFields(sessionData) {
     if (!sessionData || typeof sessionData !== 'object') return;

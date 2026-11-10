@@ -14,6 +14,7 @@ import { createGazeState, addGazePoint, accumulateGazeTime } from './gaze-tracki
 import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261025-1';
 import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
 import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261104-4';
+import { participantDebug as dbg } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
 
 class QCMetrics {
     constructor(options = {}) {
@@ -51,13 +52,13 @@ class QCMetrics {
         this._fpsMonitor.findVideoElement(this.videoElementIdCandidates);
         this._fpsMonitor.start(useRealFps);
 
-        console.log(`[QCMetrics] Started (realCameraFps: ${useRealFps})`);
+        dbg('qc', 'metrics:start', { realCameraFps: useRealFps === true });
     }
 
     stop() {
         this._isRunning = false;
         this._fpsMonitor.stop();
-        console.log('[QCMetrics] Stopped');
+        dbg('qc', 'metrics:stop');
     }
 
     processFrame(precheckResult, segmenterResult = null) {
@@ -111,7 +112,7 @@ class QCMetrics {
     setValidationData(validationData) {
         this._validationState = setValidationData(this._validationState, validationData);
         if (this._validationState.errors && this._validationState.errors.length > 0) {
-            console.log(`[QCMetrics] Validation data set: ${this._validationState.errors.length} points`);
+            dbg('qc', 'validation:set', () => ({ pointCount: this._validationState.errors.length }));
         }
     }
 
@@ -126,7 +127,7 @@ class QCMetrics {
         const next = setTrackingDeviationData(this._trackingDeviationState, samples);
         if (next.isComplete) {
             this._trackingDeviationState = next;
-            console.log(`[QCMetrics] Tracking deviation data set: ${next.validSampleCount} valid samples of ${next.sampleCount}`);
+            dbg('qc', 'tracking:set', () => ({ validSampleCount: next.validSampleCount, sampleCount: next.sampleCount }));
         }
     }
 

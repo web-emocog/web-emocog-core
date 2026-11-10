@@ -77,6 +77,7 @@ export interface PhysiologyIntervalChannel {
   mean: number | null;
   count: number;
   observedMs: number;
+  methodVersion?: string;
 }
 
 export interface PhysiologyInterval {
@@ -143,6 +144,7 @@ export interface SessionFeatureV1 {
   ids: {
     session: string;
     participant?: string | null;
+    participantAlias?: string | null;
     invitationCode?: string | null;
   };
   lifecycle: SessionLifecycleV1;
@@ -175,9 +177,21 @@ export interface SessionFeatureV1 {
   } | null;
   rt_alignment?: RtAlignmentV1;
   physiology_intervals?: PhysiologyIntervalsV1;
+  quality_assessment?: MetricQualityV1;
   startTime?: number | string | null;
   testHub?: Record<string, unknown> | null;
   gazeTests?: Record<string, unknown> | null;
+}
+
+export interface MetricQualityV1 {
+  schemaVersion: 'metric_quality.v1';
+  recordingIntegrity: { status: 'complete' | 'partial' | 'unknown'; storage: 'local_prepared' | 'server_acknowledged'; reasons: string[] };
+  protocolQuality: 'passed' | 'failed' | 'unknown';
+  signals: Array<{ channel: string; status: 'available' | 'missing' | 'unknown'; sampleCount: number | null;
+    coverageFraction: number | null; observedMs: number | null; methodVersion: string | null; reasons: string[] }>;
+  suitability: Array<{ channel: string; status: 'research_only' | 'unavailable'; reasons: string[] }>;
+  limits: Array<{ code: string; scope: string; limit: number; total: number | null; retained: number | null; truncated: boolean }>;
+  independentlyValidated: false;
 }
 
 export interface IngestSessionFeatureResponseV1 {

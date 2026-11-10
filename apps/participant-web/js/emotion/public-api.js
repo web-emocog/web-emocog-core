@@ -9,7 +9,7 @@
  */
 
 import { EMOTION_CONFIG }  from './emotion-config.js';
-import { EmotionAnalyzer } from './emotion-analyzer.js';
+import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261109-issues2';
 
 /**
  * Singleton — один экземпляр на всё приложение.

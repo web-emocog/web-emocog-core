@@ -30,27 +30,25 @@ js/
 
 ## Зависимости
 
-```html
-<!-- MediaPipe Tasks Vision -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_bundle.mjs" type="module"></script>
-```
-
-Или через CDN с FilesetResolver:
-```html
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
-```
+Используются закреплённые локальные MediaPipe, WASM и модели из
+`js/vendor/mediapipe/`, не CDN или `latest`. В протоколе сегментатор получает
+общий кадр из `session-runtime/frame-pipeline.js`; не создавайте рядом
+второй цикл обработки камеры.
 
 ## Быстрый старт
 
 ### Browser (без сборщика)
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
-<script src="js/face-segmenter.js"></script>
-<script>
+<p id="modelStatus" role="status"></p>
+<script type="module">
+    import { FilesetResolver, ImageSegmenter } from './js/vendor/mediapipe/vision_bundle.mjs';
+    import { FaceSegmenter } from './js/face-segmenter/index.js?v=20261109-media1';
+    Object.assign(window, { FilesetResolver, ImageSegmenter });
+    const status = document.getElementById('modelStatus');
     const segmenter = new FaceSegmenter({
-        onInitialized: () => console.log('Ready!'),
-        onError: (err) => console.error(err)
+        onInitialized: () => { status.textContent = 'Модель готова'; },
+        onError: () => { status.textContent = 'Модель недоступна. Повторите подготовку.'; }
     });
     
     await segmenter.initialize();
@@ -58,9 +56,7 @@ js/
     // В цикле анализа:
     const result = await segmenter.segmentFrame(videoElement, faceLandmarks);
     
-    if (result.faceVisibility.handDetected) {
-        console.log('Рука на лице!');
-    }
+    // Передавайте result в QC; техническая ошибка не означает наличие руки.
 </script>
 ```
 
@@ -72,6 +68,18 @@ import { FaceSegmenter } from './face-segmenter/index.js';
 const segmenter = new FaceSegmenter();
 await segmenter.initialize();
 ```
+
+`onInitialized` и `onError` — необязательные уведомления. Их исключение или
+отклонённый Promise не запускает второй backend и не меняет результат
+`initialize()`. Исходный Error в `onError` оставлен для совместимости,
+но не должен целиком попадать в консоль или JSON.
+
+После окончательного сбоя инициализации `segmentFrame()` возвращает
+техническую ошибку, не загружая модель на каждом кадре. Повтор запускается
+явным `initialize()`, `reset()` с последующим анализом либо новой подготовкой.
+Принятый готовый экземпляр при `reset()` не загружается заново.
+Коды ошибок диагностики ограничены до сброса экземпляра; исходные маски и
+координаты в них не записываются.
 
 ## API
 

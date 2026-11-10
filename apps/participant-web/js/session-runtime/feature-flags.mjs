@@ -1,7 +1,9 @@
+import { resolveSignalProfile } from './protocol-profile.mjs?v=20261109-issues2';
+
 export const DEFAULT_SESSION_FEATURE_FLAGS = Object.freeze({
     audio: false,
     multimodal: true,
-    bodyMovement: true,
+    bodyMovement: false,
     gamerMode: false,
     audioDebugCapture: false
 });
@@ -10,7 +12,6 @@ function bool(value, fallback) {
     if (typeof value === 'boolean') return value;
     return fallback;
 }
-
 function object(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -38,7 +39,7 @@ export function resolveSessionFeatureFlags(definition = null) {
         ),
         bodyMovement: bool(
             body.enabled,
-            bool(featureFlags.bodyMovement, DEFAULT_SESSION_FEATURE_FLAGS.bodyMovement)
+            bool(featureFlags.bodyMovement, resolveSignalProfile(definition).bodyMovementDefault)
         ),
         gamerMode: bool(
             multimodal.gamerMode,

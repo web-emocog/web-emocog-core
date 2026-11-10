@@ -12,6 +12,7 @@ import { EMOTION_CONFIG }                        from './emotion-config.js';
 import { buildInternalMask, extractActionUnits } from './au-extractor.js';
 import { classifyFACS, calcAffective }           from './facs-classifier.js';
 import { computeAggregatedMetrics }              from './emotion-aggregator.js';
+import { participantDebugError } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
@@ -51,7 +52,6 @@ export class EmotionAnalyzer {
         this._dominantCandidate = 'neutral';
         this._dominantCandidateFrames = 0;
 
-        console.log('[EmotionAnalyzer] Инициализирован (FACS AU v4.1, без ONNX)');
     }
 
     // ── Инициализация ──────────────────────────────────────────────────────
@@ -60,11 +60,10 @@ export class EmotionAnalyzer {
         try {
             if (faceMaskCollector && typeof faceMaskCollector.generateMask === 'function') {
                 this.faceMaskCollector = faceMaskCollector;
-                console.log('[EmotionAnalyzer] FaceMaskCollector подключён');
             }
             return true;
-        } catch (err) {
-            console.error('[EmotionAnalyzer] Ошибка инициализации:', err);
+        } catch (_) {
+            participantDebugError('expression', 'initialization:failed');
             return false;
         }
     }
@@ -75,12 +74,12 @@ export class EmotionAnalyzer {
      * Начало новой сессии. Полностью сбрасывает буферы предыдущей.
      * @param {string} [sessionId]
      */
-    startSession(sessionId = null) {
+    startSession(sessionId = null, options = {}) {
         this.clear();
+        this.requireExplicitBaseline = options.explicitNeutral === true;
         this.sessionId    = sessionId ?? `session_${Date.now()}`;
         this.sessionStart = Date.now();
         this.isRunning    = true;
-        console.log(`[EmotionAnalyzer] ▶️ Сессия начата: ${this.sessionId}`);
     }
 
     /**
@@ -90,10 +89,6 @@ export class EmotionAnalyzer {
     endSession() {
         this.isRunning = false;
         const durationMs = this.sessionStart ? Date.now() - this.sessionStart : 0;
-        console.log(
-            `[EmotionAnalyzer] ⏹️ Сессия завершена: ${this.sessionId}` +
-            ` (${durationMs}мс, ${this.emotionEvents.length} событий)`
-        );
         return { sessionId: this.sessionId, durationMs, eventCount: this.emotionEvents.length };
     }
 
@@ -157,8 +152,8 @@ export class EmotionAnalyzer {
                 },
             }, 'success');
 
-        } catch (err) {
-            console.error('[EmotionAnalyzer] Ошибка processLandmarks:', err);
+        } catch (_) {
+            participantDebugError('expression', 'landmarks:process-failed');
             this._recordEvent(null, 'error');
         }
     }
@@ -196,8 +191,8 @@ export class EmotionAnalyzer {
                 calibrationReady: auState.ready,
                 calibrationFrames: this._auBaselineFrames,
             };
-        } catch (err) {
-            console.error('[EmotionAnalyzer] Ошибка analyzeLandmarks:', err);
+        } catch (_) {
+            participantDebugError('expression', 'landmarks:analysis-failed');
             return this._neutralResult();
         }
     }
@@ -243,6 +238,7 @@ export class EmotionAnalyzer {
 
     /** Полный сброс состояния (вызывается автоматически в startSession) */
     clear() {
+        this.requireExplicitBaseline = false;
         this.emotionEvents       = [];
         this.smoothingBuffer     = [];
         this.temporalBuffer      = [];
@@ -256,7 +252,6 @@ export class EmotionAnalyzer {
         this._dominantCandidateFrames = 0;
         this.affectiveDimensions = { valence: 0, arousal: 0 };
         this._resetCategoryCounts();
-        console.log('[EmotionAnalyzer] Данные очищены');
     }
 
     // ── Приватные методы ───────────────────────────────────────────────────
@@ -329,9 +324,25 @@ export class EmotionAnalyzer {
         );
     }
 
+    setNeutralBaseline(baseline, count) {
+        const entries = Object.entries(baseline || {});
+        if (!this.requireExplicitBaseline || !Number.isInteger(count) || count < 1 || entries.length !== 16
+            || !entries.every(([key, value]) => /^AU\d+$/.test(key) && Number.isFinite(value) && value >= 0 && value <= 1)) {
+            throw new Error('Invalid neutral baseline');
+        }
+        this._auBaseline = { ...baseline };
+        this._auBaselineFrames = count;
+        this._auBaselineReady = true;
+        this.smoothingBuffer = []; this.temporalBuffer = [];
+        this._stableDominant = 'neutral'; this._dominantCandidate = 'neutral'; this._dominantCandidateFrames = 0;
+    }
+
     _calibrateActionUnits(rawActionUnits) {
         const cfg = this.config.baseline;
         const keys = Object.keys(rawActionUnits || {});
+        if (this.requireExplicitBaseline && !this._auBaselineReady) {
+            return { ready: false, actionUnits: Object.fromEntries(keys.map(key => [key, 0])) };
+        }
         if (!this._auBaseline) {
             this._auBaseline = Object.fromEntries(keys.map(key => [key, Number(rawActionUnits[key]) || 0]));
             this._auBaselineFrames = 1;
@@ -357,7 +368,7 @@ export class EmotionAnalyzer {
             return [key, clamp(delta * cfg.gain, 0, 1)];
         }));
         const activity = Object.values(adjusted).reduce((sum, value) => sum + value, 0) / Math.max(1, keys.length);
-        if (activity <= cfg.adaptiveMaxActivity) {
+        if (!this.requireExplicitBaseline && activity <= cfg.adaptiveMaxActivity) {
             keys.forEach(key => {
                 this._auBaseline[key] += ((Number(rawActionUnits[key]) || 0) - this._auBaseline[key]) * cfg.adaptiveRate;
             });

@@ -6,6 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 const jwt = require('jsonwebtoken');
 
+const fixtureConsentReceipt = Object.freeze({
+  informedConsentVersion: 'informed-consent-v1.0', privacyPolicyVersion: 'privacy-policy-v1.0',
+});
+
 describe('Protocol persistence and project boundaries', { skip: !process.env.S2_TEST_DATABASE_URL }, () => {
   let pool, server, url, organizationId, projectId, config, uploads;
   const users = [];
@@ -59,6 +63,42 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const stored = (await pool.query('SELECT name, slug FROM projects WHERE id=$1', [projectId])).rows[0];
     assert.deepEqual(stored, { name: 'Renamed project', slug });
   });
+  for (const scope of ['project', 'organization']) it(`does not let a protocol write overtake a concurrent ${scope} membership revocation`, async () => {
+    const name = `Before ${scope} revocation`;
+    const protocol = await create(name);
+    const peerId = users[1];
+    const revoke = await pool.connect();
+    let pending;
+    try {
+      await revoke.query('BEGIN');
+      await revoke.query(scope === 'project'
+        ? 'DELETE FROM user_projects WHERE user_id = $1 AND project_id = $2'
+        : 'DELETE FROM user_organizations WHERE user_id = $1 AND organization_id = $2',
+      [peerId, scope === 'project' ? projectId : organizationId]);
+      pending = request(`/protocols/${protocol.id}`, 'PATCH', { name: 'Unauthorized overwrite' }, 'peer');
+      let blocked = false;
+      for (let i = 0; i < 100 && !blocked; i++) {
+        const result = await pool.query(`SELECT 1 FROM pg_stat_activity
+          WHERE $1 = ANY(pg_blocking_pids(pid)) AND query LIKE '%FOR SHARE OF uo%'`, [revoke.processID]);
+        blocked = result.rowCount > 0;
+        if (!blocked) await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.ok(blocked, 'the write must wait on the membership being revoked');
+      await revoke.query('COMMIT');
+      const response = await pending;
+      assert.equal(response.status, 404, await response.clone().text());
+      assert.equal((await request(`/invitations`, 'POST', { protocol_id: protocol.id }, 'peer')).status, 403);
+      assert.equal((await request(`/protocols/${protocol.id}`, 'DELETE', undefined, 'peer')).status, 404);
+      const stored = (await pool.query('SELECT name FROM protocols WHERE id=$1', [protocol.id])).rows[0];
+      assert.equal(stored.name, name);
+    } finally {
+      await revoke.query('ROLLBACK');
+      revoke.release();
+      if (pending) await pending;
+      await pool.query('INSERT INTO user_organizations(user_id, organization_id) VALUES($1, $2) ON CONFLICT DO NOTHING', [peerId, organizationId]);
+      await pool.query('INSERT INTO user_projects(user_id, project_id) VALUES($1, $2) ON CONFLICT DO NOTHING', [peerId, projectId]);
+    }
+  });
   it('persists ordered intermediate results, seals final data and evaluates the pinned QC policy server-side', async () => {
     const base = definition('Resilience');
     base.settings = { qualityControl: { schemaVersion: 'protocol_quality.v1', rules: {
@@ -70,7 +110,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const invitation = await (await request('/invitations', 'POST', { protocol_id: protocol.id })).json();
     const sessionId = randomUUID();
     const token = await (await fetch(url + `/invitations/by-code/${invitation.code}/ingest-token`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId })
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt })
     })).json();
     const send = (sequence, completed = false, overrides = {}) => fetch(url + '/ingest', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token.token}`,
@@ -87,6 +127,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     assert.equal(row.stopped_at, null);
     assert.equal(row.payload.cognitiveResults[0].rt, 420);
     assert.deepEqual(row.payload.qcSummary.protocolQc.failed, ['gazeValid']);
+    assert.equal(row.payload.quality_assessment.protocolQuality, 'failed');
     assert.equal((await send(1, false, { cognitiveResults: [] })).status, 409);
     assert.equal((await (await send(2)).json()).idempotent, true);
     assert.equal((await send(2, false, { cognitiveResults: [] })).status, 409);
@@ -106,7 +147,10 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const invalidPolicy = await request('/protocols', 'POST', { project_id: projectId, name: 'Invalid QC',
       definition: { ...base, settings: { qualityControl: { schemaVersion: 'protocol_quality.v1', rules: { fpsStable: { enabled: true, threshold: 1000, hardStop: true } } } } } });
     assert.equal(invalidPolicy.status, 422);
-    const forbidden = await fetch(url + '/ingest', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tokens.outsider}` }, body: JSON.stringify(row.payload) });
+    assert.equal(row.payload.ids.invitationCode, undefined, 'bearer invitation code must not be stored in features');
+    const forbidden = await fetch(url + '/ingest', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tokens.outsider}` },
+      body: JSON.stringify({ schemaVersion: 'session_feature.v1', ids: { session: sessionId, invitationCode: invitation.code },
+        lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'running', status: 'in_progress' }, events: [] }) });
     assert.equal(forbidden.status, 401);
   });
 
@@ -175,7 +219,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     assert.equal(first.publication_version, 1);
     const sessionId = randomUUID();
     const admit = async code => fetch(`${url}/invitations/by-code/${code}/ingest-token`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId })
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt })
     });
     assert.equal((await admit(first.code)).status, 200);
     const update = await request(`/protocols/${saved.id}`, 'PATCH', { name: 'Stable link edited',
@@ -213,7 +257,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const invitation = await (await request('/invitations', 'POST', { protocol_id: protocol.id })).json();
     const uuid = randomUUID();
     const admission = await fetch(`${url}/invitations/by-code/${invitation.code}/ingest-token`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: uuid })
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: uuid, consent_receipt: fixtureConsentReceipt })
     });
     assert.equal(admission.status, 200);
     const token = (await admission.json()).token;
@@ -332,7 +376,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const first = await (await request('/invitations', 'POST', { protocol_id: saved.id })).json();
     const sessionId = randomUUID();
     assert.equal((await fetch(`${url}/invitations/by-code/${first.code}/ingest-token`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId })
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt })
     })).status, 200);
     const secondDefinition = { ...firstDefinition, blocks: [{ type: 'cognitive_task', taskType: 'simple_rt',
       trials: [{ stimulusId: String(stimuli[1].id), action: 'KeyM', duration: 1000 }] }] };
@@ -362,7 +406,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     const sessions = [];
     async function addSession(invitation, participant, offset = 0) {
       const uuid = randomUUID();
-      const admission = await fetch(`${url}/invitations/by-code/${invitation.code}/ingest-token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: uuid }) });
+      const admission = await fetch(`${url}/invitations/by-code/${invitation.code}/ingest-token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: uuid, consent_receipt: fixtureConsentReceipt }) });
       assert.equal(admission.status, 200, await admission.clone().text());
       const row = (await pool.query('UPDATE sessions SET participant_id=$1, stopped_at=current_timestamp WHERE session_id=$2 RETURNING id', [participant, uuid])).rows[0];
       await pool.query('INSERT INTO session_features(session_id,payload) VALUES($1,$2)', [row.id, { ids: { participantAlias: 'same-alias' }, cognitiveResults: [
@@ -481,7 +525,7 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
       const invitation = await (await request('/invitations', 'POST', { protocol_id: saved.id, expected_revision: saved.revision })).json();
       const sessionId = randomUUID();
       const [admission, deletion] = await Promise.all([
-        fetch(`${url}/invitations/by-code/${invitation.code}/ingest-token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId }) }),
+        fetch(`${url}/invitations/by-code/${invitation.code}/ingest-token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt }) }),
         request(`/protocols/${saved.id}`, 'DELETE')
       ]);
       assert.ok([200, 404].includes(admission.status), await admission.clone().text());

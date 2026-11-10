@@ -94,9 +94,10 @@ test('rPPG consumes the same frame pixels without another readback; fallback sti
 });
 
 class FakeWorker {
-  constructor() { this.messages = []; this.terminated = false; }
-  postMessage(message) {
+  constructor() { this.messages = []; this.transfers = []; this.terminated = false; }
+  postMessage(message, transfer = []) {
     this.messages.push(message);
+    this.transfers.push(transfer);
     if (message.type === 'init') queueMicrotask(() => this.reply(message.id, true));
   }
   reply(id, result) { this.onmessage?.({ data: { id, result } }); }
@@ -170,6 +171,45 @@ test('a hung bitmap capture also has a deadline and closes a late bitmap', async
   release({ close() { closed++; } }); await sleep(0);
   assert.equal(closed, 1); assert.equal(worker.messages.length, 1);
   assert.equal(client.capturePending, null); assert.equal(client.busy, false);
+});
+
+test('auxiliary workers reuse owned ImageData without a bitmap conversion or buffer detachment', async t => {
+  const { VisionWorkerClient } = await load('session-runtime/vision-worker-client.mjs');
+  const previous = { ImageData: global.ImageData, createImageBitmap: global.createImageBitmap };
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete global[name]; else global[name] = value;
+    }
+  });
+  global.ImageData = class { constructor() { this.width = 2; this.height = 2; this.data = new Uint8ClampedArray(16); } };
+  global.createImageBitmap = () => { throw new Error('unexpected_bitmap_conversion'); };
+  for (const task of ['segment', 'pose']) {
+    const worker = new FakeWorker();
+    const client = new VisionWorkerClient(task, { workerFactory: () => worker });
+    await client.start();
+    const pixels = new global.ImageData();
+    const pending = client.analyze(pixels, { timestamp: 123, wallTimestamp: 456 });
+    assert.equal(client.capturePending, null);
+    const frame = worker.messages.at(-1);
+    assert.equal(frame.imageData, pixels);
+    assert.equal(frame.bitmap, undefined);
+    assert.equal(frame.timestamp, 123);
+    assert.equal(frame.wallTimestamp, 456);
+    assert.deepEqual(worker.transfers.at(-1), [], 'shared pixels must not enter a transfer list');
+    await assert.rejects(client.analyze(pixels), /unavailable/);
+    worker.reply(frame.id, { derived: true });
+    assert.deepEqual(await pending, { derived: true });
+    assert.equal(pixels.data.byteLength, 16);
+    client.dispose();
+    await assert.rejects(client.analyze(pixels), /unavailable/);
+  }
+  const worker = new FakeWorker();
+  const client = new VisionWorkerClient('segment', { workerFactory: () => worker, timeoutMs: 15 });
+  await client.start();
+  await assert.rejects(client.analyze(new global.ImageData()), /vision_worker_timeout/);
+  assert.equal(worker.terminated, true);
+  assert.equal(client.busy, false);
+  assert.equal(client.pending, null);
 });
 
 function bodyLandmarks() {
@@ -277,7 +317,7 @@ test('segmentation masks are released even when derived analysis throws', async 
     getAsUint8Array() { throw new Error('synthetic_mask_failure'); }, close() { closed++; } },
     confidenceMasks: [{ close() { closed++; } }] }), close() {} };
   const result = await analyzer.segmentFrame({ width: 10, height: 10 });
-  assert.equal(result.error, 'synthetic_mask_failure'); assert.equal(closed, 2);
+  assert.equal(result.error, 'segment_inference_failed'); assert.equal(closed, 2);
   analyzer.dispose();
 });
 

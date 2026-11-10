@@ -317,6 +317,8 @@ describe('quality detector', () => {
     const raised = detector.update(errorFrame).raised;
     assert.equal(raised[0].kind, 'technical');
     assert.equal(raised[0].code, 'frame_analysis_failed');
+    const later = detector.update(errorFrame, null, performance.now() + 10000).raised;
+    assert.equal(later.length, 0, 'a technical failure is not evidence of a missing/occluded face or bad pose');
   });
 
   it('requires regional hand occlusion without global-mask or low-skin false positives', async () => {

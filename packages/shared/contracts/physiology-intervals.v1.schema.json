@@ -20,7 +20,8 @@
       "properties": {
         "mean": { "type": ["number", "null"] },
         "count": { "type": "integer", "minimum": 0, "maximum": 10000000 },
-        "observedMs": { "$ref": "#/$defs/time" }
+        "observedMs": { "$ref": "#/$defs/time" },
+        "methodVersion": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_.:-]+$" }
       }
     },
     "heartRate": {

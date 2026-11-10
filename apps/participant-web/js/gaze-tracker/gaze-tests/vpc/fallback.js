@@ -1,76 +1,41 @@
-import { VPC_CONFIG } from '../constants.js';
+import { createMediaCache } from '../../../session-runtime/media-cache.mjs?v=20261109-issues2';
+import { fetchMediaWithDeadline } from '../../../session-runtime/media-preload.mjs?v=20261109-issues2';
+import { VPC_CONFIG } from '../constants.js?v=20261106-metrics1';
 
-function loadImage(url, timeoutMs = VPC_CONFIG.imageLoadTimeoutMs) {
-    return new Promise((resolve, reject) => {
-        const image = new Image();
-        let settled = false;
-
-        const timeout = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            reject(new Error(`timeout:${url}`));
-        }, timeoutMs);
-
-        image.onload = () => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeout);
-            resolve({ width: image.naturalWidth, height: image.naturalHeight });
-        };
-
-        image.onerror = () => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeout);
-            reject(new Error(`load_error:${url}`));
-        };
-
-        image.referrerPolicy = 'no-referrer';
-        image.src = url;
-    });
+export function createVPCMediaCache() {
+    return createMediaCache({ scope: 'vpc_felidae_assets.v2',
+        request: (url, init, read) => fetchMediaWithDeadline(url, init, read, VPC_CONFIG.imageLoadTimeoutMs),
+        budgetBytes: 32 * 1024 * 1024 });
 }
 
-export async function pickLoadableStimulusFromPool(pool = [], usedStimulusIds = new Set()) {
-    const candidates = (pool || []).filter(item => !!item && !usedStimulusIds.has(item.stimulusId));
-
-    const preferred = candidates.length > 0 ? candidates : (pool || []);
+export async function pickLoadableStimulusFromPool(pool = [], usedStimulusIds = new Set(), options = {}) {
+    const candidates = pool.filter(item => item && item.license !== 'placeholder'
+        && !String(item.stimulusId).startsWith('local_placeholder:')
+        && /^[a-f0-9]{64}$/.test(item.sha256 || ''));
+    const unused = candidates.filter(item => !usedStimulusIds.has(item.stimulusId));
+    const preferred = [...unused, ...candidates.filter(item => usedStimulusIds.has(item.stimulusId))];
+    const cache = options.cache || createVPCMediaCache();
     const errors = [];
-
     for (const candidate of preferred) {
+        const descriptor = { sourceUrl: candidate.url, mimeType: 'image/jpeg', sha256: candidate.sha256,
+            sizeBytes: candidate.sizeBytes, version: candidate.sha256 };
         try {
-            await loadImage(candidate.url, VPC_CONFIG.imageLoadTimeoutMs);
+            const lease = await cache.prepare([descriptor]);
+            let released = false;
             return {
-                stimulus: candidate,
-                fallbackUsed: candidates.length === 0,
-                errors
+                stimulus: { ...candidate, url: lease.urlFor(descriptor), sourceUrl: candidate.url },
+                fallbackUsed: usedStimulusIds.has(candidate.stimulusId) || errors.length > 0,
+                errors,
+                release() {
+                    if (released) return;
+                    released = true; lease.release();
+                    if (!options.cache) cache.dispose();
+                }
             };
         } catch (error) {
-            errors.push({
-                stimulusId: candidate?.stimulusId || null,
-                url: candidate?.url || null,
-                message: String(error?.message || error)
-            });
+            errors.push({ stimulusId: candidate.stimulusId, code: error.code || 'stimulus_unavailable' });
         }
     }
-
-    const species = (pool && pool[0] && pool[0].species) || 'stimulus';
-    const label = String(species).replace(/_/g, ' ');
-    const hue = (label.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 360);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360"><rect fill="hsl(${hue},38%,88%)" width="100%" height="100%"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="26" fill="#1e293b" font-family="system-ui,sans-serif">${label}</text></svg>`;
-    const placeholder = {
-        species,
-        fileName: 'local_placeholder.svg',
-        stimulusId: `local_placeholder:${species}:${Date.now()}`,
-        url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-        sourcePage: '',
-        author: 'local',
-        license: 'placeholder',
-        licenseUrl: ''
-    };
-
-    return {
-        stimulus: placeholder,
-        fallbackUsed: true,
-        errors
-    };
+    if (!options.cache) cache.dispose();
+    return { stimulus: null, fallbackUsed: true, errors, reason: 'stimulus_unavailable', release() {} };
 }

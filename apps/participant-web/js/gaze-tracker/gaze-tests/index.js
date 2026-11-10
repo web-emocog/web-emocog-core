@@ -1,20 +1,20 @@
 import { state, clearTaskContext, setSessionPhase, recordSessionEvent } from '../../web-page/state.js?v=20261025-1';
-import { translations } from '../../../translations.js?v=20261025-1';
-import { getEmotionSample } from '../../emotion-stub-new.js';
-import { TEST_IDS, TEST_PHASES } from './constants.js';
+import { translations } from '../../../translations.js?v=20261109-issues2';
+import { getEmotionSample } from '../../emotion-stub-new.js?v=20261109-issues2';
+import { TEST_IDS, TEST_PHASES } from './constants.js?v=20261106-metrics1';
 import {
     ensureTestHubSessionFields,
     pushHubSelection,
     pushHubRun
 } from './session-schema.js';
-import { runVPCTest } from './vpc/runner.js?v=20261025-1';
-import { runVisuospatialDrawingTest } from './visuospatial/runner.js?v=20261025-1';
+import { runVPCTest } from './vpc/runner.js?v=20261106-metrics1';
+import { runVisuospatialDrawingTest } from './visuospatial/runner.js?v=20261109-issues2';
 import {
     startGazeTestsAnalysisLoop,
     stopGazeTestsAnalysisLoop,
     isGazeTestsAnalysisLoopRunning
-} from './common/analysis-loop.js?v=20261108-143l';
-import { getSessionRuntime } from '../../session-runtime/index.js?v=20261108-143l';
+} from './common/analysis-loop.js?v=20261109-issues2';
+import { getSessionRuntime } from '../../session-runtime/index.js?v=20261109-issues2';
 
 let hubBusy = false;
 let hubEmotionTimer = null;
@@ -41,6 +41,7 @@ export function stopHubEmotionPreview() {
 
 function startHubEmotionPreview() {
     stopHubEmotionPreview();
+    if (state.runtime.participantPageExited) return;
     const el = document.getElementById('testHubEmotionPreview');
     if (!el) return;
     const video = document.getElementById('precheckVideo');
@@ -57,7 +58,7 @@ function startHubEmotionPreview() {
             const result = centralAnalysis
                 ? state.runtime.lastPrecheckResult
                 : await analyzer.analyzeFrame(video);
-            if (!result) return;
+            if (state.runtime.participantPageExited || !hubEmotionTimer || !result) return;
             const sample = centralAnalysis
                 ? state.runtime.lastEmotionSample
                 : getEmotionSample(result);
@@ -70,7 +71,7 @@ function startHubEmotionPreview() {
                 top = Object.entries(sample.scores)
                     .sort((a, b) => b[1] - a[1])
                     .slice(0, 3)
-                    .map(([k, v]) => `${emotionDisplayName(k)} ${Math.round((Number(v) || 0) * 100)}%`)
+                        .map(([k, v]) => `${emotionDisplayName(k)} ${Number.isFinite(v) ? v.toFixed(2) : '—'}`)
                     .join(' · ');
             }
             el.textContent = `${t('hub_emotion_label')}: ${name} (v ${vl}, a ${ar})${top ? ' — ' + top : ''}`;
@@ -224,7 +225,10 @@ function summarizeRunForHub(testId, payload) {
 
     if (testId === TEST_IDS.VPC) {
         const summary = payload.summary || {};
-        return `VPC: trials=${summary.trialCount || 0}, valid=${summary.validTrials || 0}, novelty=${summary.meanNoveltyPreferencePct ?? 'n/a'}%`;
+        const unavailable = summary.exclusionReasons?.stimulus_unavailable
+            ? (state.currentLang === 'ru' ? ' Изображения недоступны; соответствующие пробы исключены.'
+                : ' Unavailable images: affected trials excluded.') : '';
+        return `VPC: trials=${summary.trialCount || 0}, valid=${summary.validTrials || 0}, excluded=${summary.invalidTrials || 0}, novelty=${summary.meanNoveltyPreferencePct ?? 'n/a'}% (image AOI; research only)${unavailable}`;
     }
 
     if (testId === TEST_IDS.VISUOSPATIAL) {
@@ -275,6 +279,7 @@ function instructionForTest(testId, options = {}) {
 }
 
 async function runSelectedTest(testId, handlers, options = {}) {
+    if (state.runtime.participantPageExited) return null;
     const hub = document.getElementById('testHubContainer');
     if (!hub) return;
     const returnToHub = options.returnToHub !== false;
@@ -352,6 +357,7 @@ async function runSelectedTest(testId, handlers, options = {}) {
             throw new Error(`Unsupported testId: ${testId}`);
         }
 
+        if (state.runtime.participantPageExited) return null;
         const blockDecision = usesInternalBlocks
             ? { repeatRequired: false }
             : (runtime?.completeBlock({ success: true }) || { repeatRequired: false });
@@ -404,6 +410,7 @@ async function runSelectedTest(testId, handlers, options = {}) {
         }
         return runPayload;
     } catch (error) {
+        if (state.runtime.participantPageExited) return null;
         const runtime = getSessionRuntime();
         const issue = runtime?.reportIssue({
             kind: 'technical',
@@ -442,7 +449,7 @@ async function runSelectedTest(testId, handlers, options = {}) {
         }
         if (issue?.code) runtime.resolveIssue(issue.code);
     } finally {
-        if (!delegatedRetry) {
+        if (!delegatedRetry && !state.runtime.participantPageExited) {
             hubBusy = false;
             setHubButtonsDisabled(false);
         }
@@ -482,6 +489,7 @@ export async function runProtocolTestSequence(testIds, handlers = {}) {
     await getSessionRuntime()?.requireQualityInstruction();
 
     for (let index = 0; index < queue.length; index += 1) {
+        if (state.runtime.participantPageExited) return;
         const testId = queue[index];
         recordSessionEvent('protocol_test_sequence_advance', {
             testId,
@@ -496,6 +504,7 @@ export async function runProtocolTestSequence(testIds, handlers = {}) {
         });
     }
 
+    if (state.runtime.participantPageExited) return;
     recordSessionEvent('protocol_test_sequence_complete', {
         tests: queue,
         count: queue.length

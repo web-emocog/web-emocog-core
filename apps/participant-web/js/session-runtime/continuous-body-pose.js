@@ -4,7 +4,7 @@
  * MediaPipe Tasks Vision and Pose Landmarker are Apache-2.0 licensed. The
  * collector stores normalized kinematics, not video frames.
  */
-import { VisionWorkerClient } from './vision-worker-client.mjs?v=20261104-4';
+import { VisionWorkerClient } from './vision-worker-client.mjs?v=20261109-issues2';
 
 const MODEL_URL = new URL(
     '../vendor/mediapipe/models/pose_landmarker_lite.task',
@@ -17,6 +17,16 @@ const LANDMARK = Object.freeze({
     RIGHT_HIP: 24
 });
 const SAMPLE_CAP = 3600;
+export const BODY_POSE_VERSION = 'body_pose_mediapipe.v2';
+export const SHOULDER_ROLL_METHOD = 'camera_normalized_axis_modulo_180.v2';
+
+export function shoulderAxisRollDeg(left, right) {
+    const dx = right?.x - left?.x, dy = right?.y - left?.y;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return null;
+    // Shoulders form an unoriented axis: swapping endpoints must not add 180 degrees.
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    return ((angle + 90) % 180 + 180) % 180 - 90;
+}
 
 function finite(value) {
     return Number.isFinite(value) ? Number(value) : null;
@@ -69,8 +79,13 @@ export function summarizeBodyPoseState(state, movementBursts = 0) {
         : samples.filter(sample => sample.valid).length;
     const validSamples = samples.filter(sample => sample.valid);
     const velocities = validSamples.map(sample => sample.movementVelocity);
+    const axisSamples = validSamples.filter(sample => sample.shoulderRollMethod === SHOULDER_ROLL_METHOD
+        && Number.isFinite(sample.shoulderRollDeg));
+    const axisCount = accumulator?.shoulderAxisValidCount ?? axisSamples.length;
+    const hasAxisMethod = accumulator?.shoulderRollMethod === SHOULDER_ROLL_METHOD || axisSamples.length > 0
+        || (!accumulator && samples.length === 0);
     return {
-        version: 'body_pose_mediapipe.v1',
+        version: hasAxisMethod ? BODY_POSE_VERSION : 'body_pose_mediapipe.v1',
         source: 'mediapipe_pose_landmarker_lite',
         enabled: accumulator?.enabled !== false,
         gamerMode: accumulator?.gamerMode === true,
@@ -96,7 +111,14 @@ export function summarizeBodyPoseState(state, movementBursts = 0) {
         torsoLeanAbsMeanDeg: validCount > 0 && Number.isFinite(accumulator?.torsoLeanAbsSum)
             ? finite(accumulator.torsoLeanAbsSum / validCount)
             : finite(mean(validSamples.map(sample => Math.abs(sample.torsoLeanDeg)))),
-        shoulderRollAbsMeanDeg: validCount > 0 && Number.isFinite(accumulator?.shoulderRollAbsSum)
+        shoulderRollMethod: hasAxisMethod ? SHOULDER_ROLL_METHOD : 'directed_line_legacy.v1',
+        shoulderRollSampleCount: hasAxisMethod ? axisCount : validCount,
+        shoulderRollLegacySampleCount: accumulator?.shoulderRollLegacySampleCount
+            ?? (hasAxisMethod ? validSamples.filter(sample => sample.shoulderRollMethod !== SHOULDER_ROLL_METHOD).length : validCount),
+        shoulderRollAbsMeanDeg: hasAxisMethod
+            ? (axisCount > 0 ? finite(Number.isFinite(accumulator?.shoulderAxisAbsSum)
+                ? accumulator.shoulderAxisAbsSum / axisCount : mean(axisSamples.map(sample => Math.abs(sample.shoulderRollDeg)))) : null)
+            : validCount > 0 && Number.isFinite(accumulator?.shoulderRollAbsSum)
             ? finite(accumulator.shoulderRollAbsSum / validCount)
             : finite(mean(validSamples.map(sample => Math.abs(sample.shoulderRollDeg)))),
         rawVideoStored: false,
@@ -132,7 +154,8 @@ export class ContinuousBodyPoseCollector {
     async start() {
         if (!this.enabled) {
             this.state.sessionData.bodyPoseSummary = {
-                version: 'body_pose_mediapipe.v1',
+                version: BODY_POSE_VERSION,
+                shoulderRollMethod: SHOULDER_ROLL_METHOD,
                 enabled: false,
                 gamerMode: this.gamerMode,
                 sampleCount: 0,
@@ -334,12 +357,8 @@ export class ContinuousBodyPoseCollector {
             movementVelocity: finite(movementVelocity),
             movementBurst: isMovementBurst,
             lateralLean: finite((shoulderCenter.x - hipCenter.x) / torsoHeight),
-            shoulderRollDeg: finite(
-                Math.atan2(
-                    rightShoulder.y - leftShoulder.y,
-                    rightShoulder.x - leftShoulder.x
-                ) * 180 / Math.PI
-            ),
+            shoulderRollMethod: SHOULDER_ROLL_METHOD,
+            shoulderRollDeg: shoulderAxisRollDeg(leftShoulder, rightShoulder),
             torsoLeanDeg: finite(
                 Math.atan2(
                     shoulderCenter.x - hipCenter.x,
@@ -370,6 +389,8 @@ export class ContinuousBodyPoseCollector {
             };
         }
         const accumulator = this.state.sessionData.bodyPoseAccumulator;
+        accumulator.shoulderRollLegacySampleCount ??= accumulator.shoulderRollMethod === SHOULDER_ROLL_METHOD
+            ? 0 : accumulator.validCount;
         accumulator.n += 1;
         accumulator.updatedAt = wallTime;
         if (sample.valid) accumulator.validCount += 1;
@@ -378,8 +399,12 @@ export class ContinuousBodyPoseCollector {
             accumulator.confidenceSum += sample.confidence;
             accumulator.movementVelocitySum += sample.movementVelocity;
             accumulator.torsoLeanAbsSum += Math.abs(sample.torsoLeanDeg);
-            accumulator.shoulderRollAbsSum += Math.abs(sample.shoulderRollDeg);
+            if (Number.isFinite(sample.shoulderRollDeg)) {
+                accumulator.shoulderAxisValidCount = (accumulator.shoulderAxisValidCount || 0) + 1;
+                accumulator.shoulderAxisAbsSum = (accumulator.shoulderAxisAbsSum || 0) + Math.abs(sample.shoulderRollDeg);
+            }
         }
+        accumulator.shoulderRollMethod = SHOULDER_ROLL_METHOD;
         if (startedMovementBurst) accumulator.movementBurstCount += 1;
         this.state.sessionData.bodyPoseSamples.push(sample);
         if (this.state.sessionData.bodyPoseSamples.length > SAMPLE_CAP) {
@@ -407,6 +432,8 @@ export class ContinuousBodyPoseCollector {
                 movementVelocitySum: 0,
                 torsoLeanAbsSum: 0,
                 shoulderRollAbsSum: 0,
+                shoulderRollMethod: SHOULDER_ROLL_METHOD,
+                shoulderRollLegacySampleCount: 0,
                 movementBurstCount: 0
             };
         }

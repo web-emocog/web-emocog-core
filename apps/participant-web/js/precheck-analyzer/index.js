@@ -4,7 +4,7 @@
  * @module precheck-analyzer
  */
 
-export { default, PrecheckAnalyzer } from './PrecheckAnalyzer.js?v=20261104-4';
+export { default, PrecheckAnalyzer } from './PrecheckAnalyzer.js?v=20261109-issues2';
 export { LANDMARKS, MIN_LANDMARKS_FULL, MIN_LANDMARKS_BASIC } from './constants.js';
 export { 
     ILLUMINATION_THRESHOLDS, FACE_THRESHOLDS, POSE_THRESHOLDS, 

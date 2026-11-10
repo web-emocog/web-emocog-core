@@ -124,7 +124,7 @@ test('precheck overlay uses the mirrored cover crop and the real gate accepts a 
     shared.runtime.precheckData = frame;
     shared.runtime.successFrames = 1000;
     shared.indicatorsStatus = { illumination: 'passed', face: 'passed', pose: 'passed', visibility: 'passed' };
-    const precheck = await import(new URL('js/web-page/precheck-updated.js?v=20261104-4', location.href).href);
+    const precheck = await import(new URL('js/web-page/precheck-updated.js?v=20261109-issues2', location.href).href);
     precheck.checkAllIndicators();
     return { translations, status: canvas.dataset.precheckStatus, pass: shared.sessionData.precheck.pass_fail };
   });
@@ -137,7 +137,7 @@ test('precheck overlay uses the mirrored cover crop and the real gate accepts a 
 test('calibration permits blinking between targets in both instruction surfaces', async ({ page }) => {
   await page.goto(participant);
   const packs = await page.evaluate(async () => {
-    const { translations } = await import(new URL('translations.js?v=20261025-1', location.href).href);
+    const { translations } = await import(new URL('translations.js?v=20261109-issues2', location.href).href);
     return ['ru', 'en'].map(lang => ({ intro: translations[lang].calibration_intro_body, clicks: translations[lang].calib_click_instruction }));
   });
   expect(packs[0].intro).toMatch(/моргать между/i);
@@ -161,7 +161,7 @@ for (const lang of ['ru', 'en']) {
         shared.currentLang = lang;
         shared.runtime.sessionRuntime.policyShown = true;
         const { loadAndStartCognitiveTask } = await import(new URL(
-          'js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
+          'js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
           version: 'instruction-regression', blocks: [
             { id: 'instruction', type: 'instruction', content: { title: 'Инструкция: Simple RT - тренировка', text: 'Нажмите Пробел.' } },
@@ -185,11 +185,13 @@ test('choice rules use trial mappings, custom placeholders survive, and all ten 
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
     const { loadAndStartCognitiveTask } = await import(new URL(
-      'js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
+      'js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
     const rows: Array<{ lang: string; task: string; text: string }> = [];
     for (const lang of ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur']) {
       shared.currentLang = lang;
       for (const task of ['simple_rt', 'go_nogo', 'nback_2', 'pvt', 'ax_cpt', 'stroop', 'flanker', 'task_switching']) {
+        // Each fixture is a new preview, not a replacement for a saved session plan.
+        delete shared.sessionData.experimentMeta.presentationPlan;
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'mapping-regression', blocks: [
           { id: 'instruction', type: 'instruction', content: { standardInstruction: true } },
           { id: 'task', type: 'cognitive_task', taskType: task, blockConfig: { responseMode: 'keypress' }, trials: [
@@ -203,6 +205,7 @@ test('choice rules use trial mappings, custom placeholders survive, and all ten 
     const custom: Record<string, string> = {};
     for (const [lang, suffix] of Object.entries({ ru: 'Ru', en: 'En', zh: 'Zh', es: 'Es', hi: 'Hi', ar: 'Ar', fr: 'Fr', bn: 'Bn', pt: 'Pt', ur: 'Ur' })) {
       shared.currentLang = lang;
+      delete shared.sessionData.experimentMeta.presentationPlan;
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'custom-regression', blocks: [
         { id: 'instruction', type: 'instruction', content: { [`title${suffix}`]: 'My instructions', [`text${suffix}`]: 'Keep the custom explanation. On target: {response}.' } },
         { id: 'task', type: 'cognitive_task', taskType: 'simple_rt', blockConfig: { responseMode: 'keypress' },

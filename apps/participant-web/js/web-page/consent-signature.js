@@ -13,9 +13,12 @@
  * Дата: 15.03.2026
  */
 
-// ========================================
-// 1. ГЕНЕРАЦИЯ HASH ДОКУМЕНТА
-// ========================================
+function noteConsentFailure(event) {
+    try {
+        const debug = window.WECOG_DEBUG;
+        if (debug?.enabled) debug.error('consent', event);
+    } catch (_) { /* Consent is independent of the optional logger. */ }
+}
 
 /**
  * Вычисляет SHA-256 hash текста документа
@@ -36,8 +39,8 @@ async function generateDocumentHash(documentText) {
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         
         return hashHex;
-    } catch (error) {
-        console.error('[ConsentSignature] Hash generation error:', error);
+    } catch (_) {
+        noteConsentFailure('document:hash-failed');
         return null;
     }
 }
@@ -77,8 +80,8 @@ async function loadDocumentAndHash(documentUrl) {
             version: version,
             url: documentUrl
         };
-    } catch (error) {
-        console.error('[ConsentSignature] Document load error:', error);
+    } catch (_) {
+        noteConsentFailure('document:load-failed');
         return null;
     } finally {
         clearTimeout(deadline);
@@ -108,11 +111,10 @@ async function createConsentSignature(documentType, documentData, participantId)
             language: navigator.language || 'unknown'
         };
 
-        console.log('[ConsentSignature] Signature created');
         return signature;
         
-    } catch (error) {
-        console.error('[ConsentSignature] Signature creation error:', error);
+    } catch (_) {
+        noteConsentFailure('signature:create-failed');
         return null;
     }
 }
@@ -134,8 +136,6 @@ function saveConsentSignature(signature, state) {
     // Сохраняем подпись по типу документа
     const docType = signature.documentType;
     state.sessionData.consent[docType] = signature;
-    
-    console.log(`[ConsentSignature] Saved ${docType} signature to state`);
 }
 
 // ========================================
@@ -152,15 +152,11 @@ function saveConsentSignature(signature, state) {
  */
 async function signDocument(documentType, documentUrl, participantId, state) {
     try {
-        console.log(`[ConsentSignature] Starting signature process for ${documentType}...`);
-        
         // 1. Загружаем документ и вычисляем hash
         const documentData = await loadDocumentAndHash(documentUrl);
         if (!documentData || !documentData.hash) {
             throw new Error('Failed to load document or generate hash');
         }
-        
-        console.log(`[ConsentSignature] Document hash: ${documentData.hash.substring(0, 16)}...`);
         
         // 2. Создаём подпись
         const signature = await createConsentSignature(
@@ -176,11 +172,10 @@ async function signDocument(documentType, documentUrl, participantId, state) {
         // 3. Сохраняем в state
         saveConsentSignature(signature, state);
         
-        console.log(`[ConsentSignature] ✅ Document "${documentType}" signed successfully`);
         return true;
         
-    } catch (error) {
-        console.error(`[ConsentSignature] ❌ Signature process failed:`, error);
+    } catch (_) {
+        noteConsentFailure('signature:failed');
         return false;
     }
 }
@@ -196,5 +191,3 @@ window.ConsentSignature = {
     saveConsentSignature,
     signDocument
 };
-
-console.log('[ConsentSignature] Module loaded v1.0');

@@ -5,13 +5,13 @@ import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-repo
 import { DiagnosticRun, SerialDiagnosticStage } from './diagnostic-run.mjs?v=20261104-4';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS, CORRECTION_POSITIONS,
   BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick, compareCalibrationClicks
-} from '../../participant-web/js/gaze-tracker/calibration-capture.mjs?v=20261108-143l';
+} from '../../participant-web/js/gaze-tracker/calibration-capture.mjs?v=20261109-issues2';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../../participant-web/js/gaze-tracker/validation-sampling.mjs';
 import { fitValidationCorrection, assessCorrectionBenchmark } from '../../participant-web/js/gaze-tracker/validation-metrics.mjs';
 import { createModelComparison, commonAppearanceCalibrationFrames, commonGradientCalibrationFrames, commonTophatCalibrationFrames, comparisonSignals, comparisonSignalKeys, comparisonPairs } from './gaze-benchmark-models.mjs?v=20261108-143m';
 import { eyePatchFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-patch-features.mjs?v=20261107-143';
 import { eyeGradientFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-gradient-features.mjs?v=20261107-143g';
-import { eyeTophatFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-tophat-features.mjs?v=20261108-143l';
+import { eyeTophatFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-tophat-features.mjs?v=20261109-issues2';
 export function mountGazeBenchmark({ mode: requestedMode = null, pose = false, temporal = false,
   cohort = false, canStart = () => false, authorize = null } = {}) {
 if (cohort && (requestedMode !== 'tophat' || typeof authorize !== 'function')) {
@@ -139,7 +139,7 @@ async function start() {
       import('../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261104-4'),
       import('../../participant-web/js/session-runtime/video-frames.mjs?v=20261104-4'),
       import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs'),
-      import('../../participant-web/js/gaze-tracker/features.js?v=20261108-143l'),
+      import('../../participant-web/js/gaze-tracker/features.js?v=20261109-issues2'),
     ]), 45000, owned);
     if (run !== owned) return;
     globalThis.FilesetResolver = vision.FilesetResolver; globalThis.FaceLandmarker = vision.FaceLandmarker;

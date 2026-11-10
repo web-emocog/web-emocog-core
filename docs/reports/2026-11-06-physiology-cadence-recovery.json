@@ -1,0 +1,777 @@
+{
+  "schemaVersion": "physiology_recovery_technical_evidence.v1",
+  "executedAt": "2026-11-06T11:13:54.231Z",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v25.4.0"
+  },
+  "sourceHashes": {
+    "apps/participant-web/js/session-runtime/physiology-intervals.mjs": "488cd2cca5a58006b63d4a63d5356f980509985a052ef53d3453217f36cbc5a0",
+    "apps/participant-web/js/session-runtime/continuous-bpm.js": "170c947e0d5aa40d2ff161059b1f401c8953c9324c9ee3fb94998c5e25b3aa60",
+    "scripts/long-session/physiology-fixtures.mjs": "27b5371a97e27a02942524d416c05f915f4e002a08533a3549b570675a02438d",
+    "scripts/long-session/run-cadence-replay.mjs": "fe9d0e4f80433dce6f5a28132b0e217dc9d115ca1448b1b55674591e1afa1326"
+  },
+  "physicalSensors": false,
+  "source": "deterministic synthetic RGB and landmark geometry; unchanged engine defaults",
+  "accelerated": [
+    {
+      "minutes": 40,
+      "sourceFrames": 72000,
+      "wallMs": 7.475375,
+      "exactRecoveryParity": true,
+      "intervalHash": "ca908a86a895add81a7213d229dc061bbba2624087292d9729cc83b83e596ad0",
+      "bytes": 9552,
+      "minutesRetained": 40,
+      "attempts": [
+        {
+          "blockId": "block-0",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-0",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-1",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-1",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-2",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-2",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-3",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-3",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-4",
+          "attempt": 1,
+          "status": "interrupted"
+        },
+        {
+          "blockId": "block-4",
+          "attempt": 2,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-4",
+          "attempt": 3,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-5",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-5",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-6",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-6",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-7",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-7",
+          "attempt": 2,
+          "status": "accepted"
+        }
+      ],
+      "channels": {
+        "heartRate": {
+          "count": 4290,
+          "observedMs": 2104500
+        },
+        "respiration": {
+          "count": 4350,
+          "observedMs": 2134000
+        }
+      }
+    },
+    {
+      "minutes": 125,
+      "sourceFrames": 225000,
+      "wallMs": 8.838500000000003,
+      "exactRecoveryParity": true,
+      "intervalHash": "8714ec5ad3e12a239d91c12c4f51a917c33c09b8c4da62dcf5e13626c85906f8",
+      "bytes": 29407,
+      "minutesRetained": 125,
+      "attempts": [
+        {
+          "blockId": "block-0",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-0",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-1",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-1",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-2",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-2",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-3",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-3",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-4",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-4",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-5",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-5",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-6",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-6",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-7",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-7",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-8",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-8",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-9",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-9",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-10",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-10",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-11",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-11",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-12",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-12",
+          "attempt": 2,
+          "status": "interrupted"
+        },
+        {
+          "blockId": "block-12",
+          "attempt": 3,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-13",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-13",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-14",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-14",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-15",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-15",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-16",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-16",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-17",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-17",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-18",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-18",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-19",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-19",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-20",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-20",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-21",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-21",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-22",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-22",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-23",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-23",
+          "attempt": 2,
+          "status": "accepted"
+        },
+        {
+          "blockId": "block-24",
+          "attempt": 1,
+          "status": "repeat_required"
+        },
+        {
+          "blockId": "block-24",
+          "attempt": 2,
+          "status": "accepted"
+        }
+      ],
+      "channels": {
+        "heartRate": {
+          "count": 13470,
+          "observedMs": 6609000
+        },
+        "respiration": {
+          "count": 13700,
+          "observedMs": 6724000
+        }
+      }
+    }
+  ],
+  "runs": [
+    {
+      "mode": "normal",
+      "frames": 3600,
+      "emissions": 240,
+      "held": 0,
+      "rejected": 240,
+      "wallMs": 467.8725,
+      "inputPtsAndPixelsHash": "b0a1bd066f2401f3bc6be31f7e59827b7eb5fc608500576766e47d99cdaea37a",
+      "outputHash": "4772b814ba3593ca97d916cf7edebd73827682facc6543c21cad038a25e785fc",
+      "summary": {
+        "bpmMean": null,
+        "validSampleCount": 0,
+        "respRateMean": 11.71875,
+        "validRespSampleCount": 200
+      },
+      "intervals": {
+        "schemaVersion": "physiology_intervals.v1",
+        "throughMs": 120001,
+        "truncated": false,
+        "minutes": [
+          {
+            "startMs": 0,
+            "endMs": 60000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 80,
+              "observedMs": 40000
+            }
+          },
+          {
+            "startMs": 60000,
+            "endMs": 120000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 119,
+              "observedMs": 59000
+            }
+          },
+          {
+            "startMs": 120000,
+            "endMs": 120001,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 1,
+              "observedMs": 0
+            }
+          }
+        ],
+        "blocks": []
+      }
+    },
+    {
+      "mode": "load",
+      "frames": 3600,
+      "emissions": 240,
+      "held": 0,
+      "rejected": 240,
+      "wallMs": 511.0714159999999,
+      "inputPtsAndPixelsHash": "b0a1bd066f2401f3bc6be31f7e59827b7eb5fc608500576766e47d99cdaea37a",
+      "outputHash": "4772b814ba3593ca97d916cf7edebd73827682facc6543c21cad038a25e785fc",
+      "summary": {
+        "bpmMean": null,
+        "validSampleCount": 0,
+        "respRateMean": 11.71875,
+        "validRespSampleCount": 200
+      },
+      "intervals": {
+        "schemaVersion": "physiology_intervals.v1",
+        "throughMs": 120001,
+        "truncated": false,
+        "minutes": [
+          {
+            "startMs": 0,
+            "endMs": 60000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 80,
+              "observedMs": 40000
+            }
+          },
+          {
+            "startMs": 60000,
+            "endMs": 120000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 119,
+              "observedMs": 59000
+            }
+          },
+          {
+            "startMs": 120000,
+            "endMs": 120001,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 1,
+              "observedMs": 0
+            }
+          }
+        ],
+        "blocks": []
+      }
+    },
+    {
+      "mode": "replay",
+      "frames": 3600,
+      "emissions": 240,
+      "held": 0,
+      "rejected": 240,
+      "wallMs": 438.1706660000002,
+      "inputPtsAndPixelsHash": "b0a1bd066f2401f3bc6be31f7e59827b7eb5fc608500576766e47d99cdaea37a",
+      "outputHash": "4772b814ba3593ca97d916cf7edebd73827682facc6543c21cad038a25e785fc",
+      "summary": {
+        "bpmMean": null,
+        "validSampleCount": 0,
+        "respRateMean": 11.71875,
+        "validRespSampleCount": 200
+      },
+      "intervals": {
+        "schemaVersion": "physiology_intervals.v1",
+        "throughMs": 120001,
+        "truncated": false,
+        "minutes": [
+          {
+            "startMs": 0,
+            "endMs": 60000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 80,
+              "observedMs": 40000
+            }
+          },
+          {
+            "startMs": 60000,
+            "endMs": 120000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 119,
+              "observedMs": 59000
+            }
+          },
+          {
+            "startMs": 120000,
+            "endMs": 120001,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 1,
+              "observedMs": 0
+            }
+          }
+        ],
+        "blocks": []
+      }
+    },
+    {
+      "mode": "drop",
+      "frames": 3450,
+      "emissions": 230,
+      "held": 0,
+      "rejected": 230,
+      "wallMs": 397.53825000000006,
+      "inputPtsAndPixelsHash": "313c4f129d2eb14aa76813f81690f1fa3b29aa36fc6daab7a3f238febe9a9f4e",
+      "outputHash": "1e2c60fe7d8884d04ed2e6ecd44f92efbb4426d8dd0df304529bfb51f582354e",
+      "summary": {
+        "bpmMean": null,
+        "validSampleCount": 0,
+        "respRateMean": 11.71875,
+        "validRespSampleCount": 151
+      },
+      "intervals": {
+        "schemaVersion": "physiology_intervals.v1",
+        "throughMs": 120001,
+        "truncated": false,
+        "minutes": [
+          {
+            "startMs": 0,
+            "endMs": 60000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 50,
+              "observedMs": 24500
+            }
+          },
+          {
+            "startMs": 60000,
+            "endMs": 120000,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 100,
+              "observedMs": 50000
+            }
+          },
+          {
+            "startMs": 120000,
+            "endMs": 120001,
+            "heartRate": {
+              "mean": null,
+              "count": 0,
+              "observedMs": 0
+            },
+            "respiration": {
+              "mean": 11.71875,
+              "count": 1,
+              "observedMs": 0
+            }
+          }
+        ],
+        "blocks": []
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "mode": "load",
+      "sameSourceFrames": true,
+      "exactOutputParity": true,
+      "exactCoverageParity": true,
+      "heartRate": {
+        "method": "monotone_one_to_one_nearest_publication_pts.v1",
+        "interpretation": "configuration_agreement_not_sensor_accuracy",
+        "channel": "bpm",
+        "toleranceMs": 0,
+        "baselinePublications": 0,
+        "candidatePublications": 0,
+        "pairedPublications": 0,
+        "unmatchedBaseline": 0,
+        "unmatchedCandidate": 0,
+        "meanAbsDifferencePerMinute": null,
+        "maxAbsDifferencePerMinute": null,
+        "meanMatchedTimeOffsetMs": null
+      },
+      "respiration": {
+        "method": "monotone_one_to_one_nearest_publication_pts.v1",
+        "interpretation": "configuration_agreement_not_sensor_accuracy",
+        "channel": "respiration",
+        "toleranceMs": 0,
+        "baselinePublications": 200,
+        "candidatePublications": 200,
+        "pairedPublications": 200,
+        "unmatchedBaseline": 0,
+        "unmatchedCandidate": 0,
+        "meanAbsDifferencePerMinute": 0,
+        "maxAbsDifferencePerMinute": 0,
+        "meanMatchedTimeOffsetMs": 0
+      }
+    },
+    {
+      "mode": "replay",
+      "sameSourceFrames": true,
+      "exactOutputParity": true,
+      "exactCoverageParity": true,
+      "heartRate": {
+        "method": "monotone_one_to_one_nearest_publication_pts.v1",
+        "interpretation": "configuration_agreement_not_sensor_accuracy",
+        "channel": "bpm",
+        "toleranceMs": 0,
+        "baselinePublications": 0,
+        "candidatePublications": 0,
+        "pairedPublications": 0,
+        "unmatchedBaseline": 0,
+        "unmatchedCandidate": 0,
+        "meanAbsDifferencePerMinute": null,
+        "maxAbsDifferencePerMinute": null,
+        "meanMatchedTimeOffsetMs": null
+      },
+      "respiration": {
+        "method": "monotone_one_to_one_nearest_publication_pts.v1",
+        "interpretation": "configuration_agreement_not_sensor_accuracy",
+        "channel": "respiration",
+        "toleranceMs": 0,
+        "baselinePublications": 200,
+        "candidatePublications": 200,
+        "pairedPublications": 200,
+        "unmatchedBaseline": 0,
+        "unmatchedCandidate": 0,
+        "meanAbsDifferencePerMinute": 0,
+        "maxAbsDifferencePerMinute": 0,
+        "meanMatchedTimeOffsetMs": 0
+      }
+    },
+    {
+      "mode": "drop",
+      "sameSourceFrames": false,
+      "exactOutputParity": false,
+      "exactCoverageParity": false,
+      "heartRate": {
+        "method": "monotone_one_to_one_nearest_publication_pts.v1",
+        "interpretation": "configuration_agreement_not_sensor_accuracy",
+        "channel": "bpm",
+        "toleranceMs": 0,
+        "baselinePublications": 0,
+        "candidatePublications": 0,
+        "pairedPublications": 0,
+        "unmatchedBaseline": 0,
+        "unmatchedCandidate": 0,
+        "meanAbsDifferencePerMinute": null,
+        "maxAbsDifferencePerMinute": null,
+        "meanMatchedTimeOffsetMs": null
+      },
+      "respiration": {
+        "method": "monotone_one_to_one_nearest_publication_pts.v1",
+        "interpretation": "configuration_agreement_not_sensor_accuracy",
+        "channel": "respiration",
+        "toleranceMs": 0,
+        "baselinePublications": 200,
+        "candidatePublications": 151,
+        "pairedPublications": 151,
+        "unmatchedBaseline": 49,
+        "unmatchedCandidate": 0,
+        "meanAbsDifferencePerMinute": 0,
+        "maxAbsDifferencePerMinute": 0,
+        "meanMatchedTimeOffsetMs": 0
+      }
+    }
+  ],
+  "limitations": [
+    "Matched PTS control verifies numerical repeatability, not real camera FPS or physiological accuracy.",
+    "Synthetic geometry and pixels can be rejected by production quality gates; null is not zero or accuracy.",
+    "Dropped-frame control intentionally has different input and is not required to match.",
+    "Local accumulator/collector only; no HTTP/PG participant-to-analytics acceptance claimed."
+  ]
+}

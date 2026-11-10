@@ -4,6 +4,7 @@
 const config = require('./config');
 const app = require('./app');
 const { pool } = require('./db');
+const { createIdentityOutboxWorker } = require('./services/identity-mail');
 const {
   configureHttpServer,
   createShutdownController,
@@ -18,6 +19,7 @@ function startServer(options = {}) {
   const processRef = options.processRef || process;
   const port = options.port ?? configValue.port;
   const host = options.host || process.env.HOST || '0.0.0.0';
+  const mailWorker = options.mailWorker || (appInstance === app ? createIdentityOutboxWorker({ pool: poolInstance }) : null);
   const server = appInstance.listen(port, host, () => {
     logger.log(JSON.stringify({
       level: 'info',
@@ -27,6 +29,11 @@ function startServer(options = {}) {
       release_sha: configValue.release.sha,
     }));
   });
+  if (mailWorker) {
+    appInstance.locals.shutdownHooks ||= [];
+    appInstance.locals.shutdownHooks.push(() => mailWorker.stop());
+    mailWorker.start();
+  }
   configureHttpServer(server, configValue.http);
   const controller = createShutdownController({
     server,

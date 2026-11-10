@@ -100,6 +100,27 @@ with a bounded decode before acceptance;
 signature, codec, decoding and unavailable-tool failures have separate codes.
 No automatic re-encoding changes the original source.
 
+### Upload Failure Boundaries
+
+Storage uses opaque UUID names; original names remain display metadata (up to
+512 characters). Multipart requests accept one file and at most eight fields,
+each at most 256 KiB. The default media/document limit remains 50 MiB per file;
+these changes do not increase it. Documents require PDF/PPT/PPTX extensions.
+The converter accepts optional `original_name` (UTF-8 form field, 512 characters)
+to preserve non-ASCII filenames independently of multipart header encoding.
+The browser chooser lists supported media rather than promising arbitrary
+images, video, or text files. Server signature and decoder checks remain authoritative.
+
+A batch is sequential and persists every acknowledged file before optional
+thumbnail loading. A later failure reports how many were saved and stops the
+batch without replaying earlier files. A lost mutation response requires a
+library refresh before retrying. On callback rollback new posters and originals
+are cleaned up; an uncertain COMMIT preserves files and returns
+`media_write_uncertain`. Such cases need DB/filesystem reconciliation, not blind
+deletion. Ready validated posters do not acquire the global media-write lock;
+generation and backfill still use it. Library versions are read with one joined
+query, with at most eight filesystem checks in flight per list request.
+
 Heatmap media is fetched with staff credentials. A missing background image does
 not discard other visual contexts or analytical data. The media cache is revoked
 on project/account boundaries. Rendering uses contain sizing, not image stretching.

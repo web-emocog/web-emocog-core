@@ -1,0 +1,826 @@
+{
+  "schemaVersion": "signal-profile-benchmark.v1",
+  "date": "2026-11-05",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro",
+    "ramBytes": 25769803776,
+    "osVersion": "macOS 26.6.2 (25G83)",
+    "power": "AC"
+  },
+  "baselineCommit": "b16ce38462050ffa3f646d908a8b37ccf92d877b",
+  "source": {
+    "dataset": {
+      "id": "kyegorov/mcd_rppg",
+      "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+      "license": "CC-BY-4.0",
+      "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+      "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+    },
+    "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+    "bytes": 138119703,
+    "input": "same-640x480-canvas-MediaStream-from-locked-video",
+    "playbackRate": 1,
+    "physicalCamera": false
+  },
+  "modelAssets": {
+    "face": {
+      "file": "face_landmarker.task",
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+    },
+    "segment": {
+      "file": "selfie_multiclass_256x256.tflite",
+      "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+    },
+    "pose": {
+      "file": "pose_landmarker_lite.task",
+      "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+    }
+  },
+  "sourceHashes": {
+    "baseline": "457555765d0cdca1b1d340c2151bee48cee19ba335626fdde004ffb0eea28315",
+    "candidate": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c"
+  },
+  "runtimeSourcesUnchangedThroughout": true,
+  "automationVersion": "1.57.0",
+  "nodeVersion": "v25.4.0",
+  "acceptedRuns": 24,
+  "acceptedFrames": 15091,
+  "allAcceptedRunsFaceCoverageOne": true,
+  "allAcceptedRunsSingleFlight": true,
+  "allAcceptedRunsWithoutTechnicalErrors": true,
+  "rows": [
+    {
+      "cohort": "automatic",
+      "engine": "chromium",
+      "variant": "develop-v1-body",
+      "repeatCount": 2,
+      "browserVersion": "143.0.7499.4",
+      "analysisFps": [
+        24.598360109326045,
+        23.494909436288804
+      ],
+      "meanAnalysisFps": 24.046634772807423,
+      "meanInputFps": 24.06329782914522,
+      "meanPrimaryMs": 10.641445251678213,
+      "meanSegmentHz": 4.999296793696388,
+      "meanPoseHz": 3.1662231354883885,
+      "auxiliaryQueueBusyFraction": 0.7771149439578777,
+      "uiTimerP95Ms": [
+        5,
+        5.099999999627471
+      ],
+      "renderers": [
+        "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        5044.500000006519,
+        4823.599999993108
+      ],
+      "emotionSamples": [
+        123,
+        117
+      ],
+      "neutralStatuses": [
+        "legacy_automatic",
+        "legacy_automatic"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "chromium",
+      "variant": "candidate-v1-body",
+      "repeatCount": 2,
+      "browserVersion": "143.0.7499.4",
+      "analysisFps": [
+        22.392162743039936,
+        22.995937384395567
+      ],
+      "meanAnalysisFps": 22.694050063717754,
+      "meanInputFps": 22.727377509202384,
+      "meanPrimaryMs": 10.688652303308384,
+      "meanSegmentHz": 4.848718874913443,
+      "meanPoseHz": 3.015871065868402,
+      "auxiliaryQueueBusyFraction": 0.7599661366881334,
+      "uiTimerP95Ms": [
+        4.5,
+        4.7000000001862645
+      ],
+      "renderers": [
+        "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        4402.600000005215,
+        4681.100000008009
+      ],
+      "emotionSamples": [
+        112,
+        115
+      ],
+      "neutralStatuses": [
+        "legacy_automatic",
+        "legacy_automatic"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "chromium",
+      "variant": "candidate-v2-body",
+      "repeatCount": 2,
+      "browserVersion": "143.0.7499.4",
+      "analysisFps": [
+        25.39263613552054,
+        24.29708434987756
+      ],
+      "meanAnalysisFps": 24.84486024269905,
+      "meanInputFps": 24.92817508071611,
+      "meanPrimaryMs": 11.851865083218122,
+      "meanSegmentHz": 1.9162724282847656,
+      "meanPoseHz": 3.8325448565695313,
+      "auxiliaryQueueBusyFraction": 0.34327101885297706,
+      "uiTimerP95Ms": [
+        4.5,
+        4.900000000372529
+      ],
+      "renderers": [
+        "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        2387.2999999998137,
+        2254.7000000029802
+      ],
+      "emotionSamples": [
+        136,
+        135
+      ],
+      "neutralStatuses": [
+        "ready",
+        "ready"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "chromium",
+      "variant": "candidate-v2-no-body",
+      "repeatCount": 2,
+      "browserVersion": "143.0.7499.4",
+      "analysisFps": [
+        22.56523753495654,
+        21.76572348531577
+      ],
+      "meanAnalysisFps": 22.165480510136156,
+      "meanInputFps": 22.248808899323734,
+      "meanPrimaryMs": 12.645985351103867,
+      "meanSegmentHz": 1.8665671166071176,
+      "meanPoseHz": 0,
+      "auxiliaryQueueBusyFraction": 0.30510873881392053,
+      "uiTimerP95Ms": [
+        4.800000000745058,
+        4.3999999994412065
+      ],
+      "renderers": [
+        "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        }
+      ],
+      "overlapMs": [
+        2156.100000000559,
+        2097.2999999960884
+      ],
+      "emotionSamples": [
+        132,
+        131
+      ],
+      "neutralStatuses": [
+        "ready",
+        "ready"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "firefox",
+      "variant": "develop-v1-body",
+      "repeatCount": 2,
+      "browserVersion": "144.0.2",
+      "analysisFps": [
+        21.831877874808345,
+        21.796367272121312
+      ],
+      "meanAnalysisFps": 21.81412257346483,
+      "meanInputFps": 21.91411090840903,
+      "meanPrimaryMs": 44.0786586362257,
+      "meanSegmentHz": 7.282482895296843,
+      "meanPoseHz": 3.649575058602159,
+      "auxiliaryQueueBusyFraction": 0.2120086095243487,
+      "uiTimerP95Ms": [
+        10,
+        10
+      ],
+      "renderers": [
+        "Apple M1, or similar"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        5804,
+        5586
+      ],
+      "emotionSamples": [
+        110,
+        109
+      ],
+      "neutralStatuses": [
+        "legacy_automatic",
+        "legacy_automatic"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "firefox",
+      "variant": "candidate-v1-body",
+      "repeatCount": 2,
+      "browserVersion": "144.0.2",
+      "analysisFps": [
+        21.73260891303623,
+        21.633333333333333
+      ],
+      "meanAnalysisFps": 21.68297112318478,
+      "meanInputFps": 21.68297112318478,
+      "meanPrimaryMs": 44.00804564833108,
+      "meanSegmentHz": 7.233212781796162,
+      "meanPoseHz": 3.6166061131295626,
+      "auxiliaryQueueBusyFraction": 0.2088298445607369,
+      "uiTimerP95Ms": [
+        10,
+        10
+      ],
+      "renderers": [
+        "Apple M1, or similar"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        5576,
+        5353
+      ],
+      "emotionSamples": [
+        109,
+        108
+      ],
+      "neutralStatuses": [
+        "legacy_automatic",
+        "legacy_automatic"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "firefox",
+      "variant": "candidate-v2-body",
+      "repeatCount": 2,
+      "browserVersion": "144.0.2",
+      "analysisFps": [
+        21.698553429771348,
+        21.8
+      ],
+      "meanAnalysisFps": 21.749276714885674,
+      "meanInputFps": 21.749276714885674,
+      "meanPrimaryMs": 43.37615031215209,
+      "meanSegmentHz": 1.8999366708886074,
+      "meanPoseHz": 4.383186676443792,
+      "auxiliaryQueueBusyFraction": 0.10761314023509544,
+      "uiTimerP95Ms": [
+        10,
+        10
+      ],
+      "renderers": [
+        "Apple M1, or similar"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        2766,
+        2798
+      ],
+      "emotionSamples": [
+        133,
+        133
+      ],
+      "neutralStatuses": [
+        "ready",
+        "ready"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "automatic",
+      "engine": "firefox",
+      "variant": "candidate-v2-no-body",
+      "repeatCount": 2,
+      "browserVersion": "144.0.2",
+      "analysisFps": [
+        21.831877874808345,
+        21.531897873475103
+      ],
+      "meanAnalysisFps": 21.681887874141722,
+      "meanInputFps": 21.681887874141722,
+      "meanPrimaryMs": 42.73334672559261,
+      "meanSegmentHz": 1.899873341777215,
+      "meanPoseHz": 0,
+      "auxiliaryQueueBusyFraction": 0.05137990800613293,
+      "uiTimerP95Ms": [
+        10,
+        10
+      ],
+      "renderers": [
+        "Apple M1, or similar"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        }
+      ],
+      "overlapMs": [
+        1439,
+        1268
+      ],
+      "emotionSamples": [
+        133,
+        133
+      ],
+      "neutralStatuses": [
+        "ready",
+        "ready"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "manual-chromium",
+      "engine": "chromium",
+      "variant": "develop-v1-body",
+      "repeatCount": 2,
+      "browserVersion": "143.0.7499.4",
+      "analysisFps": [
+        26.49668791401075,
+        27.14850683212474
+      ],
+      "meanAnalysisFps": 26.822597373067744,
+      "meanInputFps": 26.897589748924517,
+      "meanPrimaryMs": 10.681727474903038,
+      "meanSegmentHz": 5.0495455470859465,
+      "meanPoseHz": 3.624679907696976,
+      "auxiliaryQueueBusyFraction": 0.7898841504223661,
+      "uiTimerP95Ms": [
+        2.900000000372529,
+        3.099999999627471
+      ],
+      "renderers": [
+        "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        3704.6999999899417,
+        3830.500000009313
+      ],
+      "emotionSamples": [
+        88,
+        91
+      ],
+      "neutralStatuses": [
+        "legacy_automatic",
+        "legacy_automatic"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "manual-chromium",
+      "engine": "chromium",
+      "variant": "candidate-v2-no-body",
+      "repeatCount": 2,
+      "browserVersion": "143.0.7499.4",
+      "analysisFps": [
+        24.29878506074696,
+        25.59577669684645
+      ],
+      "meanAnalysisFps": 24.947280878796704,
+      "meanInputFps": 24.997272630157735,
+      "meanPrimaryMs": 12.170898035626696,
+      "meanSegmentHz": 1.9247945282969143,
+      "meanPoseHz": 0,
+      "auxiliaryQueueBusyFraction": 0.31091428227683215,
+      "uiTimerP95Ms": [
+        3.299999998882413,
+        3.099999999627471
+      ],
+      "renderers": [
+        "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        }
+      ],
+      "overlapMs": [
+        1645.1999999955297,
+        1770.4000000171363
+      ],
+      "emotionSamples": [
+        91,
+        90
+      ],
+      "neutralStatuses": [
+        "ready",
+        "ready"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "webkit-repeated",
+      "engine": "webkit",
+      "variant": "develop-v1-body",
+      "repeatCount": 2,
+      "browserVersion": "26.0",
+      "analysisFps": [
+        27.097290270972902,
+        27.448627568621568
+      ],
+      "meanAnalysisFps": 27.272958919797233,
+      "meanInputFps": 27.322955170109708,
+      "meanPrimaryMs": 9.96565039420883,
+      "meanSegmentHz": 9.1243175567449,
+      "meanPoseHz": 4.524661278184967,
+      "auxiliaryQueueBusyFraction": 0.2309826339499975,
+      "uiTimerP95Ms": [
+        5.000000000003638,
+        5.000000000003638
+      ],
+      "renderers": [
+        "Apple GPU"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 1
+        }
+      ],
+      "overlapMs": [
+        217,
+        147.00000000000728
+      ],
+      "emotionSamples": [
+        90,
+        91
+      ],
+      "neutralStatuses": [
+        "legacy_automatic",
+        "legacy_automatic"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    },
+    {
+      "cohort": "webkit-repeated",
+      "engine": "webkit",
+      "variant": "candidate-v2-no-body",
+      "repeatCount": 2,
+      "browserVersion": "26.0",
+      "analysisFps": [
+        27.15,
+        27.2
+      ],
+      "meanAnalysisFps": 27.174999999999997,
+      "meanInputFps": 27.25,
+      "meanPrimaryMs": 12.752523765030894,
+      "meanSegmentHz": 1.95,
+      "meanPoseHz": 0,
+      "auxiliaryQueueBusyFraction": 0.05744999999999938,
+      "uiTimerP95Ms": [
+        6,
+        6
+      ],
+      "renderers": [
+        "Apple GPU"
+      ],
+      "faceCoverage": [
+        1,
+        1
+      ],
+      "workerMaxPending": [
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        },
+        {
+          "face": 1,
+          "segment": 1,
+          "pose": 0
+        }
+      ],
+      "overlapMs": [
+        372,
+        410.9999999999891
+      ],
+      "emotionSamples": [
+        94,
+        94
+      ],
+      "neutralStatuses": [
+        "ready",
+        "ready"
+      ],
+      "errors": [
+        {},
+        {}
+      ]
+    }
+  ],
+  "cohorts": [
+    {
+      "name": "automatic",
+      "capture": "automatic",
+      "startedAt": "2026-11-05T11:07:23.089Z",
+      "completedAt": null,
+      "fullCommandCompleted": false,
+      "failedRun": null,
+      "failure": "benchmark_deadline",
+      "harnessHashes": {
+        "compare-pipeline.mjs": "35932b5293b24b1e5638b9a1be34a7dc284a01f29b0ee636510ac14aa381dece",
+        "pipeline-benchmark-page.mjs": "d42421d142b4dc681477976003372e8ef983754134c6b7fe98ec6832abf4999d"
+      },
+      "durationMs": 30000,
+      "warmupMs": 15000,
+      "acceptedRuns": 16
+    },
+    {
+      "name": "manual-chromium",
+      "capture": "manual",
+      "startedAt": "2026-11-05T11:25:27.597Z",
+      "completedAt": null,
+      "fullCommandCompleted": false,
+      "failedRun": {
+        "engine": "firefox",
+        "variant": "develop-v1-body",
+        "round": 1
+      },
+      "failure": "benchmark_manual_capture_unavailable",
+      "harnessHashes": {
+        "compare-pipeline.mjs": "0322b3c9c9c294610b830d4942db82f157cc8f9e3748b676353dc7f5f9c98519",
+        "pipeline-benchmark-page.mjs": "59c41c8ab925e8df50162e7536ea8c283e96febb86983ca8e43c248e37e090e4"
+      },
+      "durationMs": 20000,
+      "warmupMs": 15000,
+      "acceptedRuns": 4
+    },
+    {
+      "name": "webkit-repeated",
+      "capture": "automatic",
+      "startedAt": "2026-11-05T11:40:18.757Z",
+      "completedAt": "2026-11-05T11:42:45.308Z",
+      "fullCommandCompleted": true,
+      "failedRun": null,
+      "failure": null,
+      "harnessHashes": {
+        "compare-pipeline.mjs": "21a82a7afca145a15105642f09e3164a3d384b7466584198a77804ed6ab67eb6",
+        "pipeline-benchmark-page.mjs": "ce393ac1b0928a6ab4a40ec3efea3ee30a1ec37d3a34aa580653a9e2a9b9c84a"
+      },
+      "durationMs": 20000,
+      "warmupMs": 15000,
+      "acceptedRuns": 4
+    }
+  ],
+  "limitations": [
+    "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+    "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+    "Native browser builds under automation, not a test of installed Safari.",
+    "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization.",
+    "Each mean uses only two counterbalanced repeats; no statistical significance claim.",
+    "Do not compare absolute browser rankings: capture and measured durations differ across cohorts.",
+    "Queue busy fraction is elapsed serialized auxiliary work, not CPU utilization or energy consumption.",
+    "Initial WebKit attempts failed or produced invalid instrumentation and are excluded, not treated as passes.",
+    "Automatic and manual capture controls show source-dependent throughput; no physical-camera FPS proof."
+  ],
+  "conclusion": {
+    "parallelArchitecturePreserved": true,
+    "universalFpsImprovementConfirmed": false,
+    "allBrowsersMeet25Fps": false,
+    "issue132CanBeClosed": false
+  },
+  "verification": {
+    "unit": {
+      "runs": 2,
+      "totalEach": 707,
+      "passedEach": 702,
+      "skippedEach": 5,
+      "failedEach": 0
+    },
+    "browsers": {
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "fpsAndDuplicateChecks": 84,
+      "profileAndLifecycleChecks": 90,
+      "workerAndRuntimeChecks": 237,
+      "totalPassed": 411,
+      "totalFailedFinal": 0,
+      "correctedTestFailure": "Three engine cases expected an obsolete region-analyzer URL; the full 237-case suite passed after fixing imports and URL expectation."
+    },
+    "typecheck": true,
+    "syntax": true,
+    "diffCheck": true,
+    "postgresIntegrationExecuted": false,
+    "productionDeployExecuted": false,
+    "physicalSensorsUsed": false
+  }
+}

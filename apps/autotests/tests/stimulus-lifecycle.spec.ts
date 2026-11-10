@@ -30,7 +30,10 @@ test.beforeEach(async ({ page }) => {
     return json([]);
   });
   await page.goto(`${base}/apps/web/researcher.html#/stimuli`);
-  await expect(page.locator('.stimulus-card[data-id="42"] img')).toBeVisible();
+  await expect(async () => {
+    await page.locator('.stimulus-card[data-id="42"]').scrollIntoViewIfNeeded();
+    await expect(page.locator('.stimulus-card[data-id="42"] img')).toBeVisible();
+  }).toPass({ timeout: 5000 });
 });
 
 async function instrument(page: Page) {
@@ -63,6 +66,30 @@ async function instrument(page: Page) {
     }
   });
 }
+
+test('partial media batch keeps acknowledged files visible and reports the count without repeating uploads', async ({ page }) => {
+  await expect(page.locator('#dropzone_media')).toContainText('JPG, PNG, WebP, GIF; MP4, WebM; MP3, OGG, WAV');
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__batchUploads = 0;
+    w.hydrateStimulusThumbnail = async () => {};
+    w.apiGet = async () => ({ state: 'failed' });
+    w.apiPost = async (route: string) => {
+      if (route === '/stimuli/operations') return { state: 'reserved' };
+      if (++w.__batchUploads === 2) throw Object.assign(new Error('Synthetic media decode failure'), { status: 422 });
+      return { id: 55, name: 'Saved batch image', project_id: 7, mime_type: 'image/png',
+        current_version_id: 'version-55', content_url: '/stimuli/42/content', preview_url: '/stimuli/42/preview',
+        visibility: 'private', created_by: 1 };
+    };
+  });
+  await page.locator('#input_media').setInputFiles([1, 2, 3].map(i => ({ name: `${i}.png`, mimeType: 'image/png', buffer: png })));
+  await page.locator('[data-upload-confirm]').click();
+  await expect(page.getByText(/Сохранено 1 из 3 файлов|Saved 1 of 3 files/)).toBeVisible();
+  await expect(page.locator('.stimulus-card[data-id="55"]')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__batchUploads)).toBe(2);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_stimuli') || '[]'));
+  expect(saved.filter((row: any) => row.id === '55')).toHaveLength(1);
+});
 
 for (const boundary of ['route', 'same-route-render', 'project', 'account', 'api-origin', 'pagehide']) {
   test(`AOI opening after delayed preview is cancelled on ${boundary}`, async ({ page }) => {

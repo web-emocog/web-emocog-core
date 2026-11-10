@@ -261,6 +261,38 @@ async function hasProjectMembership(pool, projectId, user) {
   return Boolean(result.rows[0]);
 }
 
+// Call inside a transaction. A revocation must commit before this check, or
+// wait until the authorized write commits; it cannot slip between them.
+async function lockProjectWriteAccess(client, projectId, user, operation) {
+  if (!projectId || !user) return false;
+  const principal = (await client.query(
+    'SELECT id, role, token_version FROM users WHERE id = $1 FOR SHARE', [user.sub]
+  )).rows[0];
+  if (!principal || principal.role !== user.role || Number(principal.token_version) !== user.ver
+    || !canRolePerform(principal.role, operation)) return false;
+  if (isPlatformAdmin(user)) return true;
+  const organizationWide = isOrganizationAdmin(user);
+  const result = await client.query(
+    `SELECT 1 FROM projects p
+     JOIN user_organizations uo ON uo.organization_id = p.organization_id AND uo.user_id = $2
+     ${organizationWide ? '' : 'JOIN user_projects up ON up.project_id = p.id AND up.user_id = $2'}
+     WHERE p.id = $1 FOR SHARE OF uo${organizationWide ? '' : ', up'}`,
+    [projectId, user.sub]
+  );
+  return Boolean(result.rows[0]);
+}
+
+// SQL expressions and parameter indexes here are route-owned, never user input.
+function projectMembershipPredicate(user, projectExpression, actorParameter) {
+  if (isPlatformAdmin(user)) return 'TRUE';
+  return `EXISTS (
+    SELECT 1 FROM projects p_scope
+    JOIN user_organizations uo_scope ON uo_scope.organization_id = p_scope.organization_id AND uo_scope.user_id = $${actorParameter}
+    ${isOrganizationAdmin(user) ? '' : 'JOIN user_projects up_scope ON up_scope.project_id = p_scope.id AND up_scope.user_id = uo_scope.user_id'}
+    WHERE p_scope.id = ${projectExpression}
+  )`;
+}
+
 async function hasProtocolMembership(pool, protocolId, user) {
   if (!protocolId || !user) return false;
   if (isPlatformAdmin(user)) return true;
@@ -279,20 +311,25 @@ async function hasProtocolMembership(pool, protocolId, user) {
   return Boolean(result.rows[0]);
 }
 
+// Correlate the permission check to the exact row selected by the operation.
+function sessionMembershipPredicate(user, actorParameter) {
+  if (isPlatformAdmin(user)) return 'TRUE';
+  const organizationWide = isOrganizationAdmin(user);
+  return `EXISTS (
+    SELECT 1 FROM projects p
+    INNER JOIN user_organizations uo
+      ON uo.organization_id = p.organization_id AND uo.user_id = $${actorParameter}
+    ${organizationWide ? '' : `INNER JOIN user_projects up
+      ON up.project_id = p.id AND up.user_id = uo.user_id`}
+    WHERE p.id = COALESCE(s.project_id, (SELECT pr.project_id FROM protocols pr WHERE pr.id = s.protocol_id))
+  )`;
+}
+
 async function hasSessionMembership(pool, sessionId, user) {
   if (!sessionId || !user) return false;
   if (isPlatformAdmin(user)) return true;
-  const organizationWide = isOrganizationAdmin(user);
   const result = await pool.query(
-    `SELECT 1
-     FROM sessions s
-     LEFT JOIN protocols pr ON pr.id = s.protocol_id
-     INNER JOIN projects p ON p.id = COALESCE(s.project_id, pr.project_id)
-     INNER JOIN user_organizations uo
-       ON uo.organization_id = p.organization_id AND uo.user_id = $2
-     ${organizationWide ? '' : `INNER JOIN user_projects up
-       ON up.project_id = p.id AND up.user_id = $2`}
-     WHERE (s.id::text = $1::text OR s.session_id = $1::text)`,
+    `SELECT 1 FROM sessions s WHERE s.session_id = $1 AND ${sessionMembershipPredicate(user, 2)}`,
     [sessionId, user.sub]
   );
   return Boolean(result.rows[0]);
@@ -328,7 +365,10 @@ module.exports = {
   isOrganizationAdmin,
   hasOrganizationMembership,
   hasProjectMembership,
+  lockProjectWriteAccess,
+  projectMembershipPredicate,
   hasProtocolMembership,
   hasSessionMembership,
+  sessionMembershipPredicate,
   buildPermissionSnapshot,
 };

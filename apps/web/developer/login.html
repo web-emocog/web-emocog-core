@@ -108,16 +108,24 @@
       </div>
       <button type="submit">Войти</button>
     </form>
+    <a href="../account/signup.html" class="back">Создать учётную запись</a>
+    <a href="../account/recovery.html" class="back">Восстановить доступ</a>
+    <a href="../account/workspace.html" class="back">Мои организации и проекты</a>
     <a href="../index.html" class="back">← На главную</a>
   </div>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../http-client.js?v=20261027-1"></script>
+  <script src="../http-client.js?v=20261110-review1"></script>
   <script src="../account-storage.js?v=20261019-5"></script>
   <script>
     (function () {
       var requestedPortal = new URLSearchParams(window.location.search || '').get('portal');
-      if (requestedPortal !== 'researcher' && requestedPortal !== 'admin' && requestedPortal !== 'developer') requestedPortal = 'staff';
+      if (['researcher', 'admin', 'developer', 'workspace'].indexOf(requestedPortal) < 0) requestedPortal = 'staff';
       var portalCopy = {
+        workspace: {
+          kicker: 'Рабочая область',
+          title: 'Вход в wecog',
+          subtitle: 'Подтверждение email, организации и проекты.'
+        },
         researcher: {
           kicker: 'Исследователь',
           title: 'Вход исследователя',
@@ -147,6 +155,7 @@
       function destinationForRole(role) {
         var researcherRoles = ['org_admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer', 'admin'];
         var developerRoles = ['developer', 'admin'];
+        if (requestedPortal === 'workspace') return researcherRoles.indexOf(role) >= 0 ? '../account/workspace.html' : null;
         if (requestedPortal === 'researcher') {
           return researcherRoles.indexOf(role) >= 0 ? '../researcher.html' : null;
         }
@@ -182,7 +191,9 @@
           method: 'POST',
           credentials: 'include'
         }, { timeoutMs: 10000, scope: 'document' }).catch(function () {}).then(function () {
-          throw new Error(message);
+          var error = new Error(message);
+          error.code = 'portal_access_denied';
+          throw error;
         });
       }
 
@@ -209,12 +220,29 @@
       });
 
       var loginPending = false;
+      var loginSucceeded = false;
+      var retryUntil = 0;
+      var retryTimer;
+      var submitButton = document.querySelector('#form button[type="submit"]');
+      var errEl = document.getElementById('error');
+      function updateRetryWait() {
+        clearTimeout(retryTimer);
+        var seconds = Math.ceil((retryUntil - Date.now()) / 1000);
+        if (submitButton) submitButton.disabled = loginPending || loginSucceeded || seconds > 0;
+        if (seconds > 0) {
+          errEl.textContent = 'Слишком много попыток входа. Повторите через ' + seconds + ' с.';
+          errEl.classList.add('visible');
+          retryTimer = setTimeout(updateRetryWait, 1000);
+        } else if (retryUntil) {
+          retryUntil = 0;
+          errEl.textContent = 'Теперь можно повторить вход.';
+        }
+      }
       document.getElementById('form').addEventListener('submit', function (e) {
         e.preventDefault();
-        if (loginPending) return;
+        if (loginPending || loginSucceeded || retryUntil > Date.now()) return;
         var login = (document.getElementById('login').value || '').trim().toLowerCase();
         var password = document.getElementById('password').value || '';
-        var errEl = document.getElementById('error');
         errEl.classList.remove('visible');
         errEl.style.color = '';
 
@@ -226,8 +254,7 @@
 
         var base = (getApiBase() || '').replace(/\/$/, '');
         loginPending = true;
-        var submitButton = document.querySelector('#form button[type="submit"]');
-        if (submitButton) submitButton.disabled = true;
+        updateRetryWait();
         WecogHttp.json(base + '/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Auth-Transport': 'cookie' },
@@ -265,6 +292,7 @@
               localStorage.setItem('emocog_api_base', base);
               localStorage.setItem('emocog_selected_portal', requestedPortal);
             } catch (_) {}
+            loginSucceeded = true;
             window.location.href = destination;
           })
           .catch(function (err) {
@@ -273,13 +301,18 @@
               errEl.textContent = local
                 ? 'Не удалось связаться с локальным сервером. Убедитесь, что решение запущено, и повторите вход. Это не подтверждает ошибку в пароле.'
                 : 'Не удалось связаться с сервером. Проверьте подключение и повторите вход.';
-            } else {
-              errEl.textContent = 'Ошибка входа: ' + (err.message || 'проверьте email/пароль');
-            }
+            } else if (err.status === 429) {
+              retryUntil = Date.now() + Math.max(1000, err.retryAfterMs ?? 60000);
+              updateRetryWait();
+            } else if (err.status === 401) errEl.textContent = 'Неверный email или пароль.';
+            else if (err.status === 400 || err.status === 422) errEl.textContent = 'Проверьте email и пароль и повторите вход.';
+            else if (err.code === 'portal_access_denied') errEl.textContent = err.message;
+            else if (err.status === 403) errEl.textContent = 'Вход в этот раздел недоступен для вашей учётной записи.';
+            else errEl.textContent = 'Не удалось войти. Попробуйте ещё раз позже.';
             errEl.classList.add('visible');
           }).finally(function () {
             loginPending = false;
-            if (submitButton) submitButton.disabled = false;
+            updateRetryWait();
           });
       });
 

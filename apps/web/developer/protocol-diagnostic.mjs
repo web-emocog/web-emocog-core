@@ -1,20 +1,22 @@
-import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261104-4';
-import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261104-4';
-import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261104-4';
-import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261104-4';
+import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261109-issues2';
+import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261109-issues2';
+import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261109-issues2';
+import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261109-issues2';
 import { MultimodalSessionCollector } from '../../participant-web/js/multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';
-import { PROTOCOL_PROFILE_ID, MODEL_ASSETS, FRAME_SCHEDULE, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261104-4';
+import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261109-issues2';
+import { prepareNeutralCalibration } from '../../participant-web/js/session-runtime/neutral-calibration-ui.js';
 import { measureVideoFps } from '../../participant-web/js/session-runtime/video-frames.mjs?v=20261104-4';
-import { resolveSessionFeatureFlags } from '../../participant-web/js/session-runtime/feature-flags.mjs';
+import { resolveSessionFeatureFlags } from '../../participant-web/js/session-runtime/feature-flags.mjs?v=20261109-issues2';
 import { getContentViewport } from '../../participant-web/js/gaze-tracker/viewport-coordinates.mjs';
 import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './diagnostic-run.mjs?v=20261028-1';
 
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
 
 export class ProtocolDiagnostic {
-    constructor({ video, onUpdate = () => {}, onStatus = () => {} }) {
+    constructor({ video, definition = null, onUpdate = () => {}, onStatus = () => {} }) {
         this.video = video;
+        this.definition = definition;
         this.onUpdate = onUpdate;
         this.onStatus = onStatus;
         this.run = null;
@@ -77,10 +79,11 @@ export class ProtocolDiagnostic {
             const clock = createMonotonicClock();
             const viewport = getContentViewport();
             const qc = new QCMetrics({ screenWidth: viewport.width, screenHeight: viewport.height });
-            const flags = resolveSessionFeatureFlags();
+            const flags = resolveSessionFeatureFlags(this.definition);
             const state = this.state = { sessionData: { startTime: Date.now(), ids: { session: 'developer-' + crypto.randomUUID() },
                 tech: { cameraFPS: camera.fps, cameraFPSDetails: camera }, events: [] }, runtime: {
-                currentPhase: 'developer_diagnostic', taskContext: {}, localAnalyzer: analyzer, faceSegmenter: segmenter, qcMetrics: qc } };
+                invitationProtocolDefinition: this.definition, currentPhase: 'developer_diagnostic',
+                taskContext: {}, localAnalyzer: analyzer, faceSegmenter: segmenter, qcMetrics: qc } };
             const multimodal = this.multimodal = new MultimodalSessionCollector({ state, clock, enabled: flags.multimodal,
                 bodyEnabled: flags.bodyMovement, gamerMode: flags.gamerMode }); multimodal.start();
             const issues = new Map(); this.issues = issues;
@@ -90,6 +93,10 @@ export class ProtocolDiagnostic {
             const pipeline = this.pipeline = new SessionFramePipeline({ state, controller, video: this.video });
             qc.start();
             if (!await pipeline.start()) throw new Error('Diagnostic pipeline unavailable');
+            if (pipeline.neutralCalibration) {
+                this.onStatus('neutral');
+                if (!await prepareNeutralCalibration(pipeline, 'ru')) throw new Error('Diagnostic preparation cancelled');
+            }
             run.check();
             this.onStatus('running');
             this.timer = setInterval(() => {
@@ -109,9 +116,10 @@ export class ProtocolDiagnostic {
         const diagnostics = state?.sessionData.tech.framePipeline || null;
         const frame = state?.runtime.lastPrecheckResult;
         const settings = this.video.srcObject?.getVideoTracks?.()[0]?.getSettings?.();
-        return { profileId: PROTOCOL_PROFILE_ID, models: MODEL_ASSETS, schedule: FRAME_SCHEDULE,
+        const profile = resolveSignalProfile(this.definition);
+        return { profileId: profile.id, models: MODEL_ASSETS, schedule: profile.schedule,
             camera: settings ? { width: settings.width, height: settings.height, frameRate: settings.frameRate, facingMode: settings.facingMode } : null,
-            diagnostics, budget: diagnostics?.budget || frameBudget(),
+            diagnostics, budget: diagnostics?.budget || frameBudget({ schedule: profile.schedule }),
             frame: frame ? { faceDetected: frame.face?.detected === true, illumination: frame.illumination?.value } : null,
             bpm: pipeline?.bpm.lastSample || null,
             emotion: state?.runtime.lastEmotionSample || null, body: state?.runtime.lastBodyPoseSample || null,

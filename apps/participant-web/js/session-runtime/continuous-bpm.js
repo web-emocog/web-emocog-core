@@ -17,7 +17,7 @@ export function publishedRespiration(features = {}) {
 }
 
 const MODULE_URL = new URL(
-    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261103-2',
+    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261107-resp1',
     import.meta.url
 );
 
@@ -74,6 +74,7 @@ export class ContinuousBpmCollector {
         this.sampleCount = 0;
         this.lastFrameTimestamp = null;
         this.bpmStats = stats(); this.respStats = stats();
+        this.respMethodVersion = null;
         updateDiagnostics({
             moduleLoaded: false,
             reporterAvailable: false,
@@ -132,6 +133,8 @@ export class ContinuousBpmCollector {
         const width = sharedPixels?.width || video?.videoWidth || 0;
         const height = sharedPixels?.height || video?.videoHeight || 0;
         if (!width || !height || landmarks.length < 468) return null;
+        // Confirmation must describe consecutive capture, not two bursts around a stall.
+        if (this.lastFrameTimestamp !== null && timestampMs - this.lastFrameTimestamp > 250) this.publicationGate.reset();
         this.lastFrameTimestamp = timestampMs;
 
         try {
@@ -164,6 +167,7 @@ export class ContinuousBpmCollector {
             }
 
             const features = output.features || {};
+            this.respMethodVersion = features.respMethodVersion || this.respMethodVersion;
             const publication = this.publicationGate.evaluate(output);
             const measuredBpm = publication.accepted && publication.held !== true;
             const respiration = publishedRespiration(features);
@@ -187,6 +191,8 @@ export class ContinuousBpmCollector {
                 classification: publication.classification || null,
                 confidence: Number.isFinite(output.confidence) ? output.confidence : null,
                 respRate: respiration,
+                bpmMethodVersion: 'continuous_signals.v2',
+                respMethodVersion: this.respMethodVersion,
                 respConf: Number.isFinite(features.respConf) ? features.respConf : null
             };
             this.lastSample = sample;
@@ -212,6 +218,7 @@ export class ContinuousBpmCollector {
             });
             return sample;
         } catch (error) {
+            this.publicationGate.reset();
             this.consecutiveErrors += 1;
             updateDiagnostics({
                 lastError: error?.message || String(error),
@@ -226,6 +233,7 @@ export class ContinuousBpmCollector {
         return {
             ready: this.ready,
             methodVersion: 'continuous_signals.v2',
+            respMethodVersion: this.respMethodVersion,
             sampleCount: this.sampleCount,
             retainedSampleCount: this.samples.length,
             validSampleCount: this.bpmStats.n,
@@ -259,6 +267,7 @@ export class ContinuousBpmCollector {
             bpmMean: Number.isFinite(summary.bpmMean) ? summary.bpmMean : null,
             respRateMean: Number.isFinite(summary.respRateMean) ? summary.respRateMean : null,
             validRespSampleCount: summary.validRespSampleCount,
+            respMethodVersion: summary.respMethodVersion,
             respRateMin: summary.respRateMin,
             respRateMax: summary.respRateMax,
             bpmMin: this.bpmStats.min,

@@ -61,6 +61,7 @@ test('developer diagnostics start and release the real local vision models and c
   await page.goto('/apps/web/developer/bpm-test.html');
   try {
     await page.locator('#btnStart').click();
+    await page.locator('#emotionNeutralSkip').click({ timeout: 70_000 });
     await expect(page.locator('#screen')).toHaveClass(/running/, { timeout: 70_000 });
     const running = await evidence();
     expect(running).toMatchObject({ tracks: ['live'], videoAttached: true });

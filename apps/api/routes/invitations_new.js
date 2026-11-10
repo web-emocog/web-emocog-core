@@ -13,6 +13,8 @@ const {
   OPERATIONS,
   isPlatformAdmin,
   hasProtocolMembership,
+  lockProjectWriteAccess,
+  projectMembershipPredicate,
 } = require('../middleware/auth');
 const { issueIngestToken } = require('../security/ingest-token');
 const {
@@ -44,6 +46,30 @@ const { publicStimulusMetadata, publicProtocolDefinition, protocolRevision } = r
 
 const router = express.Router();
 const stimuliUploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
+
+const admissionSlots = Math.max(1, Math.min(4, Math.floor(config.database.poolMax / 4)));
+const admissionWaiters = new Set();
+let activeAdmissions = 0;
+const admissionBusy = () => new HttpError(503, 'Participant admission is temporarily busy', 'admission_busy');
+
+// The queue holds no pool connections, even when native media checks are slow.
+async function limitParticipantAdmission(callback) {
+  if (activeAdmissions < admissionSlots) activeAdmissions++;
+  else {
+    if (admissionWaiters.size >= 32) throw admissionBusy();
+    await new Promise((resolve, reject) => {
+      const takeSlot = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => { admissionWaiters.delete(takeSlot); reject(admissionBusy()); }, 2000);
+      admissionWaiters.add(takeSlot);
+    });
+  }
+  try { return await callback(); }
+  finally {
+    const next = admissionWaiters.values().next().value;
+    if (next) { admissionWaiters.delete(next); next(); }
+    else activeAdmissions--;
+  }
+}
 
 function hasGlobalInvitationAccess(user) {
   return isPlatformAdmin(user);
@@ -251,8 +277,20 @@ router.post(
       }
       const code = req.params.code.trim();
       const sessionId = String(req.body.session_id);
-      // Media locks precede invitation/session locks, matching replacement/backfill.
-      const admission = await withMediaWrite(pool, async client => {
+      const consent = req.body.consent_receipt;
+      if (consent !== undefined && (!consent || typeof consent !== 'object' || Array.isArray(consent)
+        || Object.keys(consent).length !== 2 || consent.informedConsentVersion !== 'informed-consent-v1.0'
+        || consent.privacyPolicyVersion !== 'privacy-policy-v1.0')) {
+        return res.status(422).json({ error: 'Unsupported consent receipt', code: 'consent_receipt_invalid' });
+      }
+      // Reject unknown codes before borrowing a connection for media/admission work.
+      const candidate = (await pool.query('SELECT expires_at FROM invitations WHERE code = $1', [code])).rows[0];
+      if (!candidate) throw new HttpError(404, 'Invitation not found', 'invitation_not_found');
+      if (candidate.expires_at && new Date(candidate.expires_at) < new Date()) {
+        throw new HttpError(410, 'Invitation expired', 'invitation_expired');
+      }
+      // Revalidate under the original media -> session -> invitation lock order.
+      const admission = await limitParticipantAdmission(() => withMediaWrite(pool, async client => {
         await lockSessionKey(client, sessionId);
         const invitation = await findInvitationByCode(client, code, { forUpdate: true });
         if (!invitation) {
@@ -269,10 +307,11 @@ router.post(
         }
 
         const existing = await client.query(
-          `SELECT invitation_id, project_id, protocol_id
-           FROM sessions
-           WHERE session_id = $1
-           FOR UPDATE`,
+          `SELECT s.id, s.invitation_id, s.project_id, s.protocol_id,
+                  EXISTS (SELECT 1 FROM session_consent_receipts r WHERE r.session_db_id = s.id) AS consent_recorded
+           FROM sessions s
+           WHERE s.session_id = $1
+           FOR UPDATE OF s`,
           [sessionId]
         );
         const boundSession = existing.rows[0] || null;
@@ -288,6 +327,10 @@ router.post(
           error.status = 409;
           error.code = 'session_invitation_mismatch';
           throw error;
+        }
+
+        if (!boundSession?.consent_recorded && !consent) {
+          throw new HttpError(403, 'A consent receipt is required', 'consent_receipt_required');
         }
 
         const report = await inspectProtocolStimuli(client, invitation.project_id,
@@ -318,8 +361,14 @@ router.post(
           );
           created = true;
         }
+        if (consent) {
+          await client.query(`INSERT INTO session_consent_receipts
+            (session_db_id, informed_consent_version, privacy_policy_version)
+            SELECT id, $2, $3 FROM sessions WHERE session_id = $1
+            ON CONFLICT (session_db_id) DO NOTHING`, [sessionId, consent.informedConsentVersion, consent.privacyPolicyVersion]);
+        }
         return { invitation, created };
-      });
+      }, { participantAdmission: true }));
 
       const token = issueIngestToken({
         sessionId,
@@ -335,6 +384,13 @@ router.post(
         session_created: admission.created,
       });
     } catch (err) {
+      if (err.code === 'admission_busy' || err.code === '55P03') {
+        res.set('Retry-After', '1');
+        return res.status(503).json({ error: 'Participant admission is temporarily busy', code: 'admission_busy' });
+      }
+      if (err.constraint === 'session_erasure_tombstone') {
+        return res.status(410).json({ error: 'Session has been erased', code: 'session_erased' });
+      }
       if (err.status) {
         return res.status(err.status).json({
           error: err.message,
@@ -448,8 +504,10 @@ router.post(
         exists = await pool.query('SELECT 1 FROM invitations WHERE code = $1', [code]);
       }
       const r = await withMediaWrite(pool, async client => {
-        const row = (await client.query('SELECT * FROM protocols WHERE id = $1 FOR UPDATE', [protocol_id])).rows[0];
-        if (!row || !(await hasProtocolMembership(client, protocol_id, req.user))) throw new HttpError(403, 'Access denied', 'protocol_access_denied');
+        const row = (await client.query(`SELECT pr.* FROM protocols pr
+          WHERE pr.id = $1 AND ${projectMembershipPredicate(req.user, 'pr.project_id', 2)} FOR UPDATE OF pr`,
+        isPlatformAdmin(req.user) ? [protocol_id] : [protocol_id, req.user.sub])).rows[0];
+        if (!row || !(await lockProjectWriteAccess(client, row.project_id, req.user, OPERATIONS.INVITATION_WRITE))) throw new HttpError(403, 'Access denied', 'protocol_access_denied');
         if ((req.body.expected_revision && req.body.expected_revision !== protocolRevision(row))
           || (req.body.expected_updated_at && new Date(req.body.expected_updated_at).getTime() !== new Date(row.updated_at).getTime())) {
           throw new HttpError(409, 'Protocol changed before publication. Save and publish again.', 'protocol_revision_conflict');
@@ -462,6 +520,9 @@ router.post(
         const report = await inspectProtocolStimuli(client, row.project_id, pinned,
           { user: req.user, verifyDecoding: true });
         if (!report.ok) throw new HttpError(422, 'Protocol media is unavailable', 'protocol_stimulus_unavailable');
+        const { inspectProtocolPreflight } = await import('../../shared/protocol-preflight.mjs');
+        const preflight = inspectProtocolPreflight(normalizeMandatoryParticipantShell(pinned), { mediaReport: report });
+        if (!preflight.ok) throw new HttpError(422, 'Protocol preflight failed', 'protocol_preflight_failed', preflight);
         if (!row.definition.mediaManifest) await client.query('UPDATE protocols SET definition = $1::jsonb WHERE id = $2', [JSON.stringify(pinned), row.id]);
         const publication = (await client.query('SELECT * FROM protocol_publications WHERE protocol_id = $1', [protocol_id])).rows[0];
         const version = (publication?.version || 0) + 1;
@@ -480,7 +541,8 @@ router.post(
       });
       res.status(201).json(r.rows[0]);
     } catch (err) {
-      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
+      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code,
+        ...(err.code === 'protocol_preflight_failed' ? { preflight: err.details } : {}) });
       if (err.code === '23503') return res.status(400).json({ error: 'Protocol not found' });
       if (err.code === '23505') return res.status(409).json({ error: 'Invitation code already exists' });
       logUnexpectedError(err, 'invitations-new');
@@ -536,8 +598,12 @@ router.delete(
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       await withMediaWrite(pool, async client => {
-        const invitation = (await client.query('SELECT * FROM invitations WHERE id = $1 FOR UPDATE', [req.params.id])).rows[0];
-        if (!invitation || !(await hasProtocolMembership(client, invitation.protocol_id, req.user))) {
+        const invitation = (await client.query(
+          `SELECT i.id, pr.project_id FROM invitations i JOIN protocols pr ON pr.id = i.protocol_id
+           WHERE i.id = $1 AND ${projectMembershipPredicate(req.user, 'pr.project_id', 2)} FOR UPDATE OF i`,
+          isPlatformAdmin(req.user) ? [req.params.id] : [req.params.id, req.user.sub]
+        )).rows[0];
+        if (!invitation || !(await lockProjectWriteAccess(client, invitation.project_id, req.user, OPERATIONS.INVITATION_WRITE))) {
           throw new HttpError(404, 'Not found', 'invitation_not_found');
         }
         if ((await client.query('SELECT 1 FROM sessions WHERE invitation_id = $1 LIMIT 1', [invitation.id])).rows[0]) {

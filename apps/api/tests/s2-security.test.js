@@ -395,10 +395,8 @@ describe('S1 typed transport boundary', () => {
     const legacy = fs.readFileSync(path.resolve(__dirname, '../routes/events.js'), 'utf8');
     assert.match(legacy, /router\.use\(rateLimit\(buildRouteRateLimitOptions\(config\.http\.rateLimits\)\)\)/);
     assert.match(appSource, /app\.use\(['"]\/ingest/);
-    assert.match(
-      appSource,
-      /app\.use\(rateLimit\(buildRouteRateLimitOptions\(config\.http\.rateLimits\)\)\)/
-    );
+    assert.match(appSource, /const limiterOptions = buildRouteRateLimitOptions\(config\.http\.rateLimits,/);
+    assert.ok(appSource.indexOf('app.use(rateLimit(limiterOptions))') < appSource.indexOf("app.use('/ingest'"));
   });
 });
 
@@ -489,7 +487,7 @@ describe('S2-01 route-specific HTTP controls', () => {
     assert.equal((await check(undefined)).allowed, true);
     assert.equal((await check('https://attacker.test')).error.code, 'cors_origin_denied');
     assert.equal(options.credentials, true);
-    assert.deepEqual(options.exposedHeaders, ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition', 'Retry-After']);
+    assert.deepEqual(options.exposedHeaders, ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition', 'Retry-After', 'X-Request-ID']);
   });
 
   it('uses different JSON limits for auth and ingest', async () => {
@@ -498,8 +496,8 @@ describe('S2-01 route-specific HTTP controls', () => {
       ingest: '1kb',
       default: '200b',
     });
-    const parse = route => new Promise(resolve => {
-      const body = JSON.stringify({ value: 'x'.repeat(150) });
+    const parse = (route, size = 150) => new Promise(resolve => {
+      const body = JSON.stringify({ value: 'x'.repeat(size) });
       const request = Readable.from([Buffer.from(body)]);
       request.method = 'POST';
       request.url = route;
@@ -515,6 +513,8 @@ describe('S2-01 route-specific HTTP controls', () => {
     assert.equal(auth.error?.type, 'entity.too.large');
     assert.equal(ingest.error, undefined);
     assert.equal(ingest.body.value.length, 150);
+    assert.equal((await parse('/Identity/SignUp', 9000)).error?.type, 'entity.too.large');
+    assert.equal((await parse('/WorkSpace/Organizations', 9000)).error?.type, 'entity.too.large');
   });
 
   it('rate-limits each route profile independently', async () => {
@@ -542,7 +542,7 @@ describe('S2-01 route-specific HTTP controls', () => {
     });
     assert.equal((await run('/auth/login')).nextCalled, true);
     assert.equal((await run('/auth/login')).nextCalled, true);
-    const rejected = await run('/auth/login');
+    const rejected = await run('/Identity/SignUp');
     assert.equal(rejected.response.statusCode, 429);
     assert.equal(rejected.response.body.route_profile, 'auth');
     assert.ok(Number(rejected.response.headers['Retry-After']) >= 1);

@@ -11,17 +11,21 @@ import {
     getEmotionSummary,
     appendEmotionSample,
     resetEmotionAnalyzerState,
-} from './emotion/public-api.js';
+} from './emotion/public-api.js?v=20261109-issues2';
 
 export { getEmotionSummary, appendEmotionSample };
 
 let lastValence = 0;
 let lastArousal = 0;
 
-export function startEmotionSession(sessionId = null) {
+export function startEmotionSession(sessionId = null, options = {}) {
     lastValence = 0;
     lastArousal = 0;
-    analyzer.startSession(sessionId);
+    analyzer.startSession(sessionId, options);
+}
+
+export function setExplicitNeutralBaseline(baseline, count) {
+    analyzer.setNeutralBaseline(baseline, count);
 }
 
 export function endEmotionSession() {

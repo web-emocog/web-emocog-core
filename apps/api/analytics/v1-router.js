@@ -10,6 +10,7 @@ const { protectSpreadsheetCell, escapeCsv } = require('../security/csv');
 const { loadPinnedStimuli } = require('../stimuli/versions');
 const { buildConnectedness } = require('./connectedness');
 const { intervalData, intervalExportRows } = require('./passive');
+const { build: assessMetricQuality } = require('../../shared/metric-quality');
 const { standardStimulusPreview, resolveStandardStimulus } = require('../../shared/standard-stimuli');
 const { validateAnalyticsQuery } = require('./query');
 const { resolveProtocolVersion } = require('./protocol-versions');
@@ -458,6 +459,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
         ...technical,
       },
       quality: sessionQualityDetails(row),
+      qualityAssessment: assessMetricQuality(row.features_payload || {}, { serverAcknowledged: !!row.features_payload }),
       audio: sessionAudioDetails(row, hydrated.protocol?.definition),
       connectedness: buildConnectedness(row, hydrated.snapshot.queryEcho),
       physiologyIntervals: intervalData(row, hydrated.snapshot.queryEcho),
@@ -657,6 +659,11 @@ function exportCsv(bundle) {
     '', item.unit, 'computed', '', '', '', '', '', '', item,
   ]));
   const sessionSummary = bundle.summary?.session;
+  if (sessionSummary?.qualityAssessment) rows.push([
+    'measurement_quality', bundle.snapshot.id, bundle.snapshot.datasetHash, sessionSummary.sessionId,
+    sessionSummary.participantId, '', '', '', '', sessionSummary.qualityAssessment.recordingIntegrity.status,
+    '', '', '', '', '', '', sessionSummary.qualityAssessment,
+  ]);
   const summaryMetrics = bundle.longData || [
     ...(sessionSummary?.metrics || []).map(metric => ({
       ...metric,
@@ -694,6 +701,7 @@ function exportCsv(bundle) {
       qualityValid: metric.qualityValid, qualityIssueCodes: metric.qualityIssueCodes,
       qualityReasons: metric.qualityReasons,
       includedInDefault: metric.includedInDefault, observationDurationMs: metric.observationDurationMs,
+      presentationCoverage: metric.presentationCoverage,
       blockId: metric.blockId, intervalStartMs: metric.intervalStartMs,
       intervalEndMs: metric.intervalEndMs, coveragePct: metric.coveragePct },
   ]));
@@ -703,6 +711,22 @@ function exportCsv(bundle) {
     bundle.comparison.readiness, bundle.comparison.reason, '', '', bundle.comparison.nParticipants,
     bundle.counts.sessions, bundle.comparison.nObservations, bundle.comparison,
   ]);
+  if (bundle.comparison) {
+    const { design, pairs, reference, comparison, metricId, effectUnit, modelVersion } = bundle.comparison;
+    const source = (kind, participant, value, unit, fields) => rows.push([
+      kind, bundle.snapshot.id, bundle.snapshot.datasetHash, '', participant, '', metricId,
+      value, unit, 'computed', '', '', '', 1, '', '', { modelVersion, ...fields },
+    ]);
+    if (design === 'paired') {
+      for (const pair of pairs) source('comparison_pair', pair.participantId, pair.difference, effectUnit === 'pct' ? 'pp' : effectUnit, {
+        reference: pair.reference, comparison: pair.comparison, levelUnit: effectUnit, statistic: 'B_minus_A',
+      });
+    } else {
+      for (const [side, group] of [['A', reference], ['B', comparison]]) {
+        group.values.forEach((value, index) => source('comparison_point', '', value, effectUnit, { side, index: index + 1 }));
+      }
+    }
+  }
   return [header, ...rows].map(row => row.map(escapeCsv).join(',')).join('\r\n');
 }
 

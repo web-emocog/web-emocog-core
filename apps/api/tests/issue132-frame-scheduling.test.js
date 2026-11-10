@@ -5,10 +5,11 @@ const path = require('node:path');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+for (const profileId of ['protocol_signals.v1', 'protocol_signals.v2'])
 for (const { fps, latency, minimum } of [
   { fps: 30, latency: 5, minimum: 175 }, { fps: 23, latency: 5, minimum: 130 },
   { fps: 15, latency: 5, minimum: 85 }, { fps: 30, latency: 80, minimum: 60 },
-]) test(`issue132: ${fps} Hz source, ${latency} ms model, 4 ms late browser timers`, async t => {
+]) test(`issue132 ${profileId}: ${fps} Hz source, ${latency} ms model, 4 ms late browser timers`, async t => {
   const { observeVideoFrames } = await import(pathToFileURL(path.resolve(__dirname,
     '../../participant-web/js/session-runtime/video-frames.mjs')).href);
   const profile = await import('../../participant-web/js/session-runtime/protocol-profile.mjs');
@@ -25,6 +26,7 @@ for (const { fps, latency, minimum } of [
   const context = vm.createContext({ performance: global.performance, setTimeout: global.setTimeout,
     clearTimeout: global.clearTimeout, window: {}, Date, observeVideoFrames, ...profile,
     ContinuousBpmCollector: class {}, ContinuousBodyPoseCollector: class {},
+    NeutralCalibration: class { reset() {} },
     SessionQualityDetector: class { reset() {} }, startEmotionSession() {}, endEmotionSession() {},
     getEmotionSummary() {}, updateHeadPoseGuide() {}, extractEyeSignalSample() { return null; } });
   const source = fs.readFileSync(path.resolve(__dirname, '../../participant-web/js/session-runtime/frame-pipeline.js'), 'utf8')
@@ -33,7 +35,8 @@ for (const { fps, latency, minimum } of [
   const SessionFramePipeline = context.Subject;
   const video = { readyState: 2, srcObject: { getVideoTracks: () => [] },
     requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() { callback = null; } };
-  const state = { sessionData: {}, runtime: { localAnalyzer: { async analyzeFrame() {
+  const state = { sessionData: {}, runtime: {
+    invitationProtocolDefinition: { settings: { signalProfileId: profileId } }, localAnalyzer: { async analyzeFrame() {
     peak = Math.max(peak, ++concurrent);
     await new Promise(resolve => setTimeout(resolve, latency));
     concurrent--; processed++; return { timestamp: now };
@@ -61,6 +64,7 @@ for (const { fps, latency, minimum } of [
   if (latency === 80) assert.ok(processed < 80, 'a slow model must not pretend to sustain 25 FPS');
   assert.equal(timers.size, 0, 'stop releases every pipeline timer');
   const published = state.sessionData.tech.framePipeline;
+  assert.equal(published.profileId, profileId);
   assert.equal(published.frames, processed, 'stop flushes the final diagnostic counters');
   assert.equal(published.timingMethod, 'completed-primary-stages.v1');
   assert.equal(Object.keys(published.stages).length, 6, 'timings have constant memory, not per-frame history');

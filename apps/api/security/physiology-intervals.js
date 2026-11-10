@@ -6,9 +6,10 @@ const maxTime = schema.$defs.time.maximum;
 const maxCount = schema.$defs.channel.properties.count.maximum;
 const statuses = new Set(schema.$defs.block.properties.status.enum);
 
-function hasExactKeys(value, required) {
+function hasExactKeys(value, required, optional = []) {
   return value && typeof value === 'object' && !Array.isArray(value)
-    && Object.keys(value).length === required.length && required.every(key => Object.hasOwn(value, key));
+    && Object.keys(value).every(key => required.includes(key) || optional.includes(key))
+    && required.every(key => Object.hasOwn(value, key));
 }
 
 function int(value, min, max) {
@@ -16,7 +17,9 @@ function int(value, min, max) {
 }
 
 function validChannel(channel, duration, min, max) {
-  return hasExactKeys(channel, schema.$defs.channel.required)
+  return hasExactKeys(channel, schema.$defs.channel.required, ['methodVersion'])
+    && (!Object.hasOwn(channel, 'methodVersion') || (typeof channel.methodVersion === 'string'
+      && /^[A-Za-z0-9_.:-]{1,64}$/.test(channel.methodVersion)))
     && int(channel.count, 0, Math.min(maxCount, duration + 1))
     && int(channel.observedMs, 0, duration)
     && (channel.count > 0

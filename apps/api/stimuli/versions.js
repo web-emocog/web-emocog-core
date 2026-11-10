@@ -8,17 +8,46 @@ const { getStoredContentPath, resolveReadableServerOwnedUploadPath } = require('
 const { referencedDatabaseStimulusIds } = require('../../shared/protocol-stimuli');
 const { mayReadStimulus } = require('./access');
 const { ensurePlayableVersion } = require('./media-preview');
+const { journals, discardPreviewArtifacts } = require('./write-artifacts');
+const { logUnexpectedError } = require('../security/error-log');
+const { accountObject, organizationForProject } = require('./storage-quotas');
 
 const MEDIA_LOCK = 'wecog:media-backup:v1';
 const uploadsRoot = path.join(config.storage.uploadsRoot, 'stimuli');
 
-async function withMediaWrite(pool, callback) {
-  return withTransaction(pool, async client => {
-    await client.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [MEDIA_LOCK]);
-    // A single write order also protects legacy snapshot backfill against replacement/deletion.
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', ['wecog:media-write:v1']);
-    return callback(client);
-  });
+async function withMediaWrite(pool, callback, { participantAdmission = false } = {}) {
+  const artifacts = [];
+  let prepared = false;
+  try {
+    return await withTransaction(pool, async client => {
+      if (participantAdmission) {
+        const lock = await client.query('SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 0)) AS acquired', [MEDIA_LOCK]);
+        if (!lock.rows[0]?.acquired) throw new HttpError(503, 'Participant admission is temporarily busy', 'admission_busy');
+        await client.query("SET LOCAL lock_timeout = '1500ms'");
+      } else {
+        await client.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [MEDIA_LOCK]);
+      }
+      // A single write order also protects legacy snapshot backfill against replacement/deletion.
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', ['wecog:media-write:v1']);
+      journals.set(client, artifacts);
+      try {
+        const result = await callback(client);
+        prepared = true;
+        return result;
+      } finally { journals.delete(client); }
+    });
+  } catch (error) {
+    if (prepared) {
+      // A lost COMMIT acknowledgement is not proof of rollback. Never delete
+      // originals/posters which may now belong to a committed publication.
+      logUnexpectedError(error, 'stimuli.media-commit');
+      const uncertain = new HttpError(503, 'Media write result is unknown; refresh the library before retrying', 'media_write_uncertain');
+      uncertain.mediaCommitUncertain = true;
+      throw uncertain;
+    }
+    await discardPreviewArtifacts(artifacts);
+    throw error;
+  }
 }
 
 async function hashFile(file) {
@@ -32,13 +61,14 @@ async function ensureStimulusVersion(client, row, options = {}) {
   if (!resolved.ok) throw new HttpError(422, 'Stimulus file is unavailable', resolved.code);
   const checksum = await hashFile(resolved.absolutePath);
   const size = (await fs.promises.stat(resolved.absolutePath)).size;
+  await accountObject(client, await organizationForProject(client, row.project_id), resolved.relativePath, size);
   const result = await client.query(`
     INSERT INTO stimulus_versions (id, stimulus_id, content_path, mime_type, size_bytes, sha256)
     VALUES ($1, $2, $3, $4, $5, $6)
     ON CONFLICT (stimulus_id, content_path) DO UPDATE
       SET sha256 = COALESCE(stimulus_versions.sha256, EXCLUDED.sha256)
     RETURNING *`,
-  [crypto.randomUUID(), row.id, resolved.relativePath, row.mime_type || 'application/octet-stream', size, checksum]);
+  [options.versionId || crypto.randomUUID(), row.id, resolved.relativePath, row.mime_type || 'application/octet-stream', size, checksum]);
   const version = result.rows[0];
   if (version.sha256 !== checksum || Number(version.size_bytes) !== size) {
     throw new HttpError(409, 'Stimulus integrity check failed', 'stimulus_checksum_mismatch');

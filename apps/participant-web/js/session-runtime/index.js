@@ -5,21 +5,23 @@ import {
     SESSION_STATES
 } from './contracts.mjs';
 import { SessionStateMachine } from './session-state-machine.mjs';
-import { SessionCheckpointStore, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261025-1';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261103-1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261104-4';
+import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261109-issues2';
+import { LongSessionContinuity } from './long-session-continuity.mjs';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261109-issues2';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261109-issues2';
+import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
-import { resolveSessionFeatureFlags } from './feature-flags.mjs';
-import { SessionAudioCollector } from '../audio/session-audio.js?v=20261104-4';
+import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261109-issues2';
+import { SessionAudioCollector } from '../audio/session-audio.js?v=20261109-issues2';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 import { SessionDelivery } from './delivery.mjs?v=20261025-1';
 import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261102-1';
-import { combineSignalSummaries } from './signal-history.mjs?v=20261025-1';
-import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261104-4';
-import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261104-4';
-import { showPersistenceNotice } from './persistence-ui.mjs?v=20261025-1';
-import { sendSessionFeature } from './ingest-transport.mjs?v=20261025-1';
+import { combineSignalSummaries } from './signal-history.mjs?v=20261107-resp1';
+import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261107-provenance1';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261109-issues2';
+import { showPersistenceNotice } from './persistence-ui.mjs?v=20261109-issues2';
+import { recordedConsentReceipt, sendSessionFeature } from './ingest-transport.mjs?v=20261109-issues2';
 import '../../../shared/protocol-quality.js?v=20261025-1';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
@@ -60,7 +62,8 @@ class ParticipantSessionRuntime {
                             : [...(state.sessionData.bpmRuns || []), { samples: this.framePipeline?.bpm?.samples || [] }] } : {})
                 }, current);
             },
-            send: packet => sendSessionFeature(packet, { retries: 2, backoffMs: 500 }),
+            send: packet => sendSessionFeature(packet, { retries: 2, backoffMs: 500,
+                consentReceipt: recordedConsentReceipt(state.sessionData, packet.ids.session) }),
             changed: async backup => {
                 state.sessionData.serverBackup = backup;
                 if (this.machine.currentBlock?.stage !== 'trial') {
@@ -117,9 +120,20 @@ class ParticipantSessionRuntime {
         });
         this.boundOnline = () => { this.resolveIssue('network_offline'); void this.delivery.checkpoint(); };
         this.boundVisibility = () => {
-            if (document.visibilityState === 'hidden') this.saveCheckpoint();
+            const hidden = document.visibilityState === 'hidden';
+            const gap = this.continuity?.visibility(hidden);
+            this._captureContinuity(gap);
+            if (hidden && this.machine.currentBlock?.stage === 'trial') {
+                this.reportIssue({ kind: ERROR_KINDS.TECHNICAL, code: 'page_backgrounded',
+                    message: 'The page was backgrounded during this attempt.', recoverable: true,
+                    invalidatesBlock: true });
+            } else if (!hidden) this.resolveIssue('page_backgrounded');
+            void this.saveCheckpoint();
         };
         this.boundRtInput = event => this._recordRtInput(event);
+        this.pageExited = false;
+        this.finalRetryListener = null;
+        this.finalRetryTimer = null;
     }
 
     async init() {
@@ -137,12 +151,14 @@ class ParticipantSessionRuntime {
             }
         } catch (error) {
             restored = null;
+            if (this.pageExited) return this;
             console.warn('[SessionRuntime] checkpoint restore failed:', error);
             if (this.checkpoints.getActiveSessionId()) {
                 this.checkpointRestoreFailed = true;
                 showPersistenceNotice('restore', state.currentLang);
             }
         }
+        if (this.pageExited) return this;
         // Opening a new invitation must not attach the previous tab's session
         // tuple or results to it. Keep that old checkpoint for explicit recovery.
         if (restored && !matchesCheckpointInvitation(restored.sessionData, window.location.search)) {
@@ -217,6 +233,8 @@ class ParticipantSessionRuntime {
         }
 
         if (this.machine.state !== SESSION_STATES.COMPLETED) {
+            this.continuity = new LongSessionContinuity(state.sessionData.experimentMeta?.runtimeContinuity);
+            this._captureContinuity(this.continuity.visibility(document.visibilityState === 'hidden'));
             this.pendingQualityStop = state.sessionData.pendingQualityStop || null;
             window.addEventListener('offline', this.boundOffline);
             window.addEventListener('online', this.boundOnline);
@@ -229,12 +247,18 @@ class ParticipantSessionRuntime {
     _scheduleFinalUploadRetry() {
         this.restoringFinal = true;
         const retry = () => {
-            import('../web-page/tests-updated.js?v=20261108-143l')
-                .then(module => module.finishSession())
+            this.finalRetryTimer = null;
+            this.finalRetryListener = null;
+            if (this.pageExited) return;
+            import('../web-page/tests-updated.js?v=20261109-issues2')
+                .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };
-        if (state.runtime.participantShellReady) setTimeout(retry, 0);
-        else window.addEventListener('wecog:participant-ready', retry, { once: true });
+        if (state.runtime.participantShellReady) this.finalRetryTimer = setTimeout(retry, 0);
+        else {
+            this.finalRetryListener = retry;
+            window.addEventListener('wecog:participant-ready', retry, { once: true });
+        }
     }
 
     _removeSessionListeners() {
@@ -243,7 +267,28 @@ class ParticipantSessionRuntime {
         document.removeEventListener('visibilitychange', this.boundVisibility);
     }
 
+    suspendForPageExit() {
+        if (this.pageExited) return;
+        this.pageExited = true;
+        clearInterval(this.checkpointTimer);
+        clearInterval(this.serverCheckpointTimer);
+        this.checkpointTimer = null;
+        this.serverCheckpointTimer = null;
+        clearTimeout(this.finalRetryTimer);
+        this.finalRetryTimer = null;
+        if (this.finalRetryListener) window.removeEventListener('wecog:participant-ready', this.finalRetryListener);
+        this.finalRetryListener = null;
+        this._removeSessionListeners();
+        this._removeRtListeners();
+        this.ui.suspend();
+        // Leaving is not completion: do not allocate a final sequence or ingest.
+        this.delivery.closed = true;
+        this.checkpointBuilder.stop();
+        void this.saveCheckpoint();
+    }
+
     _onTransition(transition, snapshot) {
+        if (this.pageExited) return;
         const intervalTime = this.physiologyTime();
         if (transition.reason === 'block_start') {
             this.physiologyIntervals?.beginBlock(transition.details, intervalTime);
@@ -279,7 +324,17 @@ class ParticipantSessionRuntime {
 
     _startCheckpointTimer() {
         if (this.checkpointTimer) return;
-        this.checkpointTimer = setInterval(() => this.saveCheckpoint(), CHECKPOINT_INTERVAL_MS);
+        this.checkpointTimer = setInterval(() => {
+            const gap = this.continuity?.tick(Date.now(), CHECKPOINT_INTERVAL_MS);
+            this._captureContinuity(gap);
+            if (gap && this.machine.currentBlock?.stage === 'trial') {
+                this.reportIssue({ kind: ERROR_KINDS.TECHNICAL, code: 'session_scheduler_gap',
+                    message: 'A scheduler interruption occurred during this attempt.', details: gap,
+                    recoverable: true, invalidatesBlock: true });
+                this.resolveIssue('session_scheduler_gap');
+            }
+            void this.saveCheckpoint();
+        }, CHECKPOINT_INTERVAL_MS);
         this.serverCheckpointTimer = setInterval(() => { void this.delivery.checkpoint(); }, 30000);
     }
 
@@ -289,6 +344,17 @@ class ParticipantSessionRuntime {
         if (!state.sessionData.finalDelivery) state.sessionData.finalDelivery = this.delivery.finish();
         this.delivery.closed = true;
         this.checkpointBuilder.stop();
+    }
+
+    _captureContinuity(gap) {
+        if (!this.continuity) return;
+        state.sessionData.experimentMeta = { ...(state.sessionData.experimentMeta || {}),
+            runtimeContinuity: { ...this.continuity.snapshot } };
+        if (gap) {
+            this.physiologyIntervals?.breakContinuity();
+            recordSessionEvent('session_continuity_gap', { category: EVENT_CATEGORIES.TECHNICAL,
+                severity: 'warning', ...gap });
+        }
     }
 
     updateProtocolQuality(metrics, now = Date.now()) {
@@ -348,6 +414,8 @@ class ParticipantSessionRuntime {
                     state.sessionData,
                     this.machine.snapshot()
                 );
+                if (this.checkpoints.lastRetention) state.sessionData.experimentMeta = {
+                    ...(state.sessionData.experimentMeta || {}), checkpointRetention: this.checkpoints.lastRetention };
                 if (this.checkpoints.lastPersistenceMode === 'memory') throw new Error('durable_storage_unavailable');
                 if (this.checkpoints.getActiveSessionId() !== String(currentSessionId)) throw new Error('checkpoint_reference_unavailable');
                 saved = true;
@@ -355,6 +423,7 @@ class ParticipantSessionRuntime {
             }
             return saved;
         })().catch(error => {
+            if (error instanceof CheckpointConflictError) this.checkpointRestoreFailed = true;
             console.warn('[SessionRuntime] checkpoint save failed:', error);
             if (this.machine.currentBlock?.stage !== 'trial') showPersistenceNotice('checkpointLocal', state.currentLang);
             return false;
@@ -629,7 +698,10 @@ class ParticipantSessionRuntime {
     }
 
     async startContinuousModules() {
-        if (this.framePipeline?.isRunning()) return true;
+        if (this.pageExited) return false;
+        if (this.framePipeline?.isRunning()) {
+            return await prepareNeutralCalibration(this.framePipeline, state.currentLang) && !this.pageExited;
+        }
         this._ensureSessionPlugins();
         // Start the permission request before the first await so this method can
         // be called directly from the participant's click gesture.
@@ -643,6 +715,7 @@ class ParticipantSessionRuntime {
         // Microphone permission is optional and its browser prompt may remain
         // unanswered. It must never delay camera analysis or protocol progress.
         const started = await this.framePipeline.start();
+        if (this.pageExited) return false;
         if (!started) {
             this.reportIssue({
                 kind: ERROR_KINDS.TECHNICAL,
@@ -657,6 +730,7 @@ class ParticipantSessionRuntime {
             });
             return false;
         }
+        if (!await prepareNeutralCalibration(this.framePipeline, state.currentLang) || this.pageExited) return false;
         this.resolveIssue('continuous_modules_not_started');
         this.setModuleStatus('gaze', 'running');
         this.setModuleStatus('blinks', 'running');
@@ -767,6 +841,13 @@ class ParticipantSessionRuntime {
         document.addEventListener('pointerdown', this.boundRtInput, true);
     }
 
+    _removeRtListeners() {
+        if (!this.rtListenersActive) return;
+        document.removeEventListener('keydown', this.boundRtInput, true);
+        document.removeEventListener('pointerdown', this.boundRtInput, true);
+        this.rtListenersActive = false;
+    }
+
     _recordRtInput(event) {
         const block = this.machine.currentBlock;
         if (!block || block.stage !== 'trial') return;
@@ -785,32 +866,40 @@ class ParticipantSessionRuntime {
     async stopContinuousModules(reason = 'session_finish') {
         if (this.stopModulesPromise) return this.stopModulesPromise;
         this.stopModulesPromise = (async () => {
-            this.getBpmSnapshot();
-            this.physiologyEndedAt = this.physiologyTime();
-            this.physiologyIntervals?.endBlock('interrupted', this.physiologyEndedAt);
-            this.capturePhysiologyIntervals();
-            const bpmRun = this.framePipeline?.stop(reason) || null;
-            if (bpmRun) {
-                if (!Array.isArray(state.sessionData.bpmRuns)) state.sessionData.bpmRuns = [];
-                state.sessionData.bpmRuns.push(bpmRun);
-                if (!Array.isArray(state.sessionData.respirationRuns)) state.sessionData.respirationRuns = [];
-                state.sessionData.respirationRuns.push({
-                    mode: bpmRun.mode,
-                    reason: bpmRun.reason,
-                    durationMs: bpmRun.durationMs,
-                    sampleCount: bpmRun.sampleCount,
-                    respRateMean: bpmRun.respRateMean,
-                    rppgSession: bpmRun.rppgSession
-                });
+            this._removeRtListeners();
+            const audioShutdown = this.audioCollector?.stop(reason);
+            let bpmRun = null;
+            try {
+                try {
+                    this.getBpmSnapshot();
+                    this.physiologyEndedAt = this.physiologyTime();
+                    this.physiologyIntervals?.endBlock('interrupted', this.physiologyEndedAt);
+                    this.capturePhysiologyIntervals();
+                } finally {
+                    bpmRun = this.framePipeline?.stop(reason) || null;
+                    if (bpmRun) {
+                        if (!Array.isArray(state.sessionData.bpmRuns)) state.sessionData.bpmRuns = [];
+                        state.sessionData.bpmRuns.push(bpmRun);
+                        if (!Array.isArray(state.sessionData.respirationRuns)) state.sessionData.respirationRuns = [];
+                        state.sessionData.respirationRuns.push({
+                            mode: bpmRun.mode,
+                            reason: bpmRun.reason,
+                            durationMs: bpmRun.durationMs,
+                            sampleCount: bpmRun.sampleCount,
+                            respRateMean: bpmRun.respRateMean,
+                            rppgSession: bpmRun.rppgSession
+                        });
+                    }
+                }
+            } finally {
+                try { this.multimodalCollector?.stop(); }
+                finally {
+                    try { await audioShutdown; }
+                    finally {
+                        for (const name of Object.keys(this.moduleStatus)) this.setModuleStatus(name, 'stopped');
+                    }
+                }
             }
-            await this.audioCollector?.stop(reason);
-            this.multimodalCollector?.stop();
-            if (this.rtListenersActive) {
-                document.removeEventListener('keydown', this.boundRtInput, true);
-                document.removeEventListener('pointerdown', this.boundRtInput, true);
-                this.rtListenersActive = false;
-            }
-            for (const name of Object.keys(this.moduleStatus)) this.setModuleStatus(name, 'stopped');
             return bpmRun;
         })();
         return this.stopModulesPromise;
@@ -828,6 +917,9 @@ class ParticipantSessionRuntime {
     }
 
     async completeFinish(details = {}, options = {}) {
+        state.runtime.stopCognitiveStimulusPlayback?.();
+        state.runtime.invitationMediaPreparation?.dispose();
+        state.runtime.invitationStimulusObjectUrls = [];
         this.stopServerCheckpoints();
         this.machine.completeFinish(details);
         state.sessionData.lifecycle = this.machine.lifecycle({

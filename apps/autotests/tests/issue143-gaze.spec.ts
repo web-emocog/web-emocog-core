@@ -24,7 +24,7 @@ test('production calibration counts two fresh click captures and ignores a queue
       state.runtime.lastPrecheckResult = { timestamp: performance.now(), landmarks,
         eyes: { bothOpen: true }, pose: { status: 'stable', yaw: 0, pitch: 0, roll: 0 } };
     }, 33);
-    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261108-143l';
+    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261109-issues2';
     const module = await import(moduleUrl);
     (window as any).calibrationPrepared = module.startCalibration();
   }, landmarksForGaze(0, 0));
@@ -115,7 +115,7 @@ test('eye patch features use only their completed frame pixels without a camera 
     const urls = ['/apps/participant-web/js/gaze-tracker/eye-patch-features.mjs?v=20261107-143',
       '/apps/participant-web/js/session-runtime/frame-pixels.mjs', '/apps/autotests/fixtures/issue143-eye-image.mjs',
       '/apps/participant-web/js/gaze-tracker/eye-gradient-features.mjs?v=20261107-143g',
-      '/apps/participant-web/js/gaze-tracker/eye-tophat-features.mjs?v=20261108-143l'];
+      '/apps/participant-web/js/gaze-tracker/eye-tophat-features.mjs?v=20261109-issues2'];
     const [{ eyePatchFeaturesForFrame }, { rememberFramePixels }, { syntheticEyeImage }, { eyeGradientFeaturesForFrame }, { eyeTophatFeaturesForFrame }] = await Promise.all(urls.map(url => import(url)));
     const frame={landmarks,frameSize:{width:640,height:480}};
     const missing=eyePatchFeaturesForFrame(frame);
@@ -447,7 +447,7 @@ for (const language of ['ru', 'en']) test(`spatial accuracy caveat is visible be
   if (language === 'en') await page.locator('#langEn').click();
   await page.locator('#analyticsApplyFilters').click();
   await expect(page.locator('.analytics-heatmap-canvas').first()).toBeVisible();
-  await expect(page.locator('[data-gaze-spatial-qc]').first()).toContainText(language === 'en' ? 'Signal availability ≠ spatial accuracy' : 'Доступность сигнала ≠ пространственная точность');
+  await expect(page.locator('[data-gaze-spatial-qc]').first()).toContainText(language === 'en' ? 'Gaze validation error' : 'Ошибка проверки взгляда');
   await page.evaluate(() => {
     const production = (window as any).EmocogAnalyticsProduction;
     const channels = production.store.state.summaryResponse.data.qcChannels;
@@ -460,7 +460,10 @@ for (const language of ['ru', 'en']) test(`spatial accuracy caveat is visible be
   await expect(page.locator('[data-gaze-spatial-qc]').first()).toContainText('148.4 px (8.8%)');
   await page.goto('/apps/web/researcher.html?analyticsPreview=1#/analytics/data-quality');
   await page.locator('#analyticsApplyFilters').click();
-  await expect(page.locator('[data-gaze-spatial-qc]').first()).toContainText(language === 'en' ? 'Drift during the task was not measured' : 'Дрейф во время задания не измерялся');
+  const caveat = page.locator('[data-gaze-spatial-qc]').first();
+  await caveat.locator('summary').click();
+  await expect(caveat.locator('p').last()).toBeVisible();
+  await expect(caveat).toContainText(language === 'en' ? 'drift during the task was not measured' : 'сдвиг во время задания не измерялся');
   const pdfText = await page.evaluate(() => {
     const body = document.getElementById('analyticsProductionBody')!;
     const progress = document.createElement('span'); progress.setAttribute('role', 'status');
@@ -468,7 +471,7 @@ for (const language of ['ru', 'en']) test(`spatial accuracy caveat is visible be
     const text = (window as any).EmocogAnalyticsPdf.capture(body).text;
     progress.remove(); return text;
   });
-  expect(pdfText).toContain(language === 'en' ? 'Drift during the task was not measured' : 'Дрейф во время задания не измерялся');
+  expect(pdfText).toContain(language === 'en' ? 'drift during the task was not measured' : 'сдвиг во время задания не измерялся');
   expect(pdfText).not.toContain('TRANSIENT_PROGRESS_NOT_IN_PDF');
   if (process.env.WECOG_ISSUE143_VISUAL_REVIEW === '1') {
     await page.locator('[data-gaze-spatial-qc]').first().scrollIntoViewIfNeeded();

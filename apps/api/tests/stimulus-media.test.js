@@ -7,6 +7,34 @@ const { mayReadStimulus, mayManageSharing, rejectOwnedFields } = require('../sti
 const { runMediaTool, createPreview, ensurePreview } = require('../stimuli/media-preview');
 const { collectMediaInventory } = require('../stimuli/media-inventory');
 const { hashFile } = require('../stimuli/versions');
+const { withMediaWrite } = require('../stimuli/versions');
+const { trackPreviewArtifact } = require('../stimuli/write-artifacts');
+
+test('media rollback discards only new posters, while uncertain COMMIT preserves files', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wecog-media-rollback-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'historical.jpg'), 'historical');
+  for (const commitFails of [false, true]) {
+    await fs.writeFile(path.join(root, 'new.jpg'), 'new');
+    const queries = [];
+    let releases = 0;
+    const client = { query: async sql => {
+      queries.push(sql);
+      if (sql === 'COMMIT' && commitFails) throw Object.assign(new Error('synthetic'), { code: 'ECONNRESET' });
+      return { rows: [] };
+    }, release() { releases++; } };
+    await assert.rejects(withMediaWrite({ connect: async () => client }, async queryable => {
+      trackPreviewArtifact(queryable, root, 'new.jpg');
+      if (!commitFails) throw new Error('synthetic_callback_failure');
+    }), error => commitFails ? error.code === 'media_write_uncertain' && error.mediaCommitUncertain
+      : error.message === 'synthetic_callback_failure');
+    assert.equal(await fs.readFile(path.join(root, 'historical.jpg'), 'utf8'), 'historical');
+    if (commitFails) assert.equal(await fs.readFile(path.join(root, 'new.jpg'), 'utf8'), 'new');
+    else await assert.rejects(fs.stat(path.join(root, 'new.jpg')), { code: 'ENOENT' });
+    assert.equal(releases, 1);
+    assert.ok(queries.includes('ROLLBACK'));
+  }
+});
 
 test('personal ownership is not conferred by membership, sharing is owner-only, server fields are rejected', () => {
   const row = { visibility: 'private', created_by: 7 };
@@ -52,6 +80,20 @@ test('preview generation confines inputs, records source geometry and rejects li
   const originalOptions = config.storage.preview;
   config.storage.preview = options;
   try {
+    const beforeRollback = await fs.readdir(path.join(root, 'previews'));
+    const client = { query: async (sql, values) => {
+      if (sql.startsWith('SELECT project_id')) return { rows: [{ project_id: 1 }] };
+      if (sql.startsWith('SELECT organization_id')) return { rows: [{ organization_id: 1 }] };
+      if (sql.includes('AS retained_bytes')) return { rows: [{ retained_bytes: 0, unmeasured: 0, reserved_bytes: 0 }] };
+      if (sql.includes('AS bytes FROM media_operations')) return { rows: [{ bytes: 0 }] };
+      return { rows: sql.startsWith('UPDATE stimulus_versions')
+        ? [{ id: 'rollback-preview', preview_path: values[0], preview_status: values[1] }] : [] };
+    }, release() {} };
+    await assert.rejects(withMediaWrite({ connect: async () => client }, async queryable => {
+      await ensurePreview(queryable, { id: 'rollback-preview', mime_type: 'image/png', content_path: 'source.png' }, root);
+      throw new Error('late_media_failure');
+    }), /late_media_failure/);
+    assert.deepEqual(await fs.readdir(path.join(root, 'previews')), beforeRollback);
     for (const mode of ['failure', 'deleted']) {
       const before = await fs.readdir(path.join(root, 'previews'));
       await assert.rejects(ensurePreview({ query: async () => {

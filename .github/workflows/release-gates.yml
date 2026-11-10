@@ -119,7 +119,7 @@ jobs:
             apps/api/package-lock.json
             apps/autotests/package-lock.json
       - name: Install PostgreSQL and media tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16 ffmpeg poppler-utils
       - name: Install API dependencies
         working-directory: apps/api
         run: npm ci
@@ -135,6 +135,9 @@ jobs:
         env:
           AUTH_RATE_LIMIT_PER_MINUTE: '1000'
           INGEST_RATE_LIMIT_PER_MINUTE: '1000'
+          IDENTITY_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
+          MEDIA_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
+          MEDIA_TEST_ISOLATED: '1'
         run: npm run test:postgres
       - name: Start canonical API
         working-directory: apps/api
@@ -155,6 +158,15 @@ jobs:
         run: |
           npm ci
           npm run test:api
+      - name: Verify complete participant delivery against a real API
+        working-directory: apps/autotests
+        env:
+          RESILIENCE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/protocol_fixes_test
+        run: |
+          PGPASSWORD=postgres createdb -h 127.0.0.1 -U postgres protocol_fixes_test
+          (cd ../api && DATABASE_URL="$RESILIENCE_TEST_DATABASE_URL" npm run migrate:up)
+          npx playwright install --with-deps chromium firefox
+          npx playwright test -c playwright.session-live.config.ts --project=chromium --project=firefox
       - name: Idempotent ingest load profile
         working-directory: apps/api
         env:
@@ -206,6 +218,13 @@ jobs:
       - name: Typecheck browser contracts
         working-directory: apps/autotests
         run: npm run typecheck
+      - name: Provide a local audio output for native media tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=wecog_ci
+          pactl set-default-sink wecog_ci
       - name: Run browser regression
         working-directory: apps/autotests
         run: npm test
@@ -262,6 +281,18 @@ jobs:
           npm run test:staff-http -- --project=chromium --project=firefox
           npm run test:html-security -- --project=chromium --project=firefox
           npm run test:staff-regression -- --project=chromium --project=firefox
+          npx playwright test -c playwright.identity.config.ts --project=chromium --project=firefox
+          npx playwright test -c playwright.block-media.config.ts --project=chromium --project=firefox
+      - name: Verify corrected VPC metrics and real stimulus presentation
+        working-directory: apps/autotests
+        run: npx playwright test -c playwright.metrics.config.ts --project=chromium --project=firefox
+      - name: Verify audit data boundaries and cancelled protocol loads
+        working-directory: apps/autotests
+        run: |
+          npx playwright test -c playwright.old-audit-builder.config.ts --project=chromium --project=firefox
+          npx playwright test -c playwright.old-audit-stimuli-security.config.ts --project=chromium --project=firefox
+          npx playwright test -c playwright.old-audit-analytics.config.ts --project=chromium --project=firefox
+          npx playwright test -c playwright.old-audit-network.config.ts --project=chromium --project=firefox
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

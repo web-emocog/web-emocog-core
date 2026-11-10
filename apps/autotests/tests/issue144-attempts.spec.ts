@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+const { validateSessionFeaturePayload } = require('../../api/security/payload-policy');
 
 test.beforeEach(async ({ page, baseURL }) => {
   await page.route('**/*', route => {
@@ -50,6 +51,7 @@ test('a real timed protocol assigns a new presentation identity when the same tr
   await page.evaluate(async () => {
     const s = (window as any).__WECOG_STATE__;
     s.runtime.sessionRuntime.policyShown = true;
+    s.sessionData.ids.session = 'S-timed-loop-synthetic';
     s.sessionData.startTime = Date.now();
     const moduleUrl = performance.getEntriesByType('resource').map(entry => entry.name)
       .find(name => name.includes('/js/web-page/experimental_task-updated.js'))!;
@@ -62,9 +64,19 @@ test('a real timed protocol assigns a new presentation identity when the same tr
   });
   await page.locator('#cogStartBtn').click();
   await expect.poll(() => page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.cognitiveResults.length)).toBeGreaterThan(1);
-  const rows = await page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.cognitiveResults);
+  const { rows, actual, payload } = await page.evaluate(async () => {
+    const data = (window as any).__WECOG_STATE__.sessionData;
+    const moduleUrl = performance.getEntriesByType('resource').map(entry => entry.name)
+      .find(name => name.includes('/js/unified-aggregates-new.js'))!;
+    const { buildAggregatesPayload } = await import(moduleUrl);
+    return { rows: data.cognitiveResults, actual: data.experimentMeta.presentationPlan.actual,
+      payload: buildAggregatesPayload(data, { forIngest: true }) };
+  });
   expect(new Set(rows.map((row: any) => row.presentationId)).size).toBe(rows.length);
   expect(new Set(rows.map((row: any) => row.trialId)).size).toBe(1);
   expect(rows.every((row: any) => Number.isInteger(row.presentationIndex) && Number.isFinite(row.onsetMs) && row.onsetMs >= 0)).toBe(true);
   expect(rows.every((row: any, index: number) => index === 0 || row.onsetMs > rows[index - 1].onsetMs)).toBe(true);
+  expect(actual.filter((row: any) => row.status === 'completed').map((row: any) => row.presentationId))
+    .toEqual(rows.map((row: any) => row.presentationId));
+  expect(validateSessionFeaturePayload(payload)).toEqual([]);
 });

@@ -13,6 +13,7 @@ const {
   isPlatformAdmin,
   hasProjectMembership,
   hasSessionMembership,
+  sessionMembershipPredicate,
 } = require('../middleware/auth');
 const { getSessionProxyMetrics } = require('./proxy_metrics');
 const { withTransaction, lockSessionKey } = require('../db/transaction');
@@ -142,6 +143,9 @@ router.post(
       });
       return res.status(result.status).json(result.body);
     } catch (err) {
+      if (err.constraint === 'session_erasure_tombstone') {
+        return res.status(410).json({ error: 'Session has been erased', code: 'session_erased' });
+      }
       if (err instanceof HttpError) {
         return res.status(err.status).json({
           error: err.message,
@@ -165,14 +169,15 @@ router.post(
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const now = new Date();
-      const allowed = await hasSessionMembership(pool, req.body.session_id, req.user);
-      if (!allowed) return res.status(404).json({ error: 'Session not found or access denied' });
+      const params = [now, req.body.session_id];
+      if (!isPlatformAdmin(req.user)) params.push(req.user.sub);
       const r = await pool.query(
-        `UPDATE sessions SET stopped_at = $1, updated_at = current_timestamp
-         WHERE session_id = $2 RETURNING id, session_id, started_at, stopped_at`,
-        [now, req.body.session_id]
+        `UPDATE sessions s SET stopped_at = $1, updated_at = current_timestamp
+         WHERE s.session_id = $2 AND ${sessionMembershipPredicate(req.user, 3)}
+         RETURNING id, session_id, started_at, stopped_at`,
+        params
       );
-      if (!r.rows[0]) return res.status(404).json({ error: 'Session not found' });
+      if (!r.rows[0]) return res.status(404).json({ error: 'Session not found or access denied' });
       const row = r.rows[0];
       res.json({
         ...row,
@@ -267,11 +272,12 @@ router.get(
   requireAuth,
   requireRole('admin', 'PI', 'researcher', 'analyst', 'assistant', 'developer'),
   requireOperation(OPERATIONS.SESSION_READ),
-  [param('id').isInt()],
+  [param('id').isInt({ min: 1, max: 2147483647 })],
   async (req, res) => {
     try {
-      const allowed = await hasSessionMembership(pool, req.params.id, req.user);
-      if (!allowed) return res.status(404).json({ error: 'Not found' });
+      if (!validationResult(req).isEmpty()) return res.status(400).json({ error: 'Invalid session reference' });
+      const params = [req.params.id];
+      if (!isPlatformAdmin(req.user)) params.push(req.user.sub);
       const r = await pool.query(
         `SELECT s.id, s.session_id, s.participant_id, s.project_id, s.protocol_id, s.started_at, s.stopped_at, s.created_at,
                 CASE WHEN s.stopped_at IS NULL THEN 'in_progress' ELSE 'completed' END AS session_status,
@@ -281,22 +287,93 @@ router.get(
                 pm.attention_score, pm.mean_rt_ms, pm.omissions_pct,
                 pm.emotion_valence_mean, pm.emotion_arousal_mean, pm.bpm_mean, pm.rppg_sample_count,
                 pm.respiration_rate_mean, pm.respiration_sample_count, pm.respiration_available,
-                pm.payload AS proxy_metrics, pm.source_payload AS proxy_source_data
+                pm.payload AS proxy_metrics, pm.source_payload AS proxy_source_data, sf.payload AS features
          FROM sessions s
          LEFT JOIN session_qc_summary q ON q.session_id = s.id
          LEFT JOIN session_proxy_metrics pm ON pm.session_id = s.id
-         WHERE s.id = $1`,
-        [req.params.id]
+         LEFT JOIN session_features sf ON sf.session_id = s.id
+         WHERE s.id = $1 AND ${sessionMembershipPredicate(req.user, 2)}`,
+        params
       );
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       const session = r.rows[0];
-      const features = await pool.query('SELECT payload FROM session_features WHERE session_id = $1', [session.id]);
-      session.features = features.rows[0] ? features.rows[0].payload : null;
       if (session.features?.experimentMeta?.protocolTermination) session.session_status = 'aborted';
       res.json(session);
     } catch (err) {
       logUnexpectedError(err, 'sessions');
       res.status(500).json({ error: 'Server error' });
+    }
+  }
+);
+
+// Erasure is deliberately narrower than session.write (assistants cannot erase).
+router.delete(
+  '/:id',
+  requireAuth,
+  requireRole('admin', 'PI', 'org_admin', 'researcher'),
+  requireOperation(OPERATIONS.SESSION_WRITE),
+  [param('id').isInt({ min: 1, max: 2147483647 })],
+  async (req, res) => {
+    if (!validationResult(req).isEmpty()) {
+      return res.status(400).json({ error: 'Invalid session reference', code: 'session_reference_invalid' });
+    }
+    try {
+      const result = await withTransaction(pool, async client => {
+        await client.query("SET LOCAL lock_timeout = '5s'");
+        await client.query("SET LOCAL statement_timeout = '15s'");
+        const reference = await client.query('SELECT session_id FROM sessions WHERE id = $1', [req.params.id]);
+        if (!reference.rows[0]) throw new HttpError(404, 'Session not found', 'session_not_found');
+        await lockSessionKey(client, reference.rows[0].session_id);
+        const principal = (await client.query(
+          'SELECT id, role, token_version FROM users WHERE id = $1 FOR SHARE', [req.user.sub]
+        )).rows[0];
+        if (!principal || Number(principal.token_version) !== req.user.ver) {
+          throw new HttpError(401, 'Staff access revoked', 'staff_token_revoked');
+        }
+        if (!['admin', 'PI', 'org_admin', 'researcher'].includes(principal.role)) {
+          throw new HttpError(403, 'Session erasure is not permitted', 'session_erasure_denied');
+        }
+        const row = (await client.query(
+          `SELECT s.id, s.session_id, COALESCE(s.project_id, pr.project_id) AS project_id
+           FROM sessions s LEFT JOIN protocols pr ON pr.id = s.protocol_id
+           WHERE s.id = $1 FOR UPDATE OF s`, [req.params.id]
+        )).rows[0];
+        if (!row) throw new HttpError(404, 'Session not found', 'session_not_found');
+        if (principal.role !== 'admin') {
+          const membership = await client.query(
+            `SELECT p.id FROM projects p
+             JOIN user_organizations uo ON uo.organization_id = p.organization_id AND uo.user_id = $2
+             JOIN user_projects up ON up.project_id = p.id AND up.user_id = $2
+             WHERE p.id = $1 FOR SHARE OF p, uo, up`, [row.project_id, principal.id]
+          );
+          if (!membership.rows[0]) throw new HttpError(404, 'Session not found', 'session_not_found');
+        }
+        await client.query(
+          `INSERT INTO session_erasure_tombstones (session_key_hash)
+           VALUES (encode(sha256(convert_to($1::text, 'UTF8')), 'hex'))
+           ON CONFLICT (session_key_hash) DO NOTHING`, [row.session_id]
+        );
+        // Snapshots contain IDs and selection filters; exports are computed, not stored.
+        const snapshots = await client.query(
+          `DELETE FROM analysis_snapshots WHERE project_id = $1 AND (
+             included_session_ids @> jsonb_build_array($2::integer)
+             OR excluded_sessions @> jsonb_build_array(jsonb_build_object('sessionId', $2::integer))
+             OR query->'filters'->'sessionIds' @> jsonb_build_array($2::integer)
+             OR query->'filters'->'sessionIds' @> jsonb_build_array($2::text)
+             OR query->'filters'->'sessionIds' @> jsonb_build_array($3::text))`,
+          [row.project_id, row.id, row.session_id]
+        );
+        // FK cascades remove features, QC, proxy/source payloads and events together.
+        await client.query('DELETE FROM sessions WHERE id = $1', [row.id]);
+        return { erased: true, resurrectionBlocked: true, snapshotsRemoved: snapshots.rowCount };
+      });
+      res.set('Cache-Control', 'no-store');
+      return res.json(result);
+    } catch (err) {
+      if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
+      logUnexpectedError(err, 'sessions');
+      // COMMIT may have succeeded before a connection error. Do not claim a rollback.
+      return res.status(503).json({ error: 'Erasure was not confirmed; verify session state', code: 'session_erasure_unconfirmed' });
     }
   }
 );

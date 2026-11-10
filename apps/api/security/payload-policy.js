@@ -28,6 +28,7 @@ const TOP_LEVEL_FIELDS = new Set([
   'startTime',
   'testHub',
   'gazeTests',
+  'quality_assessment',
 ]);
 const IDS_FIELDS = new Set(['session', 'participant', 'participantAlias', 'invitationCode']);
 const META_FIELDS = new Set(['user', 'tech']);
@@ -132,6 +133,7 @@ const OPTIONAL_OBJECT_FIELDS = [
   'gaze_analytics',
   'testHub',
   'gazeTests',
+  'quality_assessment',
 ];
 const PII_KEY_TOKEN_PATTERN = /(?:^|_)(?:email|phone|telephone|tel|telegram|whatsapp|first_name|last_name|middle_name|full_name|surname|address|passport|snils|oms|birth_date|ip_address)(?:_|$)/i;
 const EMAIL_VALUE_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
@@ -148,6 +150,26 @@ const DEFAULT_LIMITS = Object.freeze({
   maxBlocks: 200,
   maxCognitiveResults: 5000,
 });
+
+const PUBLIC_VALIDATION_FIELDS = new Set([...TOP_LEVEL_FIELDS, ...IDS_FIELDS, 'sequence', 'kind']);
+function collectValidationFields(rule) {
+  for (const [key, child] of Object.entries(rule.properties || {})) {
+    PUBLIC_VALIDATION_FIELDS.add(key);
+    collectValidationFields(child);
+  }
+  for (const child of Object.values(rule.$defs || {})) collectValidationFields(child);
+  for (const child of rule.anyOf || []) collectValidationFields(child);
+  if (rule.items) collectValidationFields(rule.items);
+  if (typeof rule.additionalProperties === 'object') collectValidationFields(rule.additionalProperties);
+}
+const { schema: sessionDataSchema, validateSessionDataSchema } = require('./session-data-schema');
+collectValidationFields(sessionDataSchema);
+
+function publicValidationPath(path) {
+  // Paths may contain attacker-chosen map keys. Only expose known field names and small array indexes.
+  return path.split('/').map((part, index) => index === 0 || PUBLIC_VALIDATION_FIELDS.has(part)
+    || (/^(?:0|[1-9]\d{0,3})$/.test(part) && Number(part) < DEFAULT_LIMITS.maxArrayLength) ? part : '*').join('/');
+}
 
 function addError(errors, path, keyword, message) {
   errors.push({ path: path || '/', keyword, message });
@@ -435,6 +457,7 @@ function validateResearchExtensions(payload, errors) {
 }
 
 function walkPayload(value, path, depth, counters, limits, errors, key = '') {
+  if (errors.length >= 100) return;
   if (depth > limits.maxDepth) {
     addError(errors, path, 'maxDepth', `maximum depth is ${limits.maxDepth}`);
     return;
@@ -449,13 +472,21 @@ function walkPayload(value, path, depth, counters, limits, errors, key = '') {
     if (PHONE_VALUE_PATTERN.test(value)) {
       addError(errors, path, 'pii', 'phone-like value is not allowed');
     }
+    if (/^\s*(?:data:|blob:)|;base64,/i.test(value)) {
+      addError(errors, path, 'rawMedia', 'embedded media is not accepted');
+    }
     return;
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    addError(errors, path, 'type', 'numbers must be finite');
   }
   if (value == null || typeof value !== 'object') return;
 
   if (Array.isArray(value)) {
-    if (value.length > limits.maxArrayLength) {
-      addError(errors, path, 'maxItems', `maximum array length is ${limits.maxArrayLength}`);
+    const maxItems = Math.min(limits.maxArrayLength, ({ '/events': limits.maxEvents, '/blocks': limits.maxBlocks,
+      '/cognitiveResults': limits.maxCognitiveResults })[path] ?? Infinity);
+    if (value.length > maxItems) {
+      addError(errors, path, 'maxItems', `maximum array length is ${maxItems}`);
       return;
     }
     value.forEach((item, index) => {
@@ -479,7 +510,11 @@ function walkPayload(value, path, depth, counters, limits, errors, key = '') {
     return;
   }
   for (const [childKey, childValue] of entries) {
-    const childPath = `${path}/${childKey}`;
+    const childPath = `${path}/${/^[A-Za-z0-9_:.-]{1,128}$/.test(childKey) ? childKey : '*'}`;
+    if (['__proto__', 'prototype', 'constructor'].includes(childKey)) {
+      addError(errors, childPath, 'additionalProperties', 'unsafe property name');
+      continue;
+    }
     if (isPiiKey(childKey)) {
       addError(errors, childPath, 'pii', 'PII field is not allowed');
       continue;
@@ -498,6 +533,10 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return [{ path: '/', keyword: 'type', message: 'payload must be an object' }];
   }
+
+  walkPayload(payload, '', 0, { objectKeys: 0, objectKeysExceeded: false }, limits, errors);
+  // Bound work before validators that inspect whole arrays or nested modules.
+  if (errors.some(error => ['maxDepth', 'maxItems', 'maxProperties'].includes(error.keyword))) return errors.slice(0, 100);
 
   validateKnownObjectFields(payload, TOP_LEVEL_FIELDS, '', errors);
   if (payload.delivery !== undefined) {
@@ -621,15 +660,7 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
   if (payload.physiology_intervals !== undefined) {
     errors.push(...require('./physiology-intervals').validatePhysiologyIntervals(payload.physiology_intervals));
   }
-
-  walkPayload(
-    payload,
-    '',
-    0,
-    { objectKeys: 0, objectKeysExceeded: false },
-    limits,
-    errors
-  );
+  errors.push(...validateSessionDataSchema(payload));
   return errors.slice(0, 100);
 }
 
@@ -640,7 +671,7 @@ function requireSessionFeaturePayload(req, res, next) {
     return res.status(422).json({
       error: pii ? 'PII is not accepted by ingest' : 'Payload schema validation failed',
       code: pii ? 'pii_forbidden' : 'payload_schema_invalid',
-      errors,
+      errors: errors.map(item => ({ ...item, path: item.path === '/' ? '/' : publicValidationPath(item.path) })),
     });
   }
   return next();

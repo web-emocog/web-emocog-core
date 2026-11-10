@@ -4,15 +4,16 @@
  * Добавлено: toggleConsent() из ui (2).js (наработка).
  * Исправлено: export function stopPreCheckOnLeave + 5 недостающих функций
  */
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261109-issues2';
 import { state, recordSessionEvent } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261025-1';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261104-4';
+import { translations } from '../../translations.js?v=20261109-issues2';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261109-issues2';
 import { measureRenderFPS } from './camera.js?v=20261104-4';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261104-4';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261109-issues2';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
-import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261025-1';
-import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261025-1';
+import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261109-issues2';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261109-issues2';
 
 const MVP_STEP = {
     INTRO: 1,
@@ -69,33 +70,20 @@ function resolveParticipantStep(stepNumber) {
 }
 
 async function maybeStartInvitationSessionAfterShell() {
+    if (state.runtime.participantPageExited) return false;
     const shell = invitationShellConfig();
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261108-143l');
+        const mod = await import('./tests-updated.js?v=20261109-issues2');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
-            mod.continueInvitationSessionAfterShell();
-            return true;
+            return (await mod.continueInvitationSessionAfterShell()) !== false;
         }
-    } catch (e) {
-        console.warn('[UI] invitation session start failed:', e);
+    } catch (_) {
+        dbgErr('ui', 'invitation:start-failed');
+        state.runtime.handlePreparationFailure?.();
     }
     return false;
-}
-
-function dbg(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.log(scope, event, data);
-    } catch (_) { /* ignore */ }
-}
-
-function dbgErr(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.error(scope, event, data);
-    } catch (_) { /* ignore */ }
 }
 
 function activeStepSnapshot() {
@@ -204,6 +192,7 @@ function ensureParticipantChromeVisible() {
 }
 
 export function nextStep(stepNumber) {
+    if (state.runtime.participantPageExited) return;
     const targetStep = resolveParticipantStep(resolveStepNumber(stepNumber, 1));
     dbg('ui', 'step:change:request', { requested: stepNumber, resolved: targetStep, ...activeStepSnapshot() });
 
@@ -251,7 +240,7 @@ export function nextStep(stepNumber) {
  * Активирует кнопку «Далее» только если оба чекбокса согласия отмечены.
  * Вызывается из HTML: onchange="toggleConsent()"
  */
-export function toggleConsent() {
+export function toggleConsent({ keepError = false } = {}) {
     const consentRead  = document.getElementById('consentRead');
     const consentAgree = document.getElementById('consentAgree');
     const consentSingle = document.getElementById('consentCheck');
@@ -271,9 +260,10 @@ export function toggleConsent() {
         return;
     }
 
-    consentBtn.disabled = !isAccepted;
+    const busy = consentBtn.getAttribute('aria-busy') === 'true';
+    consentBtn.disabled = !isAccepted || busy;
 
-    if (consentError && isAccepted) {
+    if (consentError && isAccepted && !keepError && !busy) {
         consentError.hidden = true;
         consentError.textContent = '';
     }
@@ -304,7 +294,9 @@ export function generateUniqueId() {
     ].join('-');
 }
 
-export async function generateIdsAndProceed() {
+export async function generateIdsAndProceed({ signal } = {}) {
+    const pageExited = () => signal?.aborted || state.runtime.participantPageExited;
+    if (pageExited()) return false;
     dbg('ui', 'button:consentBtn', { action: 'generateIdsAndProceed' });
     if (state.runtime?.sessionRuntime?.checkpointRestoreFailed) {
         const errorNode = document.getElementById('consentError');
@@ -337,11 +329,6 @@ export async function generateIdsAndProceed() {
         }
     };
 
-    console.log('[IDs Generated]', {
-        session:     sessionId.substring(0, 8) + '...',
-        participant: participantId.substring(0, 8) + '...'
-    });
-
     if (state.sessionData.consent?.informed_consent) {
         state.sessionData.consent.informed_consent.participantId = participantId;
     }
@@ -365,11 +352,18 @@ export async function generateIdsAndProceed() {
                 throw new Error('checkpoint_persistence_failed');
             }
         }
+        if (pageExited()) return false;
         admissionStage = 'network';
         await primeParticipantSession({
             sessionId,
-            invitationCode
+            invitationCode,
+            signal,
+            consentReceipt: {
+                informedConsentVersion: state.sessionData.consent.informed_consent.documentVersion,
+                privacyPolicyVersion: state.sessionData.consent.privacy_policy.documentVersion
+            }
         });
+        if (pageExited()) return false;
         if (invitationCode) {
             delete state.sessionData.admissionPending;
             admissionStage = 'local';
@@ -378,6 +372,7 @@ export async function generateIdsAndProceed() {
                 throw new Error('checkpoint_persistence_failed');
             }
         }
+        if (pageExited()) return false;
         const currentUrl = new URL(window.location.href);
         if (currentUrl.searchParams.has('code')) {
             currentUrl.searchParams.delete('code');
@@ -388,6 +383,7 @@ export async function generateIdsAndProceed() {
             );
         }
     } catch (error) {
+        if (pageExited()) return false;
         const consentError = document.getElementById('consentError');
         if (consentError) {
             consentError.hidden = false;
@@ -510,8 +506,8 @@ export function stopPreCheckOnLeave() {
     try {
         stopPreCheck();
         state.flags.isPrecheckRunning = false;
-    } catch (e) {
-        console.warn('[UI] stopPreCheckOnLeave error:', e);
+    } catch (_) {
+        dbgErr('ui', 'precheck:stop-failed');
     }
 }
 
@@ -523,9 +519,9 @@ export async function checkRenderFPS() {
     try {
         const fps = await measureRenderFPS();
         state.runtime.renderFPS = fps;
-        console.log('[UI] Render FPS:', fps);
-    } catch (e) {
-        console.warn('[UI] measureRenderFPS error:', e);
+        dbg('ui', 'render:fps', { fps });
+    } catch (_) {
+        dbgErr('ui', 'render:fps-failed');
     }
 }
 
@@ -693,8 +689,8 @@ export async function collectTechDataAndProceed(nextStepNumber = MVP_STEP.QUESTI
         const renderFps = await measureRenderFPS();
         state.sessionData.tech.measuredFPS = renderFps;
         state.sessionData.tech.renderFPS = renderFps;
-    } catch (err) {
-        console.warn('[UI] measureRenderFPS error:', err);
+    } catch (_) {
+        dbgErr('ui', 'render:fps-failed');
     }
 
     nextStep(targetStep);
@@ -716,9 +712,7 @@ function renderFinalQcMetrics(payload, lang) {
     const blinkCount = payload.blink_summary?.blinkCount;
     const perclos = payload.perclos_summary?.windows?.['60s']?.meanPct
         ?? payload.perclos_summary?.windows?.['30s']?.meanPct;
-    const attentionAverage = Number.isFinite(attention.averageAttention)
-        ? attention.averageAttention
-        : (Number.isFinite(perclos) ? Math.max(0, 1 - perclos / 100) : null);
+    const attentionAverage = Number.isFinite(attention.averageAttention) ? attention.averageAttention : null;
     const hasMetrics = attentionAverage != null
         || emotion.valence_mean != null
         || emotion.arousal_mean != null
@@ -801,18 +795,19 @@ export function updateFinalStepWithQC(qcSummary, options = {}) {
             `;
         } else {
         const passed = serverValidity ? serverValidity === 'valid' : qcSummary?.overallPass === true;
-        const validGazePct = qcSummary?.gazeValidPct || 0;
-        const faceOkPct = qcSummary?.faceOkPct || 0;
-        const durationMs = qcSummary?.durationMs || 0;
+        const percent = value => Number.isFinite(value) ? `${value.toFixed(1)}${t.percent || '%'}` : '—';
+        const validGaze = percent(qcSummary?.gazeValidPct);
+        const faceOk = percent(qcSummary?.faceOkPct);
+        const duration = Number.isFinite(qcSummary?.durationMs) ? `${Math.round(qcSummary.durationMs / 1000)}${t.seconds || 's'}` : '—';
 
         if (passed) {
             qcStatusEl.innerHTML = `
                 <div class="qc-status-passed">
                     <strong>${t.qc_passed_full || t.qc_passed || 'QC Passed'}</strong>
                     <div class="qc-status-details">
-                        ${t.qc_duration || 'Duration'}: ${Math.round(durationMs / 1000)}${t.seconds || 's'} |
-                        ${t.qc_valid || 'Valid gaze'}: ${validGazePct.toFixed(1)}${t.percent || '%'} |
-                        ${t.qc_face_ok || 'Face OK'}: ${faceOkPct.toFixed(1)}${t.percent || '%'}
+                        ${t.qc_duration || 'Duration'}: ${duration} |
+                        ${t.qc_valid || 'Valid gaze'}: ${validGaze} |
+                        ${t.qc_face_ok || 'Face OK'}: ${faceOk}
                     </div>
                 </div>
             `;
@@ -841,9 +836,9 @@ export function updateFinalStepWithQC(qcSummary, options = {}) {
                         ${t.qc_issues || 'Issues'}: ${issuesList || (lang === 'ru' ? 'недостаточно валидного сигнала' : (lang === 'es' ? 'señal válida insuficiente' : 'insufficient valid signal'))}
                     </div>
                     <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">
-                        ${t.qc_duration || 'Duration'}: ${Math.round(durationMs / 1000)}${t.seconds || 's'} |
-                        ${t.qc_valid || 'Valid gaze'}: ${validGazePct.toFixed(1)}${t.percent || '%'} |
-                        ${t.qc_face_ok || 'Face OK'}: ${faceOkPct.toFixed(1)}${t.percent || '%'}
+                        ${t.qc_duration || 'Duration'}: ${duration} |
+                        ${t.qc_valid || 'Valid gaze'}: ${validGaze} |
+                        ${t.qc_face_ok || 'Face OK'}: ${faceOk}
                     </div>
                 </div>
             `;
@@ -852,17 +847,46 @@ export function updateFinalStepWithQC(qcSummary, options = {}) {
     }
 
     try {
-        renderFinalQcMetrics(buildAggregatesPayload(state.sessionData), lang);
-    } catch (err) {
-        console.warn('[UI] final metrics render error:', err);
+        const payload = buildAggregatesPayload(state.sessionData);
+        renderFinalQcMetrics(payload, lang);
+        renderMeasurementStatus(payload?.quality_assessment);
+    } catch (_) {
+        dbgErr('ui', 'summary:render-failed');
     }
 }
 
 window.updateFinalStepWithQC = updateFinalStepWithQC;
 
+function renderMeasurementStatus(assessment) {
+    if (!assessment) return;
+    let notice = document.getElementById('measurementStatusNotice');
+    if (!notice) {
+        notice = document.createElement('section'); notice.id = 'measurementStatusNotice';
+        notice.setAttribute('role', 'status'); notice.style.cssText = 'margin:16px 0;padding:14px;border:1px solid var(--border);border-radius:12px;';
+        document.getElementById('qcStatusBlock')?.after(notice);
+    }
+    notice.replaceChildren();
+    const title = document.createElement('strong');
+    title.textContent = participantText('Сохранение и достоверность: разные статусы', 'Saving and measurement validity are separate');
+    const description = document.createElement('p');
+    description.textContent = participantText(
+        'Сообщение о сохранении подтверждает доставку записи, а не точность всех измерений. QC проверяет условия регистрации. Оценки мимики, взгляда и физиологии требуют отдельной валидации; пропуски остаются пропусками.',
+        'A saved result confirms data delivery, not the accuracy of every measurement. QC checks recording conditions. Facial-expression, gaze and physiological estimates require separate validation; missing values remain missing.');
+    const completion = document.createElement('p');
+    completion.textContent = participantText('Полнота записи: ', 'Recording integrity: ')
+        + ({ complete: participantText('завершена', 'complete'), partial: participantText('неполная', 'partial'),
+            unknown: participantText('не установлена', 'unknown') }[assessment.recordingIntegrity.status]);
+    const limits = document.createElement('p');
+    limits.textContent = participantText('Показатели исследовательские, не диагноз и не подтверждённое эмоциональное состояние.',
+        'Metrics are exploratory, not a diagnosis or a confirmed emotional state.');
+    notice.append(title, description, completion, limits);
+}
+
 // ── downloadData ─────────────────────────────────────────────────────────────
 
-export function downloadData() {
+export function downloadData(status = document.getElementById('downloadResultStatus')) {
+    if (status) { status.hidden = true; status.textContent = ''; }
+    let url, anchor;
     try {
         const aggregatesOnly = document.getElementById('aggregatesOnlyCheckbox')?.checked;
         const sessionId = state.sessionData?.ids?.session || 'session';
@@ -877,18 +901,25 @@ export function downloadData() {
             : `session_${sessionId}.json`;
         const json = JSON.stringify(data, null, 2);
         const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
+        url = URL.createObjectURL(blob);
 
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    } catch (err) {
-        console.error('[UI] downloadData error:', err);
+        anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = fileName;
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+    } catch (_) {
+        dbgErr('ui', 'result:download-failed');
+        if (status) {
+            status.hidden = false;
+            status.textContent = participantText('Не удалось скачать JSON. Повторите попытку, не закрывая вкладку.',
+                'Could not download the JSON. Try again without closing this tab.',
+                'No se pudo descargar el JSON. Inténtelo de nuevo sin cerrar esta pestaña.');
+        }
+    } finally {
+        anchor?.remove();
+        if (url) URL.revokeObjectURL(url);
     }
 }
 

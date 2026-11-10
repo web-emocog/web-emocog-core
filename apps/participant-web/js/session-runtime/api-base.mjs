@@ -52,7 +52,8 @@ export function isAllowedApiBase(candidate, options = {}) {
     const pageUrl = options.pageUrl instanceof URL
         ? options.pageUrl
         : new URL(options.pageUrl || globalThis.location?.href || 'http://localhost/');
-    if (!['http:', 'https:'].includes(candidate.protocol)) return false;
+    if (!['http:', 'https:'].includes(candidate.protocol) || candidate.username || candidate.password
+        || candidate.search || candidate.hash) return false;
     if (candidate.origin === pageUrl.origin) return true;
     if (
         isLoopback(pageUrl.hostname)

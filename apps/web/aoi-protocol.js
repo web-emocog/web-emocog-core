@@ -140,7 +140,9 @@
       if (!aois.length) return;
       const normalized = aois.map(normalizedAoi);
       if (normalized.some(result => !result.ok)) return;
-      definitions[stimulusId] = normalized.map(result => result.value);
+      Object.defineProperty(definitions, stimulusId, {
+        value: normalized.map(result => result.value), enumerable: true, writable: true, configurable: true
+      });
     });
     return definitions;
   }

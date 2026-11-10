@@ -1,5 +1,5 @@
-import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261104-4';
-import { PROTOCOL_PROFILE_ID, MODEL_ASSETS, FRAME_SCHEDULE, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261104-4';
+import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261109-issues2';
+import { PROTOCOL_PROFILE_ID, NEW_PROTOCOL_PROFILE_ID, resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261109-issues2';
 
 const fmt = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : '\u2014';
 const fpsLabel = measurement => measurement?.status === 'measured'
@@ -22,17 +22,32 @@ export function mountProtocolDiagnostic(channel) {
     const profile = document.createElement('pre'); profile.id = 'profileDetails'; profile.style.whiteSpace = 'pre-wrap'; profile.style.overflowWrap = 'anywhere';
     const performanceLine = document.createElement('p'); performanceLine.id = 'profilePerformance';
     panel.style.gridColumn = '1 / -1'; panel.style.minWidth = '0';
-    profile.textContent = JSON.stringify({ id: PROTOCOL_PROFILE_ID, schedule: FRAME_SCHEDULE, camera: protocolCameraConstraints().video, models: MODEL_ASSETS }, null, 2);
-    panel.append(title, note, profile, performanceLine);
+    const selector = document.createElement('select'); selector.id = 'diagnosticSignalProfile';
+    selector.setAttribute('aria-label', 'Профиль обработки');
+    for (const [id, label] of [[NEW_PROTOCOL_PROFILE_ID, 'Новые протоколы (v2)'], [PROTOCOL_PROFILE_ID, 'Прежние протоколы (v1)']]) {
+        const option = document.createElement('option'); option.value = id; option.textContent = label; selector.appendChild(option);
+    }
+    const definition = () => ({ settings: { signalProfileId: selector.value,
+        ...(channel === 'body' ? { featureFlags: { bodyMovement: true } } : {}) } });
+    const describeProfile = () => {
+        const selected = resolveSignalProfile(definition());
+        profile.textContent = JSON.stringify({ id: selected.id, schedule: selected.schedule,
+            bodyMovement: channel === 'body' || selected.bodyMovementDefault,
+            camera: protocolCameraConstraints().video, models: MODEL_ASSETS }, null, 2);
+    };
+    describeProfile();
+    panel.append(title, note, selector, profile, performanceLine);
     (document.querySelector('main') || document.querySelector('.layout') || document.body).appendChild(panel);
     const states = { access: 'Проверяем доступ...', models: 'Загружаем модели протокола...', camera: 'Запрашиваем камеру...',
-        sampling: 'Измеряем частоту камеры...', running: 'Анализ запущен. Взгляд без персональной калибровки не оценивается.', stopped: 'Остановлено' };
+        sampling: 'Измеряем частоту камеры...', neutral: 'Настройка нейтральной мимики...',
+        running: 'Анализ запущен. Взгляд без персональной калибровки не оценивается.', stopped: 'Остановлено' };
     let blocked = false;
     let previousEmotion = null;
     const emotionPoints = [];
-    const runner = new ProtocolDiagnostic({ video, onStatus(value) {
+    const runner = new ProtocolDiagnostic({ video, definition: definition(), onStatus(value) {
         write('status', states[value] || value);
         const active = value !== 'stopped';
+        selector.disabled = active;
         start.disabled = active || blocked; stop.disabled = !active;
         video.style.display = active ? 'block' : 'none';
         screen?.classList.toggle('running', value === 'running');
@@ -87,7 +102,7 @@ export function mountProtocolDiagnostic(channel) {
         const faceMs = face?.frames ? face.totalMs / face.frames : null;
         const camera = sample.camera?.width && sample.camera?.height
             ? ` Камера: ${sample.camera.width}×${sample.camera.height}, настройки трека: ${fmt(sample.camera.frameRate, 1)} FPS.` : '';
-        const backends = sample.diagnostics ? ` Лицо: ${sample.diagnostics.faceBackend}; сегментация: ${sample.diagnostics.segmentDelegate || '\u2014'}; корпус: ${sample.diagnostics.poseBackend || '\u2014'}.` : '';
+        const backends = sample.diagnostics ? ` Лицо: ${sample.diagnostics.faceBackend}/${sample.diagnostics.faceDelegate || '\u2014'}; сегментация: ${sample.diagnostics.segmentDelegate || '\u2014'}; корпус: ${sample.diagnostics.poseBackend || '\u2014'}.` : '';
         const cadence = sample.qc?.fpsDiagnostics;
         const method = cadence?.camera?.method ? ` (${cadence.camera.method})` : '';
         const ceiling = cadence?.camera?.status === 'measured' && cadence.camera.fps > 0
@@ -106,6 +121,7 @@ export function mountProtocolDiagnostic(channel) {
             }
         } else if (overlay) overlay.style.display = 'none';
     } });
+    selector.addEventListener('change', () => { runner.definition = definition(); describeProfile(); });
     start.addEventListener('click', () => {
         if (blocked) return;
         void runner.start().catch(error => {

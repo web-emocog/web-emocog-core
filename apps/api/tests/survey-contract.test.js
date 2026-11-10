@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const contract = require('../../shared/survey-contract');
 const { normalizeSurveyResponses } = require('../export/survey-responses');
 const { validateSessionFeaturePayload } = require('../security/payload-policy');
+const { assertPublishedSurveyResponses } = require('../security/survey-admission');
 
 const root = path.resolve(__dirname, '../..');
 const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -43,6 +44,33 @@ function validSurveyBlock(id = 'survey_1') {
     },
   };
 }
+
+describe('survey ingestion against the published definition', () => {
+  it('accepts declared answers without requiring an optional question', () => {
+    const event = { type: 'survey_response', blockId: 'survey_1', responseVersion: contract.RESPONSE_VERSION,
+      responseCount: 1, responses: [{ questionId: 'q_single', responseType: 'single', value: 'yes' }] };
+    assert.doesNotThrow(() => assertPublishedSurveyResponses([event], { blocks: [validSurveyBlock()] }));
+    assert.doesNotThrow(() => assertPublishedSurveyResponses([], null));
+  });
+
+  it('rejects undeclared answers, duplicated submissions, missing required answers and identifiable text', () => {
+    const required = { questionId: 'q_single', responseType: 'single', value: 'yes' };
+    const event = { type: 'survey_response', blockId: 'survey_1', responseVersion: contract.RESPONSE_VERSION,
+      responses: [required] };
+    const definition = { blocks: [validSurveyBlock()] };
+    for (const events of [[event, event], [{ ...event, blockId: 'other' }],
+      [{ ...event, responseCount: 0 }], [{ ...event, responses: [] }],
+      [{ ...event, responses: [required, required] }],
+      [{ ...event, responses: [{ ...required, responseType: 'open' }] }],
+      [{ ...event, responses: [{ ...required, value: 'other' }] }],
+      [{ ...event, responses: [required, { questionId: 'q_multiple', responseType: 'multiple', value: ['a', 'a'] }] }],
+      [{ ...event, responses: [required, { questionId: 'q_open', responseType: 'open', value: 'me@example.test' }] }]]) {
+      assert.throws(() => assertPublishedSurveyResponses(events, definition),
+        { status: 422, code: 'survey_response_not_declared' });
+    }
+    assert.throws(() => assertPublishedSurveyResponses([event], null), { status: 422 });
+  });
+});
 
 describe('protocol survey contract', () => {
   it('keeps authored locale variants separate and reports missing translations', () => {
@@ -258,7 +286,7 @@ describe('survey browser integration contract', () => {
     assert.match(calibration, /calibration_instruction_acknowledged/);
     assert.match(
       calibration,
-      /await waitForCalibrationIntroduction\(\{ targeted \}\);[\s\S]{0,180}point\.style\.display = 'block';/
+      /const acknowledged = await waitForCalibrationIntroduction\(\{ targeted \}\);\s*if \(!acknowledged \|\| state\.runtime\.participantPageExited\) return;[\s\S]{0,180}point\.style\.display = 'block';/
     );
     assert.match(calibrationPointRule, /transition:\s*none/);
     assert.match(calibrationPointRule, /animation:\s*none/);

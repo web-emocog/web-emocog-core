@@ -1,4 +1,4 @@
-import { SessionAudioCollector } from '../../participant-web/js/audio/session-audio.js?v=20261104-4';
+import { SessionAudioCollector } from '../../participant-web/js/audio/session-audio.js?v=20261109-issues2';
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
 import { DiagnosticRun, SerialDiagnosticStage } from './diagnostic-run.mjs?v=20261028-1';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';

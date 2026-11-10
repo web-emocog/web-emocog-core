@@ -130,14 +130,30 @@ Trial-level selection filters are incompatible with this custom design; common
 QC/date filters remain active. GET `/comparisons/custom?snapshot_id=...` returns
 the snapshot-bound result. JSON/CSV exports include the same result and query.
 
-Supported outcomes: mean correct-valid RT, median correct-valid RT, and accuracy
-among quality-valid trials with a boolean correctness result. Trials are pooled across sessions per participant;
+Supported outcomes: mean correct-valid RT, median correct-valid RT, accuracy
+among quality-valid trials with a boolean correctness result, mean estimated
+heart rate and respiration rate. Trials are pooled across sessions per participant;
 participant estimates then receive equal weight. Paired comparisons retain only
 complete pairs; independent groups cannot overlap. Difference is B minus A;
 accuracy differences are percentage points, not relative percentage changes.
-Missingness, participant N and trial counts are explicit. Confidence intervals
-and p-values remain null: no significance claim or approved inferential model
-is implied. The implementation rejects datasets above 2000 sessions rather than
+Physiology in paired designs requires `axis: "block"` and recorded intervals,
+with at least 1000 ms of observed channel coverage per included block attempt.
+Only accepted attempts are aggregated. Within each participant, available
+session estimates receive equal weight; participants then receive equal weight.
+Independent groups use whole-session summaries and cannot pretend those are
+block or stimulus-specific estimates. Heart-rate and respiration differences
+retain their native units, `bpm` and `breaths/min`.
+
+Missingness, participant N and observation counts are explicit. RT can expose
+an explicitly exploratory t-based 95% interval for at least three complete pairs
+or three participants per group, with finite nonzero estimated variability.
+Paired intervals use the spread of paired differences; independent intervals
+use Welch degrees of freedom and conservatively tabulated t critical values.
+Distributional assumptions are not automatically verified. The three-person
+display threshold is not a sample-size justification. Physiology and accuracy
+intervals, adjusted p-values and hypothesis tests remain unavailable. No
+confirmatory significance claim or approved inferential model is implied.
+The implementation rejects datasets above 2000 sessions rather than
 silently truncating the analysis. Paginated analysis is a separate follow-up.
 The ingest schema is `packages/shared/contracts/rt-alignment.v1.schema.json`;
 the API exposes it at `/contracts/rt-alignment.v1.schema.json`.

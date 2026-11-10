@@ -21,6 +21,16 @@ test('standard AOIs are restored only for recognized builtins without overriding
   }
 });
 
+test('imported AOI IDs remain own data properties, never object prototypes', () => {
+  const aois = protocolAoi.standardAoisForStimulus('std_simple_black_square');
+  const definitions = protocolAoi.buildAoiDefinitions(['__proto__', 'constructor'].map(id => ({ id, aois })), ['__proto__', 'constructor']);
+  assert.equal(Object.getPrototypeOf(definitions), Object.prototype);
+  assert.equal(Object.hasOwn(definitions, '__proto__'), true);
+  assert.equal(Object.hasOwn(definitions, 'constructor'), true);
+  assert.ok(Array.isArray(definitions.__proto__));
+  assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(definitions))), ['__proto__', 'constructor']);
+});
+
 test('AOI normalized geometry', async t => {
   await t.test('normalizes a rectangle independently of viewport resolution', () => {
     const result = geometry.normalizeGeometry('rectangle', [

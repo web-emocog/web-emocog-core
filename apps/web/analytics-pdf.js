@@ -55,16 +55,22 @@
     const targets = [copy, ...copy.querySelectorAll('*')];
     [node, ...node.querySelectorAll('*')].forEach((original, index) => {
       const style = global.getComputedStyle(original);
-      for (const property of ['fill', 'stroke', 'color', 'font-size', 'font-family', 'font-weight']) targets[index].style.setProperty(property, style.getPropertyValue(property));
+      for (const property of ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap', 'opacity', 'color', 'font-size', 'font-family', 'font-weight']) {
+        targets[index].style.setProperty(property, style.getPropertyValue(property));
+      }
     });
     const rect = node.getBoundingClientRect();
     return { node: copy, width: rect.width, height: rect.height };
   }
 
   function selection(body) {
-    return [...body.querySelectorAll('select, .analytics-layer-toggle')]
+    return [...body.querySelectorAll('select, .analytics-layer-toggle, .ab-quality-row[aria-pressed="true"]')]
       .filter(node => !body.firstElementChild.contains(node) && node.getBoundingClientRect().width)
-      .map(node => ({ control: node.id || node.dataset.layer, value: node.tagName === 'SELECT' ? node.selectedOptions[0]?.textContent : node.checked }));
+      .map(node => ({
+        control: node.id || node.dataset.layer,
+        value: node.tagName === 'SELECT' ? node.selectedOptions[0]?.textContent : node.tagName === 'BUTTON' ? node.querySelector('strong')?.textContent : node.checked,
+        ...(node.tagName === 'SELECT' ? { key: node.value } : {}),
+      }));
   }
 
   function capture(body) {
@@ -72,7 +78,7 @@
     // Filters are represented by the immutable queryEcho, not live form values.
     clone.firstElementChild?.remove();
     // Transient progress is not report data; the spatial QC limitation is.
-    clone.querySelectorAll('button, input, select, textarea, nav, svg, canvas, video, img, [role="status"]:not([data-gaze-spatial-qc])').forEach(node => node.remove());
+    clone.querySelectorAll('button, input, select, textarea, nav, svg, canvas, video, img, [role="status"]:not([data-gaze-spatial-qc], .ab-research-notice)').forEach(node => node.remove());
     clone.querySelectorAll('table').forEach(table => {
       const text = global.document.createElement('div');
       text.textContent = [...table.rows].map(row => [...row.cells].map(cell => cell.textContent.trim()).join(' | ')).join('\n');
@@ -106,7 +112,7 @@
       return { width: rect.width, height: rect.height, layers,
         caption: stage.querySelector('img')?.alt || stage.previousElementSibling?.innerText || 'Heatmap / AOI' };
     });
-    [...body.querySelectorAll('canvas, svg, div[role="img"]')].filter(node => {
+    [...body.querySelectorAll('canvas, svg[role="img"], svg:not([aria-hidden]), div[role="img"]')].filter(node => {
       if ([...stages].some(stage => stage.contains(node))) return false;
       const rect = node.getBoundingClientRect();
       return rect.width >= 100 && rect.height >= 50;
@@ -115,12 +121,12 @@
       return { ...(type === 'svg' ? svgSnapshot(node) : {}),
         png: type === 'canvas' ? node.toDataURL('image/png') : type === 'div' ? paintHtmlPlot(node) : null,
         width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
-        caption: node.closest('article')?.firstElementChild?.textContent || node.getAttribute('aria-label') || '' };
+        caption: node.getAttribute('aria-label') || node.closest('article')?.firstElementChild?.textContent || '' };
     }).forEach(figure => figures.push(figure));
     return { text, figures, controls: selection(body) };
   }
 
-  async function svgPng(figure) {
+  async function svgPng(figure, title = '') {
     const svg = figure.node;
     svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
     svg.setAttribute('width', figure.width);
@@ -132,12 +138,30 @@
       image.src = url;
       await image.decode();
       const canvas = global.document.createElement('canvas');
+      const header = title ? 76 : 0;
       canvas.width = Math.ceil(figure.width * 2);
-      canvas.height = Math.ceil(figure.height * 2);
+      canvas.height = Math.ceil(figure.height * 2) + header;
       const context = canvas.getContext('2d');
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      if (title) {
+        context.fillStyle = figure.background;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = figure.foreground;
+        context.font = 'bold 26px sans-serif';
+        context.fillText(title, 22, 47, canvas.width - 44);
+      }
+      context.drawImage(image, 0, header, canvas.width, canvas.height - header);
       return canvas.toDataURL('image/png');
     } finally { URL.revokeObjectURL(url); }
+  }
+
+  async function chartImage(node, preview) {
+    const figure = svgSnapshot(node);
+    const style = global.getComputedStyle(node.closest('.ab-card'));
+    figure.background = style.backgroundColor;
+    figure.foreground = style.color;
+    const title = (preview ? 'PREVIEW / ' : '') + (node.getAttribute('aria-label') || 'wecog');
+    const png = await svgPng(figure, title);
+    return new Blob([Uint8Array.from(global.atob(png.split(',')[1]), c => c.charCodeAt(0))], { type: 'image/png' });
   }
 
   async function figurePng(figure) {
@@ -229,5 +253,5 @@
     }
     return pdf.output('blob');
   }
-  global.EmocogAnalyticsPdf = { capture, create, selection };
+  global.EmocogAnalyticsPdf = { capture, create, selection, chartImage };
 })(window);

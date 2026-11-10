@@ -15,9 +15,9 @@ for (const outside of [0, 2, 4, 5]) {
       const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
       const { faceVisibilityFixture } = await import(fixturePath);
       const { analyzeMasks } = await import(root + 'face-segmenter/mask-analyzer.js?v=20261104-4');
-      const { analyzeFaceRegionsVisibility } = await import(root + 'face-segmenter/region-analyzer.js?v=20261028-139');
-      const { DEFAULT_THRESHOLDS } = await import(root + 'face-segmenter/thresholds.js');
-      const precheck = await import(root + 'web-page/precheck-updated.js?v=20261104-4');
+      const { analyzeFaceRegionsVisibility } = await import(root + 'face-segmenter/region-analyzer.js?v=20261109-issues2');
+      const { DEFAULT_THRESHOLDS } = await import(root + 'face-segmenter/thresholds.js?v=20261109-issues2');
+      const precheck = await import(root + 'web-page/precheck-updated.js?v=20261109-issues2');
       const state = (window as any).__WECOG_STATE__;
       const one = (input: any) => {
         const mask = analyzeMasks(input, input.width, input.height, input.landmarks);
@@ -66,7 +66,7 @@ test('real Worker messaging uses face-local mask evidence without sending its ra
     window.Worker = class extends NativeWorker {
       constructor(url: string | URL, options?: WorkerOptions) { requested.push(String(url)); super(workerUrl, options); }
     };
-    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261104-4';
+    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261109-issues2';
     const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
     const { FaceSegmenter } = await import(modulePath);
     const { faceVisibilityFixture } = await import(fixturePath);
@@ -83,14 +83,14 @@ test('real Worker messaging uses face-local mask evidence without sending its ra
   }, workerSource);
   expect(result).toMatchObject({ ready: true, backend: 'worker', raw: null, complete: true, issues: [],
     method: 'face_oval_regions.v1', sampling: { method: 'face_oval_pixels.v1', inFrame: true }, error: null });
-  expect(result.requested.some((url: string) => url.includes('vision-worker.js?v=20261104-4'))).toBe(true);
-  expect(requests.some(url => url.includes('region-analyzer.js?v=20261028-139'))).toBe(true);
+  expect(result.requested.some((url: string) => url.includes('vision-worker.js?v=20261109-issues2'))).toBe(true);
+  expect(requests.some(url => url.includes('region-analyzer.js?v=20261109-issues2'))).toBe(true);
 });
 
 test('folder-loader failure uses the same corrected analysis in inline fallback, not the old global hand heuristic', async ({ page }) => {
   await page.route('**/face-segmenter/index.js*', route => route.abort());
   await page.goto('/apps/participant-web/tools/session-report.html');
-  await page.addScriptTag({ url: '/apps/participant-web/js/face-segmenter.js?v=20261104-4' });
+  await page.addScriptTag({ url: '/apps/participant-web/js/face-segmenter.js?v=20261109-issues2' });
   const result = await page.evaluate(async () => {
     const w = window as any;
     const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';

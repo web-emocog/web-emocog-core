@@ -33,7 +33,7 @@ async function startLoadedTask(page: Page) {
     shared.runtime.sessionRuntime.policyShown = true;
     shared.runtime.sessionRuntime.notifyBlockComplete = async () => true;
     const { loadAndStartCognitiveTask } = await import(new URL(
-      'js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
+      'js/web-page/experimental_task-updated.js?v=20261109-issues2', location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false });
   });
   await page.locator('#cogStartBtn').click();
@@ -92,8 +92,10 @@ test('researcher selection survives language, reload, draft save and reopen but 
   await page.reload();
   await expect(toggle).toBeChecked();
   await page.locator('#saveDraftGlobalBtn').click();
-  const draft = await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_my_experiments') || '[]')
+  const findDraft = () => page.evaluate(() => JSON.parse(localStorage.getItem('emocog_my_experiments') || '[]')
     .find((item: any) => item.protocolId === 'photodiode-draft-fixture'));
+  await expect.poll(findDraft).toMatchObject({ sessionFeatureFlags: { photodiode: true } });
+  const draft = await findDraft();
   expect(draft.sessionFeatureFlags.photodiode).toBe(true);
   await page.evaluate((id: string) => { (window as any).ExperimentBuilderView({ experimentId: id, startStep: 6 }); }, draft.id);
   await expect(toggle).toBeChecked();
@@ -163,6 +165,7 @@ test('builder publishes the enabled flag as part of the API protocol definition'
   await page.locator('#protocolPhotodiodeToggle').check();
   await page.locator('.bstep[data-step="8"]').click();
   await page.locator('#finishSaveProtocolBtn').click();
+  await page.locator('[data-preflight-continue]').click();
   await expect.poll(() => publishedDefinition?.settings?.featureFlags?.photodiode).toBe(true);
   await expect(page.locator('#protocolSaveStatus')).toContainText(/успешно опубликован|published successfully/);
 });

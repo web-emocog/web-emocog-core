@@ -119,6 +119,19 @@ expect_javascript_mime() {
 expect_status / 200
 expect_status /apps/participant-web/run_new.html 200
 expect_status /apps/web/researcher.html 200
+expect_status /apps/shared/invitation-link.js 200
+expect_javascript_mime /apps/shared/invitation-link.js
+for invite_path in '/apps/participant-web/mvp_with_precheck_1.html?code=synthetic-test' \
+  '/invite/synthetic-test' '/apps/web/run_new.html?code=synthetic-test' \
+  '/apps/web/participant-web/run_new.html?code=synthetic-test'; do
+  expect_status "${invite_path}" 302
+  expect_header "${invite_path}" 'Location: /apps/participant-web/run_new.html?code=synthetic-test'
+  expect_header "${invite_path}" 'Referrer-Policy: no-referrer'
+  expect_header "${invite_path}" 'Cache-Control: no-store'
+done
+for retired_module in app experimental_task precheck tests ui; do
+  expect_status "/apps/participant-web/js/web-page/${retired_module}.js" 404
+done
 
 while IFS= read -r module; do
   public_path=/${module#./}

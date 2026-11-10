@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+<script>window.identityLink = new URLSearchParams(location.hash.slice(1)); history.replaceState(null, '', location.pathname);</script>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Your wecog workspace</title><link rel="stylesheet" href="account.css"></head>
+<body data-page="workspace"><main><a href="../index.html">wecog</a><h1>Your workspace</h1>
+<p id="account-label"></p><p id="message" role="status" aria-live="polite"></p>
+<section id="sign-in" hidden><p>Sign in in a new tab, then return here and continue. Keep this tab open: the invitation is not saved in browser storage.</p>
+<a href="../developer/login.html?portal=workspace" target="_blank" rel="noopener noreferrer">Sign in</a>
+<button id="continue-sign-in" type="button">Continue after signing in</button></section>
+<section id="verify-section" hidden><p>Confirm your email before creating or joining a workspace. Existing account roles are not changed by verification.</p><button id="verify-button">Send verification email</button></section>
+<section id="invite-section" hidden><h2>Join an invited project</h2><p>You must be signed in with the exact verified email that was invited. Acceptance grants access to that project only.</p>
+<button id="accept-button">Accept project invitation</button></section>
+<section id="workspaces" aria-label="Your projects"></section>
+<section id="create-section" hidden><h2>Create a workspace</h2><p>Your ownership applies only to this organization. It does not make you a platform administrator.</p>
+<form id="workspace-form"><label for="organization-name">Organization name</label><input id="organization-name" required maxlength="255">
+<label for="project-name">First project name</label><input id="project-name" required maxlength="255"><button type="submit">Create organization and project</button></form></section>
+<section id="manage-section" hidden><h2>Manage an owned organization</h2><label for="managed-organization">Organization</label><select id="managed-organization"></select>
+<form id="project-form"><label for="new-project-name">New project name</label><input id="new-project-name" required maxlength="255"><button type="submit">Create project</button></form>
+<form id="invite-form"><label for="invite-email">Invite exact email</label><input id="invite-email" type="email" required maxlength="255">
+<label for="invite-project">Project</label><select id="invite-project"></select><button type="submit">Send member invitation</button></form>
+<button id="members-button">Load members and invitations</button><div id="members"></div><div id="invitations"></div></section>
+<nav><a href="../researcher.html">Researcher portal</a><a href="recovery.html">Recover access</a></nav></main>
+<script src="../api-base.js"></script><script src="../http-client.js"></script><script src="../account-storage.js"></script><script src="account.js"></script></body></html>

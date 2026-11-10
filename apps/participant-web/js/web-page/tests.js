@@ -10,10 +10,10 @@ import { translations } from '../../translations.js';
 import { updateFinalStepWithQC, nextStep } from './ui.js?v=20261104-4';
 import { stopPreCheck } from './precheck.js?v=20261104-4';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261104-4';
+import { loadAndStartCognitiveTask } from './experimental_task.js?v=20261109-issues2';
 import { buildHeatmaps } from './heatmap.js?v=20261102-1';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js';
-import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261108-143l';
+import { startTestHub } from '../gaze-tracker/gaze-tests/index.js?v=20261109-issues2';
 import { extractEyeSignalSample } from './eye-signal.js';
 
 

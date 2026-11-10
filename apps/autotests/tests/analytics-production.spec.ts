@@ -14,6 +14,49 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#analyticsProjectFilter')).toBeVisible();
 });
 
+test('reset reloads the newest publication roster and metrics, ignoring a late older response', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { api, store, buildAnalyticsQuery } = (window as any).EmocogAnalyticsProduction;
+    const s = store.state;
+    s.protocols = [{ id: 9, versions: ['publication:2', 'publication:1'] }];
+    Object.assign(s.query, { projectId: '1', protocolId: '9', protocolVersion: 'publication:1',
+      sessionId: '11', includeIncompleteSessions: true });
+    s.sessions = [{ id: 11 }];
+    s.filterOptions = { ...s.filterOptions, selectedMetricIds: ['task.rt_mean_ms'] };
+    const requests: string[] = [];
+    let releaseOld!: (rows: unknown[]) => void, releaseNew!: (rows: unknown[]) => void;
+    api.sessions = (query: any) => {
+      requests.push(`roster:${query.protocolVersion}:${query.includeIncompleteSessions}`);
+      return new Promise(resolve => {
+        if (query.protocolVersion === 'publication:1') releaseOld = resolve;
+        else releaseNew = resolve;
+      });
+    };
+    api.filterOptions = async (query: any) => {
+      requests.push(`options:${query.protocolVersion}`);
+      return { ...s.filterOptions, selectedMetricIds: [query.protocolVersion === 'publication:2' ? 'task.accuracy_pct' : 'task.rt_mean_ms'] };
+    };
+    let prematureApply = false;
+    api.createSnapshot = async () => { prematureApply = true; };
+    const old = store.loadSessions();
+    const reset = store.resetFilters();
+    await store.apply();
+    const during = { version: s.query.protocolVersion, session: s.query.sessionId, roster: s.sessions.length, status: s.status };
+    releaseNew([{ id: 22, protocol_version: 'publication:2' }]);
+    await reset;
+    releaseOld([{ id: 11, protocol_version: 'publication:1' }]);
+    await old;
+    const query = buildAnalyticsQuery(s);
+    return { during, requests, prematureApply, version: query.protocolVersion, sessions: query.filters.sessionIds,
+      newMetric: query.metricIds.includes('task.accuracy_pct'), oldMetric: query.metricIds.includes('task.rt_mean_ms') };
+  });
+  expect(result).toEqual({
+    during: { version: 'publication:2', session: '', roster: 0, status: 'loading' },
+    requests: ['roster:publication:1:true', 'options:publication:1', 'roster:publication:2:false', 'options:publication:2'],
+    prematureApply: false, version: 'publication:2', sessions: [22], newMetric: true, oldMetric: false,
+  });
+});
+
 test('AOI remains block-scoped when training and main share one stimulus', async ({ page }) => {
   await page.evaluate(() => {
     // @ts-expect-error application globals
@@ -258,6 +301,11 @@ test('group N and export N match; Russian and English status text is available',
   await page.locator('#analyticsStimulusFilter').selectOption('stimulus-42');
   await page.locator('#analyticsApplyFilters').click();
   await expect(page.getByText('Состав выборки')).toBeVisible();
+  const relation = page.locator('#analyticsParticipantRelation');
+  await relation.locator('summary').click();
+  await expect(relation.locator('.ab-mark')).toHaveCount(12);
+  await relation.locator('#abRelationY').selectOption('0');
+  await expect(relation).toContainText('Выберите два разных показателя');
   const counts = await page.evaluate(() => {
     // @ts-expect-error application global
     const state = window.EmocogAnalyticsProduction.store.state;
