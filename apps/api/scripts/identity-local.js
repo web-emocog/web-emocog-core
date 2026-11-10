@@ -3,6 +3,21 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { constants } = require('node:fs');
+
+async function readOutboxKey(keyFile) {
+  const handle = await fs.open(keyFile, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o077)
+        || info.uid !== process.getuid() || info.size !== 44) throw new Error('Unsafe local outbox key');
+    const buffer = Buffer.alloc(45);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const value = buffer.subarray(0, bytesRead).toString('utf8');
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(value) || Buffer.from(value, 'base64').length !== 32) throw new Error('Unsafe local outbox key');
+    return value;
+  } finally { await handle.close(); }
+}
 
 async function main() {
   if (process.env.NODE_ENV === 'production') throw new Error('Local identity launcher is not for production');
@@ -16,12 +31,11 @@ async function main() {
   const keyFile = path.join(stateDir, 'outbox-key');
   try { await fs.writeFile(keyFile, crypto.randomBytes(32).toString('base64'), { flag: 'wx', mode: 0o600 }); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
-  const keyStat = await fs.lstat(keyFile);
-  if (!keyStat.isFile() || (keyStat.mode & 0o077) || keyStat.uid !== process.getuid()) throw new Error('Unsafe local outbox key');
+  const outboxKey = await readOutboxKey(keyFile);
   Object.assign(process.env, { NODE_ENV: 'development', DATABASE_URL: database.href, FORCE_HTTPS: 'false',
     IDENTITY_ENABLED: 'true', IDENTITY_MAIL_MODE: 'local', IDENTITY_PUBLIC_URL: 'http://127.0.0.1:3000/apps/web/',
     IDENTITY_TRUSTED_ORIGINS: 'http://127.0.0.1:3000', IDENTITY_MAIL_FROM: 'wecog@local.test',
-    IDENTITY_LOCAL_CAPTURE_DIR: path.join(stateDir, 'mail'), IDENTITY_OUTBOX_KEY: await fs.readFile(keyFile, 'utf8') });
+    IDENTITY_LOCAL_CAPTURE_DIR: path.join(stateDir, 'mail'), IDENTITY_OUTBOX_KEY: outboxKey });
   const express = require('express');
   const { pool } = require('../db');
   await pool.query('SELECT email_verified_at FROM users LIMIT 0');
@@ -49,4 +63,5 @@ async function main() {
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }
 
-main().catch(() => { process.stderr.write('Local identity startup failed. Use a migrated, loopback *_dev or *_test database and a free port 3000.\n'); process.exitCode = 1; });
+if (require.main === module) main().catch(() => { process.stderr.write('Local identity startup failed. Use a migrated, loopback *_dev or *_test database and a free port 3000.\n'); process.exitCode = 1; });
+module.exports = { readOutboxKey };

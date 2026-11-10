@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { constants } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 
 const retiredParticipantRuntime = [
   'apps/participant-web/mvp_with_precheck_1.html',
@@ -17,6 +19,28 @@ export async function readPublicManifest(root) {
 function safeName(name) {
   return typeof name === 'string' && !name.startsWith('/') && !name.includes('\\')
     && name.split('/').every(part => part && part !== '.' && part !== '..' && !part.startsWith('.'));
+}
+
+async function openPublicFile(root, name) {
+  if (!safeName(name)) throw new Error(`Unsafe public path: ${name}`);
+  const resolvedRoot = await fs.realpath(root);
+  const filename = path.join(resolvedRoot, name);
+  const handle = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    const resolved = await fs.realpath(filename);
+    const current = await fs.lstat(filename);
+    if (!info.isFile() || info.nlink !== 1 || resolved !== filename
+        || !resolved.startsWith(resolvedRoot + path.sep) || info.dev !== current.dev || info.ino !== current.ino) {
+      throw new Error(`Invalid public file: ${name}`);
+    }
+    return handle;
+  } catch (error) { await handle.close(); throw error; }
+}
+
+async function readPublicText(root, name) {
+  const handle = await openPublicFile(root, name);
+  try { return await handle.readFile('utf8'); } finally { await handle.close(); }
 }
 
 export function moduleReferences(source) {
@@ -36,11 +60,10 @@ export async function verifyPublicTree(root, manifest) {
   const resolvedRoot = await fs.realpath(root);
   for (const name of manifest.files) {
     if (!safeName(name)) throw new Error(`Unsafe public path: ${name}`);
-    const resolved = await fs.realpath(path.join(root, name));
-    if (!resolved.startsWith(resolvedRoot + path.sep) || !(await fs.stat(resolved)).isFile())
-      throw new Error(`Invalid public file: ${name}`);
+    const handle = await openPublicFile(resolvedRoot, name);
+    await handle.close();
     if (/\.(?:js|mjs|html|css)$/.test(name) && !name.includes('/vendor/')) {
-      const text = await fs.readFile(resolved, 'utf8');
+      const text = await readPublicText(resolvedRoot, name);
       const refs = moduleReferences(text);
       if (name.endsWith('.html')) {
         refs.push(...[...text.matchAll(/<(?:script|img|link)\b[^>]*(?:src|href)\s*=\s*['"]([^'"\n]+)['"]/gi)].map(match => match[1]));
@@ -61,12 +84,12 @@ export async function verifyPublicTree(root, manifest) {
     if (!allowed.has(name) || !name.endsWith('.html')) throw new Error(`Missing entrypoint: ${name}`);
   }
   for (const name of manifest.entrypoints.staff) {
-    const text = await fs.readFile(path.join(root, name), 'utf8');
+    const text = await readPublicText(resolvedRoot, name);
     if (!text.includes('auth-guard.js')) throw new Error(`Staff entrypoint has no authorization guard: ${name}`);
   }
   for (const name of manifest.entrypoints.authenticatedWorkspace) {
-    const text = await fs.readFile(path.join(root, name), 'utf8');
-    const client = await fs.readFile(path.join(root, 'apps/web/account/account.js'), 'utf8');
+    const text = await readPublicText(resolvedRoot, name);
+    const client = await readPublicText(resolvedRoot, 'apps/web/account/account.js');
     if (!text.includes('account.js') || !client.includes("request('/auth/me')") || !client.includes("request('/workspace')"))
       throw new Error(`Workspace entrypoint has no authenticated API flow: ${name}`);
   }
@@ -90,10 +113,13 @@ export async function stagePublicTree(source, destination) {
   await fs.mkdir(destination, { recursive: false });
   for (const name of manifest.files) {
     if (!safeName(name)) throw new Error(`Unsafe public path: ${name}`);
-    const real = await fs.realpath(path.join(source, name));
-    if (!real.startsWith((await fs.realpath(source)) + path.sep)) throw new Error('Source escapes repository');
-    await fs.mkdir(path.dirname(path.join(destination, name)), { recursive: true });
-    await fs.copyFile(real, path.join(destination, name));
+    const input = await openPublicFile(source, name);
+    let output;
+    try {
+      await fs.mkdir(path.dirname(path.join(destination, name)), { recursive: true });
+      output = await fs.open(path.join(destination, name), 'wx', 0o644);
+      await pipeline(input.createReadStream({ autoClose: false }), output.createWriteStream());
+    } finally { await input.close(); await output?.close(); }
   }
   return verifyPublicTree(destination, manifest);
 }

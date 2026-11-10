@@ -46,3 +46,11 @@ test('Linux media wrapper enforces memory limits and hides missing tool paths', 
   await assert.rejects(runMediaTool('/synthetic-missing-tool', [], 5000), error =>
     error.code === 'media_preview_unavailable' && !error.message.includes('/synthetic'));
 });
+
+test('Linux limited invocation keeps data arguments and stdin separate without shell interpretation', { skip: process.platform !== 'linux' }, async () => {
+  const argument = '/tmp/input ; echo SHOULD_NOT_EXECUTE $(printf nope) "quoted".wav';
+  const result = await runNativeProcess('python3', ['-c',
+    'import json, sys; print(json.dumps({"argument": sys.argv[1], "stdin": sys.stdin.read()}))', argument],
+  { input: 'bounded RT input', resourceLimits: true });
+  assert.deepEqual(JSON.parse(result.stdout), { argument, stdin: 'bounded RT input' });
+});

@@ -53,7 +53,7 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
     );
     if (!resolved.ok) {
       unavailable.push({ id, code: resolved.code, name: row.name || null });
-    } else if (row.sha256 && await hashFile(resolved.absolutePath) !== row.sha256) {
+    } else if (row.sha256 && await hashFile(resolved.absolutePath, resolved.root) !== row.sha256) {
       unavailable.push({ id, code: 'stimulus_checksum_mismatch', name: row.name || null });
     } else if (options.verifyDecoding) {
       try {

@@ -1,9 +1,28 @@
-import { readFile, stat } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const EXPRESSION_METHODS = Object.freeze(['geometry', 'blendshapes', 'combined']);
 export const EXPRESSION_LABELS = Object.freeze(['neutral', 'happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust']);
+
+export async function readExpressionBenchmark(file) {
+    const limit = 10 * 1024 * 1024;
+    const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.size > limit) throw new Error('expression_benchmark_too_large');
+        const buffer = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < buffer.length) {
+            const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
+            if (!bytesRead) break;
+            size += bytesRead;
+        }
+        if (size > limit) throw new Error('expression_benchmark_too_large');
+        return JSON.parse(buffer.subarray(0, size).toString('utf8'));
+    } finally { await handle.close(); }
+}
 
 // Input contains independently labelled expressions and already-produced
 // predictions. This evaluator neither trains nor selects a production model.
@@ -62,8 +81,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     try {
         if (process.argv.length !== 3) throw new Error('usage_compare_expressions_private_json');
         const file = resolve(process.argv[2]);
-        if ((await stat(file)).size > 10 * 1024 * 1024) throw new Error('expression_benchmark_too_large');
-        process.stdout.write(JSON.stringify(compareExpressions(JSON.parse(await readFile(file, 'utf8'))), null, 2) + '\n');
+        process.stdout.write(JSON.stringify(compareExpressions(await readExpressionBenchmark(file)), null, 2) + '\n');
     } catch (error) {
         const message = error instanceof SyntaxError ? 'invalid_expression_benchmark_json'
             : /^(invalid_expression_|expression_|usage_compare_)[a-z_]+$/.test(error.message)

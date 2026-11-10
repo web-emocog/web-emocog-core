@@ -50,16 +50,25 @@ async function withMediaWrite(pool, callback, { participantAdmission = false } =
   }
 }
 
-async function hashFile(file) {
+async function hashFile(file, allowedRoot = config.storage.uploadsRoot) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) throw new HttpError(422, 'Invalid stimulus path', 'invalid_content_path');
+  const root = path.resolve(allowedRoot);
+  const absolute = path.resolve(file);
+  if (!absolute.startsWith(root + path.sep)) throw new HttpError(422, 'Invalid stimulus path', 'content_path_outside_uploads_root');
   const digest = crypto.createHash('sha256');
-  for await (const chunk of fs.createReadStream(file)) digest.update(chunk);
-  return digest.digest('hex');
+  const handle = await fs.promises.open(absolute, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.nlink !== 1) throw new HttpError(422, 'Invalid stimulus path', 'content_path_link_forbidden');
+    for await (const chunk of handle.createReadStream({ autoClose: false })) digest.update(chunk);
+    return digest.digest('hex');
+  } finally { await handle.close(); }
 }
 
 async function ensureStimulusVersion(client, row, options = {}) {
   const resolved = await resolveReadableServerOwnedUploadPath(options.uploadsRoot || uploadsRoot, getStoredContentPath(row.metadata));
   if (!resolved.ok) throw new HttpError(422, 'Stimulus file is unavailable', resolved.code);
-  const checksum = await hashFile(resolved.absolutePath);
+  const checksum = await hashFile(resolved.absolutePath, resolved.root);
   const size = (await fs.promises.stat(resolved.absolutePath)).size;
   await accountObject(client, await organizationForProject(client, row.project_id), resolved.relativePath, size);
   const result = await client.query(`

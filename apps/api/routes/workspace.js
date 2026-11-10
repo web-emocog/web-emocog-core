@@ -1,14 +1,16 @@
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { rateLimit } = require('express-rate-limit');
 const { readIdentityConfig } = require('../config/identity');
 const { createWorkspaceService } = require('../services/workspace');
-const { identityBoundary, strictBody, endpoint, id } = require('../services/identity-http');
+const { identityBoundary, identityRateLimitOptions, strictBody, endpoint, id } = require('../services/identity-http');
 const { IdentityError } = require('../services/identity-security');
 
 function createWorkspaceRouter(options = {}) {
   const config = options.config || readIdentityConfig();
   const service = createWorkspaceService({ pool: options.pool || pool, config });
   const router = identityBoundary(config);
+  router.use(rateLimit(identityRateLimitOptions('default', options)));
   router.use(options.requireAuth || requireAuth);
   router.get('/', endpoint(async (req, res) => res.json(await service.list(req.user))));
   router.post('/organizations', endpoint(async (req, res) => {

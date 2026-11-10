@@ -22,9 +22,11 @@ function normalizeButtonId(key) {
 
 function parseTrialIndex(trialId, fallback) {
   if (trialId == null) return fallback;
-  const m = String(trialId).match(/(\d+)\s*$/);
-  if (m) return parseInt(m[1], 10);
-  const n = parseInt(String(trialId), 10);
+  const text = String(trialId).trimEnd();
+  let start = text.length;
+  while (start && text.charCodeAt(start - 1) >= 48 && text.charCodeAt(start - 1) <= 57) start--;
+  if (start < text.length) return parseInt(text.slice(start), 10);
+  const n = parseInt(text, 10);
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -127,4 +129,4 @@ function eventsToRtJsonl(sessionEvents, cognitiveResults, blockCtx) {
   return { events: out, analyzerTask };
 }
 
-module.exports = { eventsToRtJsonl, normalizeButtonId, conditionToIsGo };
+module.exports = { eventsToRtJsonl, normalizeButtonId, conditionToIsGo, parseTrialIndex };

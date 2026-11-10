@@ -42,10 +42,14 @@ test('canonical API: captured signup mail, workspace isolation, media recovery a
   });
   const base = 'http://127.0.0.1:' + instance.server.address().port;
   async function call(route, status, body, token) {
+    if (typeof route !== 'string' || !/^\/(?:identity|auth|workspace|projects|stimuli|protocols|invitations|operations)(?:\/|\?|$)/.test(route)
+        || route.includes('\\') || /[\r\n#]/.test(route)) throw new Error('Invalid local fixture route');
+    const target = new URL(route, base);
+    if (target.origin !== base || target.username || target.password) throw new Error('Fixture request must stay on loopback');
     const form = body instanceof FormData;
     const headers = { ...(token ? { Authorization: 'Bearer ' + token } : {}) };
     if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
-    const response = await fetch(base + route, { headers, method: body === undefined ? 'GET' : 'POST',
+    const response = await fetch(target, { headers, redirect: 'error', method: body === undefined ? 'GET' : 'POST',
       body: body === undefined || form ? body : JSON.stringify(body) });
     assert.equal(response.status, status, route.split('?')[0]);
     return response.json();

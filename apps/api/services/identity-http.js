@@ -1,5 +1,20 @@
 const express = require('express');
 const { IdentityError } = require('./identity-security');
+const httpConfig = require('../config');
+const { pool } = require('../db');
+const { ipKeyGenerator } = require('express-rate-limit');
+const { PostgresRateStore } = require('../security/postgres-rate-store');
+const { buildRouteRateLimitOptions } = require('../security/http-security');
+
+function identityRateLimitOptions(profile, options = {}) {
+  const limits = options.rateLimits || httpConfig.http.rateLimits;
+  const shared = httpConfig.http.rateLimitStore === 'postgres';
+  const settings = buildRouteRateLimitOptions(limits, shared
+    ? { store: new PostgresRateStore(options.pool || pool, httpConfig.jwt.secret) } : {});
+  settings.limit = limits[profile];
+  settings.keyGenerator = req => `identity-router:${profile}:${ipKeyGenerator(req.ip || req.socket.remoteAddress)}`;
+  return settings;
+}
 
 function identityBoundary(config) {
   const router = express.Router();
@@ -36,4 +51,4 @@ function endpoint(callback) {
     }
   };
 }
-module.exports = { identityBoundary, strictBody, id, endpoint };
+module.exports = { identityBoundary, identityRateLimitOptions, strictBody, id, endpoint };

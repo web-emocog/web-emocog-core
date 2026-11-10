@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { constants } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
@@ -95,6 +95,7 @@ for (const root of [baseline, repo]) for (const model of Object.values(MODEL_ASS
 }
 let activeRoot = baseline;
 const server = http.createServer(async (req, res) => {
+    let opened;
     try {
         const origin = 'http://127.0.0.1:' + server.address().port;
         if (req.headers.host !== new URL(origin).host || (req.headers.origin && req.headers.origin !== origin)
@@ -121,7 +122,10 @@ const server = http.createServer(async (req, res) => {
             file = await privateFile(activeRoot, relative, 32 * 1024 * 1024);
             mime = types[path.extname(relative)];
         }
-        const { size } = await fs.stat(file);
+        opened = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        const info = await opened.stat();
+        const { size } = info;
+        if (!info.isFile() || size > 256 * 1024 * 1024) throw new Error('invalid_benchmark_file');
         res.setHeader('Content-Type', mime);
         if (segmentDelegate !== 'default' && url.pathname === '/apps/participant-web/js/face-segmenter/delegate-policy.mjs') {
             const source = `export function segmentationDelegate() { return '${segmentDelegate}'; }`;
@@ -130,7 +134,7 @@ const server = http.createServer(async (req, res) => {
         }
         if ((profileStages || faceInput !== 'bitmap' || faceCanvas !== 'default')
             && url.pathname === '/apps/participant-web/js/precheck-analyzer/PrecheckAnalyzer.js') {
-            const source = profileFaceStages(await fs.readFile(file, 'utf8'), faceInput, 'full', faceCanvas);
+            const source = profileFaceStages(await opened.readFile('utf8'), faceInput, 'full', faceCanvas);
             res.setHeader('Content-Length', Buffer.byteLength(source));
             res.end(req.method === 'HEAD' ? undefined : source); return;
         }
@@ -145,8 +149,14 @@ const server = http.createServer(async (req, res) => {
                 'Content-Range': `bytes ${start}-${end}/${size}` });
         } else res.writeHead(200, { 'Content-Length': size });
         if (req.method === 'HEAD') res.end();
-        else createReadStream(file, { start, end }).on('error', () => res.destroy()).pipe(res);
-    } catch (_) { res.writeHead(404).end(); }
+        else {
+            const stream = opened.createReadStream({ start, end });
+            opened = null;
+            res.once('close', () => stream.destroy());
+            stream.on('error', () => res.destroy()).pipe(res);
+        }
+    } catch (_) { if (!res.headersSent) res.writeHead(404).end(); else res.destroy(); }
+    finally { await opened?.close(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = 'http://127.0.0.1:' + server.address().port;

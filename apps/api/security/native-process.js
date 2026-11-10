@@ -9,6 +9,11 @@ class NativeProcessError extends Error {
 }
 
 function runNativeProcess(command, args, options = {}) {
+  if (typeof command !== 'string' || !command || command.includes('\0') || command.length > 4096
+      || !Array.isArray(args) || args.length > 512
+      || args.some(value => typeof value !== 'string' || value.includes('\0') || value.length > 32768)) {
+    return Promise.reject(new NativeProcessError('invalid_invocation'));
+  }
   const timeoutMs = options.timeoutMs || 45_000;
   const maxOutputBytes = options.maxOutputBytes || 64 * 1024;
   const input = options.input == null ? null : Buffer.from(options.input);
@@ -22,12 +27,16 @@ function runNativeProcess(command, args, options = {}) {
   }
   Object.assign(env, { LANG: 'C', LC_ALL: 'C', ...(options.env || {}) });
   const limited = options.resourceLimits === true && process.platform === 'linux';
+  const invocation = limited ? Buffer.from(JSON.stringify({ command, args })) : null;
+  if (invocation?.length > 65536) return Promise.reject(new NativeProcessError('input_limit'));
   return new Promise((resolve, reject) => {
+    // Converter arguments are data on a dedicated descriptor, never Python
+    // interpreter arguments. stdin remains owned by the RT analyzer's input.
     const child = spawn(limited ? 'python3' : command, limited ? [
       path.join(__dirname, '../scripts/conversion-runner.py'),
-      String(Math.max(1, Math.ceil(timeoutMs / 1000))), command, ...args,
+      String(Math.max(1, Math.ceil(timeoutMs / 1000))),
     ] : args, { cwd: options.cwd, env, detached: process.platform !== 'win32',
-      stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'], shell: false });
+      stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(limited ? ['pipe'] : [])], shell: false });
     let settled = false;
     let failure = null;
     const output = { stdout: [], stderr: [] };
@@ -68,6 +77,10 @@ function runNativeProcess(command, args, options = {}) {
     if (input) {
       child.stdin.on('error', () => fail('failed'));
       child.stdin.end(input);
+    }
+    if (invocation) {
+      child.stdio[3].on('error', () => fail('failed'));
+      child.stdio[3].end(invocation);
     }
   });
 }

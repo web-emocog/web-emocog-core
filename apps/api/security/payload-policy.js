@@ -472,7 +472,7 @@ function walkPayload(value, path, depth, counters, limits, errors, key = '') {
     if (PHONE_VALUE_PATTERN.test(value)) {
       addError(errors, path, 'pii', 'phone-like value is not allowed');
     }
-    if (/^\s*(?:data:|blob:)|;base64,/i.test(value)) {
+    if (/^\s*(?:data:|blob:)/i.test(value) || /;base64,/i.test(value)) {
       addError(errors, path, 'rawMedia', 'embedded media is not accepted');
     }
     return;

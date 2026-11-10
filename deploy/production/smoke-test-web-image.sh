@@ -74,9 +74,8 @@ expect_status() {
 
 response_headers() {
   local path=$1 headers
-  # Drain curl before grep -q can close its input under pipefail.
+  # Error responses must carry the same restrictive policy; status is checked separately.
   headers=$(curl \
-    --fail \
     --silent \
     --show-error \
     --dump-header - \
@@ -169,6 +168,8 @@ for diagnostic_path in \
   expect_header "${diagnostic_path}" "Content-Security-Policy: frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
 done
 
+expect_status /apps/web/developer/emotion-test.html/extra 404
+expect_status /apps/web/developer/not-emotion-test.html 404
 for staff_path in \
   /apps/web/developer.html \
   /apps/web/developer/login.html \

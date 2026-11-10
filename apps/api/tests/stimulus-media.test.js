@@ -114,7 +114,7 @@ test('backup reconciliation includes historical versions and posters and fails o
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, 'stimuli'));
   for (const [name, bytes] of [['old.png', 'old'], ['new.png', 'new'], ['poster.jpg', 'poster']]) await fs.writeFile(path.join(root, 'stimuli', name), bytes);
-  const oldHash = await hashFile(path.join(root, 'stimuli/old.png'));
+  const oldHash = await hashFile(path.join(root, 'stimuli/old.png'), root);
   const queryable = { query: async sql => {
     if (sql.includes('to_regclass')) return { rows: [{ versions: 'stimulus_versions' }] };
     if (sql.includes('FROM stimuli ')) return { rows: [{ metadata: { content_path: 'new.png' } }] };
