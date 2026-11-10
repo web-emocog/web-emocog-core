@@ -1,5 +1,5 @@
 import { EmotionDiagnostics } from './emotion-diagnostics.mjs';
-import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-new-variant.mjs';
+import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-candidate.mjs';
 
 const labels=['neutral','happiness','sadness','anger','fear','surprise','disgust'];
 export const expressionNames = new Map([

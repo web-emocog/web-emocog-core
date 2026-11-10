@@ -43,7 +43,7 @@
 калибровки и adaptiveRate 0.006 остаются прежними. Различия в динамике adaptive
 baseline возможны из-за новых признаков; это не замороженная калибровка.
 
-Коэффициенты собраны в `GEOMETRY_SCALES` ([emotion-geometry-new-variant.mjs](../../apps/web/developer/emotion-geometry-new-variant.mjs)). Это стартовые инженерные значения,
+Коэффициенты собраны в `GEOMETRY_SCALES` ([emotion-geometry-candidate.mjs](../../apps/web/developer/emotion-geometry-candidate.mjs)). Это стартовые инженерные значения,
 не обученные на пяти пользовательских снимках и не валидированные интенсивности AU.
 Общие настройки находятся в `EMOTION_CONFIG` ([emotion-config.js](../../apps/participant-web/js/emotion/emotion-config.js)). Масштабы геометрии старого и нового
 вариантов различаются, напрямую сравнивать их сырые числа как интенсивности нельзя.
