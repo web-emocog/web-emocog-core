@@ -1,4 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+async function downloadEmotionSnapshot(page: Page) {
+  const pending = page.waitForEvent('download');
+  await page.locator('#emotionDownload').focus();
+  await page.keyboard.press('Enter');
+  const file = await pending;
+  expect(file.suggestedFilename()).toMatch(/^wecog-emotion-.*\.json$/);
+  return JSON.parse(await readFile((await file.path())!, 'utf8'));
+}
 
 // Ownership/lifecycle tests only: no real sensors, models, face recording or physiological claims.
 const origin = process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173';
@@ -318,17 +328,20 @@ test('Emotion Test starts after staff admission with a camera-only document poli
 });
 
 for (const width of [1280, 390]) {
-  test(`Emotion diagnostic JSON reports missing data and survives stop at width ${width}`, async ({ page }) => {
+  test(`Emotion diagnostic JSON reports missing data and survives stop at width ${width}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 844 });
     await boot(page, 'running', '', '/apps/web/developer/emotion-test.html');
+    await expect(page.locator('#emotionDownload')).toBeDisabled();
     await page.locator('#startBtn').focus();
     await page.keyboard.press('Enter');
-    await expect(page.locator('#emotionDiagnostics')).toContainText('missing_landmarks');
     await expect(page.locator('#emotionCalibrationStatus')).toContainText('Сохраняйте нейтральное лицо');
     await expect(page.locator('#emotionSampleStatus')).toContainText('Пропуск: нет точек лица');
     await expect(page.locator('#emotion-raw-AU4')).toHaveText('—');
     await expect(page.locator('#emotion-adjusted-AU12')).toHaveText('—');
-    const output = JSON.parse(await page.locator('#emotionDiagnostics').innerText());
+    await expect(page.locator('#emotion-candidate-adjusted-AU12')).toHaveText('—');
+    await expect(page.locator('#emotionTrialStart')).toBeDisabled();
+    const output = await downloadEmotionSnapshot(page);
+    expect(output.latest.status).toBe('missing_landmarks');
     expect(output.counts.attempts).toBeGreaterThan(0);
     expect(output.counts.success).toBe(0);
     expect(output.latest.valence).toBeNull();
@@ -336,13 +349,51 @@ for (const width of [1280, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.locator('#stopBtn').focus();
     await page.keyboard.press('Enter');
-    const stopped = await page.locator('#emotionDiagnostics').innerText();
+    const stopped = await downloadEmotionSnapshot(page);
     await expect(page.locator('#status')).toHaveText('Остановлено');
     await expect(page.locator('#emotionSampleStatus')).toContainText('последний снимок');
-    await expect(page.locator('#emotionDiagnostics')).toHaveText(stopped);
+    await expect(page.locator('#qc-pause-overlay')).not.toBeVisible();
+    expect(await downloadEmotionSnapshot(page)).toEqual(stopped);
     expect(await page.evaluate(() => (window as any).__streams[0].track.stops)).toBe(1);
+    await page.locator('#emotionLiveDiagnostics').screenshot({path:testInfo.outputPath('emotion-comparison.png')});
   });
 }
+
+test('Emotion comparison uses shared frames and completes a labelled neutral trial', async ({page})=>{
+  await boot(page,'running','','/apps/web/developer/emotion-test.html');
+  await page.evaluate(()=>{
+    const lm=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
+    const points: Record<string,number[]>={234:[.3,.5],454:[.7,.5],10:[.5,.25],152:[.5,.75],
+      33:[.4,.42],133:[.46,.42],362:[.54,.42],263:[.6,.42],159:[.43,.4],145:[.43,.44],386:[.57,.4],374:[.57,.44],
+      61:[.44,.62],291:[.56,.62],13:[.5,.61],14:[.5,.63],0:[.5,.6],17:[.5,.65],18:[.5,.68],1:[.5,.55],2:[.5,.57],
+      107:[.44,.37],336:[.56,.37],70:[.38,.37],300:[.62,.37],117:[.38,.52],346:[.62,.52],203:[.47,.57],423:[.53,.57]};
+    for(const [i,p] of Object.entries(points)) lm[Number(i)]={x:p[0],y:p[1],z:0};
+    (window as any).__landmarks=lm;
+    let time=0;
+    Object.defineProperty(HTMLMediaElement.prototype,'currentTime',{configurable:true,get:()=>time+=1/30});
+  });
+  await page.locator('#startBtn').click();
+  await expect(page.locator('#emotionTrialStart')).toBeEnabled({timeout:15000});
+  await expect(page.locator('#emotionCandidateStatus')).toContainText('neutral');
+  await expect(page.locator('#emotion-candidate-adjusted-AU4')).toHaveText('0.000');
+  await page.locator('#emotionTrialStart').click();
+  await expect(page.locator('#emotionTrialLabel')).toBeDisabled();
+  await expect(page.locator('#emotionTrialStatus')).toContainText('Сохранено проб: 1',{timeout:8000});
+  await page.locator('#stopBtn').click();
+  const snapshot=await downloadEmotionSnapshot(page);
+  expect(snapshot.schema).toBe('emotion_comparison.v1');
+  expect(snapshot.counts.attempts).toBe(snapshot.candidate.counts.attempts);
+  expect(snapshot.trials[0].commonValid).toBeGreaterThan(0);
+  expect(snapshot.trials[0].candidateFalsePositiveFraction).toBe(0);
+  expect(snapshot.trials[0].status).toBe('completed');
+  expect(snapshot.candidate.latest.legacyUnclippedAU.AU1).toBeGreaterThan(1);
+  expect(await page.evaluate(()=>(window as any).__models)).toBe(1);
+  // Restart must not reuse either baseline or recorded trials.
+  await page.locator('#startBtn').click();
+  await expect(page.locator('#emotionDownload')).toBeEnabled();
+  expect((await downloadEmotionSnapshot(page)).trials).toEqual([]);
+  await page.locator('#stopBtn').click();
+});
 
 test('Emotion Test respects native Chromium document policy denial before models or device requests', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Native Permissions-Policy enforcement regression for Chrome/Edge engine');

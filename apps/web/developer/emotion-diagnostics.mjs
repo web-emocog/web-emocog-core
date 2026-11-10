@@ -21,6 +21,8 @@ export class EmotionDiagnostics {
         this.latest = {
             status, calibration,
             geometry: sample.geometry ?? null,
+            unclippedGeometry: sample.unclippedGeometry ?? null,
+            legacyUnclippedAU: sample.legacyUnclippedAU ?? null,
             rawAU: sample.rawActionUnits ?? null,
             adjustedAU: success ? sample.actionUnits : null,
             rawScores: success ? sample.rawScores : null,

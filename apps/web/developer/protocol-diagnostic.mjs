@@ -12,7 +12,8 @@ import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './
 
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
 import { observeEmotionSamples } from '../../participant-web/js/emotion/public-api.js';
-import { EmotionDiagnostics } from './emotion-diagnostics.mjs';
+import { EmotionComparison } from './emotion-comparison.mjs';
+import { hide as hideQcOverlay } from '../../participant-web/js/qc-pause-overlay-new.js?v=20261103-1';
 
 export class ProtocolDiagnostic {
     constructor({ video, onUpdate = () => {}, onStatus = () => {}, emotionDiagnostics = false }) {
@@ -46,10 +47,10 @@ export class ProtocolDiagnostic {
             this.onStatus('access');
             await authorizeDiagnostic(run);
             if (this.emotionDiagnosticsEnabled) {
-                this.emotionDiagnostics = new EmotionDiagnostics();
+                this.emotionDiagnostics = new EmotionComparison();
                 const diagnostics = this.emotionDiagnostics;
-                run.onStop(observeEmotionSamples((sample, calibration) => {
-                    if (this.run === run && !run.signal.aborted) diagnostics.record(sample, calibration);
+                run.onStop(observeEmotionSamples((sample, calibration, landmarks) => {
+                    if (this.run === run && !run.signal.aborted) diagnostics.record(sample, calibration, landmarks);
                 }));
             }
             this.onStatus('models');
@@ -132,9 +133,17 @@ export class ProtocolDiagnostic {
     }
 
     stop() {
+        if(this.emotionDiagnostics && this.state) {
+            try {
+                this.emotionDiagnostics.snapshot(); // Complete elapsed trials before interrupting an active one.
+                this.emotionDiagnostics.finishTrial();
+                this.onUpdate(this.snapshot());
+            } catch (_) { /* A diagnostic display failure must not prevent camera teardown. */ }
+        }
         const run = this.run; this.run = null;
         this.pending = null;
         run?.stop();
+        hideQcOverlay();
         this.pipeline = null;
         this.multimodal = null;
         this.state = null;

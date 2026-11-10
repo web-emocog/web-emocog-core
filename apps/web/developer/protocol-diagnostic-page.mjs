@@ -1,4 +1,5 @@
 import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261104-4';
+import { expressionNames } from './emotion-comparison.mjs';
 import { PROTOCOL_PROFILE_ID, MODEL_ASSETS, FRAME_SCHEDULE, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261104-4';
 
 const fmt = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : '\u2014';
@@ -24,6 +25,7 @@ export function mountProtocolDiagnostic(channel) {
     const overlay = document.getElementById('overlay');
     if (!video || !start || !stop || !status) throw new Error('Diagnostic controls unavailable');
     const write = (id, value) => { const node = document.getElementById(id); if (node && node.textContent !== value) node.textContent = value; };
+    let emotionExport = null;
     const panel = document.createElement('section'); panel.className = 'card'; panel.id = 'protocolProfile';
     const title = document.createElement('h2'); title.textContent = 'Профиль протокола';
     const note = document.createElement('p');
@@ -36,39 +38,76 @@ export function mountProtocolDiagnostic(channel) {
     if (channel === 'emotion') {
         const heading = document.createElement('h2'); heading.textContent = 'Диагностика эмоций';
         const help = document.createElement('p');
-        help.textContent = 'rawAU - исходные признаки; calibration.baseline - нейтральный уровень; adjustedAU - признаки после калибровки. Частота attemptHzSinceFirst считается по вызовам анализатора, включая пропуски, с первого измерения. После остановки ниже остаётся последний снимок. Данные не отправляются.';
-        const output = document.createElement('pre'); output.id = 'emotionDiagnostics';
-        output.style.whiteSpace = 'pre-wrap'; output.style.overflowWrap = 'anywhere';
-        output.textContent = 'Ожидание запуска';
-        panel.append(heading, help, output);
+        help.textContent = 'Верхний график и карточки - прежняя модель, новый вариант сравнивается на тех же кадрах. Данные не отправляются.';
+        const download = document.createElement('button'); download.id = 'emotionDownload';
+        download.type = 'button'; download.textContent = 'Скачать результаты (.json)'; download.disabled = true;
+        download.addEventListener('click', () => {
+            if (!emotionExport) return;
+            const json = JSON.stringify(emotionExport,
+                (_key, value) => typeof value === 'number' ? Number(value.toFixed(4)) : value, 2);
+            const url = URL.createObjectURL(new Blob([json], { type: 'application/json;charset=utf-8' }));
+            const link = document.createElement('a'); link.href = url;
+            link.download = `wecog-emotion-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            document.body.appendChild(link); link.click(); link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+        const exportHelp = document.createElement('p');
+        exportHelp.textContent = 'Файл содержит последний снимок обоих вариантов и записанные пробы. Можно скачать во время анализа или после остановки. Новый запуск очищает результаты; перед ним скачайте файл.';
+        panel.append(heading, help, download, exportHelp);
         const summary = document.createElement('section');
         summary.id = 'emotionLiveDiagnostics';
         const caption = document.createElement('h3'); caption.textContent = 'Калибровка и движения лица';
         const calibration = document.createElement('p'); calibration.id = 'emotionCalibrationStatus';
         calibration.setAttribute('role', 'status'); calibration.textContent = 'Калибровка: ожидание запуска.';
         const freshness = document.createElement('p'); freshness.id = 'emotionSampleStatus';
+        const candidateStatus = document.createElement('p'); candidateStatus.id='emotionCandidateStatus';
+        const candidateValue = document.createElement('strong');
+        candidateValue.id = 'emotionCandidateValue';
+        candidateValue.textContent = 'ожидание запуска';
+        candidateStatus.append('Новый вариант: ', candidateValue);
+        const trialHelp=document.createElement('p');
+        trialHelp.textContent='После калибровки выберите выражение, примите его, удерживайте 1–2 секунды и нажмите «Записать 5 секунд».';
+        const trialLabel=document.createElement('label'); trialLabel.htmlFor='emotionTrialLabel'; trialLabel.textContent='Выражение для проверки: ';
+        const select=document.createElement('select'); select.id='emotionTrialLabel';
+        for(const [value,text] of expressionNames) {
+            const option=document.createElement('option'); option.value=value; option.textContent=text; select.appendChild(option);
+        }
+        const record=document.createElement('button'); record.id='emotionTrialStart'; record.type='button';
+        record.textContent='Записать 5 секунд'; record.disabled=true;
+        record.addEventListener('click',()=>{
+            if(runner.emotionDiagnostics?.beginTrial(select.value)) {
+                record.disabled=true; select.disabled=true;
+                write('emotionTrialStatus','Запись: удерживайте выбранное выражение 5 секунд.');
+            }
+        });
+        const trialStatus=document.createElement('p'); trialStatus.id='emotionTrialStatus'; trialStatus.textContent='Пробы ещё не записаны';
+        const tableWrap=document.createElement('div'); tableWrap.style.overflowX='auto';
+        tableWrap.tabIndex=0; tableWrap.setAttribute('role','region');
+        tableWrap.setAttribute('aria-label','Сравнение AU, на узком экране прокручивается горизонтально');
         const table = document.createElement('table'); table.style.width = '100%';
-        table.style.minWidth = '0';
+        table.style.minWidth = '600px';
         table.style.tableLayout = 'fixed'; table.style.overflowWrap = 'anywhere';
         const head = table.createTHead().insertRow();
-        for (const label of ['Признак AU', 'Raw', 'Adjusted']) {
+        for (const label of ['Признак AU', 'Raw', 'Adjusted', 'Raw новый', 'Adj новый']) {
             const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = label;
             cell.style.textAlign = 'left'; head.appendChild(cell);
         }
-        head.cells[0].style.width = '60%';
+        head.cells[0].style.width = '47%';
         const body = table.createTBody();
         for (const [au, name] of Object.entries(auNames)) {
             const row = body.insertRow();
             const label = document.createElement('th'); label.scope = 'row';
             label.style.textAlign = 'left'; label.style.fontWeight = 'normal';
             label.textContent = `${au} - ${name}`; row.appendChild(label);
-            for (const kind of ['raw', 'adjusted']) {
+            for (const kind of ['raw', 'adjusted', 'candidate-raw', 'candidate-adjusted']) {
                 const cell = row.insertCell(); cell.id = `emotion-${kind}-${au}`;
-                cell.textContent = '—'; cell.style.fontVariantNumeric = 'tabular-nums';
+                cell.textContent = '-'; cell.style.fontVariantNumeric = 'tabular-nums';
             }
         }
-        summary.append(caption, calibration, freshness, table);
-        document.getElementById('timeline')?.parentElement.appendChild(summary);
+        tableWrap.appendChild(table);
+        summary.append(caption, calibration, freshness, candidateStatus,trialHelp,trialLabel,select,record,trialStatus,tableWrap);
+        const timelineCard=document.getElementById('timeline')?.parentElement;
+        if(timelineCard) { timelineCard.style.minWidth='0'; timelineCard.appendChild(summary); }
     }
     (document.querySelector('main') || document.querySelector('.layout') || document.body).appendChild(panel);
     const states = { access: 'Проверяем доступ...', models: 'Загружаем модели протокола...', camera: 'Запрашиваем камеру...',
@@ -84,30 +123,53 @@ export function mountProtocolDiagnostic(channel) {
         screen?.classList.toggle('running', value === 'running');
         if (value === 'stopped') { write('bpmVal', '\u2014'); document.getElementById('bpmVal')?.classList.add('off'); }
         if (value === 'access') {
+            write('emotionCandidateValue', 'ожидание первого измерения');
+            write('emotionTrialStatus','Пробы ещё не записаны');
             write('emotionCalibrationStatus', 'Калибровка: ожидание первого измерения. Сохраняйте нейтральное лицо.');
             write('emotionSampleStatus', 'Ожидание данных');
             for (const au of Object.keys(auNames)) {
-                write(`emotion-raw-${au}`, '—'); write(`emotion-adjusted-${au}`, '—');
+                write(`emotion-raw-${au}`, '-'); write(`emotion-adjusted-${au}`, '-');
+                write(`emotion-candidate-raw-${au}`, '-'); write(`emotion-candidate-adjusted-${au}`, '-');
             }
-            write('emotionDiagnostics', 'Ожидание первого измерения');
+            emotionExport = null;
+            const download = document.getElementById('emotionDownload'); if (download) download.disabled = true;
             previousEmotion = null; emotionPoints.length = 0;
             for (const id of ['bpmVal', 'respirationV', 'valenceV', 'arousalV', 'dominantV', 'valid', 'confidence', 'velocity', 'lean', 'roll', 'qcDetails']) write(id, '\u2014');
             const timeline = document.getElementById('timeline');
             if (timeline) timeline.getContext('2d').clearRect(0, 0, timeline.width, timeline.height);
         }
         if (value === 'stopped') {
-            write('emotionSampleStatus', 'Остановлено — показан последний снимок, новые измерения не поступают.');
+            const record=document.getElementById('emotionTrialStart'); if(record) record.disabled=true;
+            const select=document.getElementById('emotionTrialLabel'); if(select) select.disabled=false;
+            write('emotionSampleStatus', 'Остановлено - показан последний снимок, новые измерения не поступают.');
             if (overlay) { overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height); overlay.style.display = 'none'; }
             write('profilePerformance', 'Запуск остановлен. Измерения не отправлялись.');
         }
     }, onUpdate(sample) {
         if (channel === 'emotion') {
             const diagnostics = sample.emotionDiagnostics;
+            emotionExport = diagnostics ?? null;
+            const download = document.getElementById('emotionDownload');
+            if (download) download.disabled = !emotionExport;
             const latest = diagnostics?.latest;
             const calibration = latest?.calibration;
+            const candidate=diagnostics?.candidate?.latest;
+            const candidateCalibration=candidate?.calibration;
+            write('emotionCandidateValue', candidateCalibration?.ready
+                ? `${candidate?.dominant ?? 'пропуск'}; valence ${fmt(candidate?.valence,3)}, arousal ${fmt(candidate?.arousal,3)}. Статус: ${candidate?.status}.`
+                : `калибровка: ${candidateCalibration?.frames ?? 0}/${candidateCalibration?.requiredFrames ?? 18}. Статус: ${candidate?.status ?? 'ожидание'}.`);
+            const active=diagnostics?.trialActive;
+            const record=document.getElementById('emotionTrialStart');
+            if(record) record.disabled=!!active||!calibration?.ready||!candidateCalibration?.ready
+                ||latest?.status!=='success'||candidate?.status!=='success'||(diagnostics?.trials?.length??0)>=30;
+            const select=document.getElementById('emotionTrialLabel'); if(select) select.disabled=!!active;
+            const trials=diagnostics?.trials ?? [];
+            const last = trials.at(-1);
+            write('emotionTrialStatus',active ? `Запись «${expressionNames.get(active.expression) ?? active.expected}»: осталось ${fmt(active.remainingMs/1000,1)} с.`
+                : last ? `Сохранено проб: ${trials.length}. Последняя: «${expressionNames.get(last.expression) ?? last.expected}», ${last.status}, общих валидных измерений: ${last.commonValid}.` : 'Пробы ещё не записаны');
             write('emotionCalibrationStatus', calibration?.ready
                 ? `Калибровка завершена: ${calibration.frames}/${calibration.requiredFrames}. Можно выполнять выражения лица.`
-                : `Калибровка: ${calibration?.frames ?? 0}/${calibration?.requiredFrames ?? '—'}. Сохраняйте нейтральное лицо.`);
+                : `Калибровка: ${calibration?.frames ?? 0}/${calibration?.requiredFrames ?? '-'}. Сохраняйте нейтральное лицо.`);
             const labels = { success: 'Успешное измерение', calibrating: 'Сбор нейтрального уровня',
                 missing_landmarks: 'Пропуск: нет точек лица', missing_data: 'Пропуск: нет данных',
                 invalid_landmarks: 'Пропуск: некорректные точки лица', analysis_error: 'Ошибка расчёта' };
@@ -115,10 +177,10 @@ export function mountProtocolDiagnostic(channel) {
             for (const au of Object.keys(auNames)) {
                 write(`emotion-raw-${au}`, fmt(latest?.rawAU?.[au], 3));
                 write(`emotion-adjusted-${au}`, fmt(latest?.adjustedAU?.[au], 3));
+                write(`emotion-candidate-raw-${au}`,fmt(candidate?.rawAU?.[au],3));
+                write(`emotion-candidate-adjusted-${au}`,fmt(candidate?.adjustedAU?.[au],3));
             }
         }
-        if (channel === 'emotion') write('emotionDiagnostics', JSON.stringify(sample.emotionDiagnostics,
-            (_key, value) => typeof value === 'number' ? Number(value.toFixed(4)) : value, 2));
         const bpm = sample.bpm;
         if (bpm?.published || bpm?.held) {
             write('bpmVal', fmt(bpm.bpm, 0)); document.getElementById('bpmVal')?.classList.remove('off');

@@ -153,14 +153,14 @@ export class EmotionAnalyzer {
                 || !Number.isFinite(Math.sqrt(geometry.faceWidth ** 2 + geometry.faceHeight ** 2))) {
                 throw new Error('Invalid face geometry');
             }
-            const rawActionUnits = extractActionUnits(landmarks, mask.geometry);
-            requireUnitValues(rawActionUnits);
+            const rawActionUnits = this._extractActionUnits(landmarks, mask.geometry);
+            this._validateRawActionUnits(rawActionUnits);
             const auState = this._calibrateActionUnits(rawActionUnits);
             requireUnitValues(auState.actionUnits);
             if (!auState.ready) {
                 this._trackFrameValidity(true);
                 return { ...this._unavailableResult('calibrating'), rawActionUnits,
-                    actionUnits: auState.actionUnits, geometry: { ...geometry } };
+                    actionUnits: auState.actionUnits, geometry: { ...geometry }, ...this._featureDiagnostics() };
             }
             const raw = classifyFACS(auState.actionUnits);
             requireUnitValues(raw, this.emotionLabels);
@@ -204,6 +204,7 @@ export class EmotionAnalyzer {
                 calibrationReady: auState.ready,
                 calibrationFrames: this._auBaselineFrames,
                 faceMask,
+                ...this._featureDiagnostics(),
             };
         } catch (err) {
             console.error('[EmotionAnalyzer] Ошибка analyzeLandmarks:', err);
@@ -280,6 +281,11 @@ export class EmotionAnalyzer {
     }
 
     // ── Приватные методы ───────────────────────────────────────────────────
+
+    // Developer experiments override extraction only; the default stays unchanged.
+    _extractActionUnits(landmarks, geometry) { return extractActionUnits(landmarks, geometry); }
+    _validateRawActionUnits(values) { requireUnitValues(values); }
+    _featureDiagnostics() { return {}; }
 
     _getMask(landmarks) {
         return this.faceMaskCollector

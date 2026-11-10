@@ -13,7 +13,7 @@ import { EMOTION_CONFIG } from './emotion-config.js';
 // ── Утилиты ───────────────────────────────────────────────────────────────────
 
 /** Ограничение значения в диапазоне [min, max] */
-function clamp(v, min, max) {
+function clampValue(v, min, max) {
     return Math.max(min, Math.min(max, v));
 }
 
@@ -109,7 +109,9 @@ function _calcSymmetry(lm, faceWidth, normFactor) {
  * @param {Object} [geometry] — предвычисленная геометрия из маски
  * @returns {Object} AU1..AU27, все значения в [0, 1]
  */
-export function extractActionUnits(lm, geometry = null) {
+export function extractActionUnits(lm, geometry = null, { unclipped = false } = {}) {
+    // Diagnostic mode exposes the old expressions before clipping; default unchanged.
+    const clamp = unclipped ? value => value : clampValue;
     const C = EMOTION_CONFIG.au;
 
     // Ключевые точки

@@ -69,7 +69,8 @@ function unavailableSample(status, dataSource) {
 export function getEmotionSample(precheckResult) {
     const sample = calculateEmotionSample(precheckResult);
     for (const listener of diagnosticListeners) {
-        try { listener(structuredClone(sample), analyzer.getCalibrationDiagnostics()); }
+        // Input is transient and local. Observers must never retain landmarks/pixels.
+        try { listener(structuredClone(sample), analyzer.getCalibrationDiagnostics(), structuredClone(precheckResult?.landmarks)); }
         catch (_) { /* Diagnostic UI must never break signal collection. */ }
     }
     return sample;
