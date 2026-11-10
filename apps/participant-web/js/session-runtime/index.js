@@ -229,7 +229,7 @@ class ParticipantSessionRuntime {
     _scheduleFinalUploadRetry() {
         this.restoringFinal = true;
         const retry = () => {
-            import('../web-page/tests-updated.js?v=20261108-143l')
+            import('../web-page/tests-updated.js?v=20261110-157')
                 .then(module => module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };

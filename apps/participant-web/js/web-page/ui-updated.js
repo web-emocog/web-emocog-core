@@ -73,7 +73,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261108-143l');
+        const mod = await import('./tests-updated.js?v=20261110-157');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             mod.continueInvitationSessionAfterShell();
             return true;

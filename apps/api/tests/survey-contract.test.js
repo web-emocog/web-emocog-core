@@ -258,7 +258,7 @@ describe('survey browser integration contract', () => {
     assert.match(calibration, /calibration_instruction_acknowledged/);
     assert.match(
       calibration,
-      /await waitForCalibrationIntroduction\(\{ targeted \}\);[\s\S]{0,180}point\.style\.display = 'block';/
+      /await waitForCalibrationIntroduction\(\{ targeted,[^}]+\}\);[\s\S]{0,420}point\.style\.display = 'block';/
     );
     assert.match(calibrationPointRule, /transition:\s*none/);
     assert.match(calibrationPointRule, /animation:\s*none/);

@@ -6,10 +6,10 @@ import {
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261025-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261108-143l';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261110-157';
 import { stopPreCheck } from './precheck-updated.js?v=20261104-4';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261108-143l';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261110-157';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -20,11 +20,12 @@ import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20
 import {
     runProtocolTestSequence,
     startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261108-143l';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261110-157';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
     CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
-} from '../gaze-tracker/calibration-capture.mjs?v=20261108-143l';
+} from '../gaze-tracker/calibration-capture.mjs?v=20261110-160';
+import { calibrationFeedback } from '../gaze-tracker/calibration-feedback.mjs?v=20261110-157';
 import { calculateValidationMetrics as sharedValidationMetrics,
     fitValidationCorrection, assessCorrectionBenchmark } from '../gaze-tracker/validation-metrics.mjs';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../gaze-tracker/validation-sampling.mjs';
@@ -44,7 +45,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261108-143l';
+} from '../session-runtime/index.js?v=20261110-157';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -364,11 +365,11 @@ function waitForCalibrationIntroduction(options = {}) {
         title.textContent = targeted ? t.calib_progress : t.runtime_instruction_title;
     }
     if (text) {
-        text.textContent = targeted
-            ? `${t.qc_failed_full} ${t.calib_click_instruction}`
-            : (t.calibration_intro_body || t.calib_click_instruction);
+        text.textContent = options.viewportChanged
+            ? calibrationFeedback(state.currentLang, 'viewport_changed')
+            : (targeted ? `${t.qc_failed_full} ${t.calib_click_instruction}` : (t.calibration_intro_body || t.calib_click_instruction));
     }
-    button.textContent = targeted ? t.runtime_recalibrate : t.runtime_instruction_action;
+    button.textContent = targeted || options.viewportChanged ? t.runtime_recalibrate : t.runtime_instruction_action;
     intro.hidden = false;
     requestAnimationFrame(() => button.focus());
 
@@ -431,6 +432,11 @@ export function getWorstValidationTargets(points, viewport = getContentViewport(
 
 let calibrationSetup = null;
 let calibrationGeneration = 0;
+let calibrationGeometryWatch = null;
+
+function calibrationGeometry() {
+    return { ...getContentViewport(), dpr: window.devicePixelRatio };
+}
 
 export function startCalibration(options = {}) {
     if (calibrationSetup) return calibrationSetup;
@@ -443,6 +449,7 @@ export function startCalibration(options = {}) {
 
 async function prepareCalibration(options) {
     const generation = ++calibrationGeneration;
+    calibrationGeometryWatch?.abort();
     const targetedPositions = normalizeCalibrationTargets(options.targetedPositions);
     const targeted = targetedPositions.length > 0
         && state.runtime?.gazeTracker?.isCalibrated?.() === true;
@@ -484,12 +491,9 @@ async function prepareCalibration(options) {
         await window.QCMetricsReady;
         dbg('qc', 'module:ready:QCMetrics', { resolved: true });
     }
-    const sessionViewport = getContentViewport();
     if (!targeted) {
-        state.runtime.qcMetrics = new QCMetrics({
-            screenWidth: sessionViewport.width,
-            screenHeight: sessionViewport.height
-        });
+        state.runtime.qcMetrics?.stop?.();
+        state.runtime.qcMetrics = new QCMetrics();
         state.runtime.qcMetrics.start();
         state.runtime.sessionStartTime = Date.now();
         console.log('[QC] QCMetrics инициализирован и запущен');
@@ -501,11 +505,8 @@ async function prepareCalibration(options) {
         await window.GazeTrackerReady;
         dbg('gaze', 'module:ready:GazeTracker', { resolved: true });
     }
-    const contentViewport = sessionViewport;
     if (!targeted) {
         state.runtime.gazeTracker = new GazeTracker({
-            screenWidth: contentViewport.width,
-            screenHeight: contentViewport.height,
             onGazeUpdate: (gazeData) => {
                 if (window.handleGazeUpdate) {
                     window.handleGazeUpdate(gazeData);
@@ -569,10 +570,66 @@ async function prepareCalibration(options) {
     showCalibrationHeadPoseGuide(true);
     const instructionPanel = instructionText?.closest('.calib-instruction');
     if (instructionPanel) instructionPanel.style.display = 'none';
-    await waitForCalibrationIntroduction({ targeted });
+    await waitForCalibrationIntroduction({ targeted, viewportChanged: options.viewportChanged === true });
+    if (generation !== calibrationGeneration || state.runtime.currentPhase !== 'calibration'
+        || !calibScreen.classList.contains('active')) return;
     if (instructionPanel) instructionPanel.style.display = '';
     point.style.display = 'block';
-    
+    point.style.opacity = '1';
+    point.style.backgroundColor = '#DC2626';
+    point.style.cursor = 'pointer';
+
+    // Fixed UI is now in its measuring layout; the classic scrollbar from
+    // preparation is gone. Never freeze geometry while the preview is visible.
+    calibScreen.getBoundingClientRect();
+    const contentViewport = calibrationGeometry();
+    const ownerTracker = state.runtime.gazeTracker;
+    const ownsCalibration = () => state.runtime.gazeTracker === ownerTracker
+        && generation === calibrationGeneration && state.runtime.currentPhase === 'calibration'
+        && calibScreen.classList.contains('active');
+    const geometryMatches = () => {
+        const current = calibrationGeometry();
+        return Object.keys(contentViewport).every(key => current[key] === contentViewport[key]);
+    };
+    const restartForViewport = () => {
+        if (!ownsCalibration() || geometryWatch.signal.aborted) return;
+        geometryWatch.abort();
+        point.onclick = null;
+        point.style.display = 'none';
+        recordSessionEvent('calibration_viewport_changed', {
+            category: 'technical', severity: 'warning', targeted
+        });
+        // Let the current setup finish before restarting (including the case
+        // of a targeted repair in a different viewport). A fresh tracker must
+        // never mix newly measured targets with the previous calibration.
+        const pending = calibrationSetup;
+        void Promise.resolve(pending).then(() => {
+            if (ownsCalibration()) return startCalibration({ viewportChanged: true });
+        });
+    };
+    const geometryWatch = calibrationGeometryWatch = new AbortController();
+    const listenerOptions = { signal: geometryWatch.signal };
+    const onGeometryChange = () => {
+        if (ownsCalibration() && !geometryMatches()) restartForViewport();
+    };
+    window.addEventListener('resize', onGeometryChange, listenerOptions);
+    window.visualViewport?.addEventListener('resize', onGeometryChange, listenerOptions);
+    window.visualViewport?.addEventListener('scroll', onGeometryChange, listenerOptions);
+    window.matchMedia(`(resolution: ${contentViewport.dpr}dppx)`).addEventListener('change', onGeometryChange, listenerOptions);
+    window.addEventListener('wecog:session-phase-change', ({ detail }) => {
+        if (detail?.phase !== 'calibration') geometryWatch.abort();
+    }, listenerOptions);
+    window.addEventListener('pagehide', event => {
+        if (!event.persisted) geometryWatch.abort();
+    }, listenerOptions);
+
+    const fittedViewport = targeted ? ownerTracker.getStatus().calibrationScreenSize : null;
+    if (targeted && (!fittedViewport || fittedViewport.width !== contentViewport.width || fittedViewport.height !== contentViewport.height)) {
+        restartForViewport();
+        return;
+    }
+    ownerTracker.updateScreenSize(contentViewport.width, contentViewport.height);
+
     instructionText.innerText = translations[state.currentLang].calib_click_instruction;
 
     const fullCalibrationPositions = CALIBRATION_POSITIONS;
@@ -595,13 +652,20 @@ async function prepareCalibration(options) {
         `points=${positions.length}, clicksPerPoint=${CLICKS_PER_POINT}`
     );
     let clicksOnCurrentPoint = 0;
-    const ownerTracker = state.runtime.gazeTracker;
-    const captureIsActive = () => state.runtime.gazeTracker === ownerTracker
-        && generation === calibrationGeneration && state.runtime.currentPhase === 'calibration'
-        && calibScreen.classList.contains('active') && !document.hidden
-        && isContinuousSessionAnalysisRunning()
-        && getContentViewport().width === contentViewport.width
-        && getContentViewport().height === contentViewport.height;
+    const captureIsActive = () => ownsCalibration() && !geometryWatch.signal.aborted && !document.hidden
+        && isContinuousSessionAnalysisRunning() && geometryMatches();
+    const recoverFromInactiveCapture = () => {
+        if (!ownsCalibration() || geometryWatch.signal.aborted) return;
+        if (!geometryMatches()) { restartForViewport(); return; }
+        geometryWatch.abort();
+        if (!isContinuousSessionAnalysisRunning()) {
+            getSessionRuntime()?.reportIssue({
+                kind: 'technical', code: 'continuous_modules_not_started',
+                message: 'Continuous camera analysis could not start.', recoverable: true, invalidatesBlock: false
+            });
+        }
+        returnToMandatoryPreparation();
+    };
     let clickPending = false;
     const pointFailureCounts = new Array(positions.length).fill(0);
     
@@ -615,7 +679,8 @@ async function prepareCalibration(options) {
     // Обработчик клика на точку для калибровки
     // Два клика на точку; свежая серия открытых глаз с прежними pose limits.
     const handleCalibClick = async () => {
-        if (clickPending || !captureIsActive()) return;
+        if (clickPending || document.hidden || !ownsCalibration() || geometryWatch.signal.aborted) return;
+        if (!captureIsActive()) { recoverFromInactiveCapture(); return; }
         clickPending = true;
         // Prevent double-clicks while collecting frames
         point.onclick = null;
@@ -636,9 +701,7 @@ async function prepareCalibration(options) {
                 });
                 if (capture.summary.cancelled || !captureIsActive()) {
                     capture.frames.length = 0;
-                    if (generation === calibrationGeneration && state.runtime.currentPhase === 'calibration') {
-                        returnToMandatoryPreparation();
-                    }
+                    recoverFromInactiveCapture();
                     return;
                 }
                 const accepted = capture.summary.accepted && ownerTracker.addAveragedCalibrationPoint(
@@ -660,14 +723,14 @@ async function prepareCalibration(options) {
                         `[GazeTracker] Недостаточно стабильных кадров (${capture.summary.usableFrames}/${policy.minFrames}), ` +
                         `повторяем точку ${i + 1}, неудачных кликов подряд: ${pointFailureCounts[i]}`
                     );
-                    instructionText.innerText = translations[state.currentLang].calib_click_instruction;
+                    instructionText.innerText = calibrationFeedback(state.currentLang, 'insufficient_frames');
                     point.style.opacity = '1';
                     point.onclick = handleCalibClick;
                     return;
                 }
             }
         } catch (e) {
-            if (!captureIsActive()) return;
+            if (!captureIsActive()) { recoverFromInactiveCapture(); return; }
             console.error('[GazeTracker] Ошибка калибровки точки:', e);
             instructionText.innerText = `${participantMessage('runtime_generic_technical')} ${translations[state.currentLang].calib_click_instruction}`;
             setTimeout(() => {
@@ -682,6 +745,7 @@ async function prepareCalibration(options) {
             clickPending = false;
         }
         
+        instructionText.innerText = translations[state.currentLang].calib_click_instruction;
         clicksOnCurrentPoint++;
         
         if (clicksOnCurrentPoint >= CLICKS_PER_POINT) {
@@ -715,6 +779,7 @@ async function prepareCalibration(options) {
             setTimeout(async () => {
                 // После калибровки запускаем валидацию точности
                 if (captureIsActive()) startGazeValidation();
+                else recoverFromInactiveCapture();
             }, 1500);
             return;
         }
