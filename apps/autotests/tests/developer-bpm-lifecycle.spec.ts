@@ -317,6 +317,33 @@ test('Emotion Test starts after staff admission with a camera-only document poli
   expect(await page.evaluate(() => (window as any).__streams[0].track.stops)).toBe(1);
 });
 
+for (const width of [1280, 390]) {
+  test(`Emotion diagnostic JSON reports missing data and survives stop at width ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await boot(page, 'running', '', '/apps/web/developer/emotion-test.html');
+    await page.locator('#startBtn').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#emotionDiagnostics')).toContainText('missing_landmarks');
+    await expect(page.locator('#emotionCalibrationStatus')).toContainText('Сохраняйте нейтральное лицо');
+    await expect(page.locator('#emotionSampleStatus')).toContainText('Пропуск: нет точек лица');
+    await expect(page.locator('#emotion-raw-AU4')).toHaveText('—');
+    await expect(page.locator('#emotion-adjusted-AU12')).toHaveText('—');
+    const output = JSON.parse(await page.locator('#emotionDiagnostics').innerText());
+    expect(output.counts.attempts).toBeGreaterThan(0);
+    expect(output.counts.success).toBe(0);
+    expect(output.latest.valence).toBeNull();
+    expect(output.latest.rawAU).toBeNull();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.locator('#stopBtn').focus();
+    await page.keyboard.press('Enter');
+    const stopped = await page.locator('#emotionDiagnostics').innerText();
+    await expect(page.locator('#status')).toHaveText('Остановлено');
+    await expect(page.locator('#emotionSampleStatus')).toContainText('последний снимок');
+    await expect(page.locator('#emotionDiagnostics')).toHaveText(stopped);
+    expect(await page.evaluate(() => (window as any).__streams[0].track.stops)).toBe(1);
+  });
+}
+
 test('Emotion Test respects native Chromium document policy denial before models or device requests', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Native Permissions-Policy enforcement regression for Chrome/Edge engine');
   await boot(page, 'running', '', '/apps/web/developer/emotion-test.html',

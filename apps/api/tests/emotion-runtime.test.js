@@ -42,6 +42,62 @@ describe('browser emotion runtime', () => {
     return sample;
   }
 
+  it('diagnostics count calculations, show calibration AU and distinguish missing samples', async () => {
+    const { EmotionDiagnostics } = await import(pathToFileURL(path.join(root,
+      'web/developer/emotion-diagnostics.mjs')).href);
+    let now = 0;
+    const diagnostics = new EmotionDiagnostics(() => now);
+    const stop = api.observeEmotionSamples((sample, calibration) => diagnostics.record(sample, calibration));
+    try {
+      api.getEmotionSample({ landmarks: makeLandmarks() });
+      const first = diagnostics.snapshot();
+      assert.equal(first.latest.status, 'calibrating');
+      assert.equal(first.latest.calibration.frames, 1);
+      assert.ok(Number.isFinite(first.latest.rawAU.AU12));
+      assert.equal(first.latest.adjustedAU, null);
+      assert.equal(first.latest.valence, null);
+      first.latest.calibration.baseline.AU12 = 999;
+      assert.notEqual(diagnostics.snapshot().latest.calibration.baseline.AU12, 999);
+      for (let i = 1; i < 20; i++) {
+        now += 200;
+        api.getEmotionSample({ landmarks: makeLandmarks() });
+      }
+      assert.equal(diagnostics.snapshot().attemptHzSinceFirst, 5);
+      assert.ok(diagnostics.snapshot().counts.success > 0);
+      assert.ok(diagnostics.snapshot().latest.smoothedScores);
+      now += 200;
+      const broken = makeLandmarks(); broken[61].x = NaN;
+      api.getEmotionSample({ landmarks: broken });
+      const snapshot = diagnostics.snapshot();
+      assert.equal(snapshot.counts.attempts, 21);
+      assert.equal(snapshot.counts.missing, 1);
+      assert.equal(snapshot.latest.status, 'invalid_landmarks');
+      assert.equal(snapshot.latest.rawAU, null);
+      assert.equal(snapshot.latest.valence, null);
+      // UI polling cannot create additional measurements.
+      diagnostics.snapshot(); diagnostics.snapshot();
+      assert.equal(diagnostics.snapshot().counts.attempts, 21);
+      now += 2000;
+      assert.equal(diagnostics.snapshot().lastAttemptAgeMs, 2000);
+      assert.ok(diagnostics.snapshot().attemptHzSinceFirst < 5);
+    } finally { stop(); }
+    api.getEmotionSample();
+    assert.equal(diagnostics.snapshot().counts.attempts, 21);
+  });
+
+  it('a failing or mutating diagnostic observer cannot corrupt emotion results', () => {
+    calibrate();
+    const stop = api.observeEmotionSamples(sample => {
+      sample.valence = 999;
+      throw new Error('diagnostic UI failed');
+    });
+    try {
+      const sample = api.getEmotionSample({ landmarks: makeLandmarks() });
+      assert.equal(sample.status, 'success');
+      assert.notEqual(sample.valence, 999);
+    } finally { stop(); }
+  });
+
   function assertMissing(sample) {
     assert.equal(sample.degraded, true);
     assert.equal(sample.dominant, 'unknown');

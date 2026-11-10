@@ -19,6 +19,13 @@ import { EmotionAnalyzer } from './emotion-analyzer.js';
 export const analyzer  = new EmotionAnalyzer();
 export const _analyzer = analyzer;   // алиас для обратной совместимости
 
+// Opt-in, local developer observation of existing calculations. No second inference.
+const diagnosticListeners = new Set();
+export function observeEmotionSamples(listener) {
+    diagnosticListeners.add(listener);
+    return () => diagnosticListeners.delete(listener);
+}
+
 function isSuccessfulSample(sample) {
     return sample?.status === 'success'
         && sample.calibrationReady === true
@@ -60,6 +67,15 @@ function unavailableSample(status, dataSource) {
  * @returns {{ valence, arousal, dominant, scores, confidence, dataQuality, dataSource }}
  */
 export function getEmotionSample(precheckResult) {
+    const sample = calculateEmotionSample(precheckResult);
+    for (const listener of diagnosticListeners) {
+        try { listener(structuredClone(sample), analyzer.getCalibrationDiagnostics()); }
+        catch (_) { /* Diagnostic UI must never break signal collection. */ }
+    }
+    return sample;
+}
+
+function calculateEmotionSample(precheckResult) {
     // ── Путь 1: landmarks → FACS ────────────────────────────────────────
     if (precheckResult?.landmarks != null) {
         const result = analyzer.analyzeLandmarks(precheckResult.landmarks);
@@ -68,6 +84,9 @@ export function getEmotionSample(precheckResult) {
                 ...unavailableSample(result.status === 'success' ? 'analysis_error' : result.status, 'landmarks'),
                 calibrationReady: result.calibrationReady === true,
                 calibrationFrames: result.calibrationFrames,
+                rawActionUnits: result.rawActionUnits ?? null,
+                actionUnits: result.status === 'calibrating' ? null : (result.actionUnits ?? null),
+                geometry: result.geometry ?? null,
             };
         }
         return {

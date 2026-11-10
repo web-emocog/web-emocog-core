@@ -6,6 +6,15 @@ const fpsLabel = measurement => measurement?.status === 'measured'
     ? `${fmt(measurement.fps, 0)} FPS`
     : measurement?.status === 'stale' ? 'нет свежего окна' : 'нет замера';
 
+const auNames = {
+    AU1: 'Подъём внутренних частей бровей', AU2: 'Подъём внешних частей бровей',
+    AU4: 'Сведение бровей', AU5: 'Раскрытие глаз', AU6: 'Подъём щёк',
+    AU7: 'Сужение век', AU9: 'Сморщивание носа', AU10: 'Подъём верхней губы',
+    AU12: 'Растяжение уголков губ', AU15: 'Опускание уголков губ',
+    AU17: 'Подъём подбородка', AU20: 'Растяжение губ', AU23: 'Сжатие губ',
+    AU25: 'Размыкание губ', AU26: 'Опускание челюсти', AU27: 'Широкое открытие рта',
+};
+
 export function mountProtocolDiagnostic(channel) {
     const video = document.getElementById('video');
     const start = document.getElementById('btnStart') || document.getElementById('startBtn');
@@ -24,13 +33,50 @@ export function mountProtocolDiagnostic(channel) {
     panel.style.gridColumn = '1 / -1'; panel.style.minWidth = '0';
     profile.textContent = JSON.stringify({ id: PROTOCOL_PROFILE_ID, schedule: FRAME_SCHEDULE, camera: protocolCameraConstraints().video, models: MODEL_ASSETS }, null, 2);
     panel.append(title, note, profile, performanceLine);
+    if (channel === 'emotion') {
+        const heading = document.createElement('h2'); heading.textContent = 'Диагностика эмоций';
+        const help = document.createElement('p');
+        help.textContent = 'rawAU - исходные признаки; calibration.baseline - нейтральный уровень; adjustedAU - признаки после калибровки. Частота attemptHzSinceFirst считается по вызовам анализатора, включая пропуски, с первого измерения. После остановки ниже остаётся последний снимок. Данные не отправляются.';
+        const output = document.createElement('pre'); output.id = 'emotionDiagnostics';
+        output.style.whiteSpace = 'pre-wrap'; output.style.overflowWrap = 'anywhere';
+        output.textContent = 'Ожидание запуска';
+        panel.append(heading, help, output);
+        const summary = document.createElement('section');
+        summary.id = 'emotionLiveDiagnostics';
+        const caption = document.createElement('h3'); caption.textContent = 'Калибровка и движения лица';
+        const calibration = document.createElement('p'); calibration.id = 'emotionCalibrationStatus';
+        calibration.setAttribute('role', 'status'); calibration.textContent = 'Калибровка: ожидание запуска.';
+        const freshness = document.createElement('p'); freshness.id = 'emotionSampleStatus';
+        const table = document.createElement('table'); table.style.width = '100%';
+        table.style.minWidth = '0';
+        table.style.tableLayout = 'fixed'; table.style.overflowWrap = 'anywhere';
+        const head = table.createTHead().insertRow();
+        for (const label of ['Признак AU', 'Raw', 'Adjusted']) {
+            const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = label;
+            cell.style.textAlign = 'left'; head.appendChild(cell);
+        }
+        head.cells[0].style.width = '60%';
+        const body = table.createTBody();
+        for (const [au, name] of Object.entries(auNames)) {
+            const row = body.insertRow();
+            const label = document.createElement('th'); label.scope = 'row';
+            label.style.textAlign = 'left'; label.style.fontWeight = 'normal';
+            label.textContent = `${au} - ${name}`; row.appendChild(label);
+            for (const kind of ['raw', 'adjusted']) {
+                const cell = row.insertCell(); cell.id = `emotion-${kind}-${au}`;
+                cell.textContent = '—'; cell.style.fontVariantNumeric = 'tabular-nums';
+            }
+        }
+        summary.append(caption, calibration, freshness, table);
+        document.getElementById('timeline')?.parentElement.appendChild(summary);
+    }
     (document.querySelector('main') || document.querySelector('.layout') || document.body).appendChild(panel);
     const states = { access: 'Проверяем доступ...', models: 'Загружаем модели протокола...', camera: 'Запрашиваем камеру...',
         sampling: 'Измеряем частоту камеры...', running: 'Анализ запущен. Взгляд без персональной калибровки не оценивается.', stopped: 'Остановлено' };
     let blocked = false;
     let previousEmotion = null;
     const emotionPoints = [];
-    const runner = new ProtocolDiagnostic({ video, onStatus(value) {
+    const runner = new ProtocolDiagnostic({ video, emotionDiagnostics: channel === 'emotion', onStatus(value) {
         write('status', states[value] || value);
         const active = value !== 'stopped';
         start.disabled = active || blocked; stop.disabled = !active;
@@ -38,16 +84,41 @@ export function mountProtocolDiagnostic(channel) {
         screen?.classList.toggle('running', value === 'running');
         if (value === 'stopped') { write('bpmVal', '\u2014'); document.getElementById('bpmVal')?.classList.add('off'); }
         if (value === 'access') {
+            write('emotionCalibrationStatus', 'Калибровка: ожидание первого измерения. Сохраняйте нейтральное лицо.');
+            write('emotionSampleStatus', 'Ожидание данных');
+            for (const au of Object.keys(auNames)) {
+                write(`emotion-raw-${au}`, '—'); write(`emotion-adjusted-${au}`, '—');
+            }
+            write('emotionDiagnostics', 'Ожидание первого измерения');
             previousEmotion = null; emotionPoints.length = 0;
             for (const id of ['bpmVal', 'respirationV', 'valenceV', 'arousalV', 'dominantV', 'valid', 'confidence', 'velocity', 'lean', 'roll', 'qcDetails']) write(id, '\u2014');
             const timeline = document.getElementById('timeline');
             if (timeline) timeline.getContext('2d').clearRect(0, 0, timeline.width, timeline.height);
         }
         if (value === 'stopped') {
+            write('emotionSampleStatus', 'Остановлено — показан последний снимок, новые измерения не поступают.');
             if (overlay) { overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height); overlay.style.display = 'none'; }
             write('profilePerformance', 'Запуск остановлен. Измерения не отправлялись.');
         }
     }, onUpdate(sample) {
+        if (channel === 'emotion') {
+            const diagnostics = sample.emotionDiagnostics;
+            const latest = diagnostics?.latest;
+            const calibration = latest?.calibration;
+            write('emotionCalibrationStatus', calibration?.ready
+                ? `Калибровка завершена: ${calibration.frames}/${calibration.requiredFrames}. Можно выполнять выражения лица.`
+                : `Калибровка: ${calibration?.frames ?? 0}/${calibration?.requiredFrames ?? '—'}. Сохраняйте нейтральное лицо.`);
+            const labels = { success: 'Успешное измерение', calibrating: 'Сбор нейтрального уровня',
+                missing_landmarks: 'Пропуск: нет точек лица', missing_data: 'Пропуск: нет данных',
+                invalid_landmarks: 'Пропуск: некорректные точки лица', analysis_error: 'Ошибка расчёта' };
+            write('emotionSampleStatus', `${labels[latest?.status] || 'Ожидание данных'}; возраст снимка: ${fmt(diagnostics?.lastAttemptAgeMs, 0)} мс; средняя частота расчётов: ${fmt(diagnostics?.attemptHzSinceFirst)} Гц.`);
+            for (const au of Object.keys(auNames)) {
+                write(`emotion-raw-${au}`, fmt(latest?.rawAU?.[au], 3));
+                write(`emotion-adjusted-${au}`, fmt(latest?.adjustedAU?.[au], 3));
+            }
+        }
+        if (channel === 'emotion') write('emotionDiagnostics', JSON.stringify(sample.emotionDiagnostics,
+            (_key, value) => typeof value === 'number' ? Number(value.toFixed(4)) : value, 2));
         const bpm = sample.bpm;
         if (bpm?.published || bpm?.held) {
             write('bpmVal', fmt(bpm.bpm, 0)); document.getElementById('bpmVal')?.classList.remove('off');

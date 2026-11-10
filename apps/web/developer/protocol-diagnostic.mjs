@@ -11,9 +11,13 @@ import { getContentViewport } from '../../participant-web/js/gaze-tracker/viewpo
 import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './diagnostic-run.mjs?v=20261028-1';
 
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
+import { observeEmotionSamples } from '../../participant-web/js/emotion/public-api.js';
+import { EmotionDiagnostics } from './emotion-diagnostics.mjs';
 
 export class ProtocolDiagnostic {
-    constructor({ video, onUpdate = () => {}, onStatus = () => {} }) {
+    constructor({ video, onUpdate = () => {}, onStatus = () => {}, emotionDiagnostics = false }) {
+        this.emotionDiagnosticsEnabled = emotionDiagnostics;
+        this.emotionDiagnostics = null;
         this.video = video;
         this.onUpdate = onUpdate;
         this.onStatus = onStatus;
@@ -41,6 +45,13 @@ export class ProtocolDiagnostic {
         try {
             this.onStatus('access');
             await authorizeDiagnostic(run);
+            if (this.emotionDiagnosticsEnabled) {
+                this.emotionDiagnostics = new EmotionDiagnostics();
+                const diagnostics = this.emotionDiagnostics;
+                run.onStop(observeEmotionSamples((sample, calibration) => {
+                    if (this.run === run && !run.signal.aborted) diagnostics.record(sample, calibration);
+                }));
+            }
             this.onStatus('models');
             const vision = await run.wait(() => import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs'));
             run.check();
@@ -111,7 +122,8 @@ export class ProtocolDiagnostic {
         const settings = this.video.srcObject?.getVideoTracks?.()[0]?.getSettings?.();
         return { profileId: PROTOCOL_PROFILE_ID, models: MODEL_ASSETS, schedule: FRAME_SCHEDULE,
             camera: settings ? { width: settings.width, height: settings.height, frameRate: settings.frameRate, facingMode: settings.facingMode } : null,
-            diagnostics, budget: diagnostics?.budget || frameBudget(),
+            diagnostics, emotionDiagnostics: this.emotionDiagnostics?.snapshot() ?? null,
+            budget: diagnostics?.budget || frameBudget(),
             frame: frame ? { faceDetected: frame.face?.detected === true, illumination: frame.illumination?.value } : null,
             bpm: pipeline?.bpm.lastSample || null,
             emotion: state?.runtime.lastEmotionSample || null, body: state?.runtime.lastBodyPoseSample || null,

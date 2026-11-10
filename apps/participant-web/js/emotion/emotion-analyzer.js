@@ -159,7 +159,8 @@ export class EmotionAnalyzer {
             requireUnitValues(auState.actionUnits);
             if (!auState.ready) {
                 this._trackFrameValidity(true);
-                return this._unavailableResult('calibrating');
+                return { ...this._unavailableResult('calibrating'), rawActionUnits,
+                    actionUnits: auState.actionUnits, geometry: { ...geometry } };
             }
             const raw = classifyFACS(auState.actionUnits);
             requireUnitValues(raw, this.emotionLabels);
@@ -194,6 +195,7 @@ export class EmotionAnalyzer {
                 modelScores,
                 rawScores: raw,
                 rawActionUnits,
+                geometry: { ...geometry },
                 actionUnits: auState.actionUnits,
                 valence:    affective.valence,
                 arousal:    affective.arousal,
@@ -214,6 +216,13 @@ export class EmotionAnalyzer {
     }
 
     // ── Публичные геттеры ──────────────────────────────────────────────────
+
+    getCalibrationDiagnostics() {
+        return { ready: this._auBaselineReady, frames: this._auBaselineFrames,
+            requiredFrames: this.config.baseline.minFrames,
+            baseline: this._auBaseline ? { ...this._auBaseline } : null,
+            deadzone: this.config.baseline.deadzone, gain: this.config.baseline.gain };
+    }
 
     getEmotionCategoryStats() {
         const { positive, neutral, negative, total } = this.emotionCategoryCounts;
