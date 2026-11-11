@@ -2,9 +2,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { randomUUID, createHash } = require('node:crypto');
+const { randomBytes, randomUUID, createHash } = require('node:crypto');
+const { crc32, deflateSync } = require('node:zlib');
 const { Pool } = require('pg');
 const config = require('../config');
+const { seedStimulusLoadFixture } = require('./seed-stimulus-load-fixture');
 
 function requireIsolatedTarget(env, settings) {
   const database = new URL(env.DATABASE_URL);
@@ -20,7 +22,7 @@ function requireIsolatedTarget(env, settings) {
   assert.ok(!api.username && !api.password && !api.search && !api.hash);
   assert.equal(settings.http.rateLimitStore, 'postgres');
   assert.deepEqual(settings.http.rateLimits, { auth: 20, ingest: 60, media: 1200, default: 600 });
-  assert.ok(env.LIVE_STIMULUS_FIXTURE && env.MEDIA_LOAD_TEST_IMAGE && env.MEDIA_LOAD_TEST_REPORT);
+  assert.ok(env.LIVE_STIMULUS_FIXTURE && env.MEDIA_LOAD_TEST_REPORT);
   return api.origin;
 }
 
@@ -40,11 +42,42 @@ function percentile(values, fraction) {
   return Number(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))].toFixed(2));
 }
 
+function pngChunk(type, data) {
+  const payload = Buffer.concat([Buffer.from(type), data]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(payload));
+  return Buffer.concat([length, payload, checksum]);
+}
+
+function createSyntheticPng() {
+  const width = 640;
+  const height = 360;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // 8-bit grayscale.
+  const stride = width + 1;
+  const scanlines = Buffer.alloc(stride * height);
+  const pixels = randomBytes(width * height);
+  for (let row = 0; row < height; row++) {
+    // Each row begins with PNG filter type 0 (unfiltered).
+    pixels.copy(scanlines, row * stride + 1, row * width, (row + 1) * width);
+  }
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(scanlines)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
 async function main() {
   const base = requireIsolatedTarget(process.env, config);
-  const fixture = JSON.parse(await fs.readFile(process.env.LIVE_STIMULUS_FIXTURE, 'utf8'));
-  assert.match(fixture.users.owner.email, /^owner-[\da-f-]+@example\.test$/);
-  const image = await fs.readFile(process.env.MEDIA_LOAD_TEST_IMAGE);
+  const fixture = await seedStimulusLoadFixture(config.database.url);
+  await fs.writeFile(process.env.LIVE_STIMULUS_FIXTURE, JSON.stringify(fixture), { mode: 0o600, flag: 'wx' });
+  const image = createSyntheticPng();
   const sha = createHash('sha256').update(image).digest('hex');
   const pool = new Pool({ connectionString: config.database.url, max: 4 });
   const report = { libraryFiles: 600, actualUploads: 24, seededFiles: 576, concurrency: 8,
@@ -53,7 +86,7 @@ async function main() {
   const started = performance.now();
   const normal = async (route, options = {}, expected = 200) => {
     const start = performance.now();
-    const response = await fetch(base + route, { ...options, signal: AbortSignal.timeout(30_000) });
+    const response = await fetch(base + route, { ...options, redirect: 'error', signal: AbortSignal.timeout(30_000) });
     const bytes = Buffer.from(await response.arrayBuffer());
     report.normal.requests++;
     report.normal.bytes += bytes.length;
@@ -149,7 +182,7 @@ async function main() {
     let passed = 0, rejected;
     // Probe the remaining real PostgreSQL-backed budget, not a mocked middleware.
     while (passed <= 1200) {
-      const response = await fetch(`${base}/stimuli/${ids[0]}/content`, { headers, signal: AbortSignal.timeout(10_000) });
+      const response = await fetch(`${base}/stimuli/${ids[0]}/content`, { headers, redirect: 'error', signal: AbortSignal.timeout(10_000) });
       const bytes = await response.arrayBuffer();
       if (response.status === 429) {
         assert.equal(JSON.parse(Buffer.from(bytes).toString('utf8')).route_profile, 'media');
@@ -169,7 +202,7 @@ async function main() {
     passed = 0;
     rejected = null;
     while (passed <= 600) {
-      const response = await fetch(`${base}/projects`, { headers, signal: AbortSignal.timeout(10_000) });
+      const response = await fetch(`${base}/projects`, { headers, redirect: 'error', signal: AbortSignal.timeout(10_000) });
       const bytes = await response.arrayBuffer();
       if (response.status === 429) {
         assert.equal(JSON.parse(Buffer.from(bytes).toString('utf8')).route_profile, 'default');
@@ -199,4 +232,4 @@ if (require.main === module) main().catch(error => {
   process.stderr.write(`Stimulus load test failed: ${error.message}\n`);
   process.exitCode = 1;
 });
-module.exports = { requireIsolatedTarget, percentile };
+module.exports = { requireIsolatedTarget, percentile, createSyntheticPng };
