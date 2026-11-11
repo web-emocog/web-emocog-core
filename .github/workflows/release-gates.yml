@@ -118,6 +118,8 @@ jobs:
           cache-dependency-path: |
             apps/api/package-lock.json
             apps/autotests/package-lock.json
+      - name: Configure reachable Ubuntu package mirrors
+        run: bash scripts/configure-ci-ubuntu-mirrors.sh
       - name: Install PostgreSQL and media tools
         run: sudo apt-get update && sudo apt-get install -y postgresql-client-16 ffmpeg poppler-utils
       - name: Install API dependencies
@@ -212,6 +214,8 @@ jobs:
       - name: Install browser test dependencies
         working-directory: apps/autotests
         run: npm ci
+      - name: Configure reachable Ubuntu package mirrors
+        run: bash scripts/configure-ci-ubuntu-mirrors.sh
       - name: Install supported browsers
         working-directory: apps/autotests
         run: npx playwright install --with-deps chromium firefox
@@ -261,6 +265,8 @@ jobs:
       - name: Install browser test dependencies
         working-directory: apps/autotests
         run: npm ci
+      - name: Configure reachable Ubuntu package mirrors
+        run: bash scripts/configure-ci-ubuntu-mirrors.sh
       - name: Install Chromium and Firefox
         working-directory: apps/autotests
         run: npx playwright install --with-deps chromium firefox

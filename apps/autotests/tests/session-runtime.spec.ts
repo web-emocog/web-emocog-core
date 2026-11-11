@@ -1622,7 +1622,7 @@ test.describe('Participant session runtime', () => {
   test('emotion summary remains session-wide when raw samples are trimmed', async ({ page }) => {
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     const summary = await page.evaluate(async () => {
-      const url = new URL('js/emotion/public-api.js', window.location.href).href;
+      const url = new URL('js/emotion/public-api.js?v=20261110-integration1', window.location.href).href;
       const { appendEmotionSample, getEmotionSummary } = await import(url);
       const localState: any = {
         sessionData: {
@@ -1633,6 +1633,10 @@ test.describe('Participant session runtime', () => {
       };
       for (let i = 0; i < 10; i++) {
         appendEmotionSample(localState, {
+          status: 'success',
+          calibrationReady: true,
+          confidence: 1,
+          scores: { neutral: 1, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
           valence: i / 10,
           arousal: 0.5,
           dominant: 'neutral',
