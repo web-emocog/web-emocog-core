@@ -194,7 +194,10 @@ uses an ephemeral loopback API port and a separate static port 4237, runs the
 load script and browser checks, and stops only containers it created. The user's
 ports 3000/4173/5432 are not used. A private temporary directory retains the
 synthetic fixture and evidence; it must not be published with credentials.
-The benchmark command `npm run load:stimuli` has additional explicit guards:
+The benchmark command `npm run load:stimuli` generates its own synthetic PNG
+and test accounts. It writes the browser fixture to a new file at
+`LIVE_STIMULUS_FIXTURE` for the subsequent browser checks. The benchmark has
+additional explicit guards:
 test environment, acknowledged disposable database, matching loopback test URL,
 PostgreSQL limiter and unchanged rate defaults. It refuses production/remote
 targets rather than offering an override. This manual destructive fixture test

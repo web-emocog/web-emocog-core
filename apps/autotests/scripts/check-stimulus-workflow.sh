@@ -36,7 +36,7 @@ common=(--network "container:$dbname" --read-only --tmpfs /tmp:rw,exec,size=2g,m
  -e JWT_SECRET=synthetic-stimulus-check-secret-not-for-real-users-1111 -e NODE_ENV=test -e FORCE_HTTPS=false
  -e RATE_LIMIT_STORE=postgres -e CORS_ORIGINS=http://127.0.0.1:4237 -e UPLOADS_ROOT=/test-output/uploads
  -e LIVE_STIMULUS_FIXTURE=/test-output/fixture.json --entrypoint sh)
-docker run --rm "${common[@]}" "$MEDIA_TEST_API_IMAGE" -lc 'set -e; mkdir -p /test-output/uploads/stimuli; npm run migrate:up > /test-output/migrations.log 2>&1; node ../autotests/scripts/seed-live-stimulus-fixture.cjs; ffmpeg -v error -f lavfi -i "nullsrc=s=640x360,noise=alls=100:allf=u" -frames:v 1 -threads 1 /test-output/synthetic.png' > "$out/setup.log" 2>&1 || { tail -n 40 "$out/setup.log"; exit 1; }
+docker run --rm "${common[@]}" "$MEDIA_TEST_API_IMAGE" -lc 'set -e; mkdir -p /test-output/uploads/stimuli; npm run migrate:up > /test-output/migrations.log 2>&1' > "$out/setup.log" 2>&1 || { tail -n 40 "$out/setup.log"; exit 1; }
 start_api() {
  docker run -d --rm --name "$apiname" "${common[@]}" "$@" "$MEDIA_TEST_API_IMAGE" -lc 'node server.js' >/dev/null
  created_api=1
@@ -44,7 +44,7 @@ start_api() {
  docker logs "$apiname"; return 1
 }
 start_api
-docker exec -e MEDIA_LOAD_TEST_ISOLATED=YES -e MEDIA_LOAD_TEST_IMAGE=/test-output/synthetic.png \
+docker exec -e MEDIA_LOAD_TEST_ISOLATED=YES \
  -e MEDIA_LOAD_TEST_REPORT=/test-output/load-report.json "$apiname" node scripts/load-stimuli.js > "$out/load.log" 2>&1 || { tail -n 30 "$out/load.log"; exit 1; }
 cat "$out/load-report.json"
 docker logs "$apiname" > "$out/api-load.log" 2>&1

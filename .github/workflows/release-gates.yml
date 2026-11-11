@@ -214,9 +214,13 @@ jobs:
         run: docker rm --force "${{ steps.postgres.outputs.container }}"
 
   browser-regression:
-    name: Chromium and Firefox critical paths
+    name: Browser critical paths (${{ matrix.browser }})
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
@@ -233,7 +237,7 @@ jobs:
       - name: Install supported browsers
         working-directory: apps/autotests
         timeout-minutes: 8
-        run: npx playwright install --with-deps chromium firefox
+        run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Typecheck browser contracts
         working-directory: apps/autotests
         run: npm run typecheck
@@ -248,12 +252,12 @@ jobs:
           pactl set-default-sink wecog_ci
       - name: Run browser regression
         working-directory: apps/autotests
-        run: npm test
+        run: npm test -- --project=${{ matrix.browser }}
       - name: Upload failure evidence
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: playwright-failure-${{ github.run_id }}
+          name: playwright-failure-${{ matrix.browser }}-${{ github.run_id }}
           path: |
             apps/autotests/test-results
             apps/autotests/playwright-report

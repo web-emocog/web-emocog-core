@@ -156,6 +156,10 @@ describe('S3-01 release hardening', () => {
       assert.match(source, /retries: 0/);
       assert.match(source, /reuseExistingServer: false/);
     }
+    const browserJob = workflow.split('  browser-regression:')[1].split('  frame-pipeline-regression:')[0];
+    assert.match(browserJob, /browser: \[chromium, firefox\]/);
+    assert.match(browserJob, /npm test -- --project=\$\{\{ matrix\.browser \}\}/);
+    assert.match(workflow, /\[\[ "\$BROWSER_RESULT" == "success" \]\]/);
     assert.match(workflow, /needs: \[api-security, postgres-release, browser-regression, frame-pipeline-regression\]/);
     assert.match(workflow, /\[\[ "\$FRAME_PIPELINE_RESULT" == "success" \]\]/);
     assert.match(frameJob, /npx playwright test -c playwright\.metrics\.config\.ts --project=chromium --project=firefox/);
