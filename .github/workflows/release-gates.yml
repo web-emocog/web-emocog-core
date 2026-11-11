@@ -93,7 +93,8 @@ jobs:
   postgres-release:
     name: PostgreSQL, migration, restore and ingest load
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Includes browser-backed delivery and database/media restore rehearsals.
+    timeout-minutes: 35
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
       S2_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
@@ -107,9 +108,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.4.0
-      - name: Start digest-pinned PostgreSQL with a registry fallback
-        id: postgres
-        run: bash scripts/start-ci-postgres.sh
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.4.0
         with:
@@ -118,8 +116,28 @@ jobs:
           cache-dependency-path: |
             apps/api/package-lock.json
             apps/autotests/package-lock.json
+      - uses: ./.github/actions/bound-ubuntu-apt
       - name: Install PostgreSQL and media tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16 ffmpeg poppler-utils
+        timeout-minutes: 6
+        run: |
+          missing=0
+          for tool in /usr/lib/postgresql/16/bin/{createdb,pg_dump,pg_restore,psql} ffmpeg ffprobe pdfinfo pdftoppm; do
+            command -v "$tool" >/dev/null || missing=1
+          done
+          if (( missing )); then
+            sudo apt-get update -o APT::Update::Error-Mode=any
+            sudo apt-get install -y --no-install-recommends postgresql-client-16 ffmpeg poppler-utils
+          fi
+          echo '/usr/lib/postgresql/16/bin' >> "$GITHUB_PATH"
+      - name: Install browsers for real HTTP delivery
+        working-directory: apps/autotests
+        timeout-minutes: 8
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium firefox
+      - name: Start digest-pinned PostgreSQL with a registry fallback
+        id: postgres
+        run: bash scripts/start-ci-postgres.sh
       - name: Install API dependencies
         working-directory: apps/api
         run: npm ci
@@ -138,6 +156,8 @@ jobs:
           IDENTITY_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
           MEDIA_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/emocog_test
           MEDIA_TEST_ISOLATED: '1'
+          ALLOW_MEDIA_RESTORE_DRILL: 'YES'
+          RESTORE_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: npm run test:postgres
       - name: Start canonical API
         working-directory: apps/api
@@ -155,9 +175,7 @@ jobs:
         env:
           RUN_API_CONTRACT: '1'
           API_BASE: http://127.0.0.1:3000
-        run: |
-          npm ci
-          npm run test:api
+        run: npm run test:api
       - name: Verify complete participant delivery against a real API
         working-directory: apps/autotests
         env:
@@ -165,7 +183,6 @@ jobs:
         run: |
           PGPASSWORD=postgres createdb -h 127.0.0.1 -U postgres protocol_fixes_test
           (cd ../api && DATABASE_URL="$RESILIENCE_TEST_DATABASE_URL" npm run migrate:up)
-          npx playwright install --with-deps chromium firefox
           npx playwright test -c playwright.session-live.config.ts --project=chromium --project=firefox
       - name: Idempotent ingest load profile
         working-directory: apps/api
@@ -216,16 +233,20 @@ jobs:
       - name: Install browser test dependencies
         working-directory: apps/autotests
         run: npm ci
+      - uses: ./.github/actions/bound-ubuntu-apt
       - name: Install supported browsers
         working-directory: apps/autotests
+        timeout-minutes: 8
         run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Typecheck browser contracts
         working-directory: apps/autotests
         run: npm run typecheck
       - name: Provide a local audio output for native media tests
+        timeout-minutes: 4
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pulseaudio
+          if ! command -v pulseaudio >/dev/null || ! command -v pactl >/dev/null; then
+            sudo apt-get install -y --no-install-recommends pulseaudio
+          fi
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=wecog_ci
           pactl set-default-sink wecog_ci
@@ -265,10 +286,13 @@ jobs:
       - name: Install browser test dependencies
         working-directory: apps/autotests
         run: npm ci
+      - uses: ./.github/actions/bound-ubuntu-apt
       - name: Install Chromium and Firefox
         working-directory: apps/autotests
+        timeout-minutes: 8
         run: npx playwright install --with-deps chromium firefox
       - name: Install software OpenGL for the virtual display
+        timeout-minutes: 4
         run: sudo apt-get install --yes --no-install-recommends libgl1-mesa-dri libegl-mesa0 mesa-utils
       - name: Verify window and Worker WebGL2 in every engine
         working-directory: apps/autotests

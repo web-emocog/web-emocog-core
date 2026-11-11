@@ -76,9 +76,31 @@ describe('S3-01 release hardening', () => {
     assert.match(postgresStep, /IDENTITY_TEST_DATABASE_URL: [^\n]+\/emocog_test/);
     assert.match(postgresStep, /MEDIA_TEST_DATABASE_URL: [^\n]+\/emocog_test/);
     assert.match(postgresStep, /MEDIA_TEST_ISOLATED: '1'/);
+    assert.match(postgresStep, /ALLOW_MEDIA_RESTORE_DRILL: 'YES'/);
+    assert.match(postgresStep, /RESTORE_ADMIN_DATABASE_URL: postgres:\/\/[^\n]+@127\.0\.0\.1:5432\/postgres/);
     assert.match(postgresStep, /run: npm run test:postgres/);
     assert.equal(require('../package.json').scripts['test:postgres'],
       'node --test --test-concurrency=1 tests/*.integration.test.js');
+  });
+
+  it('bounds Ubuntu dependency installation without reducing the PostgreSQL release budget', () => {
+    const root = path.resolve(apiRoot, '../..');
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-gates.yml'), 'utf8');
+    const action = fs.readFileSync(path.join(root, '.github/actions/bound-ubuntu-apt/action.yml'), 'utf8');
+    const job = workflow.split('  postgres-release:')[1].split('  browser-regression:')[0];
+    const limit = Number(job.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
+    assert.ok(limit >= 30);
+    for (const step of ['Install PostgreSQL and media tools', 'Install browsers for real HTTP delivery',
+      'Install supported browsers', 'Install Chromium and Firefox']) {
+      const setup = workflow.split(`- name: ${step}\n`)[1]?.split('\n      - ')[0];
+      assert.ok(setup, step);
+      assert.match(setup, /timeout-minutes: [1-9]\b/);
+      assert.doesNotMatch(setup, /continue-on-error/);
+    }
+    assert.equal(workflow.match(/uses: \.\/\.github\/actions\/bound-ubuntu-apt/g)?.length, 3);
+    assert.match(action, /Acquire::http::Timeout/);
+    assert.match(action, /Acquire::https::Timeout/);
+    assert.ok(job.indexOf('Install browsers for real HTTP delivery') < job.indexOf('id: postgres'));
   });
 
   it('does not turn a cancelled superseded release run into a failed gate', () => {
@@ -103,6 +125,11 @@ describe('S3-01 release hardening', () => {
     assert.match(config, /throw new Error/);
     assert.match(config, /reuseExistingServer: false/);
     assert.match(config, /testMatch: 'resilience-live\.spec\.ts'/);
+    assert.match(config, /process\.env\.CORS_ORIGINS = origin/);
+    const http = fs.readFileSync(path.join(root, 'apps/autotests/playwright.api.config.ts'), 'utf8');
+    assert.match(http, /testMatch: 'api-contract\.spec\.ts'/);
+    assert.doesNotMatch(http, /webServer:|devices\[/);
+    assert.match(require('../../autotests/package.json').scripts['test:api'], /playwright\.api\.config\.ts/);
   });
 
   it('keeps Linux regressions required and runs the same WebKit checks only on demand', () => {
@@ -137,8 +164,20 @@ describe('S3-01 release hardening', () => {
     assert.match(workflow, /\[\[ "\$FRAME_PIPELINE_RESULT" == "success" \]\]/);
     assert.match(frameJob, /npx playwright test -c playwright\.metrics\.config\.ts --project=chromium --project=firefox/);
     assert.match(webkitWorkflow, /npx playwright test -c playwright\.metrics\.config\.ts --project=webkit/);
+    assert.match(webkitWorkflow, /npx playwright test -c playwright\.issue143\.config\.ts --project=webkit/);
+    const windowsWorkflow = fs.readFileSync(path.join(root, '.github/workflows/windows-runtime-smoke.yml'), 'utf8');
+    assert.match(windowsWorkflow, /npx playwright test -c playwright\.issue143\.config\.ts --project=chromium --grep "native classic scrollbar"/);
     const mainConfig = fs.readFileSync(path.join(root, 'apps/autotests/playwright.config.ts'), 'utf8');
     assert.match(mainConfig, /testIgnore:[\s\S]*?metric-corrections\.spec\.ts/);
+    assert.match(mainConfig, /outputDir: 'test-results\/browser-regression'/);
+    assert.match(mainConfig, /trace: 'retain-on-failure'/);
+    const workersConfig = fs.readFileSync(path.join(root, 'apps/autotests/playwright.workers.config.ts'), 'utf8');
+    assert.match(workersConfig, /outputDir: 'test-results\/frame-workers'/);
+    for (const name of ['staff-http', 'html-security', 'identity', 'block-media', 'old-audit-network', 'workers']) {
+      const config = fs.readFileSync(path.join(root, `apps/autotests/playwright.${name}.config.ts`), 'utf8');
+      assert.match(config, /scripts\/serve-static\.py/);
+      assert.match(config, /outputDir: 'test-results\//);
+    }
   });
 
   it('uses identical pinned BuildKit sources and keeps the fallback fail-closed', () => {
@@ -162,6 +201,7 @@ describe('S3-01 release hardening', () => {
     }
     const ci = fs.readFileSync(path.join(repositoryRoot, '.github/workflows/ci.yml'), 'utf8');
     assert.match(ci, /pull_request:\s+branches: \[develop, main\]/);
+    assert.match(ci, /for script in deploy\/production\/\*\.sh[\s\S]+?bash -n "\$script"/);
     const deploy = fs.readFileSync(path.join(repositoryRoot, '.github/workflows/deploy-production.yml'), 'utf8');
     assert.match(deploy, /push:\s+branches: \[main\]/);
   });

@@ -9,15 +9,19 @@ if (!['postgres:', 'postgresql:'].includes(url.protocol)
   || url.hostname !== '127.0.0.1' || url.pathname !== '/protocol_fixes_test') {
   throw new Error('Only the disposable local protocol_fixes_test database is supported');
 }
+const port = 4229;
+const origin = `http://127.0.0.1:${port}`;
+// The per-worker Express fixture must only allow this disposable UI origin.
+process.env.CORS_ORIGINS = origin;
 
 export default defineConfig({
   testDir: './tests', testMatch: 'resilience-live.spec.ts',
   workers: 1, retries: 0, timeout: 60_000, reporter: 'list',
   outputDir: 'test-results/session-live',
-  use: { baseURL: 'http://127.0.0.1:4173', headless: true, permissions: [],
+  use: { baseURL: origin, headless: true, permissions: [],
     trace: 'off', screenshot: 'off', video: 'off' },
-  webServer: { command: 'python3 -m http.server 4173 --bind 127.0.0.1 --directory ../../',
-    port: 4173, reuseExistingServer: false },
+  webServer: { command: `python3 scripts/serve-static.py ${port}`,
+    port, reuseExistingServer: false },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },

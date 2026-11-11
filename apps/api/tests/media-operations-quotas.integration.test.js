@@ -126,6 +126,39 @@ describe('Media admission, retained storage and durable operations', {
     for (const key of envNames) savedEnv[key] === undefined ? delete process.env[key] : process.env[key] = savedEnv[key];
   });
 
+  it('restores PostgreSQL rows and the bytes of a real uploaded stimulus; rejects changed bytes', {
+    skip: process.env.ALLOW_MEDIA_RESTORE_DRILL !== 'YES',
+    timeout: 120_000,
+  }, async () => {
+    const database = new URL(config.database.url);
+    const admin = new URL(process.env.RESTORE_ADMIN_DATABASE_URL);
+    assert.equal(database.hostname, '127.0.0.1', 'restore integration requires a local database');
+    assert.equal(admin.host, database.host, 'the restore database must be created on the same local PostgreSQL');
+    assert.equal(admin.pathname, '/postgres');
+    const { verifyMediaRestore } = require('../scripts/verify-media-restore');
+    const { collectMediaInventory } = require('../stimuli/media-inventory');
+    const f = await fixture(), d = descriptor(f);
+    await admit(f, d);
+    const response = await upload(f, d);
+    assert.equal(response.status, 201);
+    const inventory = await collectMediaInventory(pool, root);
+    const entry = inventory.files.find(item => item.sha256 === hash(pdf));
+    assert.ok(entry, 'the uploaded media bytes must be referenced by the database');
+    assert.equal(entry.bytes, pdf.length);
+    const result = await verifyMediaRestore();
+    assert.equal(result.databaseContentVerified, true);
+    assert.equal(result.mediaHashesVerified, true);
+    assert.equal(result.files, inventory.files.length);
+    assert.ok(result.tables > 0);
+
+    const changed = Buffer.from(pdf);
+    changed[changed.length - 1] ^= 1;
+    const filename = path.join(root, entry.file);
+    await fs.writeFile(filename, changed);
+    try { await assert.rejects(verifyMediaRestore(), /Referenced media integrity check failed/); }
+    finally { await fs.writeFile(filename, pdf); }
+  });
+
   it('rejects old/missing admission before multipart disk writes', async () => {
     const f = await fixture();
     const before = await fs.readdir(path.join(root,'stimuli'));

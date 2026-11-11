@@ -32,3 +32,5 @@ jobs:
           npm run test:fps -- --project=chromium --project=firefox
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:staff-http -- --project=chromium --project=firefox
+      - name: Verify calibration with a native classic scrollbar
+        run: npx playwright test -c playwright.issue143.config.ts --project=chromium --grep "native classic scrollbar"

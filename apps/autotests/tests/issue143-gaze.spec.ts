@@ -464,7 +464,12 @@ for (const mode of [...manualModes, 'nuisance-geometry-overlap', 'nuisance-geome
   if (cohort) await installGazeAccess(page);
   await page.goto(cohort ? '/apps/participant-web/tools/gaze-benchmark.html?protocol=' + program : manualUrl(mode));
   if (cohort) {
-    await page.locator('#consent').check();
+    await expect(page.locator('#status')).toContainText('Доступ подтверждён');
+    const consent = page.locator('#consent');
+    // These scenarios exercise the clock oracle, not pointer layout. Use the
+    // real keyboard action after bootstrap instead of racing a pointer click.
+    await consent.press('Space');
+    await expect(consent).toBeChecked();
     await expect(page.locator('#start')).toBeEnabled();
   }
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));

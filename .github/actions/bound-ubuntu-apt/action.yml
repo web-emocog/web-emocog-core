@@ -1,0 +1,12 @@
+name: Bound Ubuntu APT network waits
+description: Keep the runner's signed repositories and bound slow mirror requests, including Playwright's APT subprocesses.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        printf '%s\n' \
+          'Acquire::Retries "1";' \
+          'Acquire::http::Timeout "5";' \
+          'Acquire::https::Timeout "5";' \
+          | sudo tee /etc/apt/apt.conf.d/99-wecog-ci-network >/dev/null
