@@ -3115,7 +3115,9 @@ function ExperimentBuilderView(options = {}) {
 
   function hydrateBuilderStimulusPreviews(onHydrated) {
     if (typeof hydrateApiStimulusPreview !== 'function') return;
-    const pending = stimuliList.filter(stimulus => stimulus?.apiContentUrl && !stimulus?._previewObjectUrl);
+    const selected = new Set(experimentBlocks.flatMap(block => aoiStimulusIdsForBlock(block)));
+    const pending = stimuliList.filter(stimulus => selected.has(String(stimulus.id))
+      && stimulus?.apiContentUrl && !stimulus?._previewObjectUrl);
     if (!pending.length) return;
     Promise.allSettled(pending.map(stimulus => hydrateApiStimulusPreview(stimulus)))
       .then(results => {
@@ -5003,6 +5005,14 @@ function ExperimentBuilderView(options = {}) {
         if (e?.code === 'protocol_aoi_invalid') apiErr = trb(
           'Не удалось проверить зоны интереса. Откройте шаг «Зоны интереса / Цели», проверьте активные зоны и повторите публикацию. Аудиофайлам экранные AOI не нужны.',
           'Areas of interest could not be validated. Review active areas in Areas of Interest / Targets and publish again. Audio does not need spatial AOIs.');
+        if (e?.code === 'media_inventory_unmeasured') apiErr = trb(
+          'Не удалось проверить объём ранее загруженных файлов организации. Черновик сохранён. Сообщите поддержке название проекта и время ошибки; удалять или заново загружать стимулы не нужно.',
+          'The organization\'s previously uploaded files could not be measured. Your draft is saved. Contact support with the project name and error time; do not delete or re-upload stimuli.');
+        if (e?.status === 429) {
+          const seconds = Math.max(1, Math.ceil((Number(e.retryAfterMs) || 60000) / 1000));
+          apiErr = trb(`Слишком много запросов. Подождите ${seconds} с и повторите публикацию один раз. Черновик сохранён.`,
+            `Too many requests. Wait ${seconds} seconds and publish once more. Your draft is saved.`);
+        }
         const failedExperiments = JSON.parse(localStorage.getItem('emocog_my_experiments')) || [];
         const failedIndex = failedExperiments.findIndex(item => item.id === id);
         if (failedIndex >= 0) {

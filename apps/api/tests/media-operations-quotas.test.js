@@ -19,7 +19,7 @@ const descriptor = () => ({ kind: 'upload', project_id: 4, file: { name: 'x.pdf'
 
 test('storage policy has strict configurable defaults, without a test-mode bypass', () => {
   const policy = readStoragePolicy({ NODE_ENV: 'test' });
-  assert.equal(policy.organizationBytes, 1024*MiB);
+  assert.equal(policy.organizationBytes, 10*1024*MiB);
   assert.equal(policy.maxUserUploads, 2);
   assert.equal(policy.minFreeBytes, 1024*MiB);
   for (const value of ['0','-1','NaN','20bad','1.2','9007199254740992']) {
@@ -78,6 +78,45 @@ test('disk guard counts outstanding work reservations and fails closed if statfs
   await assertDiskSpace(client, root, 1, { minFreeBytes: 1 });
   await assert.rejects(assertDiskSpace(client, root, 0, { minFreeBytes: Number.MAX_SAFE_INTEGER }), { code: 'media_disk_low' });
   await assert.rejects(assertDiskSpace(client, path.join(root,'missing'), 0, { minFreeBytes: 1 }), { code: 'media_disk_unavailable' });
+});
+
+test('publication quota measures migrated objects before admission and still counts reservations and other organizations separately', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'media-publication-inventory-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'legacy-poster'), '123456');
+  let unknown = true;
+  const client = { query: async (sql, values) => {
+    if (sql.includes('AS retained_bytes')) {
+      assert.deepEqual(values, [7, null]);
+      return { rows: [{ retained_bytes: unknown ? 3 : 9, reserved_bytes: 2, unmeasured: unknown ? 1 : 0 }] };
+    }
+    if (sql.startsWith('SELECT content_path')) {
+      assert.deepEqual(values, [7]);
+      return { rows: [{ content_path: 'legacy-poster' }] };
+    }
+    assert.ok(sql.startsWith('UPDATE media_storage_objects'));
+    assert.deepEqual(values, [6, 7, 'legacy-poster']);
+    unknown = false;
+    return { rows: [] };
+  } };
+  assert.deepEqual(await assertQuota(client, 7, 1, { organizationBytes: 12 }, root),
+    { retained_bytes: 9, reserved_bytes: 2, unmeasured: 0 });
+  unknown = true;
+  await assert.rejects(assertQuota(client, 7, 2, { organizationBytes: 12 }, root), { code: 'media_quota_exceeded' });
+});
+
+test('publication cannot repair unknown inventory by ignoring missing files or exceeding the online batch bound', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'media-publication-invalid-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let rows = [{ content_path: 'missing' }];
+  const client = { query: async sql => {
+    if (sql.includes('AS retained_bytes')) return { rows: [{ retained_bytes: 0, reserved_bytes: 0, unmeasured: rows.length }] };
+    if (sql.startsWith('SELECT content_path')) return { rows };
+    assert.fail('No unknown object may be recorded as zero bytes');
+  } };
+  await assert.rejects(assertQuota(client, 7, 0, { organizationBytes: 100 }, root), { code: 'media_inventory_unmeasured' });
+  rows = Array.from({ length: 501 }, () => ({ content_path: 'missing' }));
+  await assert.rejects(assertQuota(client, 7, 0, { organizationBytes: 100 }, root), { code: 'media_inventory_unmeasured' });
 });
 
 test('legacy poster measurement rejects symlink escape instead of guessing zero bytes', async t => {
