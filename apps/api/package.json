@@ -24,7 +24,7 @@
     "test": "node --test tests/*.test.js tests/*.test.mjs",
     "test:postgres": "node --test --test-concurrency=1 tests/*.integration.test.js",
     "test:release": "node --test tests/server-lifecycle.test.js tests/bulk-insert.test.js tests/release-hardening.test.js",
-    "test:rt-python": "python3 ../../rt_component-/scripts/analyze_events_json.py < ../../rt_component-/tests/smoke_input.json",
+    "test:rt-python": "python3 -B ../../rt_component-/scripts/analyze_events_json.py < ../../rt_component-/tests/smoke_input.json && python3 -B -m unittest discover -s ../../rt_component-/tests -v",
     "test:reference:video": "node ../../scripts/reference-data/replay.mjs",
     "test:reference:signals": "node ../../scripts/reference-data/bidmc.mjs"
   },
