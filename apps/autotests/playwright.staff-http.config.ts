@@ -5,7 +5,7 @@ export default defineConfig({
   workers: 1, retries: 0, reporter: 'list', outputDir: 'test-results/staff-http',
   use: { baseURL: 'http://127.0.0.1:4194', headless: true,
     trace: 'off', screenshot: 'off', video: 'off', permissions: [] },
-  webServer: { command: (process.platform === 'win32' ? 'python' : 'python3') + ' -m http.server 4194 --bind 127.0.0.1 --directory ../../',
+  webServer: { command: (process.platform === 'win32' ? 'python' : 'python3') + ' scripts/serve-static.py 4194',
     port: 4194, reuseExistingServer: false },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

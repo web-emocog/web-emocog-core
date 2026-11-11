@@ -6,7 +6,8 @@ export default defineConfig({
   // These run with their own loopback servers in the required matrix job.
   testIgnore: ['**/vision-workers.spec.ts', '**/developer-native-models.spec.ts', '**/fps-diagnostics.spec.ts',
     '**/security-performance.spec.ts', '**/diagnostics-lifecycle.spec.ts', '**/issue139-face-visibility.spec.ts',
-    '**/staff-http.spec.ts', '**/html-data-boundaries.spec.ts', '**/metric-corrections.spec.ts', '**/old-audit-*.spec.ts'],
+    '**/staff-http.spec.ts', '**/html-data-boundaries.spec.ts', '**/metric-corrections.spec.ts', '**/old-audit-*.spec.ts',
+    '**/api-contract.spec.ts', '**/resilience-live.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -19,12 +20,12 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
     actionTimeout: 10_000,
     navigationTimeout: 30_000, // Увеличен таймаут для file://
-    trace: 'on',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
 
-  outputDir: 'test-results',
+  outputDir: 'test-results/browser-regression',
   webServer: {
     command: 'python3 scripts/serve-static.py 4173',
     port: 4173,
@@ -35,7 +36,7 @@ export default defineConfig({
   reporter: [
     ['html', { outputFolder: 'playwright-report' }],
     ['list'],
-    ['json', { outputFile: 'test-results/results.json' }],
+    ['json', { outputFile: 'test-results/browser-regression/results.json' }],
   ],
 
   projects: [

@@ -10,7 +10,7 @@ function readStoragePolicy(env = process.env) {
     return value;
   };
   return Object.freeze({
-    organizationBytes: positive('MEDIA_ORGANIZATION_QUOTA_BYTES', 1024 * MiB),
+    organizationBytes: positive('MEDIA_ORGANIZATION_QUOTA_BYTES', 10 * 1024 * MiB),
     maxUserUploads: positive('MEDIA_MAX_USER_UPLOADS', 2, 32),
     maxActiveUploads: positive('MEDIA_MAX_ACTIVE_UPLOADS', 8, 128),
     minFreeBytes: positive('MEDIA_MIN_FREE_BYTES', 1024 * MiB),

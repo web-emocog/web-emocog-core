@@ -46,9 +46,13 @@ test('instruction title updates immediately, and draft saves the complete builde
   expect(saved.definition.builderState.savedStep).toBe(2);
 });
 
-test('failed publication retains the old link and edits; retry updates the same protocol, without duplicate creation', async ({ page }) => {
+for (const failure of [
+  { name: 'temporary server error', message: '503 — invitation temporarily unavailable', status: 503, code: '', retryAfterMs: 0, expected: 'temporarily unavailable' },
+  { name: 'legacy inventory', message: '503 — Media inventory needs validation before uploading', status: 503, code: 'media_inventory_unmeasured', retryAfterMs: 0, expected: 'ранее загруженных файлов' },
+  { name: 'request throttling', message: '429 — Too many requests', status: 429, code: 'rate_limit_exceeded', retryAfterMs: 42000, expected: '42 с' },
+]) test(`failed publication retains the old link and edits; retry updates the same protocol, without duplicate creation: ${failure.name}`, async ({ page }) => {
   await page.goto(`${BASE}#/analytics/session-card`);
-  await page.evaluate(() => {
+  await page.evaluate(failure => {
     const w = window as any;
     localStorage.setItem('emocog_selected_project_id', '1');
     const old = { id: 'published-edit', apiProtocolId: 502, projectId: 1, title: 'Revised protocol', protocolId: 'published-edit', status: 'active',
@@ -61,14 +65,15 @@ test('failed publication retains the old link and edits; retry updates the same 
     w.apiPatch = async (_path: string, payload: any) => { w.__patches.push(payload); return { id: 502, project_id: 1, updated_at: new Date().toISOString() }; };
     w.apiPost = async (path: string) => {
       if (path === '/protocols') { w.__creates++; throw new Error('Unexpected duplicate'); }
-      if (++w.__invitations === 1) throw new Error('503 — invitation temporarily unavailable');
+      if (++w.__invitations === 1) throw Object.assign(new Error(failure.message), failure);
       return { code: 'new-published-code' };
     };
     document.getElementById('view')!.replaceChildren(w.ExperimentBuilderView({ experimentId: old.id, startStep: 8 }));
-  });
+  }, failure);
   await page.locator('#finishSaveProtocolBtn').click();
     await page.locator('[data-preflight-continue]').click();
   await expect(page.locator('#protocolSaveStatus')).toContainText(/прежн|previous/);
+  await expect(page.locator('#protocolSaveStatus')).toContainText(failure.expected);
   await expect(page.locator('#participantLinkInput')).toHaveValue(/previous-code/);
   await expect(page.locator('#copyParticipantLinkBtn')).toBeEnabled();
   const pending = await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_my_experiments')!)[0]);

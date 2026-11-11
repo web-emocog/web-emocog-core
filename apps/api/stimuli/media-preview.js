@@ -92,7 +92,7 @@ async function ensurePreview(queryable, version, uploadsRoot) {
   const task = (async () => {
     // Audio is still decoded and quota-locked, but does not create a poster.
     const policy = /^audio\//.test(version.mime_type) ? { ...readStoragePolicy(), previewBytes: 0 } : undefined;
-    await previewBudget(queryable, version, policy);
+    await previewBudget(queryable, version, policy, uploadsRoot);
     await assertDiskSpace(queryable, uploadsRoot);
     let preview;
     try { preview = await createPreview(version, uploadsRoot); }
@@ -111,8 +111,8 @@ async function persistPreview(queryable, version, uploadsRoot, preview) {
   trackPreviewArtifact(queryable, uploadsRoot, preview.path);
   try {
     if (preview.path) {
-      const organizationId = await previewBudget(queryable, version);
-      await accountObject(queryable, organizationId, preview.path, preview.bytes);
+      const organizationId = await previewBudget(queryable, version, undefined, uploadsRoot);
+      await accountObject(queryable, organizationId, preview.path, preview.bytes, undefined, uploadsRoot);
     }
     const result = await queryable.query(`UPDATE stimulus_versions
       SET preview_path = $1, preview_status = $2, media_info = $3::jsonb WHERE id = $4 RETURNING *`,

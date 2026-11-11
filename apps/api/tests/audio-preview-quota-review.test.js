@@ -51,6 +51,10 @@ async function fixture(t, options = {}) {
       return { rows: [{ retained_bytes: options.retainedBytes ?? policy.organizationBytes - 1,
         reserved_bytes: options.reservedBytes ?? 0, unmeasured: options.unmeasured ?? 0 }] };
     }
+    if (sql.startsWith('SELECT content_path')) {
+      assert.deepEqual(values, [13]);
+      return { rows: [{ content_path: 'missing-legacy-file.wav' }] };
+    }
     if (sql.includes('AS bytes FROM media_operations')) {
       calls.push('disk-reservations');
       return { rows: [{ bytes: 0 }] };
