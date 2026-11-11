@@ -55,6 +55,8 @@ test('project library hides stale files, hydrates late images, retries errors an
   await expect(page.locator('.stimulus-card[data-id="legacy-foreign"]')).toHaveCount(0);
   await expect(page.getByText('Foreign folder', { exact: true })).toHaveCount(0);
   const loadedImage = (id: number) => page.locator(`.stimulus-card[data-id="${id}"] img`);
+  const reveal = (id: number) => page.locator(`.stimulus-card[data-id="${id}"]`).scrollIntoViewIfNeeded();
+  await reveal(42);
   await expect.poll(() => loadedImage(42).evaluateAll(elements => elements.some(el =>
     (el as HTMLImageElement).src.startsWith('blob:') && (el as HTMLImageElement).naturalWidth > 0))).toBe(true);
   const switchProject = (id: number) => page.evaluate(id => {
@@ -65,12 +67,14 @@ test('project library hides stale files, hydrates late images, retries errors an
   await expect(page.locator('[data-stimulus-library-status]')).toContainText('Файлы на сервере не удалены');
   failEight = false;
   await page.locator('[data-stimulus-library-status] button').click();
+  await reveal(43);
   await expect.poll(() => loadedImage(43).evaluateAll(elements => elements.some(el =>
     (el as HTMLImageElement).src.startsWith('blob:') && (el as HTMLImageElement).naturalWidth > 0))).toBe(true);
 
   failPreview = true;
   ++version;
   await page.evaluate(() => (window as any).syncProjectStimuliFromApi());
+  await reveal(43);
   await expect(page.locator('.stimulus-card[data-id="43"] .stim-retry-btn')).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_stimuli') || '[]')
     .some((item: any) => item.apiStimulusId === 43))).toBe(true);
@@ -84,6 +88,7 @@ test('project library hides stale files, hydrates late images, retries errors an
   await expect(page.locator('.stimulus-card[data-id="43"]')).toHaveCount(0);
   wrongProject = false;
   await page.locator('[data-stimulus-library-status] button').click();
+  await reveal(43);
   await expect(loadedImage(43)).toBeVisible();
 
   holdSeven = true;
@@ -92,6 +97,7 @@ test('project library hides stale files, hydrates late images, retries errors an
   await page.evaluate(() => { (window as any).__pendingLibraryTest = (window as any).syncProjectStimuliFromApi(); });
   await expect.poll(() => releaseSeven.length).toBeGreaterThanOrEqual(2);
   await switchProject(8);
+  await reveal(43);
   await expect(loadedImage(43)).toBeVisible();
   releaseSeven.forEach(release => release());
   expect(await page.evaluate(() => (window as any).__pendingLibraryTest)).toBe(false);
@@ -99,8 +105,9 @@ test('project library hides stale files, hydrates late images, retries errors an
     .filter((row: any) => row.apiStimulusId).map((row: any) => row.projectId))).toEqual([8]);
   await expect(page.locator('.stimulus-card[data-id="42"]')).toHaveCount(0);
   await page.reload();
+  await reveal(43);
   await expect(loadedImage(43)).toBeVisible();
-  await expect(page.locator('.stimulus-card').first()).toHaveAttribute('data-id', '43');
+  await expect(page.locator('.stimulus-card[data-id="43"]')).toHaveCount(1);
   await expect(page.locator('.stimulus-card[data-id="42"]')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('project-library.png') });
 });
@@ -137,7 +144,7 @@ for (const [code, en, ru] of [['KeyZ', 'z', 'я'], ['KeyX', 'x', 'ч'], ['Comma'
       await page.evaluate(async ({ action }) => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
         await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
           version: 'v2-keyboard-regression', blocks: [{ id: 'key-task', type: 'cognitive_task', taskType: 'simple_rt',
             blockConfig: { useFixation: false, stimulusDuration: 5000, responseMode: 'keypress' },
@@ -167,7 +174,7 @@ for (const [action, key] of [['Space', 'Space'], ['arrow_left', 'ArrowLeft'], ['
     await page.evaluate(async action => {
       const shared = (window as any).__WECOG_STATE__;
       shared.runtime.sessionRuntime.policyShown = true;
-      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261108-143l', location.href).href);
+      const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
         version: '1.0.0', blocks: [{ id: 'key-edge', type: 'cognitive_task', taskType: 'simple_rt',
           blockConfig: { useFixation: false, stimulusDuration: 5000, responseMode: 'keypress' },

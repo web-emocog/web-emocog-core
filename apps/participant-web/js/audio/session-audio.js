@@ -633,12 +633,16 @@ export class SessionAudioCollector {
         this.stopRequested = true;
         this.stopPromise = (async () => {
             this.started = false;
-            this._flushPendingWindow();
-            this.pendingChunks = [];
-            this.pendingSamples = 0;
-            await this.analysisQueue;
-            this._disableWorker();
-            await this._teardownGraph();
+            // Stop capture before a slow analysis job or AudioContext.close().
+            const graphClosed = this._teardownGraph();
+            try {
+                this._flushPendingWindow();
+                await Promise.all([this.analysisQueue, graphClosed]);
+            } finally {
+                this.pendingChunks = [];
+                this.pendingSamples = 0;
+                this._disableWorker();
+            }
             if (this.everStarted && !this.workerStalled) this.status = 'completed';
             else if (this.status === 'requesting_permission') this.status = 'stopped';
             const summary = this._storeSummary(this.status);

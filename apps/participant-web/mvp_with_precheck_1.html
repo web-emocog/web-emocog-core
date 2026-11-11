@@ -3,28 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EmoCog — legacy entrypoint (deprecated)</title>
-    <!--
-      DEPRECATED: use mvp_with_precheck_1-updated.html (app-updated.js + tests-updated.js).
-      This page auto-redirects to the official entrypoint.
-    -->
+    <meta name="referrer" content="no-referrer">
+    <title>wecog</title>
 </head>
 <body>
-    <p style="font-family:sans-serif;padding:1rem;">
-        <strong>Legacy entrypoint deprecated.</strong>
-        Redirecting to
-        <a href="mvp_with_precheck_1-updated.html">mvp_with_precheck_1-updated.html</a>…
-    </p>
+    <p><a href="run_new.html">Открыть исследование / Open study</a></p>
     <script>
-        (function () {
-            var target = 'mvp_with_precheck_1-updated.html';
-            var q = window.location.search || '';
-            var h = window.location.hash || '';
-            try {
-                console.warn('[DEPRECATED] mvp_with_precheck_1.html — use mvp_with_precheck_1-updated.html');
-            } catch (_) {}
-            window.location.replace(target + q + h);
-        })();
+        window.location.replace('run_new.html' + window.location.search + window.location.hash);
     </script>
 </body>
 </html>

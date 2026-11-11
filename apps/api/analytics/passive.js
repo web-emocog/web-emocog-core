@@ -5,8 +5,19 @@ const MIN_REPORT_COVERAGE_MS = 1000;
 const incompatibleFilters = filters => ['stimulusIds', 'conditionIds', 'aoiIds'].some(key => filters[key]?.length);
 
 function reportInterval(row) {
-  const visible = channel => channel.observedMs >= MIN_REPORT_COVERAGE_MS ? channel : { ...channel, mean: null };
-  return { ...row, heartRate: visible(row.heartRate), respiration: visible(row.respiration) };
+  const visible = (channel, key) => validSignal(channel, key, row.endMs - row.startMs)
+    ? channel.observedMs >= MIN_REPORT_COVERAGE_MS ? channel : { ...channel, mean: null }
+    : { mean: null, count: 0, observedMs: 0 };
+  return { ...row, heartRate: visible(row.heartRate, 'heartRate'), respiration: visible(row.respiration, 'respiration') };
+}
+
+function validSignal(signal, key, duration) {
+  const [min, max] = key === 'heartRate' ? [45, 180] : [6, 24];
+  return signal && Number.isSafeInteger(signal.count) && signal.count >= 0
+    && Number.isFinite(signal.observedMs) && signal.observedMs >= 0
+    && Number.isFinite(duration) && duration >= signal.observedMs
+    && (signal.count === 0 ? signal.mean === null && signal.observedMs === 0
+      : Number.isFinite(signal.mean) && signal.mean >= min && signal.mean <= max);
 }
 
 function intervalPayload(row) {
@@ -19,27 +30,30 @@ function intervalData(row, query) {
   if (!data) return null;
   const filters = query.filters || {};
   if (incompatibleFilters(filters)) return null;
-  if (!filters.blockIds?.length) return { ...data, minutes: data.minutes.map(reportInterval), blocks: data.blocks.map(reportInterval) };
+  const present = intervals => intervals.filter(interval => interval && typeof interval === 'object');
+  if (!filters.blockIds?.length) return { ...data, minutes: present(data.minutes).map(reportInterval), blocks: present(data.blocks).map(reportInterval) };
   const blockIds = new Set(filters.blockIds);
-  return { ...data, minutes: [], blocks: data.blocks.filter(block => blockIds.has(block.blockId)).map(reportInterval) };
+  return { ...data, minutes: [], blocks: present(data.blocks).filter(block => blockIds.has(block.blockId)).map(reportInterval) };
 }
 
 function blockMeasurement(row, query, channel) {
   const rows = intervalPayload(row)?.blocks;
   const blockIds = new Set(query.filters.blockIds);
   let n = 0, observedMs = 0, sum = 0;
+  const methods = new Set();
   for (const block of rows || []) {
-    if (block.status !== 'accepted' || !blockIds.has(block.blockId)) continue;
+    if (!block || block.status !== 'accepted' || !blockIds.has(block.blockId)) continue;
     const signal = block[channel];
-    if (signal.observedMs < MIN_REPORT_COVERAGE_MS || !Number.isFinite(signal.mean)) continue;
+    if (!validSignal(signal, channel, block.endMs - block.startMs) || signal.observedMs < MIN_REPORT_COVERAGE_MS) continue;
     n += signal.count;
     observedMs += signal.observedMs;
     sum += signal.mean * signal.count;
+    if (signal.count > 0) methods.add(signal.methodVersion || 'legacy_summary');
   }
   const value = n ? sum / n : null;
   return { value, n, observedMs, status: value === null ? 'no_data' : 'computed',
     reason: value !== null ? null : rows ? 'block_physiology_missing' : 'session_summary_not_interval',
-    scope: 'accepted_blocks', methodVersion: 'physiology_intervals.v1' };
+    scope: 'accepted_blocks', methodVersion: methods.size > 1 ? 'mixed_methods' : [...methods][0] || 'legacy_summary' };
 }
 
 function intervalExportRows(data, metricIds, context) {
@@ -50,7 +64,7 @@ function intervalExportRows(data, metricIds, context) {
     const definition = definitions.find(item => item.id === metricId);
     for (const [kind, intervals] of [['minute', data.minutes], ['block', data.blocks]]) {
       for (const interval of intervals) {
-        const { mean, count, observedMs } = interval[CHANNELS[metricId]];
+        const { mean, count, observedMs, methodVersion } = interval[CHANNELS[metricId]];
         const duration = interval.endMs - interval.startMs;
         const hasData = count > 0 && Number.isFinite(mean);
         rows.push({ ...context, metricId, value: hasData ? mean : null, unit: definition.unit,
@@ -59,7 +73,7 @@ function intervalExportRows(data, metricIds, context) {
           sourceKind: 'physiology_' + kind, intervalStartMs: interval.startMs, intervalEndMs: interval.endMs,
           coveragePct: duration > 0 ? observedMs / duration * 100 : 0,
           blockId: interval.blockId, attempt: interval.attempt, attemptStatus: interval.status,
-          algorithm: { id: 'physiology-intervals', version: data.schemaVersion, parametersHash: null } });
+          algorithm: { id: 'physiology-intervals', version: methodVersion || 'legacy_summary', parametersHash: null } });
       }
     }
   }
@@ -84,7 +98,8 @@ function passiveMetric(metricId, row, query) {
     scope: { sessionId: row.id, blockId: blockSelected && !blocked && filters.blockIds.length === 1 ? filters.blockIds[0] : null,
       trialId: null, presentationId: null, stimulusId: null, aoiId: null },
     qc: { channel: definition.channel, status: 'not_computed', validFraction: null, signalConfidence: null,
-      reasons: [value == null ? result.reason : 'summary_not_independent_validation'],
+      reasons: [value == null ? result.reason : 'summary_not_independent_validation',
+        ...(metricId === 'physiology.respiration_mean' ? ['respiration_lighting_confound_unchecked'] : [])],
       ruleVersion: 'passive-summary-qc.v1' },
     algorithm: { id: `passive-${result.scope}`, version: result.methodVersion, parametersHash: null } };
 }

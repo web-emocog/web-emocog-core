@@ -4,6 +4,22 @@ const { normalizeButtonId, eventsToRtJsonl } = require('../rt/event_adapter');
 const { computeBlockRtFeatures } = require('../rt/compute');
 
 describe('RT web→analyzer key mapping', () => {
+  it('never scores a skipped or interrupted media presentation, or borrows its events', () => {
+    const rows = [
+      { trialId: 'missing-1', presentationId: 'load-failed', skippedMedia: true, qualityValid: false },
+      { trialId: 'truncated-2', presentationId: 'decode-failed', skippedMedia: true, qualityValid: false },
+      { trialId: 'healthy-3', presentationId: 'healthy', rt: 351, response: 'Space' },
+    ];
+    const result = eventsToRtJsonl([
+      { type: 'stimulus_on', presentationId: 'decode-failed', tRelMs: 2000 },
+      { type: 'stimulus_on', presentationId: 'healthy', tRelMs: 5000 },
+      { type: 'response', presentationId: 'decode-failed', rtMs: 200, key: 'KeyX' },
+    ], rows, {});
+    assert.deepEqual(result.events.map(event => [event.event_type, event.trial_id, event.t_mono]), [
+      ['stimulus_on', 3, 5], ['keypress', 3, 5.351],
+    ]);
+    assert.deepEqual(eventsToRtJsonl([], rows.slice(0, 2), {}).events, []);
+  });
   it('preserves the first exact response index and positional fallback after indexing', () => {
     const { events } = eventsToRtJsonl([
       { type: 'response', blockId: 'b1', trialIndex: 1, rtMs: 501, key: 'KeyD' },

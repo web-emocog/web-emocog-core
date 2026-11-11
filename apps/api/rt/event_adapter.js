@@ -22,9 +22,11 @@ function normalizeButtonId(key) {
 
 function parseTrialIndex(trialId, fallback) {
   if (trialId == null) return fallback;
-  const m = String(trialId).match(/(\d+)\s*$/);
-  if (m) return parseInt(m[1], 10);
-  const n = parseInt(String(trialId), 10);
+  const text = String(trialId).trimEnd();
+  let start = text.length;
+  while (start && text.charCodeAt(start - 1) >= 48 && text.charCodeAt(start - 1) <= 57) start--;
+  if (start < text.length) return parseInt(text.slice(start), 10);
+  const n = parseInt(text, 10);
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -52,6 +54,10 @@ function eventsToRtJsonl(sessionEvents, cognitiveResults, blockCtx) {
 
   const stimEvents = events.filter((e) => e && e.type === 'stimulus_on' && (blockId == null || String(e.blockId) === String(blockId)));
   const responseEvents = events.filter((e) => e && e.type === 'response' && (blockId == null || String(e.blockId) === String(blockId)));
+  const hasMediaFailures = rows.some(row => row?.skippedMedia === true);
+  const byPresentation = list => new Map(list.filter(item => item.presentationId != null).map(item => [item.presentationId, item]));
+  const stimByPresentation = hasMediaFailures ? byPresentation(stimEvents) : null;
+  const responseByPresentation = hasMediaFailures ? byPresentation(responseEvents) : null;
   const responseByIndex = new Map();
   for (const response of responseEvents) {
     // Match the original Array.find semantics: first exact numeric index wins.
@@ -69,11 +75,13 @@ function eventsToRtJsonl(sessionEvents, cognitiveResults, blockCtx) {
   const out = [];
   let trialNum = 0;
 
-  const maxLen = Math.max(rows.length, stimEvents.length);
+  const maxLen = hasMediaFailures ? rows.length : Math.max(rows.length, stimEvents.length);
   for (let i = 0; i < maxLen; i++) {
     const row = rows[i] || null;
-    const stim = stimByIndex.get(i) || stimEvents[i] || null;
-    const resp = responseByIndex.get(i) || responseEvents[i] || null;
+    if (row?.skippedMedia === true) continue;
+    // Missing media can leave a hole before onset. Never borrow another trial's events.
+    const stim = hasMediaFailures ? stimByPresentation.get(row?.presentationId) : stimByIndex.get(i) || stimEvents[i] || null;
+    const resp = hasMediaFailures ? responseByPresentation.get(row?.presentationId) : responseByIndex.get(i) || responseEvents[i] || null;
 
     trialNum += 1;
     const tid = parseTrialIndex(row?.trialId ?? stim?.trialId, trialNum);
@@ -121,4 +129,4 @@ function eventsToRtJsonl(sessionEvents, cognitiveResults, blockCtx) {
   return { events: out, analyzerTask };
 }
 
-module.exports = { eventsToRtJsonl, normalizeButtonId, conditionToIsGo };
+module.exports = { eventsToRtJsonl, normalizeButtonId, conditionToIsGo, parseTrialIndex };

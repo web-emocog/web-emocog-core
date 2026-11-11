@@ -12,11 +12,13 @@
  * @license Apache-2.0
  */
 import { LANDMARKS, MIN_LANDMARKS, DEFAULTS, FEATURE_METHOD, EXPERIMENTAL_FEATURE_METHOD, CALIBRATION_SAMPLING } from './constants.js?v=20261106-143';
-import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261108-143l';
+import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261110-integration1';
 import { ridgeRegression, ridgeRegressionDual, dotProduct } from './ridge.js?v=20261107-143';
 import { EYE_PATCH_LENGTH, EYE_PATCH_METHOD, EYE_PATCH_SPEC, EYE_PATCH_CORE_LENGTH, EYE_PATCH_CORE_METHOD } from './eye-patch-features.mjs?v=20261107-143';
 import { EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD, EYE_GRADIENT_LENGTH, EYE_GRADIENT_SPEC } from './eye-gradient-features.mjs?v=20261107-143g';
-import { EYE_TOPHAT_METHOD, EYE_TOPHAT_LENGTH, EYE_TOPHAT_SPEC } from './eye-tophat-features.mjs?v=20261108-143l';
+import { EYE_TOPHAT_METHOD, EYE_TOPHAT_LENGTH, EYE_TOPHAT_SPEC } from './eye-tophat-features.mjs?v=20261110-integration1';
+import { participantDebugErrorOnce as dbgErrorOnce, notifyParticipantCallback,
+    resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import {
     AdaptiveGazeFilter,
     fitDistribution,
@@ -234,23 +236,30 @@ export default class GazeTracker {
             const config = options.experimentalEyePatch;
             if (!config || options.experimentalModel !== undefined || options.experimentalGeometry !== undefined
                 || typeof config.readFeatures !== 'function'
-                || !['full', 'core', 'gradient', 'gradient_all', 'tophat'].includes(config.region ?? 'full')
+                || !['full', 'core', 'gradient', 'gradient_all', 'tophat', 'masked', 'rows', 'nuisance'].includes(config.region ?? 'full')
                 || ![config.frameWidth, config.frameHeight].every(v => Number.isSafeInteger(v) && v > 0 && v <= 16384)) {
                 throw new RangeError('Invalid explicit experimental eye-patch model');
             }
-            const region = config.region ?? 'full', gradient = region.startsWith('gradient'), tophat = region === 'tophat';
-            const count = tophat ? EYE_TOPHAT_LENGTH : gradient ? EYE_GRADIENT_LENGTH : region === 'core' ? EYE_PATCH_CORE_LENGTH : EYE_PATCH_LENGTH;
-            this._eyePatch = Object.freeze({ geometry: gradient ? 'eye_gradient' : 'eye_patch', basis: gradient ? 'center_linear' : 'appearance_linear', region, featureCount: count,
+            const region = config.region ?? 'full', gradient = region.startsWith('gradient'), tophat = region === 'tophat', masked = region === 'masked';
+            const centers = gradient || masked;
+            const inputCount = tophat ? EYE_TOPHAT_LENGTH : centers ? EYE_GRADIENT_LENGTH : region === 'core' ? EYE_PATCH_CORE_LENGTH : EYE_PATCH_LENGTH;
+            const count = masked ? 2 : inputCount;
+            this._eyePatch = Object.freeze({ geometry: masked ? 'eye_masked' : gradient ? 'eye_gradient' : 'eye_patch', basis: centers ? 'center_linear' : 'appearance_linear', region, featureCount: count,
                 frameWidth: config.frameWidth, frameHeight: config.frameHeight, maxTrainingRows: 50,
-                crop: tophat ? EYE_TOPHAT_SPEC : gradient ? Object.freeze({ ...EYE_GRADIENT_SPEC, support: region === 'gradient_all' ? 'all' : 'lateral' }) : EYE_PATCH_SPEC });
-            this._featureMethod = tophat ? EYE_TOPHAT_METHOD : region === 'gradient' ? EYE_GRADIENT_METHOD : region === 'gradient_all' ? EYE_GRADIENT_ALL_METHOD
+                crop: masked ? Object.freeze({ columns: 16, rows: 10, widthInCanthalWidths: .8, heightInCanthalWidths: .5,
+                    support: 'approximate_lid_mask', fit: 'row_demeaned_pooled_template' })
+                    : tophat ? EYE_TOPHAT_SPEC : gradient ? Object.freeze({ ...EYE_GRADIENT_SPEC, support: region === 'gradient_all' ? 'all' : 'lateral' }) : EYE_PATCH_SPEC });
+            this._featureMethod = region === 'rows' ? 'eye_patch_rows.experimental.v1'
+                : region === 'nuisance' ? 'eye_patch_paired_nuisance.experimental.v1'
+                : masked ? 'eye_masked_center.experimental.v1' : tophat ? EYE_TOPHAT_METHOD : region === 'gradient' ? EYE_GRADIENT_METHOD : region === 'gradient_all' ? EYE_GRADIENT_ALL_METHOD
                 : region === 'core' ? EYE_PATCH_CORE_METHOD : EYE_PATCH_METHOD;
-            this._featureFloors = new Array(count).fill(gradient ? .03 : .05);
+            this._featureFloors = new Array(count).fill(centers ? .03 : .05);
             const readFeatures = config.readFeatures;
             this._extractGroups = landmarks => {
                 const baseline = extractFeatureGroups(landmarks), values = readFeatures(landmarks);
-                if (!baseline || !Array.isArray(values) || values.length !== count || !values.every(Number.isFinite)) return null;
-                return { ...baseline, iris: [...values, 1], gateIris: baseline.iris };
+                if (!baseline || !Array.isArray(values) || values.length !== inputCount || !values.every(Number.isFinite)) return null;
+                const iris = masked ? [(values[0] + values[2]) / 2, (values[1] + values[3]) / 2, 1] : [...values, 1];
+                return { ...baseline, iris, gateIris: baseline.iris };
             };
         }
         this._calibrationFrames = { attempted: 0, accepted: 0, rejected: 0 };
@@ -450,21 +459,22 @@ export default class GazeTracker {
             // Low-resolution eye appearance is sensitive too. Release its
             // training rows before a callback can throw or retain this tracker.
             if (this._eyePatch) this._calibrationData = [];
-            this.onCalibrationComplete?.({
+            notifyParticipantCallback(this.onCalibrationComplete, this, [{
                 points: count,
                 timestamp: Date.now(),
                 trainMAE,
                 ridgeLambda: this._ridgeLambda,
                 targetCvRmsPx: this._stats.calibrationTargetCvRmsPx,
                 targetCvTargetCount: lambdaSelection.targetCount,
-                predictor: this._eyePatch?.geometry === 'eye_gradient' ? 'eye_gradient_ridge' : this._eyePatch ? 'eye_patch_ridge' : 'iris_only_ridge',
+                predictor: this._eyePatch?.geometry === 'eye_masked' ? 'eye_masked_ridge'
+                    : this._eyePatch?.geometry === 'eye_gradient' ? 'eye_gradient_ridge' : this._eyePatch ? 'eye_patch_ridge' : 'iris_only_ridge',
                 featureMethod: this._featureMethod,
                 calibrationSampling: CALIBRATION_SAMPLING,
                 targetBlind: true
-            });
+            }], 'gaze', 'calibration:callback-failed');
             return true;
         } catch (error) {
-            console.error('[GazeTracker] Calibration failed:', error);
+            dbgErrorOnce(this, 'gaze', 'calibration:failed');
             return false;
         }
     }
@@ -658,7 +668,8 @@ export default class GazeTracker {
             isTracking: this._isTracking,
             ...this._stats,
             avgFeatureExtractionMs: Math.round(this._stats.avgFeatureExtractionMs * 100) / 100,
-            predictor: this._eyePatch?.geometry === 'eye_gradient' ? 'eye_gradient_ridge' : this._eyePatch ? 'eye_patch_ridge' : 'iris_only_ridge',
+            predictor: this._eyePatch?.geometry === 'eye_masked' ? 'eye_masked_ridge'
+                : this._eyePatch?.geometry === 'eye_gradient' ? 'eye_gradient_ridge' : this._eyePatch ? 'eye_patch_ridge' : 'iris_only_ridge',
             featureMethod: this._featureMethod,
             calibrationSampling: CALIBRATION_SAMPLING,
             calibrationFrames: { ...this._calibrationFrames },
@@ -694,6 +705,7 @@ export default class GazeTracker {
     }
 
     reset() {
+        resetParticipantDiagnostics(this);
         this._isCalibrated = false;
         this.clearCalibrationData();
         this._modelX = null;

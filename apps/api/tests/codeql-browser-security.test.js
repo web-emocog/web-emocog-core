@@ -49,15 +49,15 @@ test('legacy imported protocol, stimulus and filename sinks are escaped without 
 test('offline design prototype routes never call inherited Object methods', () => {
   const source = read('docs/design/sprint-1/prototype/app.js');
   const render = source.match(/function render\(\) \{[\s\S]*?\n\}/)[0];
-  for (const route of ['__proto__', 'constructor', 'toString', '/participant/invite', '/known']) {
+  for (const route of ['__proto__', 'constructor', 'toString', '/participant/invite', '/login', '/known']) {
     const app = {};
     const context = { app, normalizeRoute: () => route,
-      participantViews: { '/participant/invite': () => 'participant' },
+      participantViews: { '/participant/invite': () => 'participant' }, loginView: () => 'login',
       views: { '/overview': () => 'overview', '/known': () => 'known' }, routeMeta: {},
       shell: (html, key) => `${html}:${key}`, requestAnimationFrame: () => {},
       document: { body: { classList: { remove() {} } } } };
     vm.runInNewContext(`${render}; render()`, context);
-    assert.equal(app.innerHTML, route === '/participant/invite' ? 'participant'
+    assert.equal(app.innerHTML, route === '/participant/invite' ? 'participant' : route === '/login' ? 'login'
       : route === '/known' ? 'known:/known' : 'overview:/overview');
   }
 });

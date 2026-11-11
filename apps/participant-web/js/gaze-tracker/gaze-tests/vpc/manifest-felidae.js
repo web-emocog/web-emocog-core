@@ -1,3 +1,5 @@
+import { FELIDAE_ASSETS } from './asset-integrity.mjs';
+
 function buildLocalEntry({
     species,
     fileName,
@@ -12,6 +14,7 @@ function buildLocalEntry({
         fileName,
         stimulusId: `${species}:${assetName}`,
         url: `assets/vpc/felidae/${assetName}`,
+        ...FELIDAE_ASSETS[assetName],
         sourcePage,
         author,
         license,

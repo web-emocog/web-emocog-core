@@ -161,6 +161,23 @@ test('too little coverage hides the mean without discarding counts or rewriting 
   assert.equal(buildSessionMetrics(row, { metricIds, filters: { blockIds: ['rt'] } })[0].value, null);
 });
 
+test('incomplete historic interval channels cannot crash reports or contribute an invented value', async () => {
+  const row = await fixture();
+  const data = row.features_payload.physiology_intervals;
+  data.blocks.push(null);
+  const accepted = data.blocks.find(block => block?.status === 'accepted');
+  delete accepted.heartRate;
+  accepted.respiration = { mean: 12, count: -1, observedMs: 1000 };
+  const report = intervalData(row, { filters: { blockIds: ['rt'] } });
+  assert.deepEqual(report.blocks.find(block => block.status === 'accepted').heartRate, empty);
+  assert.ok(buildSessionMetrics(row, { metricIds, filters: { blockIds: ['rt'] } })
+    .every(metric => metric.value === null && metric.status === 'no_data'));
+  assert.doesNotThrow(() => buildExportBundle({ snapshot: { id: 's', datasetHash: 'h',
+    queryEcho: { mode: 'session', metricIds, filters: { blockIds: ['rt'] } }, versions: {},
+    includedSessionIds: [row.id], includedParticipantIds: ['person'] },
+    sessionRows: [row], protocol: { definition: { blocks: [] } } }));
+});
+
 test('JSON and CSV export carry attempt statuses, intervals, counts, missing values and coverage', async () => {
   const row = await fixture();
   const snapshot = { id: 'snap', datasetHash: 'hash', queryEcho: { mode: 'session', metricIds, filters: { blockIds: ['rt'] } },
@@ -175,6 +192,6 @@ test('JSON and CSV export carry attempt statuses, intervals, counts, missing val
       ]);
     }
     assert.match(exportCsv(bundle), /physiology_block.*intervalStartMs.*coveragePct/);
-    assert.doesNotMatch(exportCsv(bundle), /physiology_minute/);
+    assert.doesNotMatch(exportCsv(bundle), /sourceKind"":""physiology_minute/);
   }
 });

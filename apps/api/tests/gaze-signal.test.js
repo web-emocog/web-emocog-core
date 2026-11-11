@@ -344,3 +344,37 @@ describe('gaze signal semantics', () => {
     assert.equal(metrics.postCalibration.meta.scopeFilterApplied, true);
   });
 });
+
+describe('gaze calibration observer isolation', () => {
+  for (const mode of ['throw', 'reject']) {
+    it(`${mode}: a notification failure preserves fitted coefficients, readiness and predictions`, async t => {
+      const { default: GazeTracker } = await importGazeModule('GazeTracker.js');
+      const previous = globalThis.WECOG_DEBUG;
+      t.after(() => { if (previous === undefined) delete globalThis.WECOG_DEBUG; else globalThis.WECOG_DEBUG = previous; });
+      const events = [];
+      globalThis.WECOG_DEBUG = { enabled: true, error: (...args) => events.push(args) };
+      let notifications = 0;
+      const baseline = new GazeTracker({ screenWidth: 1000, screenHeight: 500 });
+      const tracker = new GazeTracker({ screenWidth: 1000, screenHeight: 500, onCalibrationComplete(value) {
+        assert.equal(this, tracker); assert.equal(value.points, 16); assert.equal(value.targetBlind, true);
+        notifications++;
+        if (mode === 'throw') throw new Error('SYNTHETIC-PRIVATE-CALIBRATION');
+        return Promise.reject(new Error('SYNTHETIC-PRIVATE-CALIBRATION'));
+      } });
+      for (const irisY of [-.75, -.25, .25, .75]) for (const irisX of [-.75, -.25, .25, .75]) {
+        for (const candidate of [baseline, tracker]) assert.equal(candidate.addCalibrationPoint(
+          makeLandmarks(irisX, irisY), 500 + irisX * 400, 250 + irisY * 180), true);
+      }
+      assert.equal(baseline.calibrate(), true); assert.equal(tracker.calibrate(), true);
+      assert.equal(tracker.isCalibrated(), true); assert.equal(notifications, 1);
+      for (const field of ['_modelX', '_modelY', '_featureMean', '_featureStd']) assert.deepEqual(tracker[field], baseline[field]);
+      const expected = baseline.predict(makeLandmarks(.25, -.25), { timestamp: 100 });
+      const actual = tracker.predict(makeLandmarks(.25, -.25), { timestamp: 100 });
+      for (const field of ['x', 'y', 'rawX', 'rawY', 'correctedX', 'correctedY', 'displayX', 'displayY', 'valid', 'confidence']) {
+        assert.deepEqual(actual[field], expected[field], field);
+      }
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(events, [['gaze', 'calibration:callback-failed', undefined]]);
+    });
+  }
+});

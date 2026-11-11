@@ -280,10 +280,11 @@ test.describe('wecog design system', () => {
       if (url.pathname.endsWith('/projects')) return route.fulfill({ status: 200, headers, json: [{ id: 7, name: 'Project' }] });
       if (url.pathname.endsWith('/stimuli/folders')) return route.fulfill({ status: 200, headers, json: [] });
       if (url.pathname.endsWith('/stimuli') && route.request().method() === 'GET') return route.fulfill({ status: 200, headers, json: rows });
+      if (url.pathname.endsWith('/stimuli/operations')) return route.fulfill({ status: 201, headers, json: { state: 'reserved' } });
       if (url.pathname.endsWith('/stimuli/upload')) {
         const id = failServerRead ? 44 : 43;
         const row = { id, project_id: 7, folder_id: null, name: 'new.png',
-          mime_type: 'image/png', size_bytes: image.length, metadata: {},
+          mime_type: 'image/png', size_bytes: image.length, metadata: {}, current_version_id: 'version-' + id,
           content_url: `/stimuli/${id}/content`, content_available: true };
         rows.push(row);
         return route.fulfill({ status: 201, headers, json: row });

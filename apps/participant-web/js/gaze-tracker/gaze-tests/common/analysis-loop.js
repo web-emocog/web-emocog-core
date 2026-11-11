@@ -1,7 +1,7 @@
 import { state } from '../../../web-page/state.js?v=20261025-1';
 import { extractEyeSignalSample } from '../../../web-page/eye-signal.js';
-import { ANALYSIS_LOOP } from '../constants.js';
-import { isContinuousSessionAnalysisRunning } from '../../../session-runtime/index.js?v=20261108-143l';
+import { ANALYSIS_LOOP } from '../constants.js?v=20261106-metrics1';
+import { isContinuousSessionAnalysisRunning } from '../../../session-runtime/index.js?v=20261110-integration1';
 
 function getVideoTime(videoElement) {
     if (!videoElement || videoElement.readyState < 2) return -1;
@@ -27,7 +27,7 @@ function clearLoopTimeout() {
 }
 
 function canRun(run) {
-    if (run !== localState || !run.active) return false;
+    if (state.runtime.participantPageExited || run !== localState || !run.active) return false;
     if (isContinuousSessionAnalysisRunning()) {
         stopGazeTestsAnalysisLoop();
         return false;
@@ -123,6 +123,7 @@ async function runTick(run) {
 }
 
 export function startGazeTestsAnalysisLoop() {
+    if (state.runtime.participantPageExited) return false;
     if (isContinuousSessionAnalysisRunning()) return true;
     if (localState.active) return true;
 

@@ -16,9 +16,11 @@ export function profileFaceStages(source, faceInput = 'bitmap', faceOutputs = 'f
     })()`);
   }
   if (faceOutputs === 'used') {
-    const original = 'outputFaceBlendshapes: true,';
+    const original = source.includes('outputFaceBlendshapes: true,')
+      ? 'outputFaceBlendshapes: true,' : 'runningMode: this.runningMode,';
     if (source.split(original).length !== 2) throw new Error('reference_profile_source_changed');
-    source = source.replace(original, 'outputFaceBlendshapes: false,');
+    source = source.replace(original, original.startsWith('runningMode')
+      ? original + '\n                outputFaceBlendshapes: false,' : 'outputFaceBlendshapes: false,');
   }
   const edits = [
     ['const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);',

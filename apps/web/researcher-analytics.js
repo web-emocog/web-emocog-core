@@ -129,6 +129,16 @@ function safeNum(v, digits, fallback){
 }
 function safeStat(v){ return (v === null || v === undefined || !isFinite(Number(v))) ? '—' : v; }
 
+function legacyMetricNumber(value){
+  if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function legacyMetricText(metric, value){
+  const number = legacyMetricNumber(value);
+  return number === null ? '—' : metric.format(number);
+}
+
 function renderSessionCardHeader(){
   const data = SESSION_DATA;
   const qcEl = document.getElementById("qcMain");
@@ -203,10 +213,10 @@ function renderSessionMetrics(selectedKey){
     section.className = "section";
     section.innerHTML = `
       <div class="section-head">
-        <div class="t">${gi.title}</div>
-        <div class="s">${gi.sub}</div>
+        <div class="t">${escapeUiHtml(gi.title)}</div>
+        <div class="s">${escapeUiHtml(gi.sub)}</div>
       </div>
-      <div class="section-grid" data-group="${g.key}"></div>
+      <div class="section-grid" data-group="${escapeUiHtml(g.key)}"></div>
     `;
     grid.appendChild(section);
     sectionEls[g.key] = section.querySelector(".section-grid");
@@ -214,10 +224,12 @@ function renderSessionMetrics(selectedKey){
   
   METRICS.forEach(m => {
     const val = SESSION_DATA.segments[seg][m.key];
-    const g = SESSION_DATA.group[seg][m.key];
-    const z = computeZ(val, g.mean, g.sd);
-    const p = g.p;
-    const barWidth = Math.max(2, Math.min(98, p));
+    const g = SESSION_DATA.group[seg][m.key] || {};
+    const number = legacyMetricNumber(val);
+    const mean = legacyMetricNumber(g.mean), sd = legacyMetricNumber(g.sd);
+    const z = number === null || mean === null || sd === null ? null : computeZ(number, mean, sd);
+    const p = legacyMetricNumber(g.p);
+    const barWidth = p === null ? 0 : Math.max(2, Math.min(98, p));
     
     const card = document.createElement("div");
     card.className = "dash-metric" + (m.key === selectedKey ? " active" : "");
@@ -225,15 +237,15 @@ function renderSessionMetrics(selectedKey){
     
     const mode = document.getElementById("modeSelect").value;
     const compareText = (mode === "zscore")
-      ? `z = <b>${z.toFixed(2)}</b>`
-      : `p = <b>${p}</b>`;
+      ? `z = <b>${safeNum(z, 2)}</b>`
+      : `p = <b>${p === null ? '—' : p}</b>`;
     
     const mi = tM(m.key);
     card.innerHTML = `
-      <div class="name"><span class="mono">${m.title}</span> (${mi.ru || m.ru})</div>
+      <div class="name"><span class="mono">${escapeUiHtml(m.title)}</span> (${escapeUiHtml(mi.ru || m.ru)})</div>
       <div class="value">
-        <div class="num">${m.format(val)}</div>
-        <div class="unit">${m.unit}</div>
+        <div class="num">${escapeUiHtml(legacyMetricText(m, val))}</div>
+        <div class="unit">${escapeUiHtml(m.unit)}</div>
       </div>
       <div class="mini-row">
         <div class="mini">${t('compareLabel')} <span>${compareText}</span></div>
@@ -251,6 +263,9 @@ function renderSessionMetrics(selectedKey){
 }
 
 function drawDistribution(svgEl, percentile){
+  percentile = legacyMetricNumber(percentile);
+  if (percentile === null) { svgEl.replaceChildren(); return; }
+  percentile = Math.max(0, Math.min(100, percentile));
   const w = 380, h = 120;
   const pad = 16;
   const baseline = 96;
@@ -299,24 +314,26 @@ function renderSessionDetail(){
   const metric = METRICS.find(m => m.key === SELECTED_METRIC);
   
   const val = SESSION_DATA.segments[seg][metric.key];
-  const g = SESSION_DATA.group[seg][metric.key];
-  const z = computeZ(val, g.mean, g.sd);
-  const p = g.p;
+  const g = SESSION_DATA.group[seg][metric.key] || {};
+  const number = legacyMetricNumber(val);
+  const mean = legacyMetricNumber(g.mean), sd = legacyMetricNumber(g.sd);
+  const z = number === null || mean === null || sd === null ? null : computeZ(number, mean, sd);
+  const p = legacyMetricNumber(g.p);
   
   const mi = tM(metric.key);
   document.getElementById("detailTitle").textContent = `${metric.title} (${mi.ru || metric.ru})`;
   document.getElementById("detailSub").textContent = mi.hint || metric.goodHint;
-  document.getElementById("kpiValue").textContent = `${metric.format(val)} ${metric.unit}`;
+  document.getElementById("kpiValue").textContent = `${legacyMetricText(metric, val)} ${metric.unit}`;
   
   const compareLabel = document.getElementById("kpiCompareLabel");
   const compareVal = document.getElementById("kpiCompare");
   
   if(mode === "zscore"){
     compareLabel.textContent = t('kpiZscore');
-    compareVal.textContent = z.toFixed(2);
+    compareVal.textContent = safeNum(z, 2);
   } else {
     compareLabel.textContent = t('kpiPercentile');
-    compareVal.textContent = `p${p}`;
+    compareVal.textContent = p === null ? '—' : `p${p}`;
   }
   
   drawDistribution(document.getElementById("distSvg"), p);
@@ -429,7 +446,7 @@ function _buildSessionCard() {
       <div class="card" style="padding:0;">
         <div class="dash-card-header">
           <h2>${t('qualityControlQc')}</h2>
-          <div class="hint">Сессия: ${SESSION_DATA.session.id}</div>
+          <div class="hint">Сессия: ${escapeUiHtml(SESSION_DATA.session.id)}</div>
         </div>
         <div class="qc-grid">
           <div class="qc-main" id="qcMain">

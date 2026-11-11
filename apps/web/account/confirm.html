@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+<script>window.identityLink = new URLSearchParams(location.hash.slice(1)); history.replaceState(null, '', location.pathname);</script>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Confirm wecog account</title>
+<link rel="stylesheet" href="account.css"></head>
+<body data-page="confirm"><main><a href="../index.html">wecog</a><h1 id="heading">Confirm your email</h1>
+<p>Nothing changes just by opening this page. Use the button below to confirm. Links expire and can only be used once.</p>
+<form id="confirm-form"><div id="name-field"><label for="display-name">Display name (optional)</label><input id="display-name" maxlength="255" autocomplete="name"></div>
+<div id="password-field"><label for="password">Choose a new password</label><input id="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" required>
+<p>At least 12 characters, at most 72 UTF-8 bytes.</p></div><button type="submit">Confirm deliberately</button></form>
+<p id="message" role="status" aria-live="polite"></p><nav><a href="../developer/login.html?portal=workspace">Sign in</a>
+<a href="signup.html">Request another signup link</a><a href="recovery.html">Request another recovery link</a></nav></main>
+<script src="../api-base.js"></script><script src="../http-client.js"></script><script src="account.js"></script></body></html>

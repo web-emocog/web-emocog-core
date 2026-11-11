@@ -5,7 +5,8 @@ import path from 'node:path';
 const requireApi = createRequire(path.resolve(__dirname, '../../api/package.json'));
 const { buildSessionMetrics, buildGroupSummary } = requireApi('./analytics/metrics');
 const { definitions } = requireApi('../shared/passive-metrics');
-const base = 'http://127.0.0.1:4173/apps/web/researcher.html?analyticsPreview=1';
+const web = process.env.EMOCOG_WEB_URL || 'http://127.0.0.1:4173/apps/web';
+const base = web + '/researcher.html?analyticsPreview=1';
 const query = { metricIds: definitions.map((item: any) => item.id), filters: { qcChannels: ['task', 'gaze'] } };
 const measured = { id: 105, participant_id: 'synthetic', features_payload: {
   bpm_summary: { bpmMean: 80, validSampleCount: 30, methodVersion: 'continuous_signals.v2' },
@@ -29,6 +30,7 @@ for (const language of ['ru', 'en']) test(`session exposes real background metri
     };
   }, buildSessionMetrics(measured, query));
   await page.locator('#analyticsApplyFilters').click();
+  await page.locator('.ab-disclosure > summary').filter({ hasText: /Физиология и другие сигналы|Physiology and other signals/ }).click();
   const signals = page.locator('#analyticsPassiveSignals');
   await expect(signals.locator('[data-passive-metric]')).toHaveCount(9);
   await expect(signals.locator('[data-passive-metric="physiology.bpm_mean"]')).toContainText('80');
@@ -46,6 +48,7 @@ for (const language of ['ru', 'en']) test(`session exposes real background metri
     };
     await api.store.loadSessionSummary();
   }, buildSessionMetrics({ ...measured, features_payload: {} }, query));
+  await page.locator('.ab-disclosure > summary').filter({ hasText: /Физиология и другие сигналы|Physiology and other signals/ }).click();
   await expect(signals.locator('[data-passive-metric="physiology.bpm_mean"]')).toContainText(language === 'en' ? 'No data' : 'Нет данных');
   await expect(signals.locator('[data-passive-metric="physiology.respiration_mean"]')).not.toContainText('>0<');
   await signals.locator('a').click();
@@ -65,6 +68,7 @@ test('group background metrics give each participant equal weight, not each fram
     };
   }, buildGroupSummary([measured, second], query).metrics);
   await page.locator('#analyticsApplyFilters').click();
+  await page.locator('.ab-disclosure > summary').filter({ hasText: 'Физиология и другие сигналы' }).click();
   const pulse = page.locator('#analyticsPassiveSignals [data-passive-metric="physiology.bpm_mean"]');
   await expect(pulse).toContainText('90');
   await expect(pulse).toContainText('Участников: 2');
@@ -72,7 +76,7 @@ test('group background metrics give each participant equal weight, not each fram
 
 test('active physiology reaches the aggregate worker once, before and after finalization', async ({ page }) => {
   await page.route('http://127.0.0.1:3000/**', route => route.fulfill({ status: 401, json: {} }));
-  await page.goto('http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html');
+  await page.goto(new URL('../participant-web/mvp_with_precheck_1-updated.html', web + '/').href);
   await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.sessionRuntime);
   const result = await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__, runtime = shared.runtime.sessionRuntime;

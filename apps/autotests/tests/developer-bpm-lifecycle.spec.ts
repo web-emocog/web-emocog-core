@@ -97,6 +97,8 @@ async function boot(page: Page, stage = 'running', prefix = '', target = '/apps/
   });
   await page.goto(origin + prefix + target);
   await expect(page.locator('#btnStart, #startBtn')).toBeVisible();
+  const profile = page.locator('#diagnosticSignalProfile');
+  if (await profile.count()) await profile.selectOption('protocol_signals.v1');
   return { setRole: (value: string) => { role = value; } };
 }
 

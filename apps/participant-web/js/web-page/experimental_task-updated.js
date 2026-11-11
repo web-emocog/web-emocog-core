@@ -1,3 +1,4 @@
+import { participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import {
     state,
     ex_state,
@@ -7,20 +8,25 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { finishSession } from './tests-updated.js?v=20261108-143l';
+import { finishSession } from './tests-updated.js?v=20261110-integration1';
 import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
-import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
+import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js';
-import { translations } from '../../translations.js?v=20261025-1';
+import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js?v=20261110-integration1';
+import { translations } from '../../translations.js?v=20261110-integration1';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
+import { createBlockMediaPreparation } from '../session-runtime/block-media-preparation.mjs?v=20261110-integration1';
+import { createPresentationPlan, restorePresentationPlan, resolveBlockPresentationPlan,
+    createPresentationRecord, presentationWindow, createTrialBudget, PLAN_LIMITS } from '../session-runtime/presentation-plan.mjs?v=20261110-integration1';
+import { createInvitationRequestPool } from '../session-runtime/invitation-http.mjs?v=20261110-integration1';
+import { fetchMediaWithDeadline, mediaAbortError } from '../session-runtime/media-preload.mjs?v=20261110-integration1';
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261108-143l';
+} from '../session-runtime/index.js?v=20261110-integration1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
@@ -45,6 +51,8 @@ let activeTrialRuntime = null;
 let cognitiveFinished = false;
 
 let cognitiveVideo = null;
+let cognitiveAnalysisGeneration = 0;
+let cognitiveFrameInFlight = false;
 let cognitiveLoopLastVideoTime = -1;
 let cognitiveSegmenterThrottleCounter = 0;
 let cognitiveSegmenterInFlight = false;
@@ -68,6 +76,16 @@ let acknowledgedTaskBlockIndex = null;
 let cognitiveFullscreenOwned = false;
 let timedProtocolBlockInterval = null;
 let pendingPhotodiodeTaskStart = null;
+let mediaPreparation = null;
+let mediaPreparationOwned = false;
+let blockMediaLease = null;
+let mediaRunGeneration = 0;
+let protocolLoadController = null;
+let feedbackTimeout = null;
+let interTrialTimeout = null;
+let pendingBlockStart = null;
+let activePresentationRecord = null;
+let activeRenderCancel = null;
 const MAX_COGNITIVE_BLOCK_ATTEMPTS = 3;
 
 const LOCALE_FIELD_SUFFIX = Object.freeze({
@@ -543,7 +561,7 @@ function toSurveyBlock(block, index) {
     };
 }
 
-function toCognitiveBlockFromStimuli(defBlock, index) {
+function toCognitiveBlockFromStimuli(defBlock, index, reserveTrials) {
     const params = defBlock?.params || {};
     const stimuliMap = state.runtime?.invitationStimuliMap || {};
     const normalizeStimulusId = (id) => {
@@ -551,10 +569,13 @@ function toCognitiveBlockFromStimuli(defBlock, index) {
         if (raw.startsWith('api:')) return raw.slice(4);
         return raw;
     };
-    const trials = Array.isArray(params.trials) && params.trials.length
+    const explicit = Array.isArray(params.trials) && params.trials.length;
+    const ids = Array.isArray(params.stimuli_ids) && params.stimuli_ids.length;
+    if (explicit || ids) reserveTrials(explicit || ids);
+    const trials = explicit
         ? params.trials
         : (
-            Array.isArray(params.stimuli_ids) && params.stimuli_ids.length
+            ids
                 ? params.stimuli_ids.map((stimulusId, i) => {
                     const normalizedStimulusId = normalizeStimulusId(stimulusId);
                     const row = stimuliMap[normalizedStimulusId] || null;
@@ -573,6 +594,7 @@ function toCognitiveBlockFromStimuli(defBlock, index) {
                 : buildDefaultTrials(String(index))
         );
 
+    if (!explicit && !ids) reserveTrials(trials.length);
     return {
         id: defBlock?.id || `block_${index}`,
         type: 'cognitive_task',
@@ -623,12 +645,13 @@ function conditionToIsGo(condition) {
     return null;
 }
 
-function normalizeV2Trials(trials) {
+function normalizeV2Trials(trials, reserveTrials = createTrialBudget()) {
     const stimuliMap = state.runtime?.invitationStimuliMap || {};
     const list = Array.isArray(trials) ? trials : [];
     const out = [];
     list.forEach((t, index) => {
-        const reps = Math.max(1, parseInt(t.repetitions, 10) || 1);
+        const reps = t.repetitions == null || t.repetitions === '' ? 1 : Number(t.repetitions);
+        reserveTrials(reps > 0 ? reps : NaN);
         for (let r = 0; r < reps; r += 1) {
             const sid = t.stimulusId || `trial_${index}`;
             const meta = stimuliMap[String(sid).replace(/^api:/, '')] || null;
@@ -648,16 +671,18 @@ function normalizeV2Trials(trials) {
     return out;
 }
 
-function toCognitiveBlockFromV2(block, index) {
+function toCognitiveBlockFromV2(block, index, reserveTrials) {
     const cfg = block.blockConfig || {};
     const taskType = block.taskType || cfg.taskType || 'other';
     const isInvite = !!state.runtime?.invitationProtocolDefinition;
-    let trials = normalizeV2Trials(block.trials);
+    let trials = normalizeV2Trials(block.trials, reserveTrials);
     if (!trials.length && isInvite) {
         trials = synthesizeInvitationTrials(block, index);
+        reserveTrials(trials.length);
     }
     if (!trials.length) {
         trials = buildDefaultTrials(String(index));
+        reserveTrials(trials.length);
     }
     return {
         id: block.id || `cognitive_${index}`,
@@ -682,12 +707,13 @@ function toCognitiveBlockFromV2(block, index) {
     };
 }
 
-function toPassiveBlockFromV2(block, index) {
+function toPassiveBlockFromV2(block, index, reserveTrials) {
     const content = block?.content || {};
     const config = { ...content, ...(block?.blockConfig || {}) };
     const sourceTrials = Array.isArray(block?.trials) && block.trials.length
         ? block.trials
         : (Array.isArray(content.trials) && content.trials.length ? content.trials : content.slides);
+    if (Array.isArray(sourceTrials) && sourceTrials.length > PLAN_LIMITS.trials) reserveTrials(sourceTrials.length);
     const trials = (Array.isArray(sourceTrials) ? sourceTrials : []).map((entry, trialIndex) => {
         const value = entry && typeof entry === 'object' ? entry : { stimulusId: entry };
         return {
@@ -716,10 +742,14 @@ function toPassiveBlockFromV2(block, index) {
             randomInterStimulus: config.randomInterStimulus === true,
             fullscreenStimulus: config.fullscreenStimulus === true
         }
-    }, index);
+    }, index, reserveTrials);
 }
 
 function normalizeProtocolDefinition(definition, options = {}) {
+    const reserveTrials = createTrialBudget();
+    if (Array.isArray(definition?.blocks) && definition.blocks.length > PLAN_LIMITS.blocks) {
+        const error = new Error('Protocol block limit exceeded'); error.code = 'protocol_trial_limit'; throw error;
+    }
     if (isResearcherV2Protocol(definition)) {
         const blocksIn = Array.isArray(definition?.blocks) ? definition.blocks : [];
         const outBlocks = [];
@@ -735,7 +765,7 @@ function normalizeProtocolDefinition(definition, options = {}) {
                 return;
             }
             if (type === 'cognitive_task' || type === 'stimuli') {
-                outBlocks.push(toCognitiveBlockFromV2(block, index));
+                outBlocks.push(toCognitiveBlockFromV2(block, index, reserveTrials));
                 return;
             }
             if (type === 'survey') {
@@ -763,7 +793,7 @@ function normalizeProtocolDefinition(definition, options = {}) {
                 return;
             }
             if (type === 'passive') {
-                outBlocks.push(toPassiveBlockFromV2(block, index));
+                outBlocks.push(toPassiveBlockFromV2(block, index, reserveTrials));
                 return;
             }
             if (type === 'timer') {
@@ -823,7 +853,7 @@ function normalizeProtocolDefinition(definition, options = {}) {
             return;
         }
         if (type === 'stimuli' || type === 'cognitive_task') {
-            outBlocks.push(toCognitiveBlockFromStimuli(block, index));
+            outBlocks.push(toCognitiveBlockFromStimuli(block, index, reserveTrials));
             return;
         }
     });
@@ -902,6 +932,8 @@ function handleQcPauseState(overlayVisible) {
 }
 
 function resetStimulusViews() {
+    activeRenderCancel?.();
+    activeRenderCancel = null;
     if (ex_state.task?.stimulus) {
         ex_state.task.stimulus.style.display = 'none';
     }
@@ -926,6 +958,15 @@ function resetStimulusViews() {
         delete videoEl.dataset.fallbackAttempted;
         videoEl.removeAttribute('src');
         videoEl.load();
+    }
+    const audioEl = document.getElementById('cogAudio');
+    if (audioEl) {
+        audioEl.pause();
+        audioEl.onloadeddata = null;
+        audioEl.oncanplay = null;
+        audioEl.onerror = null;
+        audioEl.removeAttribute('src');
+        audioEl.load();
     }
 }
 
@@ -964,41 +1005,41 @@ function renderStimulusMediaError(stimulus) {
     });
 }
 
-function renderStimulus(trial) {
+function renderStimulus(trial, onPlaybackFailure) {
     resetStimulusViews();
 
     const stimulus = trial?.stimulus || {};
     const stimulusType = stimulus.type || 'shape';
     const shapeEl = ex_state.task?.stimulus;
     const imageEl = document.getElementById('cogImage');
-    const videoEl = document.getElementById('cogVideo');
+    const videoEl = document.getElementById(stimulusType === 'audio' ? 'cogAudio' : 'cogVideo');
 
-    if (stimulusType === 'video' && videoEl) {
-        if (!stimulus.src) {
+    if ((stimulusType === 'video' || stimulusType === 'audio') && videoEl) {
+        if (!stimulus.src || !stimulus.preparedMedia || !blockMediaLease?.valid()) {
             renderStimulusMediaError(stimulus);
             return Promise.resolve(false);
         }
         return new Promise(resolve => {
             let settled = false;
+            let shown = false;
             let readyInProgress = false;
             let loadTimeout;
-            let sourceAttempt = 0;
+            let progressTimer;
             const settle = value => {
                 if (settled) return;
                 settled = true;
                 clearTimeout(loadTimeout);
+                clearTimeout(progressTimer);
+                activeRenderCancel = null;
                 resolve(value);
             };
+            activeRenderCancel = () => settle(false);
             const fail = () => {
-                if (settled) return;
-                if (!videoEl.dataset.fallbackAttempted && videoEl.dataset.fallbackSrc) {
-                    videoEl.dataset.fallbackAttempted = '1';
-                    sourceAttempt++;
-                    readyInProgress = false;
-                    clearTimeout(loadTimeout);
-                    loadTimeout = setTimeout(fail, 15_000);
-                    videoEl.src = videoEl.dataset.fallbackSrc;
-                    videoEl.load();
+                if (videoEl.onerror !== fail) return;
+                if (settled) {
+                    if (!shown) return;
+                    shown = false;
+                    onPlaybackFailure?.();
                     return;
                 }
                 renderStimulusMediaError(stimulus);
@@ -1007,24 +1048,54 @@ function renderStimulus(trial) {
             const ready = () => {
                 if (settled || readyInProgress) return;
                 readyInProgress = true;
-                const attempt = sourceAttempt;
                 videoEl.currentTime = 0;
-                videoEl.play().then(() => {
-                    if (settled || attempt !== sourceAttempt) return;
-                    videoEl.style.display = 'block';
+                const confirmPlayback = () => {
+                    if (settled) return;
+                    if (videoEl.error) { fail(); return; }
+                    // A resolved play() alone does not prove that an audio clock started.
+                    if (stimulusType === 'audio' && !(videoEl.currentTime > 0)) {
+                        progressTimer = setTimeout(confirmPlayback, 25);
+                        return;
+                    }
+                    if (stimulusType === 'audio') {
+                        shapeEl.textContent = state.currentLang === 'ru' ? 'Слушайте аудио' : 'Listen to the audio';
+                        shapeEl.style.cssText = 'display:flex;align-items:center;justify-content:center;background:transparent;color:inherit;width:auto;height:auto;font-size:24px;';
+                    } else videoEl.style.display = 'block';
+                    shown = true;
                     settle(true);
-                }).catch(() => {
-                    if (settled || attempt !== sourceAttempt) return;
+                };
+                videoEl.play().then(confirmPlayback).catch(error => {
+                    if (settled) return;
+                    if (stimulusType === 'audio' && error?.name === 'NotAllowedError' && shapeEl) {
+                        clearTimeout(loadTimeout);
+                        const waitingAt = performance.now();
+                        shapeEl.textContent = '';
+                        shapeEl.style.cssText = 'display:flex;align-items:center;justify-content:center;background:transparent;width:auto;height:auto;';
+                        const allow = document.createElement('button');
+                        allow.type = 'button';
+                        allow.dataset.allowStimulusAudio = 'true';
+                        allow.textContent = state.currentLang === 'ru' ? 'Включить звук и начать пробу' : 'Enable sound and start this trial';
+                        shapeEl.append(allow);
+                        loadTimeout = setTimeout(fail, 120_000);
+                        allow.onclick = () => {
+                            if (settled || videoEl.onerror !== fail) return;
+                            allow.disabled = true;
+                            if (activeBlockDeadlinePerf) activeBlockDeadlinePerf += performance.now() - waitingAt;
+                            readyInProgress = false;
+                            ready();
+                        };
+                        return;
+                    }
                     readyInProgress = false;
                     fail();
                 });
             };
             loadTimeout = setTimeout(fail, 15_000);
             videoEl.style.cssText = '';
-            videoEl.muted = stimulus.muted !== false;
+            videoEl.muted = stimulusType === 'audio' ? false : stimulus.muted !== false;
             if (stimulus.style && typeof stimulus.style === 'object') Object.assign(videoEl.style, stimulus.style);
-            const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
-            if (fallbackSrc) videoEl.dataset.fallbackSrc = fallbackSrc;
+            // Do not expose an old frame while the next source is still loading.
+            videoEl.style.display = 'none';
             videoEl.onloadeddata = ready;
             videoEl.oncanplay = ready;
             videoEl.onerror = fail;
@@ -1035,7 +1106,7 @@ function renderStimulus(trial) {
     }
 
     if ((stimulusType === 'image' || stimulusType === 'slides') && imageEl) {
-        if (!stimulus.src) {
+        if (!stimulus.src || !stimulus.preparedMedia || !blockMediaLease?.valid()) {
             renderStimulusMediaError(stimulus);
             return Promise.resolve(false);
         }
@@ -1046,17 +1117,12 @@ function renderStimulus(trial) {
                 if (settled) return;
                 settled = true;
                 clearTimeout(loadTimeout);
+                activeRenderCancel = null;
                 resolve(value);
             };
+            activeRenderCancel = () => settle(false);
             const fail = () => {
                 if (settled) return;
-                if (!imageEl.dataset.fallbackAttempted && imageEl.dataset.fallbackSrc) {
-                    imageEl.dataset.fallbackAttempted = '1';
-                    clearTimeout(loadTimeout);
-                    loadTimeout = setTimeout(fail, 10_000);
-                    imageEl.src = imageEl.dataset.fallbackSrc;
-                    return;
-                }
                 renderStimulusMediaError(stimulus);
                 settle(false);
             };
@@ -1066,8 +1132,7 @@ function renderStimulus(trial) {
             if (stimulus.style && typeof stimulus.style === 'object') {
                 Object.assign(imageEl.style, stimulus.style);
             }
-            const fallbackSrc = String(stimulus.fallbackSrc || '').trim();
-            if (fallbackSrc) imageEl.dataset.fallbackSrc = fallbackSrc;
+            imageEl.style.display = 'none';
             imageEl.onload = () => {
                 if (settled) return;
                 if (!(imageEl.naturalWidth > 0 && imageEl.naturalHeight > 0)) {
@@ -1106,6 +1171,7 @@ function renderStimulus(trial) {
 }
 
 function stopCognitiveAnalysisLoop() {
+    cognitiveAnalysisGeneration++;
     state.runtime._cognitiveLoopActive = false;
     if (state.runtime.cognitiveAnalysisInterval) {
         clearTimeout(state.runtime.cognitiveAnalysisInterval);
@@ -1114,29 +1180,39 @@ function stopCognitiveAnalysisLoop() {
     cognitiveVideo = null;
 }
 
-function scheduleCognitiveAnalysisTick(delayMs = 0) {
-    if (!state.runtime._cognitiveLoopActive) return;
-    state.runtime.cognitiveAnalysisInterval = setTimeout(runCognitiveAnalysisTick, delayMs);
+function activeCognitiveAnalysis(generation) {
+    return state.runtime._cognitiveLoopActive && generation === cognitiveAnalysisGeneration;
 }
 
-async function runCognitiveAnalysisTick() {
-    if (!state.runtime._cognitiveLoopActive) return;
+function scheduleCognitiveAnalysisTick(delayMs = 0, generation = cognitiveAnalysisGeneration) {
+    if (!activeCognitiveAnalysis(generation) || cognitiveFrameInFlight || state.runtime.cognitiveAnalysisInterval != null) return;
+    state.runtime.cognitiveAnalysisInterval = setTimeout(() => {
+        if (!activeCognitiveAnalysis(generation)) return;
+        state.runtime.cognitiveAnalysisInterval = null;
+        void runCognitiveAnalysisTick(generation);
+    }, delayMs);
+}
+
+async function runCognitiveAnalysisTick(generation) {
+    if (!activeCognitiveAnalysis(generation) || cognitiveFrameInFlight) return;
     if (!cognitiveVideo || !state.runtime.localAnalyzer) {
-        scheduleCognitiveAnalysisTick(100);
+        scheduleCognitiveAnalysisTick(100, generation);
         return;
     }
 
     const tickStart = performance.now();
 
+    const videoTime = getVideoTime(cognitiveVideo);
+    if (videoTime < 0 || videoTime === cognitiveLoopLastVideoTime) {
+        scheduleCognitiveAnalysisTick(SAME_FRAME_RETRY_MS, generation);
+        return;
+    }
+    cognitiveLoopLastVideoTime = videoTime;
+    cognitiveFrameInFlight = true;
     try {
-        const videoTime = getVideoTime(cognitiveVideo);
-        if (videoTime < 0 || videoTime === cognitiveLoopLastVideoTime) {
-            scheduleCognitiveAnalysisTick(SAME_FRAME_RETRY_MS);
-            return;
-        }
-        cognitiveLoopLastVideoTime = videoTime;
 
         const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(cognitiveVideo);
+        if (!activeCognitiveAnalysis(generation)) return;
         state.runtime.lastPrecheckResult = precheckResult;
 
         if (precheckResult && precheckResult.pose) {
@@ -1173,10 +1249,10 @@ async function runCognitiveAnalysisTick() {
                 cognitiveSegmenterInFlight = true;
                 state.runtime.faceSegmenter.segmentFrame(cognitiveVideo, precheckResult.landmarks)
                     .then((segmenterResult) => {
-                        cognitiveLastSegmenterResult = segmenterResult;
+                        if (activeCognitiveAnalysis(generation)) cognitiveLastSegmenterResult = segmenterResult;
                     })
-                    .catch((segmenterError) => {
-                        console.warn('[Cognitive] Ошибка сегментации:', segmenterError);
+                    .catch(() => {
+                        if (activeCognitiveAnalysis(generation)) dbgErr('task', 'segmentation:failed');
                     })
                     .finally(() => {
                         cognitiveSegmenterInFlight = false;
@@ -1204,41 +1280,43 @@ async function runCognitiveAnalysisTick() {
             const a = Number.isFinite(emotionSample.arousal) ? emotionSample.arousal.toFixed(2) : '?';
             cogEmoHud.textContent = `${lab}: ${name} (v ${v}, a ${a})`;
         }
-    } catch (e) {
-        console.warn('[Cognitive] Ошибка анализа:', e);
+    } catch (_) {
+        if (activeCognitiveAnalysis(generation)) dbgErr('task', 'frame:analysis-failed');
+    } finally {
+        cognitiveFrameInFlight = false;
+        const elapsed = performance.now() - tickStart;
+        // A replacement run waits here instead of polling an older inference.
+        scheduleCognitiveAnalysisTick(generation === cognitiveAnalysisGeneration ? Math.max(0, TARGET_LOOP_INTERVAL_MS - elapsed) : 0);
     }
-
-    const elapsed = performance.now() - tickStart;
-    const nextDelay = Math.max(0, TARGET_LOOP_INTERVAL_MS - elapsed);
-    scheduleCognitiveAnalysisTick(nextDelay);
 }
 
 function startCognitiveAnalysisLoop() {
     if (isContinuousSessionAnalysisRunning()) {
-        console.log('[Cognitive] Используется непрерывный session analysis loop');
         return;
     }
     if (state.runtime._cognitiveLoopActive) return;
 
     cognitiveVideo = document.getElementById('precheckVideo');
     if (!(cognitiveVideo && cognitiveVideo.srcObject && state.runtime.localAnalyzer)) {
-        console.warn('[Cognitive] analysis loop не запущен: нет video/localAnalyzer');
+        dbgErr('task', 'analysis:input-unavailable');
         return;
     }
 
     cognitiveLoopLastVideoTime = -1;
     cognitiveSegmenterThrottleCounter = 0;
-    cognitiveSegmenterInFlight = false;
     cognitiveLastSegmenterResult = null;
 
     state.runtime._cognitiveLoopActive = true;
     scheduleCognitiveAnalysisTick(0);
-    console.log('[Cognitive] Single-flight цикл анализа запущен (gaze + eye-signal + QC)');
 }
 
 function emitStimulusOffIfNeeded(rtMs, reason) {
     if (!activeTrialRuntime || activeTrialRuntime.stimulusOff) return;
     activeTrialRuntime.stimulusOff = true;
+    if (activePresentationRecord) {
+        activePresentationRecord.stimulusOffEpochMs = Date.now();
+        activePresentationRecord.stimulusOffPerfMs = performance.now();
+    }
     emitTaskEvent('stimulus_off', {
         reason,
         rtMs: Number.isFinite(rtMs) ? Math.round(rtMs) : null
@@ -1260,9 +1338,45 @@ function saveProtocolProgress(status, block = null) {
     void getSessionRuntime()?.saveCheckpoint();
 }
 
+// Session teardown may invoke this after measurement stops, before disposing the
+// invitation cache. It deliberately does not finish/ingest or mutate QC policy.
+export function stopCognitiveStimulusPlayback() {
+    cognitiveFinished = true;
+    mediaRunGeneration++;
+    stopCognitiveAnalysisLoop();
+    protocolLoadController?.abort();
+    protocolLoadController = null;
+    clearInterval(timedProtocolBlockInterval);
+    timedProtocolBlockInterval = null;
+    pendingBlockStart = null;
+    pendingPhotodiodeTaskStart = null;
+    cleanupTrial();
+    resetStimulusViews();
+    mediaPreparation?.releaseBlock();
+    blockMediaLease = null;
+    if (mediaPreparationOwned) mediaPreparation?.dispose();
+    state.runtime.blockMediaStatus = { state: 'released' };
+}
+
+state.runtime.stopCognitiveStimulusPlayback = stopCognitiveStimulusPlayback;
+
 function finishCognitiveTask(reason = 'completed', errorMessage = null) {
     if (cognitiveFinished) return;
     cognitiveFinished = true;
+    if (reason === 'error') {
+        const runtime = getSessionRuntime();
+        const meta = state.sessionData.experimentMeta ||= {};
+        meta.protocolTermination = { reason: 'technical_error', timestamp: Date.now() };
+        if (activePresentationRecord && activePresentationRecord.status !== 'completed') {
+            activePresentationRecord.status = 'interrupted';
+            activePresentationRecord.deviations = [...new Set([...(activePresentationRecord.deviations || []), 'technical_error'])];
+        }
+        // The runner has stopped, so a live block/repeat must not fence delivery
+        // of earlier accepted data. This is an explicit abort, never a QC pass.
+        if (runtime?.getCurrentBlock()) runtime.completeBlock({ success: false, reason: 'protocol_technical_stop' });
+        for (const repeat of [...(runtime?.machine.repeatQueue || [])]) runtime.discardRepeat(repeat.blockId);
+        saveProtocolProgress('ready_to_finish');
+    }
     if (reason === 'completed') saveProtocolProgress('ready_to_finish');
     pendingPhotodiodeTaskStart = null;
     if (reason === 'completed') void window.Photodiode?.finish();
@@ -1272,14 +1386,12 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
         timedProtocolBlockInterval = null;
     }
 
-    cleanupTrial();
-    resetStimulusViews();
+    stopCognitiveStimulusPlayback();
     setStimulusLayout(null, false);
 
     if (ex_state.task?.fixation) ex_state.task.fixation.style.display = 'none';
     if (ex_state.task?.feedback) ex_state.task.feedback.style.display = 'none';
 
-    stopCognitiveAnalysisLoop();
     hideQcOverlay();
     const cogEmoClear = document.getElementById('cognitiveEmotionHud');
     if (cogEmoClear) cogEmoClear.textContent = '';
@@ -1327,9 +1439,8 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
 
     if (cognitiveTaskOptions.autoFinishSession !== false) {
         setSessionPhase('final', { source: 'finishCognitiveTask' });
-        console.log('[Cognitive] Задача завершена');
-        void finishSession().catch(error => {
-            console.error('[Cognitive] final save failed:', error);
+        void finishSession().catch(() => {
+            dbgErr('task', 'result:save-failed');
             const button = ex_state.instruction.btn;
             if (button) {
                 button.disabled = false;
@@ -1341,7 +1452,6 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
         cognitiveTaskOptions = { autoFinishSession: true, onComplete: null };
     } else {
         setSessionPhase('cognitive_instruction', { source: 'finishCognitiveTask_return' });
-        console.log('[Cognitive] Задача завершена, возврат в Test Hub');
         if (typeof cognitiveTaskOptions.onComplete === 'function') {
             cognitiveTaskOptions.onComplete(payload);
         }
@@ -1351,10 +1461,35 @@ function finishCognitiveTask(reason = 'completed', errorMessage = null) {
 }
 
 export async function loadAndStartCognitiveTask(options = {}) {
-    console.log('[Cognitive] Инициализация задачи...');
+    if (state.runtime.participantPageExited) return;
     const requestedProtocol = options.protocol && typeof options.protocol === 'object'
         ? options.protocol
         : null;
+    const generation = ++mediaRunGeneration;
+    stopCognitiveAnalysisLoop();
+    protocolLoadController?.abort();
+    const controller = new AbortController();
+    protocolLoadController = controller;
+    clearInterval(timedProtocolBlockInterval);
+    timedProtocolBlockInterval = null;
+    const assertCurrent = () => {
+        throwIfRequestAborted(controller.signal);
+        if (generation !== mediaRunGeneration || cognitiveFinished) {
+            const error = new Error('Protocol load cancelled'); error.name = 'AbortError'; throw error;
+        }
+    };
+    pendingBlockStart = null;
+    cleanupTrial();
+    resetStimulusViews();
+    mediaPreparation?.releaseBlock();
+    if (mediaPreparationOwned) mediaPreparation?.dispose();
+    blockMediaLease = null;
+    mediaPreparation = state.runtime.invitationMediaPreparation || createBlockMediaPreparation({
+        scope: `legacy-${mediaRunGeneration}`, rows: state.runtime.invitationStimuliMap || {},
+        requireManifest: Boolean(requestedProtocol || state.runtime.invitationProtocolDefinition),
+        request: createInvitationRequestPool({ fetchRequest: fetchMediaWithDeadline })
+    });
+    mediaPreparationOwned = mediaPreparation !== state.runtime.invitationMediaPreparation;
     cognitiveTaskOptions = {
         autoFinishSession: options.autoFinishSession !== false,
         onComplete: typeof options.onComplete === 'function' ? options.onComplete : null
@@ -1378,10 +1513,13 @@ export async function loadAndStartCognitiveTask(options = {}) {
                 ? normalized
                 : ensureSessionQualityInstruction(normalized);
         } else {
-            const normalized = await fetchWithDeadline('./experiment.json', {}, response => {
+            const demoUrl = new URL('../../experiment.json', import.meta.url).href;
+            const definition = await fetchWithDeadline(demoUrl, { signal: controller.signal, redirect: 'error' }, response => {
                 if (!response.ok) throw new Error('Файл experiment.json не найден');
                 return response.json();
             });
+            assertCurrent();
+            const normalized = normalizeProtocolDefinition(definitionForCognitiveRunner(definition));
             experimentProtocol = runtime?.policyShown
                 ? normalized
                 : ensureSessionQualityInstruction(normalized);
@@ -1416,6 +1554,28 @@ export async function loadAndStartCognitiveTask(options = {}) {
                 : []
         };
 
+        const meta = state.sessionData.experimentMeta;
+        if (meta.presentationPlan) {
+            restorePresentationPlan(meta.presentationPlan, protocolBlocks);
+            // An intent saved before a hard reload is not a completed presentation.
+            for (const record of meta.presentationPlan.actual) {
+                if (record.status === 'prepared' || record.status === 'started') {
+                    record.status = 'interrupted';
+                    if (!record.deviations.includes('page_reloaded')) record.deviations.push('page_reloaded');
+                }
+            }
+        } else {
+            const seed = globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+            meta.presentationPlan = createPresentationPlan({ blocks: protocolBlocks, seed });
+            meta.presentationPlan.historyBeforePlan = state.sessionData.cognitiveResults.length ? 'unknown_legacy' : 'none';
+        }
+        meta.presentationSequence = Math.max(Number.isSafeInteger(meta.presentationSequence) ? meta.presentationSequence : 0,
+            ...meta.presentationPlan.actual.map(record => record.sequence));
+        // Persist the whole future schedule before any timed block, not just the seed.
+        if (runtime && (state.sessionData.ids?.session || cognitiveTaskOptions.autoFinishSession)
+            && await runtime.saveCheckpoint() !== true) throw new Error('presentation_plan_persistence_failed');
+        assertCurrent();
+
         const resumedIndex = resumeProgress ? protocolBlocks.findIndex(block => block.id === progress.blockId) : -1;
         currentBlockIndex = repeatBlockIndex >= 0 ? repeatBlockIndex
             : (resumeProgress && progress.status === 'ready_to_finish' ? protocolBlocks.length : Math.max(0, resumedIndex));
@@ -1449,17 +1609,23 @@ export async function loadAndStartCognitiveTask(options = {}) {
         startCognitiveAnalysisLoop();
         runNextBlock();
     } catch (e) {
-        console.error('[Cognitive] Ошибка загрузки:', e);
+        if (generation !== mediaRunGeneration || controller.signal.aborted || cognitiveFinished) return;
+        dbgErr('task', 'protocol:preparation-failed');
         const runtime = getSessionRuntime();
+        const t = translations[state.currentLang] || translations.en;
+        const limit = e?.code === 'protocol_trial_limit';
+        const body = limit && state.currentLang === 'ru' ? 'В протоколе слишком много блоков или проб либо неверно задано число повторов. Попросите исследователя проверить протокол. Сессия не завершена.'
+            : limit && state.currentLang === 'en' ? 'The protocol exceeds the block or trial limit or has an invalid repetition count. Ask the researcher to check the protocol. The session is not complete.'
+            : t.runtime_protocol_start_failure_body;
         recordSessionEvent('protocol_runtime_start_failed', {
             category: 'technical',
             severity: 'error',
-            message: String(e?.message || e)
+            message: 'Protocol preparation failed'
         });
         runtime?.reportIssue?.({
             kind: 'technical',
             code: 'protocol_runtime_start_failed',
-            message: (translations[state.currentLang] || translations.en).runtime_protocol_start_failure_body,
+            message: body,
             recoverable: true,
             invalidatesBlock: false
         });
@@ -1467,9 +1633,8 @@ export async function loadAndStartCognitiveTask(options = {}) {
         document.getElementById('step6')?.classList.add('active');
         ex_state.task.area.style.display = 'none';
         ex_state.instruction.container.style.display = 'block';
-        const t = translations[state.currentLang] || translations.en;
         ex_state.instruction.title.textContent = t.runtime_protocol_start_failure_title;
-        ex_state.instruction.text.textContent = t.runtime_protocol_start_failure_body;
+        ex_state.instruction.text.textContent = body;
         ex_state.instruction.btn.disabled = false;
         ex_state.instruction.btn.textContent = t.runtime_protocol_retry_action;
         ex_state.instruction.btn.onclick = event => {
@@ -1499,7 +1664,6 @@ function runNextBlock() {
 
     const block = experimentProtocol.blocks[currentBlockIndex];
     saveProtocolProgress('instruction', block);
-    console.log('[Cognitive] Переход к блоку:', block.id, 'Тип:', block.type);
     getSessionRuntime()?.enterInstruction({
         source: 'cognitive_block_instruction',
         blockId: block?.id || null,
@@ -1625,6 +1789,8 @@ function formatCountdown(milliseconds) {
 
 function showTimedParticipantBlock(block, kind) {
     if (timedProtocolBlockInterval) clearInterval(timedProtocolBlockInterval);
+    const generation = mediaRunGeneration;
+    const isCurrent = () => !cognitiveFinished && generation === mediaRunGeneration;
     ex_state.task.area.style.display = 'none';
     ex_state.instruction.container.style.display = 'block';
     ex_state.instruction.text.classList.remove('survey-runtime');
@@ -1676,7 +1842,7 @@ function showTimedParticipantBlock(block, kind) {
 
     let completing = false;
     const complete = async () => {
-        if (completing) return;
+        if (completing || !isCurrent()) return;
         completing = true;
         if (timedProtocolBlockInterval) clearInterval(timedProtocolBlockInterval);
         timedProtocolBlockInterval = null;
@@ -1684,7 +1850,9 @@ function showTimedParticipantBlock(block, kind) {
         ex_state.instruction.btn.style.display = '';
         if (isAudio) {
             const audioWindowStart = await audioWindowStartPromise;
+            if (!isCurrent()) return;
             try { await collector?.flushBoundary?.(); } catch (_) { /* The session continues without audio. */ }
+            if (!isCurrent()) return;
             const windows = Array.isArray(collector?.windows) ? collector.windows.slice(audioWindowStart) : [];
             const scopedWindows = windows.filter(window => !window?.blockId || String(window.blockId) === String(block.id));
             const experimentMeta = state.sessionData.experimentMeta || (state.sessionData.experimentMeta = {});
@@ -1739,6 +1907,7 @@ function showTimedParticipantBlock(block, kind) {
     };
 
     const update = () => {
+        if (!isCurrent()) return;
         const remaining = deadline - Date.now();
         countdownElement.textContent = formatCountdown(remaining);
         if (remaining <= 0) complete();
@@ -1803,6 +1972,9 @@ function showInstructions(block) {
         if (
             block?.id !== 'session_quality_policy'
             && nextBlock?.type === 'cognitive_task'
+            // Fullscreen must be requested by the block's own Start gesture,
+            // after any required media preparation.
+            && !nextBlock.blockConfig?.fullscreenStimulus
         ) {
             acknowledgedTaskBlockIndex = currentBlockIndex + 1;
         }
@@ -2074,7 +2246,42 @@ async function exitCognitiveFullscreen() {
     try { await exit.call(document); } catch (_) { /* Browser may already have exited. */ }
 }
 
-function showTaskBlockInstruction(block) {
+function mediaPreparationMessage(error) {
+    const ru = state.currentLang === 'ru';
+    if (error?.code === 'media_budget_exceeded') return ru
+        ? 'Блок и временные данные загрузки не помещаются в локальный бюджет памяти. Пробы не начались. Повторите подготовку после освобождения ресурсов сессии или попросите исследователя подготовить блок для этого устройства. Потоковая загрузка во время проб не используется.'
+        : 'This block and its download workspace do not fit the local media budget. No trials have started. Retry after releasing session resources, or ask the researcher for a block that fits this device. Trials will not stream files from the network.';
+    if (error?.httpStatus === 429) return ru
+        ? 'Сервер временно ограничил загрузку. Подождите и повторите подготовку. Пробы не начались.'
+        : 'Loading is temporarily rate limited. Wait and retry preparation. No trials have started.';
+    if (/^media_(hash|size)_/.test(error?.code || '')) return ru
+        ? 'Файл не соответствует закреплённой публикации. Пробы не начались. Подключитесь к сети и повторите; если ошибка остаётся, обратитесь к исследователю.'
+        : 'A file does not match the pinned publication. No trials have started. Reconnect and retry; if this persists, contact the researcher.';
+    return ru
+        ? 'Медиа блока пока недоступны. Пробы не начались. Проверьте подключение и повторите подготовку. После перезагрузки локальные медиа нужно подготовить заново; весь протокол не гарантированно доступен без сети.'
+        : 'Block media are unavailable. No trials have started. Check your connection and retry preparation. Reload requires preparing local media again; the whole protocol is not guaranteed to be available offline.';
+}
+
+async function prepareTaskBlockMedia(block) {
+    const generation = mediaRunGeneration;
+    const preparation = mediaPreparation;
+    if (!preparation || (preparation !== state.runtime.invitationMediaPreparation && !mediaPreparationOwned)) throw mediaAbortError();
+    state.runtime.blockMediaStatus = { state: 'preparing', blockId: block.id };
+    try {
+        const lease = await preparation.prepareBlock(block);
+        if (generation !== mediaRunGeneration || preparation !== mediaPreparation || cognitiveFinished || !lease.valid()) throw mediaAbortError();
+        blockMediaLease = lease;
+        state.runtime.blockMediaStatus = { state: 'ready', blockId: block.id, ...preparation.cache.snapshot() };
+        return lease;
+    } catch (error) {
+        if (generation === mediaRunGeneration && error?.name !== 'AbortError') {
+            state.runtime.blockMediaStatus = { state: 'unavailable', blockId: block.id, code: error?.code || 'media_unavailable' };
+        }
+        throw error;
+    }
+}
+
+function showTaskBlockInstruction(block, { mediaError = null } = {}) {
     ex_state.task.area.style.display = 'none';
     ex_state.instruction.container.style.display = 'block';
     const t = translations[state.currentLang] || translations.en;
@@ -2099,32 +2306,54 @@ function showTaskBlockInstruction(block) {
     const checkContainer = document.getElementById('cogCheckContainer');
     if (checkbox) checkbox.checked = false;
     if (checkContainer) checkContainer.style.display = 'none';
-    ex_state.instruction.btn.disabled = false;
-    ex_state.instruction.btn.onclick = async (event) => {
+    const begin = async (event) => {
         event.preventDefault();
+        if (!current() || button.disabled) return;
+        button.disabled = true;
         recordSessionEvent('cognitive_block_instruction_acknowledged', {
             blockId: block?.id || null,
             blockType: block?.type || 'cognitive_task'
         });
         if (block?.blockConfig?.fullscreenStimulus) await requestCognitiveFullscreen();
+        if (!current()) return;
         startTaskBlock(block);
     };
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status');
+    status.dataset.blockMediaStatus = 'preparing';
+    ex_state.instruction.text.append(status);
+    const generation = mediaRunGeneration;
+    const button = ex_state.instruction.btn;
+    const current = () => generation === mediaRunGeneration && !cognitiveFinished
+        && experimentProtocol.blocks[currentBlockIndex] === block && status.isConnected;
+    const unavailable = error => {
+        if (!current() || error?.name === 'AbortError') return;
+        status.dataset.blockMediaStatus = 'unavailable';
+        status.textContent = mediaPreparationMessage(error);
+        button.disabled = false;
+        button.innerText = state.currentLang === 'ru' ? 'Повторить подготовку' : 'Retry preparation';
+        button.onclick = event => { event.preventDefault(); void prepare(); };
+    };
+    const prepare = async () => {
+        button.disabled = true;
+        status.dataset.blockMediaStatus = 'preparing';
+        status.textContent = state.currentLang === 'ru' ? 'Подготовка медиа блока…' : 'Preparing block media...';
+        try {
+            await prepareTaskBlockMedia(block);
+            if (!current()) return;
+            status.dataset.blockMediaStatus = 'ready';
+            status.textContent = state.currentLang === 'ru' ? 'Медиа блока готовы.' : 'Block media ready.';
+            button.disabled = false;
+            button.innerText = t.runtime_instruction_action;
+            button.onclick = begin;
+        } catch (error) { unavailable(error); }
+    };
+    if (mediaError) unavailable(mediaError);
+    else void prepare();
 }
 
 function buildTrialPlan(block) {
-    const trials = Array.isArray(block?.trials) ? block.trials : [];
-    const plan = trials.map((trial, sourceIndex) => ({
-        trial,
-        sourceIndex,
-        trialId: String(trial?.id || `trial_${sourceIndex + 1}`)
-    }));
-    if (block?.blockConfig?.randomize === true) {
-        for (let i = plan.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [plan[i], plan[j]] = [plan[j], plan[i]];
-        }
-    }
-    return plan;
+    return resolveBlockPresentationPlan(state.sessionData.experimentMeta.presentationPlan, block);
 }
 
 function trialQualityIssues(runtime, context) {
@@ -2139,17 +2368,32 @@ function trialQualityIssues(runtime, context) {
 }
 
 async function startTaskBlock(block, trialPlan = null) {
+    if (pendingBlockStart) return;
+    const start = { generation: mediaRunGeneration };
+    pendingBlockStart = start;
+    ex_state.instruction.btn.disabled = true;
+    try {
+        await prepareTaskBlockMedia(block);
+    } catch (error) {
+        if (pendingBlockStart === start) {
+            pendingBlockStart = null;
+            if (error?.name !== 'AbortError') showTaskBlockInstruction(block, { mediaError: error });
+        }
+        return;
+    }
+    if (pendingBlockStart !== start || cognitiveFinished || experimentProtocol.blocks[currentBlockIndex] !== block) return;
     if (window.Photodiode?.isEnabled()) {
         if (pendingPhotodiodeTaskStart) return;
         const pending = {};
         pendingPhotodiodeTaskStart = pending;
         ex_state.instruction.btn.disabled = true;
         await window.Photodiode.signal('stage');
-        if (pendingPhotodiodeTaskStart !== pending) return;
+        if (pendingPhotodiodeTaskStart !== pending || pendingBlockStart !== start) return;
         pendingPhotodiodeTaskStart = null;
         if (cognitiveFinished || experimentProtocol.blocks[currentBlockIndex] !== block) return;
         ex_state.instruction.btn.disabled = false;
     }
+    pendingBlockStart = null;
     ex_state.instruction.container.style.display = 'none';
     ex_state.task.area.style.display = 'flex';
     currentTrialIndex = 0;
@@ -2175,8 +2419,13 @@ async function startTaskBlock(block, trialPlan = null) {
     runTrial();
 }
 
-function runTrial() {
+async function runTrial() {
+    if (cognitiveFinished) return;
     if (finishAtQualityBoundary()) return;
+    if (!blockMediaLease?.valid()) {
+        finishCognitiveTask('error', mediaPreparationMessage(null));
+        return;
+    }
     const block = experimentProtocol.blocks[currentBlockIndex];
     const trials = activeBlockTrialPlan;
 
@@ -2200,31 +2449,6 @@ function runTrial() {
     const trial = planItem.trial;
     const config = block.blockConfig || {};
     const useFixation = config.useFixation !== false && !!config.fixation;
-    const trialFixationMin = Math.max(0, Number(trial?.fixationMin) || 0);
-    const trialFixationMax = Math.max(trialFixationMin, Number(trial?.fixationMax) || trialFixationMin);
-    const hasTrialRandomFixation = useFixation && trialFixationMax > 0;
-    const baseFixationDuration = useFixation
-        ? (hasTrialRandomFixation
-            ? Math.round(trialFixationMin + Math.random() * (trialFixationMax - trialFixationMin))
-            : Math.max(0, Number(config.fixation?.duration) || 500))
-        : 0;
-    const blockRandomMin = Math.max(0, Number(config.interStimulusMinMs) || 0);
-    const blockRandomMax = Math.max(blockRandomMin, Number(config.interStimulusMaxMs) || blockRandomMin);
-    const trialRandomMin = Math.max(0, Number(trial?.randomItiMin) || 0);
-    const trialRandomMax = Math.max(trialRandomMin, Number(trial?.randomItiMax) || trialRandomMin);
-    const useBlockRandomInterval = config.randomInterStimulus === true;
-    const useTrialRandomInterval = !useBlockRandomInterval && trialRandomMax > 0;
-    const randomMin = useBlockRandomInterval ? blockRandomMin : trialRandomMin;
-    const randomMax = useBlockRandomInterval ? blockRandomMax : trialRandomMax;
-    const randomPreStimulusMs = useBlockRandomInterval || useTrialRandomInterval
-        ? Math.round(randomMin + Math.random() * (randomMax - randomMin))
-        : 0;
-    const fixationDuration = baseFixationDuration + randomPreStimulusMs;
-    const remainingBlockMs = activeBlockDeadlinePerf ? Math.max(1, activeBlockDeadlinePerf - performance.now()) : Infinity;
-    const stimulusDuration = Math.min(
-        Math.max(1, Number(trial?.duration) || Number(config.stimulusDuration) || 1000),
-        remainingBlockMs
-    );
 
     const stimulusType = trial?.stimulus?.type || 'shape';
     const trialId = planItem.trialId;
@@ -2254,12 +2478,34 @@ function runTrial() {
         expectedResponse: trial?.correctResponse ?? null
     });
 
+    const generation = mediaRunGeneration;
+    try {
+        activePresentationRecord = createPresentationRecord(meta.presentationPlan, {
+            blockId: block.id, planItemId: planItem.planItemId,
+            presentationId: state.runtime.taskContext.presentationId,
+            sequence: meta.presentationSequence, attempt: currentBlockAttempt,
+            epochMs: Date.now(), perfMs: performance.now(), timeOriginMs: performance.timeOrigin,
+            sessionStartEpochMs: state.sessionData.startTime
+        });
+        meta.presentationPlan.actual.push(activePresentationRecord);
+        if (runtime && (state.sessionData.ids?.session || cognitiveTaskOptions.autoFinishSession)
+            && await runtime.saveCheckpoint() !== true) throw new Error('presentation_plan_persistence_failed');
+    } catch (error) {
+        finishCognitiveTask('error', 'presentation_plan_persistence_failed');
+        return;
+    }
+    if (cognitiveFinished || generation !== mediaRunGeneration || trials[currentTrialIndex] !== planItem) return;
+    const fixationDuration = activePresentationRecord.fixationDurationMs;
+    const randomPreStimulusMs = activePresentationRecord.randomPreStimulusMs;
+    const plannedStimulusDuration = activePresentationRecord.stimulusDurationMs;
+    activePresentationRecord.fixationStartedPerfMs = performance.now();
+
     emitTaskEvent('trial_start', {
         trialIndex: currentTrialIndex,
         condition: trial?.condition ?? null,
         fixationDuration,
         randomPreStimulusMs,
-        stimulusDuration
+        stimulusDuration: plannedStimulusDuration
     });
 
     resetStimulusViews();
@@ -2276,13 +2522,33 @@ function runTrial() {
     });
     responseCollector.startBaseline();
 
+    const renderGeneration = mediaRunGeneration;
+    const endAtDeadline = () => {
+        activePresentationRecord.status = 'interrupted';
+        activePresentationRecord.deviations.push('block_deadline_before_onset');
+        cleanupTrial();
+        resetStimulusViews();
+        void finishTaskBlockAttempt(block);
+    };
     pendingFixationCallback = async () => {
+        if (cognitiveFinished || renderGeneration !== mediaRunGeneration || activeBlockTrialPlan[currentTrialIndex] !== planItem) return;
         if (activeBlockDeadlinePerf && performance.now() >= activeBlockDeadlinePerf) {
-            finishTaskBlockAttempt(block);
+            endAtDeadline();
             return;
         }
         ex_state.task.fixation.style.display = 'none';
-        const stimulusReady = await renderStimulus(trial);
+        const stimulusReady = await renderStimulus(trial, () => {
+            if (trialPhase !== 'stimulus' || cognitiveFinished || renderGeneration !== mediaRunGeneration
+                || activeBlockTrialPlan[currentTrialIndex] !== planItem) return;
+            handleResponse(null, null, { responseMode, skippedMedia: true, mediaPlaybackFailed: true });
+        });
+        if (cognitiveFinished || renderGeneration !== mediaRunGeneration || activeBlockTrialPlan[currentTrialIndex] !== planItem) return;
+        const stimulusOnPerf = performance.now();
+        const stimulusDuration = presentationWindow(plannedStimulusDuration, stimulusOnPerf, activeBlockDeadlinePerf);
+        if (stimulusDuration <= 0) {
+            endAtDeadline();
+            return;
+        }
         if (!stimulusReady) {
             const errorAt = performance.now();
             const errorView = ex_state.task?.stimulus;
@@ -2314,22 +2580,18 @@ function runTrial() {
             skip.onclick = () => {
                 if (trialPhase !== 'media_error') return;
                 trialPhase = 'media_skipped';
-                getSessionRuntime()?.reportIssue?.({
-                    kind: 'technical', code: 'stimulus_media_load_failed',
-                    message: state.currentLang === 'ru'
-                        ? 'Проба пропущена: файл стимула не загрузился.'
-                        : 'Trial skipped: the stimulus file could not be loaded.',
-                    recoverable: true, invalidatesBlock: true
-                });
-                recordSessionEvent('stimulus_trial_skipped', {
-                    category: 'technical', trialId, stimulusId: trial?.stimulus?.stimulusId || null
-                });
                 handleResponse(null, null, { responseMode, skippedMedia: true });
             };
             return;
         }
 
-        const stimulusOnPerf = performance.now();
+        if (activePresentationRecord) {
+            activePresentationRecord.status = 'started';
+            activePresentationRecord.stimulusOnPerfMs = stimulusOnPerf;
+            activePresentationRecord.stimulusOnEpochMs = Date.now();
+            activePresentationRecord.effectiveStimulusDurationMs = stimulusDuration;
+            if (stimulusDuration < plannedStimulusDuration) activePresentationRecord.deviations.push('block_deadline_clipped');
+        }
         activeTrialRuntime = {
             stimulusOnPerf,
             stimulusOnEpoch: Date.now(),
@@ -2408,15 +2670,26 @@ function handleResponse(rt, key, decision = {}) {
         runtime,
         activeTrialRuntime?.qualityContext || activeTrialQualityContext
     );
-    if (decision.skippedMedia && !qualityIssues.some(issue => issue.code === 'stimulus_media_load_failed')) {
-        qualityIssues.push({ code: 'stimulus_media_load_failed', kind: 'technical' });
+    if (decision.skippedMedia) {
+        const code = decision.mediaPlaybackFailed ? 'stimulus_media_playback_failed' : 'stimulus_media_load_failed';
+        if (!qualityIssues.some(issue => issue.code === code)) qualityIssues.push({ code, kind: 'technical' });
+        // A failed presentation is not a persistent channel or block issue.
+        recordSessionEvent('stimulus_trial_skipped', {
+            ...state.runtime.taskContext,
+            category: 'technical', reason: code
+        });
     }
     const qualityValid = qualityIssues.length === 0 && !decision.skippedMedia;
 
     const rtMs = Number.isFinite(rt) ? Math.round(rt) : null;
-    emitStimulusOffIfNeeded(rtMs, key ? 'response' : 'timeout');
+    emitStimulusOffIfNeeded(rtMs, decision.skippedMedia ? 'stimulus_unavailable' : key ? 'response' : 'timeout');
+    if (activePresentationRecord) {
+        activePresentationRecord.status = decision.skippedMedia ? 'interrupted' : 'completed';
+        activePresentationRecord.qualityValid = qualityValid;
+        if (decision.skippedMedia) activePresentationRecord.deviations.push('stimulus_unavailable');
+    }
 
-    emitTaskEvent('response', {
+    if (!decision.skippedMedia) emitTaskEvent('response', {
         key: key || null,
         responded: key !== null,
         rtMs,
@@ -2482,7 +2755,10 @@ function handleResponse(rt, key, decision = {}) {
         ex_state.task.feedback.style.color = isCorrect ? '#4CAF50' : '#F44336';
         ex_state.task.feedback.style.display = 'block';
 
-        setTimeout(() => {
+        const generation = mediaRunGeneration;
+        feedbackTimeout = setTimeout(() => {
+            feedbackTimeout = null;
+            if (generation !== mediaRunGeneration || cognitiveFinished) return;
             ex_state.task.feedback.style.display = 'none';
             moveToNextTrial();
         }, Math.max(0, Number(trial?.feedbackDuration) || 500));
@@ -2492,6 +2768,7 @@ function handleResponse(rt, key, decision = {}) {
 }
 
 async function finishTaskBlockAttempt(block) {
+    const generation = mediaRunGeneration;
     const runtime = getSessionRuntime();
     const blockId = String(block?.id || '');
     // Leave the stimulus layout before any completion/repeat modal can block this flow.
@@ -2528,19 +2805,26 @@ async function finishTaskBlockAttempt(block) {
         });
         if (attempt < MAX_COGNITIVE_BLOCK_ATTEMPTS && repeatTrialPlan.length) {
             await runtime.promptRepeat(blockId);
+            if (generation !== mediaRunGeneration || cognitiveFinished) return;
             startTaskBlock(block, repeatTrialPlan);
             return;
         }
         const abandonedRepeat = runtime?.discardRepeat(blockId);
         if (abandonedRepeat) await runtime.notifyRepeatLimit(abandonedRepeat);
+        if (generation !== mediaRunGeneration || cognitiveFinished) return;
     }
 
     await exitCognitiveFullscreen();
+    if (generation !== mediaRunGeneration || cognitiveFinished) return;
     await runtime?.notifyBlockComplete({
         blockId,
         blockType: block?.type || 'cognitive_task'
     });
+    if (generation !== mediaRunGeneration || cognitiveFinished) return;
 
+    resetStimulusViews();
+    mediaPreparation?.releaseBlock();
+    blockMediaLease = null;
     activeBlockTrialPlan = [];
     activeBlockDeadlinePerf = null;
     currentBlockIndex++;
@@ -2562,9 +2846,14 @@ function finishAtQualityBoundary() {
 }
 
 function moveToNextTrial() {
-    const trial = activeBlockTrialPlan[currentTrialIndex]?.trial;
-    const interTrialDelay = Math.max(0, Number(trial?.iti) || 200);
-    setTimeout(() => {
+    const interTrialDelay = activePresentationRecord?.itiMs ?? 200;
+    const previousPresentation = activePresentationRecord;
+    const scheduledAt = performance.now();
+    const generation = mediaRunGeneration;
+    interTrialTimeout = setTimeout(() => {
+        interTrialTimeout = null;
+        if (generation !== mediaRunGeneration || cognitiveFinished) return;
+        if (previousPresentation) previousPresentation.actualItiMs = performance.now() - scheduledAt;
         currentTrialIndex++;
         runTrial();
     }, activeBlockDeadlinePerf
@@ -2573,6 +2862,8 @@ function moveToNextTrial() {
 }
 
 function cleanupTrial() {
+    clearTimeout(feedbackTimeout); feedbackTimeout = null;
+    clearTimeout(interTrialTimeout); interTrialTimeout = null;
     responseCollector?.dispose();
     responseCollector = null;
 

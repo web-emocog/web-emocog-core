@@ -5,6 +5,9 @@ const { runNativeProcess } = require('../security/native-process');
 const config = require('../config');
 const { resolveReadableServerOwnedUploadPath } = require('../security/upload-paths');
 const { HttpError } = require('../security/http-error');
+const { trackPreviewArtifact } = require('./write-artifacts');
+const { previewBudget, accountObject, assertDiskSpace } = require('./storage-quotas');
+const { readStoragePolicy } = require('../config/storage-policy');
 
 let active = 0;
 const pending = new Map();
@@ -56,6 +59,7 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
     const directory = path.join(uploadsRoot, 'previews');
     await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
     temporary = path.join(directory, `${crypto.randomUUID()}.jpg`);
+    await options.onArtifact?.(path.relative(uploadsRoot, temporary));
     await runMediaTool(options.ffmpegBin, ['-nostdin', '-v', 'error', '-xerror', '-max_alloc', '67108864',
       '-protocol_whitelist', 'file,pipe', '-threads', '1', '-i', input.absolutePath,
       '-map', '0:v:0', '-frames:v', '1', '-an', '-sn', '-threads', '1',
@@ -64,7 +68,7 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
     const stat = await fs.promises.stat(temporary);
     if (!stat.size || stat.size > 2 * 1024 * 1024) throw new HttpError(422, 'Preview exceeds limits', 'media_preview_oversized');
     const duration = Number(metadata.format?.duration);
-    const result = { status: 'ready', path: path.relative(uploadsRoot, temporary),
+    const result = { status: 'ready', path: path.relative(uploadsRoot, temporary), bytes: stat.size,
       info: { intrinsic_width: width, intrinsic_height: height, codec: String(stream.codec_name || '').slice(0, 64),
         ...(Number.isFinite(duration) && duration >= 0 ? { duration_ms: Math.round(duration * 1000) } : {}) } };
     temporary = null;
@@ -75,31 +79,50 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
   }
 }
 
+async function hasUsablePreview(version, uploadsRoot) {
+  if (!version || version.media_info?.validated_sha256 !== version.sha256) return false;
+  if (version.preview_status === 'unsupported') return true;
+  return version.preview_status === 'ready'
+    && (await resolveReadableServerOwnedUploadPath(uploadsRoot, version.preview_path)).ok;
+}
+
 async function ensurePreview(queryable, version, uploadsRoot) {
-  if (version.preview_status === 'ready' && version.media_info?.validated_sha256 === version.sha256) return version;
-  if (version.preview_status === 'unsupported' && version.media_info?.validated_sha256 === version.sha256) return version;
+  if (await hasUsablePreview(version, uploadsRoot)) return version;
   if (pending.has(version.id)) return pending.get(version.id);
   const task = (async () => {
+    // Audio is still decoded and quota-locked, but does not create a poster.
+    const policy = /^audio\//.test(version.mime_type) ? { ...readStoragePolicy(), previewBytes: 0 } : undefined;
+    await previewBudget(queryable, version, policy);
+    await assertDiskSpace(queryable, uploadsRoot);
     let preview;
     try { preview = await createPreview(version, uploadsRoot); }
     catch (error) {
       if (error.code === 'media_preview_busy') throw error;
       preview = { status: 'failed', info: { preview_error: error.code || 'media_preview_failed' } };
     }
-    if (preview.status === 'ready') preview.info.validated_sha256 = version.sha256;
-    try {
-      const result = await queryable.query(`UPDATE stimulus_versions
-        SET preview_path = $1, preview_status = $2, media_info = $3::jsonb WHERE id = $4 RETURNING *`,
-      [preview.path || null, preview.status, JSON.stringify(preview.info), version.id]);
-      if (!result.rows[0]) throw new HttpError(409, 'Stimulus version is no longer available', 'stimulus_version_changed');
-      return result.rows[0];
-    } catch (error) {
-      if (preview.path) await fs.promises.unlink(path.join(uploadsRoot, preview.path)).catch(() => {});
-      throw error;
-    }
+    return persistPreview(queryable, version, uploadsRoot, preview);
   })();
   pending.set(version.id, task);
   try { return await task; } finally { pending.delete(version.id); }
+}
+
+async function persistPreview(queryable, version, uploadsRoot, preview) {
+  if (preview.status === 'ready') preview.info.validated_sha256 = version.sha256;
+  trackPreviewArtifact(queryable, uploadsRoot, preview.path);
+  try {
+    if (preview.path) {
+      const organizationId = await previewBudget(queryable, version);
+      await accountObject(queryable, organizationId, preview.path, preview.bytes);
+    }
+    const result = await queryable.query(`UPDATE stimulus_versions
+      SET preview_path = $1, preview_status = $2, media_info = $3::jsonb WHERE id = $4 RETURNING *`,
+    [preview.path || null, preview.status, JSON.stringify(preview.info), version.id]);
+    if (!result.rows[0]) throw new HttpError(409, 'Stimulus version is no longer available', 'stimulus_version_changed');
+    return result.rows[0];
+  } catch (error) {
+    if (preview.path) await fs.promises.unlink(path.join(uploadsRoot, preview.path)).catch(() => {});
+    throw error;
+  }
 }
 
 async function ensurePlayableVersion(queryable, version, uploadsRoot) {
@@ -118,4 +141,4 @@ async function ensurePlayableVersion(queryable, version, uploadsRoot) {
   return inspected;
 }
 
-module.exports = { runMediaTool, createPreview, ensurePreview, ensurePlayableVersion };
+module.exports = { runMediaTool, createPreview, persistPreview, hasUsablePreview, ensurePreview, ensurePlayableVersion };

@@ -1147,13 +1147,15 @@ body.cognitive-stimulus-fullscreen {
 
 .vpc-pair-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px;
     align-items: center;
     margin-top: 14px;
 }
 
 .vpc-side-image {
+    box-sizing: border-box;
+    min-width: 0;
     width: 100%;
     max-height: 46vh;
     border-radius: 10px;
@@ -1264,10 +1266,6 @@ body.cognitive-stimulus-fullscreen {
 
 @media (max-width: 900px) {
     .test-hub-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .vpc-pair-row {
         grid-template-columns: 1fr;
     }
 

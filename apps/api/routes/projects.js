@@ -68,6 +68,7 @@ router.post(
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       const { organization_id, name, slug } = req.body;
       const project = await withTransaction(pool, async client => {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['workspace-org:' + organization_id]);
         if (!isPlatformAdmin(req.user)) {
           const organizationAccess = await client.query(
             `SELECT organization_id
@@ -82,6 +83,17 @@ router.post(
               { status: 403, code: 'organization_membership_required' }
             );
           }
+        }
+        const governed = await client.query(`SELECT EXISTS(
+          SELECT 1 FROM user_organizations WHERE organization_id=$1 AND role='owner') AS self_service`, [organization_id]);
+        if (governed.rows[0]?.self_service) {
+          if (!isPlatformAdmin(req.user)) {
+            const owner = await client.query(`SELECT 1 FROM user_organizations
+              WHERE organization_id=$1 AND user_id=$2 AND role='owner'`, [organization_id, req.user.sub]);
+            if (!owner.rows[0]) throw Object.assign(new Error('Organization owner required'), { status: 403, code: 'organization_owner_required' });
+          }
+          const count = await client.query('SELECT count(*)::int AS count FROM projects WHERE organization_id=$1', [organization_id]);
+          if (count.rows[0].count >= 100) throw Object.assign(new Error('Project limit reached'), { status: 409, code: 'project_limit_reached' });
         }
         const r = await client.query(
           'INSERT INTO projects (organization_id, name, slug) VALUES ($1, $2, $3) RETURNING id, organization_id, name, slug, created_at',
@@ -102,7 +114,7 @@ router.post(
             `INSERT INTO user_projects (user_id, project_id, role)
              VALUES ($1, $2, $3)
              ON CONFLICT (user_id, project_id) DO NOTHING`,
-            [req.user.sub, r.rows[0].id, req.user.role]
+            [req.user.sub, r.rows[0].id, governed.rows[0]?.self_service ? 'owner' : req.user.role]
           );
         }
         return r.rows[0];

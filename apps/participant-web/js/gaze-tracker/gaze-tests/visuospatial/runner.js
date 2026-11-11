@@ -1,5 +1,5 @@
 import { state, setSessionPhase, setTaskContext, clearTaskContext, recordSessionEvent } from '../../../web-page/state.js?v=20261025-1';
-import { TEST_PHASES, VISUOSPATIAL_CONFIG } from '../constants.js';
+import { TEST_PHASES, VISUOSPATIAL_CONFIG } from '../constants.js?v=20261106-metrics1';
 import { pickRandomPrompt } from './prompts.js';
 import { computeVisuospatialMetrics } from './metrics.js';
 import { pushVisuospatialSessionRun } from '../session-schema.js';
@@ -47,6 +47,21 @@ function setupCanvas(canvas) {
 }
 
 export async function runVisuospatialDrawingTest(options = {}) {
+    if (state.runtime.participantPageExited) return null;
+    state.runtime.cancelVisuospatialTest?.();
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    state.runtime.cancelVisuospatialTest = cancel;
+    window.addEventListener('pagehide', cancel, { once: true });
+    try {
+        return await runDrawing(options, controller.signal);
+    } finally {
+        window.removeEventListener('pagehide', cancel);
+        if (state.runtime.cancelVisuospatialTest === cancel) state.runtime.cancelVisuospatialTest = null;
+    }
+}
+
+async function runDrawing(options, signal) {
     dbg('visuospatial', 'screen:opened', {});
     const t = options.t;
     const runId = `visuospatial_run_${Date.now()}`;
@@ -91,17 +106,23 @@ export async function runVisuospatialDrawingTest(options = {}) {
     recordSessionEvent('visuospatial_prompt_selected', { runId, trialId, promptId: prompt.id });
 
     // 1. Ждём клика "Начать рисование" в intro-карточке.
-    await new Promise(resolve => {
+    const acknowledged = await new Promise(resolve => {
         if (!startBtn) {
-            resolve();
+            resolve(true);
             return;
         }
-        const onClick = () => {
+        const finish = accepted => {
             startBtn.removeEventListener('click', onClick);
-            resolve();
+            signal.removeEventListener('abort', cancelled);
+            resolve(accepted);
         };
+        const onClick = () => finish(true);
+        const cancelled = () => finish(false);
         startBtn.addEventListener('click', onClick);
+        signal.addEventListener('abort', cancelled, { once: true });
+        if (signal.aborted) cancelled();
     });
+    if (!acknowledged || signal.aborted) return null;
 
     if (typeof options.onStart === 'function') options.onStart();
 
@@ -169,6 +190,7 @@ export async function runVisuospatialDrawingTest(options = {}) {
             if (timeoutId) clearTimeout(timeoutId);
             if (onKeyDown) document.removeEventListener('keydown', onKeyDown, { capture: true });
             if (onKeyUp) document.removeEventListener('keyup', onKeyUp, { capture: true });
+            signal.removeEventListener('abort', cancelled);
             globalThis.__WECOG_ACTIVE_LISTENERS__ = 0;
             if (gazeDot) gazeDot.classList.remove('is-pen-down');
             if (finishBtn) {
@@ -179,6 +201,8 @@ export async function runVisuospatialDrawingTest(options = {}) {
         };
 
         const onFinishClick = () => stopRun('manual');
+        const cancelled = () => stopRun('page_exit');
+        signal.addEventListener('abort', cancelled, { once: true });
         if (finishBtn) finishBtn.addEventListener('click', onFinishClick);
 
         timeoutId = setTimeout(() => stopRun('timeout'), VISUOSPATIAL_CONFIG.maxDurationMs);
@@ -294,6 +318,7 @@ export async function runVisuospatialDrawingTest(options = {}) {
     hide(gazeDot);
     if (startBtn) startBtn.disabled = false;
     hide(drawingOverlay);
+    if (signal.aborted) return null;
 
     const metrics = computeVisuospatialMetrics(points, VISUOSPATIAL_CONFIG, {
         width: canvasInfo.width,

@@ -6,6 +6,37 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const modulePath = pathToFileURL(path.resolve(__dirname, '../../../scripts/reference-data/reference.mjs'));
 
+test('file-backed fake camera requires provenance tying its decoded bytes to the locked reference', async () => {
+  const { validateCameraFileMetadata } = await import(pathToFileURL(path.resolve(__dirname,
+    '../../../scripts/reference-data/prepare-camera-file.mjs')));
+  const source = { sha256: 'a'.repeat(64) }, output = { sha256: 'b'.repeat(64), bytes: 12345 };
+  const valid = { schemaVersion: 'fake-camera-file.v1', sourceSha256: source.sha256,
+    outputSha256: output.sha256, outputBytes: output.bytes, decoderImage: 'sha256:' + 'c'.repeat(64),
+    transformation: 'VP9-to-YUV420-Y4M-no-scaling-no-rate-override-no-audio' };
+  assert.equal(validateCameraFileMetadata(valid, source, output), valid);
+  for (const patch of [{ schemaVersion: 'future' }, { sourceSha256: 'd'.repeat(64) },
+    { outputSha256: 'e'.repeat(64) }, { outputBytes: 12344 }, { decoderImage: 'latest' },
+    { transformation: 'scaled-or-retimed' }]) {
+    assert.throws(() => validateCameraFileMetadata({ ...valid, ...patch }, source, output), /invalid_benchmark_fake_video_provenance/);
+  }
+  assert.throws(() => validateCameraFileMetadata(null, source, output), /invalid_benchmark_fake_video_provenance/);
+});
+
+test('browser CPU comparison accounts for all process threads and rejects churn or backwards counters', async () => {
+  const { processCpuDelta } = await import(pathToFileURL(path.resolve(__dirname, '../../../scripts/reference-data/performance.mjs')));
+  const before = [{ id: 1, type: 'browser', cpuTime: 10 }, { id: 2, type: 'renderer', cpuTime: 30 }];
+  const after = [{ id: 1, type: 'browser', cpuTime: 12 }, { id: 2, type: 'renderer', cpuTime: 38 }];
+  assert.deepEqual(processCpuDelta(before, after, 5000), { status: 'measured', cpuSeconds: 10,
+    secondsByType: { browser: 2, renderer: 8 }, processCount: 2, cpuCoreEquivalents: 2,
+    scope: 'browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system' });
+  assert.equal(processCpuDelta([], [], 5000).status, 'not_measured');
+  assert.equal(processCpuDelta(before, after, 0).status, 'not_measured');
+  for (const rows of [after.slice(0, 1), [...after, { id: 3, type: 'renderer', cpuTime: 1 }],
+    [{ ...after[0], cpuTime: 9 }, after[1]], [{ ...after[0], type: 'gpu' }, after[1]]]) {
+    assert.equal(processCpuDelta(before, rows, 5000).status, 'process_set_changed');
+  }
+});
+
 test('private replay stage profiling changes no model settings and refuses unknown source versions', async () => {
   const { profileFaceStages } = await import(pathToFileURL(path.resolve(__dirname, '../../../scripts/reference-data/profile-stages.mjs')));
   const source = await fs.readFile(path.resolve(__dirname, '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js'), 'utf8');
@@ -17,7 +48,9 @@ test('private replay stage profiling changes no model settings and refuses unkno
   assert.throws(() => profileFaceStages(source, 'unknown'), /invalid_reference_face_input/);
   const used = profileFaceStages(source, 'bitmap', 'used');
   assert.ok(used.includes('outputFaceBlendshapes: false'));
-  assert.ok(used.includes('outputFacialTransformationMatrixes: true'));
+  const { FACE_MODEL_CONFIG } = await import(pathToFileURL(path.resolve(__dirname,
+    '../../participant-web/js/precheck-analyzer/face-model.mjs')));
+  assert.equal(FACE_MODEL_CONFIG.outputFacialTransformationMatrixes, true);
   assert.throws(() => profileFaceStages(source, 'bitmap', 'unknown'), /invalid_reference_face_outputs/);
   assert.ok(profileFaceStages(source, 'bitmap', 'full', 'compute').includes('antialias: false'));
   assert.throws(() => profileFaceStages(source, 'bitmap', 'full', 'unknown'), /invalid_reference_face_canvas/);

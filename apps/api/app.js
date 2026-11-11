@@ -22,7 +22,13 @@ const experimentsRoutes = require('./routes/experiments');
 const stimuliRoutes = require('./routes/stimuli');
 const proxyMetricsRoutes = require('./routes/proxy_metrics');
 const contractsRoutes = require('./routes/contracts');
+const identityRoutes = require('./routes/identity');
+const workspaceRoutes = require('./routes/workspace');
 const { getRtAnalyzerHealth } = require('./rt/compute');
+const { PostgresRateStore } = require('./security/postgres-rate-store');
+const { HttpError } = require('./security/http-error');
+const { createOperationalMetrics } = require('./operations/metrics');
+const { requireAuth, requireRole } = require('./middleware/auth');
 const {
   buildCorsOptions,
   createSecurityHeaders,
@@ -33,6 +39,9 @@ const {
 
 const app = express();
 app.disable('x-powered-by');
+const operationalMetrics = createOperationalMetrics({ startedAt: new Date().toISOString() });
+app.locals.operationalMetrics = operationalMetrics;
+app.use(operationalMetrics.middleware);
 if (config.http.trustProxyHops > 0) {
   app.set('trust proxy', config.http.trustProxyHops);
 }
@@ -42,10 +51,15 @@ if (config.forceHttps) {
 }
 app.use(cors(buildCorsOptions(config.http.corsOrigins)));
 app.use(cookieParser());
-app.use(rateLimit(buildRouteRateLimitOptions(config.http.rateLimits)));
+const limiterOptions = buildRouteRateLimitOptions(config.http.rateLimits, config.http.rateLimitStore === 'postgres'
+  ? { store: new PostgresRateStore(pool, config.jwt.secret) } : {});
+limiterOptions.skip = req => ['GET', 'HEAD'].includes(req.method) && ['/health', '/ready'].includes(req.path);
+app.use(rateLimit(limiterOptions));
 app.use(createRouteAwareJsonParser(config.http.bodyLimits));
 
 app.use('/auth', authRoutes);
+app.use('/identity', identityRoutes);
+app.use('/workspace', workspaceRoutes);
 app.use('/organizations', organizationsRoutes);
 app.use('/projects', projectsRoutes);
 app.use('/sessions', sessionsRoutes);
@@ -58,6 +72,9 @@ app.use('/experiments', experimentsRoutes);
 app.use('/stimuli', stimuliRoutes);
 app.use('/proxy-metrics', proxyMetricsRoutes);
 app.use('/contracts', contractsRoutes);
+app.get('/operations/metrics', requireAuth, requireRole('admin', 'developer'), (_req, res) => {
+  res.type('text/plain; version=0.0.4; charset=utf-8').send(operationalMetrics.prometheus());
+});
 
 app.get('/health', async (req, res, next) => {
   try {
@@ -80,6 +97,10 @@ app.get('/ready', async (req, res) => {
   }
   try {
     await pool.query('SELECT 1');
+    if (config.http.rateLimitStore === 'postgres') {
+      const schema = await pool.query("SELECT to_regclass('public.http_rate_windows') AS limiter");
+      if (!schema.rows[0]?.limiter) return res.status(503).json({ status: 'not_ready', reason: 'migration_required' });
+    }
     return res.json({ status: 'ready', db: 'ok' });
   } catch (err) {
     return res.status(503).json({ status: 'not_ready', db: 'error' });
@@ -87,6 +108,10 @@ app.get('/ready', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  if (err instanceof HttpError) {
+    if (err.status === 503) res.setHeader('Retry-After', '5');
+    return res.status(err.status).json({ error: err.message, code: err.code, requestId: req.requestId });
+  }
   if (err?.type === 'entity.too.large') {
     return res.status(413).json({
       error: 'Request body is too large',
@@ -129,7 +154,7 @@ app.use((err, req, res, next) => {
   // Only unexpected server faults get a sanitized diagnostic. Client-controlled 4xx
   // failures above must not expose request data or provide a log-flood vector.
   logUnexpectedError(err, 'app');
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(500).json({ error: 'Internal server error', requestId: req.requestId });
 });
 
 module.exports = app;

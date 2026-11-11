@@ -1,28 +1,5 @@
-/**
- * QC Metrics Module v3.5 — Browser Wrapper / Loader
- *
- * Загрузка устроена так:
- *   1) Сразу синхронно объявляется inline-класс QCMetricsInline (полная реализация
- *      ниже), и он публикуется в window.QCMetrics — это safety net для legacy-кода,
- *      который делает new QCMetrics() сразу при загрузке страницы (с предупреждением
- *      console.warn о sync use).
- *   2) Параллельно запускается dynamic import() ES-модуля ./qc-metrics/index.js.
- *      Если папка успешно загрузилась и экспортирует класс QCMetrics —
- *      window.QCMetrics ПЕРЕзаписывается на модульную версию.
- *   3) Если папка повреждена или не загрузилась — остаёмся на inline-классе и
- *      ругаемся в консоль (console.error).
- *   4) Состояние загрузки доступно как Promise window.QCMetricsReady,
- *      резолвящийся в 'module' или 'inline'. Все НОВЫЕ потребители ОБЯЗАНЫ
- *      делать `await window.QCMetricsReady` перед `new QCMetrics()`.
- *
- * Inline-копия здесь поддерживается как точная функциональная копия модульной
- * версии (тот же публичный API, та же формула QC Score). При расхождении
- * источником истины считается папка ./qc-metrics/.
- *
- * @version 3.5.0
- */
+// Classic loader; consumers await the canonical module before constructing the model.
 
-// Встроенный класс — fallback при сбое загрузки папки.
 class QCMetricsInline {
     constructor(options = {}) {
         this.thresholds = {
@@ -101,12 +78,10 @@ class QCMetricsInline {
         this._warmupComplete = false;
         this._baselineFps = null;
         this._cameraFps = 0;
-        console.log('[QCMetrics] Started');
     }
 
     stop() {
         this._isRunning = false;
-        console.log('[QCMetrics] Stopped');
     }
 
     /**
@@ -125,7 +100,6 @@ class QCMetricsInline {
             const sorted = [...this._cameraFpsHistory].sort((a, b) => b - a);
             this._baselineFps = sorted[Math.floor(sorted.length * 0.2)] || sorted[0];
             this._warmupComplete = true;
-            console.log(`[QCMetrics] Camera baseline FPS: ${this._baselineFps}`);
         }
     }
 
@@ -480,7 +454,6 @@ class QCMetricsInline {
 
     setTrackingDeviationData(samples) {
         if (!Array.isArray(samples) || samples.length === 0) {
-            console.warn('[QCMetrics] setTrackingDeviationData: нет данных');
             return;
         }
         const errors = [];
@@ -494,7 +467,6 @@ class QCMetricsInline {
             }
         }
         if (errors.length < 5) {
-            console.warn('[QCMetrics] setTrackingDeviationData: недостаточно валидных точек:', errors.length);
             return;
         }
         this._trackingDeviationState = {
@@ -503,7 +475,6 @@ class QCMetricsInline {
             validSampleCount: errors.length,
             isComplete: true
         };
-        console.log(`[QCMetrics] Tracking deviation data set: ${errors.length} valid samples of ${samples.length}`);
     }
 
     _getTrackingDeviationMetrics(options = {}) {
@@ -561,7 +532,6 @@ class QCMetricsInline {
      */
     setValidationData(samples) {
         if (!Array.isArray(samples) || samples.length === 0) {
-            console.warn('[QCMetrics] setValidationData: нет данных');
             return;
         }
 
@@ -575,7 +545,6 @@ class QCMetricsInline {
         }
 
         if (errors.length < 3) {
-            console.warn('[QCMetrics] setValidationData: недостаточно валидных точек:', errors.length);
             return;
         }
 
@@ -585,7 +554,6 @@ class QCMetricsInline {
             isComplete: true
         };
 
-        console.log(`[QCMetrics] Validation data set: ${errors.length} points`);
     }
 
     resetGazeAvailability() {
@@ -607,46 +575,22 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = QCMetricsInline;
 }
 
-// Browser: loader-паттерн.
-// Сначала publish'им inline-класс СИНХРОННО как safety net — старый код,
-// который делает new QCMetrics() до резолва Promise, не упадёт, но получит
-// console.warn, чтобы было видно непереведённые точки потребления.
 if (typeof window !== 'undefined') {
-    let _qcMetricsResolvedKind = null; // 'module' | 'inline' | null (ещё не решено)
-
-    // Класс-прокси: до резолва выводит предупреждение и инстанцирует inline.
-    // После резолва window.QCMetrics ПЕРЕзаписывается реальным классом
-    // (модульным или inline), и прокси больше не используется для новых вызовов.
-    function QCMetricsProxy(...args) {
-        if (_qcMetricsResolvedKind === null) {
-            console.warn(
-                '[QCMetrics] sync use before Ready — using inline fallback. ' +
-                'Update the consumer to `await window.QCMetricsReady` before `new QCMetrics()`.'
-            );
-        }
-        return new QCMetricsInline(...args);
-    }
-    QCMetricsProxy.prototype = QCMetricsInline.prototype;
-
-    window.QCMetrics = QCMetricsProxy;
-
-    // Фоновая загрузка модульной версии.
-    window.QCMetricsReady = (async () => {
-        try {
-            const mod = await import('./qc-metrics/index.js?v=20261104-4');
-            const Cls = mod && (mod.QCMetrics || mod.default);
-            if (typeof Cls !== 'function') {
-                throw new Error('module did not export QCMetrics class');
-            }
-            window.QCMetrics = Cls;
-            _qcMetricsResolvedKind = 'module';
-            console.info('[QCMetrics] folder version loaded');
+    window.QCMetrics = QCMetricsInline;
+    window.QCMetricsReady = import('./qc-metrics/index.js?v=20261110-integration1')
+        .then(module => {
+            const Model = module.QCMetrics || module.default;
+            if (typeof Model !== 'function') throw new Error('qc_export_missing');
+            window.QCMetrics = Model;
             return 'module';
-        } catch (e) {
-            window.QCMetrics = QCMetricsInline;
-            _qcMetricsResolvedKind = 'inline';
-            console.error('[QCMetrics] folder load failed, using inline fallback', e);
+        })
+        .catch(() => {
+            void import('./session-runtime/participant-diagnostic.mjs?v=20261110-integration1').then(
+                diagnostic => {
+                    diagnostic.participantDebugError('qc', 'module:inline-fallback');
+                },
+                () => { /* Diagnostics are optional. */ }
+            );
             return 'inline';
-        }
-    })();
+        });
 }

@@ -6,6 +6,107 @@ const { pathToFileURL } = require('node:url');
 const { validateSessionFeaturePayload } = require('../security/payload-policy');
 const { buildSessionMetrics, channelQc } = require('../analytics/metrics');
 
+test('completed protocol Test Hub runs and hidden timer records pass the closed final contract', async () => {
+  const { buildAggregatesPayload } = await import('../../participant-web/js/unified-aggregates-new.js');
+  const { pushHubRun, pushHubSelection } = await import('../../participant-web/js/gaze-tracker/gaze-tests/session-schema.js');
+  const { createSessionEvent } = await import('../../participant-web/js/session-runtime/contracts.mjs');
+  const data = { ids: { session: 'synthetic-completed-protocol-test' },
+    lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed',
+      finishAttemptId: 'synthetic-finish', completedAt: 5000 },
+    experimentMeta: { protocolTimers: [{ id: 'elapsed', name: 'Session duration', startsAt: 'session_start',
+      startedAt: 1000, finishedAt: 5000, durationMs: 4000, hidden: true }] },
+    events: [createSessionEvent({ type: 'protocol_timers_complete',
+      timers: [{ id: 'elapsed', name: 'Session duration', durationMs: 4000 }] }),
+      createSessionEvent({ type: 'protocol_timer_started', id: 'elapsed', startedAt: 1000 })] };
+  pushHubSelection(data, { testId: 'vpc', selectedAt: 2000, phase: 'protocol' });
+  pushHubRun(data, { testId: 'vpc', startedAt: 2000, completedAt: 4000, summary: 'Synthetic completed run' });
+  const packet = buildAggregatesPayload(data, { forIngest: true });
+  assert.deepEqual(validateSessionFeaturePayload(packet), []);
+  assert.equal(packet.testHub.runs[0].completedAt, 4000);
+  assert.equal(packet.experimentMeta.protocolTimers[0].finishedAt, 5000);
+  for (const mutate of [
+    item => { item.testHub.runs[0].completedAt = 'not-a-time'; },
+    item => { item.testHub.runs[0].rawVideo = 'forbidden'; },
+    item => { item.experimentMeta.protocolTimers[0].hidden = 'yes'; },
+    item => { item.experimentMeta.protocolTimers[0].finishedAt = -1; },
+    item => { item.events[0].timers[0].rawFrames = []; },
+    item => { item.events[1].id = { arbitrary: true }; },
+    item => { item.experimentMeta.protocolTimers[0].arbitraryAnswers = {}; },
+  ]) {
+    const invalid = structuredClone(packet); mutate(invalid);
+    assert.notDeepEqual(validateSessionFeaturePayload(invalid), []);
+  }
+});
+
+test('the strict API accepts the actual attention episode summary and lifecycle fields without raw series', async () => {
+  const { buildAggregatesPayload } = await import('../../participant-web/js/unified-aggregates-new.js');
+  const { buildAttentionMetrics } = await import('../../participant-web/js/gaze-tracker/attention-metrics.js');
+  const { createSessionEvent } = await import('../../participant-web/js/session-runtime/contracts.mjs');
+  const { SessionStateMachine } = await import('../../participant-web/js/session-runtime/session-state-machine.mjs');
+  const attentionMetrics = buildAttentionMetrics({ eyeSignals: [], eyeTracking: [] });
+  assert.equal(attentionMetrics.global.perclos.episodes.count, 0);
+  const finishAttemptId = 'finish-actual-runtime-contract';
+  const transitions = [];
+  const machine = new SessionStateMachine({ onTransition: transition => transitions.push(createSessionEvent({
+    type: 'session_state_transition', details: transition.details,
+  })) });
+  machine.start();
+  machine.enterInstruction();
+  machine.reportIssue({ kind: 'technical', code: 'network_offline', message: 'Network disconnected', invalidatesBlock: false });
+  assert.ok(transitions.some(event => event.details?.code === 'network_offline'));
+  machine.resolveIssue('network_offline');
+  machine.beginBlock({ blockId: 'rt', blockType: 'cognitive_task' });
+  machine.reportIssue({ kind: 'quality', code: 'fps_low', message: 'Frame rate low', invalidatesBlock: true });
+  machine.completeBlock({ success: true, repeatItems: [{ id: 'trial1', issueCodes: ['fps_low'] }], totalItemCount: 1 });
+  const repeat = machine.consumeRepeat('rt');
+  machine.resolveIssue('fps_low');
+  machine.enterInstruction();
+  machine.beginBlock({ blockId: 'rt', blockType: 'cognitive_task' });
+  machine.completeBlock({ success: true, repeatItems: [], totalItemCount: 1 });
+  assert.ok(transitions.some(event => event.details?.repeatRequired === true));
+  const payload = buildAggregatesPayload({
+    ids: { session: 'S-runtime', participant: 'P-runtime', invitationCode: 'INV-runtime' },
+    attentionMetrics,
+    perclosSummary: attentionMetrics.global.perclos,
+    lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed',
+      finishAttemptId, completedAt: 2000 },
+    events: [
+      createSessionEvent({ type: 'invitation_protocol_loaded', protocolId: 42, timestamp: 1000 }),
+      ...transitions,
+      createSessionEvent({ type: 'session_finish_start', details: { finishAttemptId }, timestamp: 2000 }),
+      createSessionEvent({ type: 'session_finishing', finishAttemptId, timestamp: 2000 }),
+      createSessionEvent({ type: 'cognitive_task_complete', blocksProcessed: 2, trialResults: 1 }),
+      createSessionEvent({ type: 'session_block_repeat_acknowledged', repeatItemCount: repeat.repeatItemCount,
+        failedAttempt: repeat.failedAttempt, repeatItems: repeat.repeatItems }),
+      createSessionEvent({ type: 'tracking_test_complete', averageCameraFps: 25.2 }),
+      createSessionEvent({ type: 'vpc_pair_on', familiarStimulusId: 'familiar-1', novelStimulusId: 'novel-1',
+        familiarSha256: 'a'.repeat(64), novelSha256: 'b'.repeat(64), novelSide: 'left' }),
+    ],
+  }, { forIngest: true });
+  assert.deepEqual(validateSessionFeaturePayload(payload), []);
+  assert.equal(payload.perclos_summary.episodes.durationsMsCount, 0);
+  assert.equal(payload.perclos_summary.episodes.durationsMs, undefined);
+  payload.perclos_summary.rejectReasons.not_deep_enough = 1;
+  assert.deepEqual(validateSessionFeaturePayload(payload), []);
+  const largeRepeat = structuredClone(payload);
+  const repeatEvent = largeRepeat.events.find(event => event.type === 'session_block_repeat_acknowledged');
+  repeatEvent.repeatItemCount = 201;
+  repeatEvent.repeatItems = Array.from({ length: 201 }, (_, index) => ({ id: `trial-${index}`, issueCodes: ['fps_low'] }));
+  assert.deepEqual(validateSessionFeaturePayload(largeRepeat), []);
+  for (const mutate of [
+    value => { value.perclos_summary.episodes.durationsMs = [100]; },
+    value => { value.events.find(event => event.details?.code === 'network_offline').details.details.rawVideo = 'forbidden'; },
+    value => { value.events.find(event => event.type === 'vpc_pair_on').familiarSha256 = 'invalid'; },
+    value => { value.events.find(event => event.type === 'session_block_repeat_acknowledged').failedAttempt = -1; },
+    value => { value.events[0].protocolId = 2147483648; },
+    value => { value.attentionMetrics.focus.cognitiveStimulus.perclos.rawFrames = []; },
+  ]) {
+    const malformed = structuredClone(payload);
+    mutate(malformed);
+    assert.notDeepEqual(validateSessionFeaturePayload(malformed), []);
+  }
+});
+
 test('participant final aggregates pass ingest policy and remain visible to researcher analytics', async () => {
   const aggregateModule = path.resolve(
     __dirname,

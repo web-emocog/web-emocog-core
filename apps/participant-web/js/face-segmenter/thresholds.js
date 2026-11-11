@@ -52,57 +52,45 @@ export const DEFAULT_THRESHOLDS = {
  * @param {Object} baseThresholds - базовые пороги
  * @returns {Object} - пороги для области {minFaceSkin, maxHair, maxHand}
  */
-export function getAreaThresholds(areaName, baseThresholds) {
-    let minFaceSkinThreshold = baseThresholds.minSkinVisibility;
-    let maxHairThreshold = baseThresholds.hairOcclusionThreshold;
-    let maxHandThreshold = baseThresholds.handOcclusionThreshold;
+export const REGION_THRESHOLDS = Object.freeze({
+    forehead: Object.freeze({ minFaceSkin: 0.40, maxHair: 0.35, maxHand: 0.05 }),
+    leftCheek: Object.freeze({ minFaceSkin: 0.45, maxHair: 0.20, maxHand: 0.05 }),
+    rightCheek: Object.freeze({ minFaceSkin: 0.45, maxHair: 0.20, maxHand: 0.05 }),
+    leftEye: Object.freeze({ minFaceSkin: 0.20, maxHair: 0.15, maxHand: 0.05 }),
+    rightEye: Object.freeze({ minFaceSkin: 0.20, maxHair: 0.15, maxHand: 0.05 }),
+    nose: Object.freeze({ minFaceSkin: 0.40, maxHair: 0.10, maxHand: 0.08 }),
+    mouth: Object.freeze({ minFaceSkin: 0.35, maxHair: 0.10, maxHand: 0.08 }),
+    chin: Object.freeze({ minFaceSkin: 0.30, maxHair: 0.20, maxHand: 0.10 })
+});
 
-    // Для разных областей разные пороги
-    // v1.2: Значительно снижены пороги для body_skin (рука)
-    switch (areaName) {
-        case 'forehead':
-            // Лоб часто закрыт волосами — более строгий порог для волос
-            maxHairThreshold = 0.35;
-            minFaceSkinThreshold = 0.40;
-            maxHandThreshold = 0.05;  // Снижено с 0.10 — руки на лбу редки, но если есть — сразу детектим
-            break;
-        case 'leftCheek':
-        case 'rightCheek':
-            // Щёки критичны для трекинга — очень строгие пороги для руки
-            minFaceSkinThreshold = 0.45;
-            maxHairThreshold = 0.20;
-            maxHandThreshold = 0.05;  // Снижено с 0.12 — даже 5% body_skin на щеке = рука
-            break;
-        case 'leftEye':
-        case 'rightEye':
-            // Глаза должны быть видимы
-            minFaceSkinThreshold = 0.20;
-            maxHairThreshold = 0.15;
-            maxHandThreshold = 0.05;  // Снижено с 0.10
-            break;
-        case 'nose':
-            // Нос обычно виден
-            minFaceSkinThreshold = 0.40;
-            maxHairThreshold = 0.10;
-            maxHandThreshold = 0.08;  // Снижено с 0.15
-            break;
-        case 'mouth':
-            // Рот может быть частично закрыт рукой
-            minFaceSkinThreshold = 0.35;
-            maxHairThreshold = 0.10;
-            maxHandThreshold = 0.08;  // Снижено с 0.15
-            break;
-        case 'chin':
-            // Подбородок может быть закрыт рукой
-            minFaceSkinThreshold = 0.30;
-            maxHairThreshold = 0.20;
-            maxHandThreshold = 0.10;  // Снижено с 0.20
-            break;
+const REGION_KEYS = { minFaceSkin: 'minSkinVisibility', maxHair: 'hairOcclusionThreshold',
+    maxHand: 'handOcclusionThreshold' };
+
+export function createSegmentThresholds(options = {}) {
+    const thresholds = { ...DEFAULT_THRESHOLDS };
+    for (const key of Object.keys(thresholds)) {
+        const value = options[key];
+        if (Number.isFinite(value) && value >= 0 && value <= 1) thresholds[key] = value;
     }
+    thresholds.regions = {};
+    for (const [name, defaults] of Object.entries(REGION_THRESHOLDS)) {
+        const region = { ...defaults };
+        for (const [key, globalKey] of Object.entries(REGION_KEYS)) {
+            const global = options[globalKey], local = options.regions?.[name]?.[key];
+            if (Number.isFinite(global) && global >= 0 && global <= 1) region[key] = global;
+            if (Number.isFinite(local) && local >= 0 && local <= 1) region[key] = local;
+        }
+        thresholds.regions[name] = region;
+    }
+    return thresholds;
+}
 
-    return {
-        minFaceSkin: minFaceSkinThreshold,
-        maxHair: maxHairThreshold,
-        maxHand: maxHandThreshold
-    };
+export function getAreaThresholds(areaName, baseThresholds = DEFAULT_THRESHOLDS) {
+    const resolved = baseThresholds.regions ? baseThresholds : createSegmentThresholds(
+        Object.fromEntries(Object.entries(baseThresholds).filter(([key, value]) => value !== DEFAULT_THRESHOLDS[key]))
+    );
+    return { ...(resolved.regions[areaName] || {
+        minFaceSkin: resolved.minSkinVisibility, maxHair: resolved.hairOcclusionThreshold,
+        maxHand: resolved.handOcclusionThreshold
+    }) };
 }

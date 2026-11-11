@@ -1,7 +1,6 @@
 function absoluteStimulusApiUrl(pathValue) {
   const value = String(pathValue || '').trim();
-  if (!value) return '';
-  if (/^(https?:|blob:|data:)/i.test(value)) return value;
+  if (!/^\/stimuli\/[1-9]\d*\/(?:content|preview)(?:\?version=[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})?$/i.test(value)) return '';
   const base = String(window.EmocogApiBase ? window.EmocogApiBase.resolve() : window.API_BASE || '').replace(/\/$/, '');
   return base + (value.startsWith('/') ? value : '/' + value);
 }
@@ -16,6 +15,74 @@ function escapeStimulusHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+const stimulusMediaObjectUrls = new Set();
+
+function stimulusObjectUrl(stimulus, key) {
+  const url = stimulus?.[key];
+  return stimulusMediaObjectUrls.has(url) ? url : '';
+}
+
+function createStimulusMediaUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  stimulusMediaObjectUrls.add(url);
+  return url;
+}
+
+function safeStimulusMediaUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    const url = new URL(value, location.href);
+    if (url.username || url.password) return '';
+    if (url.protocol === 'blob:') return url.origin === location.origin ? url.href : '';
+    if (url.protocol === 'data:') return /^data:(?:image|video|audio)\/[a-z0-9.+-]+[;,]/i.test(value) ? value : '';
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch (_) { return ''; }
+}
+
+// Builder preview markup is a presentation fragment, never an action/navigation surface.
+function safeStimulusPreviewHtml(value) {
+  const template = document.createElement('template');
+  template.innerHTML = String(value || '');
+  const result = document.createElement('div');
+  const tags = new Set(['DIV', 'SPAN', 'IMG', 'VIDEO', 'AUDIO', 'BR']);
+  const styles = ['width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+    'aspect-ratio', 'border', 'border-radius', 'border-left', 'border-right', 'border-top',
+    'border-bottom', 'background-color', 'color', 'box-shadow', 'display', 'flex-direction',
+    'align-items', 'justify-content', 'gap', 'padding', 'margin', 'font-size', 'font-weight',
+    'font-family', 'letter-spacing', 'line-height', 'text-align', 'text-transform',
+    'white-space', 'object-fit', 'transform', 'transform-origin', 'clip-path', 'overflow'];
+  function append(source, parent) {
+    if (source.nodeType === Node.TEXT_NODE) { parent.appendChild(document.createTextNode(source.textContent)); return; }
+    if (source.nodeType !== Node.ELEMENT_NODE || !tags.has(source.tagName)) return;
+    const target = document.createElement(source.tagName.toLowerCase());
+    for (const property of styles) {
+      const value = source.style.getPropertyValue(property);
+      // clip-path is the only permitted property whose grammar also accepts URLs.
+      if (property === 'clip-path' && !/^(?:polygon|circle|ellipse|inset)\(/i.test(value)) continue;
+      target.style.setProperty(property, value);
+    }
+    const background = source.style.getPropertyValue('background');
+    if (background && CSS.supports('color', background)) target.style.backgroundColor = background;
+    if (['IMG', 'VIDEO', 'AUDIO'].includes(source.tagName)) {
+      const url = safeStimulusMediaUrl(source.getAttribute('src'));
+      if (!url) return;
+      target.setAttribute('crossorigin', 'anonymous');
+      target.setAttribute('referrerpolicy', 'no-referrer');
+      target.setAttribute('src', url);
+      target.setAttribute('preload', 'metadata');
+      if (source.tagName === 'IMG') target.setAttribute('alt', source.getAttribute('alt') || '');
+      else {
+        target.setAttribute('muted', '');
+        if (source.hasAttribute('controls')) target.setAttribute('controls', '');
+      }
+    }
+    for (const child of source.childNodes) append(child, target);
+    parent.appendChild(target);
+  }
+  for (const child of template.content.childNodes) append(child, result);
+  return result.innerHTML;
+}
+
 async function hydrateApiStimulusPreview(stimulus) {
   if (!stimulus?.apiContentUrl || typeof fetch !== 'function') return stimulus;
   if (stimulus._previewRetired) throw new Error('Stimulus preview superseded');
@@ -23,20 +90,20 @@ async function hydrateApiStimulusPreview(stimulus) {
   const generation = stimulusLibraryGeneration;
   if (String(stimulus.projectId) !== String(localStorage.getItem('emocog_selected_project_id'))) throw new Error('Stimulus project changed');
   if (stimulus.contentAvailable === false) return stimulus;
-  if (stimulus._previewObjectUrl) return stimulus;
+  if (stimulusObjectUrl(stimulus, '_previewObjectUrl')) return stimulus;
   if (stimulus._previewHydrationPromise) return stimulus._previewHydrationPromise;
   const url = absoluteStimulusApiUrl(stimulus.apiContentUrl);
   if (!url) return stimulus;
   stimulus._previewHydrating = true;
   stimulus._previewHydrationPromise = (async () => {
-    const blob = await WecogHttp.blob(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include' }, { scope: 'workspace', transfer: true });
+    const blob = await WecogHttp.blob(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include', redirect: 'error' }, { scope: 'workspace', transfer: true });
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed during loading');
     if (!blob.size) throw new Error(CURRENT_LANG === 'en' ? 'Stimulus file is empty' : 'Файл стимула пуст');
     if ((stimulus.type === 'image' || stimulus.type === 'slides') && blob.type && !blob.type.startsWith('image/')) {
       throw new Error(CURRENT_LANG === 'en' ? 'The server returned a non-image file' : 'Сервер вернул файл, который не является изображением');
     }
-    if (stimulus._previewObjectUrl) URL.revokeObjectURL(stimulus._previewObjectUrl);
-    stimulus._previewObjectUrl = URL.createObjectURL(blob);
+    if (stimulusMediaObjectUrls.delete(stimulus._previewObjectUrl)) URL.revokeObjectURL(stimulus._previewObjectUrl);
+    stimulus._previewObjectUrl = createStimulusMediaUrl(blob);
     stimulus.contentAvailable = true;
     delete stimulus.contentError;
     delete stimulus.previewError;
@@ -54,7 +121,8 @@ async function hydrateApiStimulusPreview(stimulus) {
 }
 
 function stimulusPreviewSource(stimulus) {
-  return stimulus?._previewObjectUrl || stimulus?.url || stimulus?.src || '';
+  return stimulusObjectUrl(stimulus, '_previewObjectUrl')
+    || (!stimulus?.apiContentUrl ? safeStimulusMediaUrl(stimulus?.url || stimulus?.src) : '');
 }
 
 let thumbnailFetches = 0;
@@ -70,7 +138,7 @@ function releaseThumbnailSlot() {
 
 async function hydrateStimulusThumbnail(stimulus) {
   if (!stimulus?.apiContentUrl || stimulus.contentAvailable === false || stimulus.type === 'audio') return stimulus;
-  if (stimulus._thumbnailObjectUrl || stimulus._thumbnailPromise) return stimulus._thumbnailPromise || stimulus;
+  if (stimulusObjectUrl(stimulus, '_thumbnailObjectUrl') || stimulus._thumbnailPromise) return stimulus._thumbnailPromise || stimulus;
   const source = stimulus.apiPreviewUrl || (stimulus.type !== 'video' ? stimulus.apiContentUrl : null);
   if (!source) return stimulus;
   const scope = stimulusLibraryScope();
@@ -79,16 +147,31 @@ async function hydrateStimulusThumbnail(stimulus) {
     await takeThumbnailSlot();
     try {
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed');
-    const blob = await WecogHttp.blob(absoluteStimulusApiUrl(source), { headers: authHeaders(), credentials: 'include' }, { scope: 'workspace', transfer: true });
+    const url = absoluteStimulusApiUrl(source);
+    if (!url) throw new Error('Untrusted stimulus preview path');
+    let blob;
+    for (let attempt = 0; ; attempt++) {
+      if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed');
+      try {
+        blob = await WecogHttp.blob(url, { headers: authHeaders(), credentials: 'include', redirect: 'error' }, { scope: 'workspace', transfer: true });
+        break;
+      } catch (error) {
+        const temporary = [429, 503, 504].includes(error.status)
+          && !['media_write_uncertain', 'media_decode_failed', 'media_dimensions_invalid', 'media_codec_unsupported'].includes(error.code);
+        const delay = Math.max(1000 * 2 ** attempt, error.retryAfterMs || 0);
+        if (!temporary || attempt >= 2 || delay > 5000) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
     if (!blob.size || !blob.type.startsWith('image/')) throw new Error(CURRENT_LANG === 'en' ? 'Preview is not an image' : 'Превью не является изображением');
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed');
-    stimulus._thumbnailObjectUrl = URL.createObjectURL(blob);
+    stimulus._thumbnailObjectUrl = createStimulusMediaUrl(blob);
     delete stimulus.previewError;
     return stimulus;
     } finally { releaseThumbnailSlot(); }
   })();
   try { return await stimulus._thumbnailPromise; }
-  catch (error) { stimulus.previewError = error.message; throw error; }
+  catch (error) { stimulus.previewError = error.message; stimulus.previewErrorStatus = error.status; stimulus.previewErrorCode = error.code; throw error; }
   finally {
     delete stimulus._thumbnailPromise;
     refreshThumbnailCells(stimulus);
@@ -147,7 +230,7 @@ function stimulusOwnership(stimulus) {
 
 function releaseStimulusMedia(stimulus) {
   for (const key of ['_previewObjectUrl', '_thumbnailObjectUrl']) {
-    if (stimulus[key]) URL.revokeObjectURL(stimulus[key]);
+    if (stimulusMediaObjectUrls.delete(stimulus[key])) URL.revokeObjectURL(stimulus[key]);
     delete stimulus[key];
   }
 }
@@ -203,6 +286,139 @@ function requireCurrentStimulusOperation(operation) {
   if (!isCurrentStimulusOperation(operation)) throw new Error(CURRENT_LANG === 'en'
     ? 'Workspace changed. The operation belongs to the original workspace.'
     : 'Рабочая область изменилась. Операция относится к исходной рабочей области.');
+}
+
+const stimulusMediaJournalStorageKey = 'emocog_media_operations_v1';
+
+function readStimulusMediaJournal() {
+  const journal = JSON.parse(localStorage.getItem(stimulusMediaJournalStorageKey) || '[]');
+  if (!Array.isArray(journal) || journal.length > 100) throw new Error('Media recovery journal needs validation');
+  return journal;
+}
+
+function saveStimulusMediaJournalEntry(record, remove = false) {
+  const journal = readStimulusMediaJournal().filter(item => item.key !== record.key);
+  if (!remove) journal.push(record);
+  if (journal.length > 100) throw new Error('Recover existing media operations before uploading more files');
+  localStorage.setItem(stimulusMediaJournalStorageKey, JSON.stringify(journal));
+}
+
+async function stimulusMediaDigest(bytes) {
+  if (!globalThis.crypto?.subtle) throw new Error(CURRENT_LANG === 'en'
+    ? 'A secure browser context is required to validate media uploads.' : 'Для проверки загружаемых файлов нужен защищённый контекст браузера.');
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2,'0')).join('');
+}
+
+function mediaOperationResult(status, projectId) {
+  if (status?.state !== 'completed') return null;
+  const rows = status.result?.stimuli || [status.result];
+  if (!rows.length || rows.some(row => !Number.isSafeInteger(row?.id) || !row.current_version_id
+    || Number(row.project_id) !== Number(projectId))) throw new Error('Invalid media operation acknowledgement');
+  return status.result;
+}
+
+async function recoverStimulusMediaOperation(record, operation, attempts = 8) {
+  for (let attempt=0; attempt<attempts; attempt++) {
+    requireCurrentStimulusOperation(operation);
+    try {
+      const status = await apiGet(`/stimuli/operations/${encodeURIComponent(record.key)}?project_id=${encodeURIComponent(record.projectId)}`);
+      requireCurrentStimulusOperation(operation);
+      const result = mediaOperationResult(status, record.projectId);
+      if (result) { saveStimulusMediaJournalEntry(record, true); return { status, result }; }
+      if (status.state === 'failed') {
+        saveStimulusMediaJournalEntry(record, true);
+        const error = new Error(CURRENT_LANG === 'en'
+          ? 'The upload did not complete. Select the file again to start a new validated operation.'
+          : 'Загрузка не завершена. Выберите файл повторно для новой проверенной операции.');
+        error.code = 'media_operation_failed';
+        throw error;
+      }
+      if (status.state === 'reserved' || status.recovery_required) return { status, result: null };
+    } catch (error) {
+      if (error.code === 'media_operation_failed' || error.code === 'staff_account_changed'
+        || error.code === 'request_context_changed' || (error.status && error.status !== 404 && error.status < 500)) throw error;
+    }
+    if (attempt+1 < attempts) await new Promise(resolve => setTimeout(resolve, 750));
+  }
+  return { status: null, result: null };
+}
+
+function unknownStimulusMediaOutcome(record) {
+  const error = new Error(CURRENT_LANG === 'en'
+    ? 'Upload outcome is pending or unknown. Use Recover uploads or select the same file again to check its existing operation; do not upload it with a new key.'
+    : 'Результат загрузки пока неизвестен. Нажмите «Проверить загрузки» или выберите тот же файл для проверки существующей операции. Не создавайте новую загрузку.');
+  error.code = 'media_write_uncertain';
+  error.mutationMayHaveCommitted = true;
+  error.mediaOperationKey = record.key;
+  return error;
+}
+
+async function uploadStimulusMediaOperation(entry, descriptor, endpoint, formData) {
+  const operation = captureStimulusOperation();
+  const file = entry.file;
+  if (!Number.isSafeInteger(file.size) || file.size < 1 || file.size > 50*1024*1024) {
+    throw new Error(CURRENT_LANG === 'en' ? 'Choose a nonempty file up to 50 MiB.' : 'Выберите непустой файл размером до 50 МиБ.');
+  }
+  const sha256 = await stimulusMediaDigest(await file.arrayBuffer());
+  requireCurrentStimulusOperation(operation);
+  const request = { ...descriptor, file: { name: file.name, size: file.size, type: file.type || 'application/octet-stream', sha256 } };
+  const signature = await stimulusMediaDigest(new TextEncoder().encode(JSON.stringify(request)));
+  requireCurrentStimulusOperation(operation);
+  let record = readStimulusMediaJournal().find(item => item.scope === operation.scope && item.signature === signature);
+  if (!record) record = { key: entry.mediaOperationKey || crypto.randomUUID(), signature,
+    scope: operation.scope, projectId: descriptor.project_id, kind: descriptor.kind };
+  entry.mediaOperationKey = record.key;
+  // Persist before the first mutation. Storage denial is an explicit failure,
+  // not permission to silently lose the only recovery key.
+  saveStimulusMediaJournalEntry(record);
+  let admitted;
+  try { admitted = await apiPost('/stimuli/operations', { ...request, key: record.key }); }
+  catch (error) {
+    if (error.status && error.status < 500) {
+      if (error.status !== 409) saveStimulusMediaJournalEntry(record, true);
+      throw error;
+    }
+    const recovered = await recoverStimulusMediaOperation(record, operation);
+    if (recovered.result) return recovered.result;
+    if (recovered.status?.state !== 'reserved') throw unknownStimulusMediaOutcome(record);
+    admitted = recovered.status;
+  }
+  requireCurrentStimulusOperation(operation);
+  const existing = mediaOperationResult(admitted, descriptor.project_id);
+  if (existing) { saveStimulusMediaJournalEntry(record, true); return existing; }
+  if (admitted.state !== 'reserved') {
+    const recovered = await recoverStimulusMediaOperation(record, operation);
+    if (recovered.result) return recovered.result;
+    throw unknownStimulusMediaOutcome(record);
+  }
+  try {
+    const result = await apiPost(`${endpoint}?operation_key=${encodeURIComponent(record.key)}`, formData);
+    requireCurrentStimulusOperation(operation);
+    mediaOperationResult({ state: 'completed', result }, descriptor.project_id);
+    saveStimulusMediaJournalEntry(record, true);
+    return result;
+  } catch (error) {
+    requireCurrentStimulusOperation(operation);
+    const recovered = await recoverStimulusMediaOperation(record, operation);
+    if (recovered.result) return recovered.result;
+    throw unknownStimulusMediaOutcome(record);
+  }
+}
+
+async function recoverPendingStimulusMediaOperations() {
+  const operation = captureStimulusOperation();
+  let pending = 0;
+  for (const record of readStimulusMediaJournal().filter(item => item.scope === operation.scope)) {
+    try {
+      const recovered = await recoverStimulusMediaOperation(record, operation, 1);
+      if (!recovered.result) pending++;
+    } catch (error) { if (error.code !== 'media_operation_failed') throw error; }
+  }
+  requireCurrentStimulusOperation(operation);
+  await syncProjectStimuliFromApi();
+  if (pending) toast(CURRENT_LANG === 'en'
+    ? `${pending} media operations still pending; unknown operations require operator reconciliation.`
+    : `Ожидают проверки: ${pending}. Для неопределённых операций нужна сверка администратором.`, 'error');
 }
 
 // UI ownership is narrower than workspace media caches: even a same-route render retires it.
@@ -373,8 +589,14 @@ async function syncProjectStimuliFromApi() {
     let projectCache = [];
     try { projectCache = JSON.parse(localStorage.getItem('emocog_stimulus_library_v1:' + scope) || '{}').stimuli || []; } catch (_) {}
     if (!Array.isArray(projectCache)) projectCache = [];
+    // Persisted JSON cannot restore live URLs or async state, even at the same revision.
+    projectCache.forEach(item => {
+      if (!item || typeof item !== 'object') return;
+      for (const key of ['_previewObjectUrl', '_thumbnailObjectUrl', '_thumbnailPromise',
+        '_previewHydrating', '_previewHydrationPromise', '_previewRetired', 'src']) delete item[key];
+    });
     const existing = new Map([...projectCache, ...stimuliList]
-      .filter(item => item.apiStimulusId && String(item.projectId) === String(projectId))
+      .filter(item => item?.apiStimulusId && String(item.projectId) === String(projectId))
       .map(item => [String(item.apiStimulusId), item]));
     const remote = remoteStimuli.map(row => {
       const id = String(row.id);
@@ -558,16 +780,17 @@ async function convertDocumentToStimuli(file, onProgress) {
   }
   if (typeof apiPost !== 'function' || typeof resolveApiProjectId !== 'function' || typeof hasResearcherApiToken !== 'function' || !hasResearcherApiToken()) {
     throw new Error(CURRENT_LANG === 'en'
-      ? 'Document conversion requires the backend API and researcher sign-in.'
-      : 'Для конвертации документов нужен backend API и вход исследователя.');
+      ? 'Sign in as a researcher to convert documents.'
+      : 'Чтобы преобразовать документ, войдите как исследователь.');
   }
   const projectId = await resolveApiProjectId();
   requireCurrentStimulusOperation(operation);
   const formData = new FormData();
   formData.append('file', file);
   formData.append('project_id', String(projectId));
+  formData.append('original_name', file.name);
   onProgress?.(0, 1, CURRENT_LANG === 'en' ? 'Uploading and converting the document…' : 'Загрузка и конвертация документа…');
-  const result = await apiPost('/stimuli/convert', formData);
+  const result = await uploadStimulusMediaOperation({ file }, { kind: 'convert', project_id: Number(projectId) }, '/stimuli/convert', formData);
   requireCurrentStimulusOperation(operation);
   const rows = Array.isArray(result?.stimuli)
     ? result.stimuli
@@ -706,20 +929,30 @@ function requestStimulusUploadDetails(files) {
 
 function stimulusPreviewHtml(stimulus) {
   if (stimulus?.previewError && stimulus.contentAvailable !== false) {
-    return `<div role="status" style="font-size:12px;text-align:center;color:var(--bad);">${CURRENT_LANG === 'en' ? 'Preview could not be loaded.' : 'Не удалось загрузить превью.'}<br><button class="quick-btn stim-retry-btn" data-id="${escapeStimulusHtml(stimulus.id)}">${CURRENT_LANG === 'en' ? 'Retry' : 'Повторить'}</button></div>`;
+    const transient = [429,503,504].includes(stimulus.previewErrorStatus);
+    const reason = stimulus.previewErrorStatus === 403
+      ? (CURRENT_LANG === 'en' ? 'Access to this preview was denied.' : 'Нет доступа к миниатюре.')
+      : transient ? (CURRENT_LANG === 'en' ? 'The server could not prepare the preview yet. This does not mean the original file is lost.' : 'Сервер пока не смог подготовить миниатюру. Это не означает, что исходный файл потерян.')
+      : (CURRENT_LANG === 'en' ? 'Preview unavailable. Retry or check the original file.' : 'Миниатюра недоступна. Повторите загрузку или проверьте исходный файл.');
+    return `<div role="status" style="padding:10px;font-size:12px;line-height:1.45;text-align:center;color:var(--muted);">${reason}${stimulus.previewErrorCode ? `<div style="font-size:10px;margin:6px 0;">${escapeStimulusHtml(stimulus.previewErrorCode)}</div>` : ''}<button class="quick-btn stim-retry-btn" data-id="${escapeStimulusHtml(stimulus.id)}">${CURRENT_LANG === 'en' ? 'Retry' : 'Повторить'}</button></div>`;
   }
-  if (stimulus?.apiContentUrl && stimulus.type !== 'audio' && stimulus.contentAvailable !== false && !stimulus._thumbnailObjectUrl && !stimulus._previewObjectUrl) {
+  const thumbnailUrl = stimulusObjectUrl(stimulus, '_thumbnailObjectUrl');
+  const previewUrl = stimulusPreviewSource(stimulus);
+  if (stimulus?.apiContentUrl && stimulus.type !== 'audio' && stimulus.contentAvailable !== false && !thumbnailUrl && !previewUrl) {
     return `<div role="status" style="font-size:12px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Loading preview\u2026' : 'Загружаем превью\u2026'}</div>`;
   }
   const name = escapeStimulusHtml(typeof localizedStimulusName === 'function' ? localizedStimulusName(stimulus) : stimulus?.name || '');
-  const url = escapeStimulusHtml(stimulus?._thumbnailObjectUrl || stimulus?._previewObjectUrl || (!stimulus?.apiContentUrl ? stimulus?.url : '') || '');
+  const url = escapeStimulusHtml(thumbnailUrl || previewUrl);
+  if (stimulus?.type === 'audio' && stimulus.apiContentUrl && !url && stimulus.contentAvailable !== false) {
+    return `<button class="quick-btn stim-retry-btn" data-id="${escapeStimulusHtml(stimulus.id)}">${CURRENT_LANG === 'en' ? 'Load audio preview' : 'Прослушать аудио'}</button>`;
+  }
   if (stimulus?.contentAvailable === false) {
     return `<div style="padding:12px;text-align:center;color:var(--bad);font-size:11px;line-height:1.35;font-weight:700;">${CURRENT_LANG === 'en' ? 'File unavailable. Replace it before publishing.' : 'Файл недоступен. Замените его до публикации.'}</div>`;
   }
-  if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && url) return `<img src="${url}" alt="${name}" style="width:100%;height:100%;display:block;object-fit:contain;">`;
-  if (stimulus?.type === 'video' && stimulus._thumbnailObjectUrl) return `<img src="${url}" alt="${name}" style="width:100%;height:100%;object-fit:contain;">`;
-  if (stimulus?.type === 'video' && url) return `<video src="${url}" muted preload="metadata" style="width:100%;height:100%;display:block;object-fit:contain;"></video>`;
-  if (stimulus?.type === 'audio' && url) return `<audio src="${url}" controls preload="metadata" style="width:92%;height:34px;"></audio>`;
+  if ((stimulus?.type === 'image' || stimulus?.type === 'slides') && url) return `<img crossorigin="anonymous" referrerpolicy="no-referrer" src="${url}" alt="${name}" style="width:100%;height:100%;display:block;object-fit:contain;">`;
+  if (stimulus?.type === 'video' && thumbnailUrl) return `<img crossorigin="anonymous" referrerpolicy="no-referrer" src="${url}" alt="${name}" style="width:100%;height:100%;object-fit:contain;">`;
+  if (stimulus?.type === 'video' && url) return `<video crossorigin="anonymous" referrerpolicy="no-referrer" src="${url}" muted preload="metadata" style="width:100%;height:100%;display:block;object-fit:contain;"></video>`;
+  if (stimulus?.type === 'audio' && url) return `<audio crossorigin="anonymous" referrerpolicy="no-referrer" src="${url}" controls preload="metadata" style="width:92%;height:34px;"></audio>`;
   const standard = window.StandardStimuli?.resolveStandardStimulus?.(stimulus?.id, stimulus, { lang: CURRENT_LANG });
   if (standard?.type === 'image' && standard.src) return `<img src="${escapeStimulusHtml(standard.src)}" alt="${name}" style="width:100%;height:100%;display:block;object-fit:contain;">`;
   if (standard?.type === 'text') {
@@ -734,15 +967,17 @@ function stimulusPreviewHtml(stimulus) {
 }
 
 function wireStimulusPreviewRetry(container, refresh) {
+  const scope = stimulusLibraryScope(), generation = stimulusLibraryGeneration;
   container.querySelectorAll('.stim-retry-btn').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      if (scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) return;
       const stimulus = stimuliList.find(item => String(item.id) === String(button.dataset.id));
       if (!stimulus) return;
       button.disabled = true;
-      try { await hydrateStimulusThumbnail(stimulus); }
+      try { await (stimulus.type === 'audio' ? hydrateApiStimulusPreview(stimulus) : hydrateStimulusThumbnail(stimulus)); }
       catch (_) { /* The card displays the retryable preview error. */ }
-      if (container.isConnected) refresh();
+      if (container.isConnected && scope === stimulusLibraryScope() && generation === stimulusLibraryGeneration) refresh();
     });
   });
 }
@@ -768,6 +1003,18 @@ function StimuliAOIView() {
   status.setAttribute('role', 'status');
   status.style.cssText = 'padding:10px 20px;font-size:13px;color:var(--muted);';
   root.appendChild(status);
+  const recoveryButton = document.createElement('button');
+  recoveryButton.className = 'quick-btn';
+  recoveryButton.textContent = CURRENT_LANG === 'en' ? 'Recover uploads' : 'Проверить загрузки';
+  recoveryButton.style.cssText = 'align-self:flex-start;margin:4px 20px;';
+  recoveryButton.onclick = async () => {
+    if (recoveryButton.disabled) return;
+    recoveryButton.disabled = true;
+    try { await recoverPendingStimulusMediaOperations(); }
+    catch (error) { if (lifetime.current()) toast(error.message, 'error'); }
+    finally { if (lifetime.current()) recoveryButton.disabled = false; }
+  };
+  root.appendChild(recoveryButton);
   const updateStatus = () => {
     status.replaceChildren();
     status.hidden = stimulusLibraryStatus === 'ready';
@@ -849,7 +1096,7 @@ function StimuliAOIView() {
   root.insertBefore(topBarWrap, root.firstChild);
 
   const filterRow = document.createElement('div');
-  filterRow.style.cssText = 'display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-shrink:0; padding:10px 20px 0;';
+  filterRow.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;flex-shrink:0;padding:10px 20px 0;';
   filterRow.innerHTML = `
     <label style="font-size:11px; color:var(--muted); font-weight:500; flex-shrink:0;">${t('type')}:</label>
     <div class="type-filter-pills" id="typeFilterPills" style="flex:1;">
@@ -860,8 +1107,21 @@ function StimuliAOIView() {
       <button class="type-pill" data-val="text">${t('text')}</button>
       <button class="type-pill" data-val="slides">${t('slides')}</button>
     </div>
+    <label style="font-size:12px;">${CURRENT_LANG === 'en' ? 'Sort by' : 'Сортировать по'}
+      <select id="stimulusLibrarySort">
+        <option value="name">${CURRENT_LANG === 'en' ? 'Name' : 'Имени'}</option>
+        <option value="recent">${CURRENT_LANG === 'en' ? 'Newest first' : 'Дате, новые сначала'}</option>
+      </select>
+    </label>
   `;
   root.appendChild(filterRow);
+  const sortSelect = filterRow.querySelector('#stimulusLibrarySort');
+  sortSelect.value = stimulusLibrarySort;
+  sortSelect.addEventListener('change', () => {
+    stimulusLibrarySort = sortSelect.value === 'recent' ? 'recent' : 'name';
+    if (currentTab === 'folder') renderFolderView();
+    else if (currentTab === 'library') renderStimuliGallery(gallery);
+  });
   const scopeRow = document.createElement('div');
   scopeRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:8px 20px;flex-shrink:0;';
   scopeRow.setAttribute('aria-label', CURRENT_LANG === 'en' ? 'Library ownership' : 'Доступ к материалам');
@@ -904,8 +1164,8 @@ function StimuliAOIView() {
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           </div>
           <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">${CURRENT_LANG === 'en' ? 'Media files' : 'Медиафайлы'}</div>
-          <div style="font-size:12px; color:var(--muted); line-height:1.4;">${CURRENT_LANG === 'en' ? 'Images, video, audio, text' : 'Картинки, Видео, Аудио, Текст'}</div>
-          <input type="file" id="input_media" accept="image/*,video/*,audio/*,text/plain" multiple style="display:none;">
+          <div style="font-size:12px; color:var(--muted); line-height:1.4;">JPG, PNG, WebP, GIF; MP4, WebM; MP3, OGG, WAV</div>
+          <input type="file" id="input_media" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/wav,audio/x-wav" multiple style="display:none;">
         </div>
 
         <div id="dropzone_docs" style="flex:1; min-width:280px; border:2px dashed var(--warn); border-radius:16px; padding:40px 20px; text-align:center; background:rgba(245,158,11,.04); cursor:pointer; transition:all 0.2s;">
@@ -998,8 +1258,8 @@ function StimuliAOIView() {
       requireCurrentStimulusOperation(operation);
       const newIds = (await handleFileUpload(uploadEntries, (current, total) => {
         progress.update(current, total, CURRENT_LANG === 'en'
-          ? `Uploading file ${current} of ${total}`
-          : `Загрузка файла ${current} из ${total}`);
+          ? `Saved ${current} of ${total} files`
+          : `Сохранено файлов: ${current} из ${total}`);
       }, folder)).map(String);
       requireCurrentStimulusOperation(operation);
       if (!lifetime.current()) return newIds;
@@ -1018,8 +1278,19 @@ function StimuliAOIView() {
         const retained = stimuliList.some(stimulus => stimulus?._previewObjectUrl === entry.previewObjectUrl);
         if (entry.previewObjectUrl && !retained) URL.revokeObjectURL(entry.previewObjectUrl);
       });
-      if (lifetime.current()) toast(`${CURRENT_LANG === 'en' ? 'Media upload failed.' : 'Ошибка загрузки медиа.'} ${error?.message || ''}`.trim(), 'error');
-      return [];
+      const savedIds = error.uploadedStimulusIds || [];
+      if (lifetime.current() && isCurrentStimulusOperation(operation)) {
+        if (folder) renderFolderView();
+        else renderStimuliGallery(gallery);
+        const saved = CURRENT_LANG === 'en'
+          ? `Saved ${savedIds.length} of ${uploadEntries.length} files. Upload stopped.`
+          : `Сохранено ${savedIds.length} из ${uploadEntries.length} файлов. Загрузка остановлена.`;
+        const uncertain = error.mutationMayHaveCommitted || error.code === 'media_write_uncertain'
+          ? (CURRENT_LANG === 'en' ? ' Refresh the library before retrying: the last file may already be saved.'
+            : ' Перед повтором обновите библиотеку: последний файл мог уже сохраниться.') : '';
+        toast(`${saved} ${error?.message || ''}${uncertain}`.trim(), 'error');
+      }
+      return savedIds;
     } finally {
       progress.close();
       dropzone.style.pointerEvents = '';
@@ -1106,6 +1377,7 @@ function StimuliAOIView() {
     if (currentStimuliFilter !== 'all') {
       folderStimuli = folderStimuli.filter(s => s.type === currentStimuliFilter);
     }
+    folderStimuli = sortLibraryStimuli(folderStimuli, stimulusLibrarySort);
     stopStimulusUiMedia(content);
     if (folderStimuli.length === 0) {
       content.innerHTML = `<div style="grid-column:1/-1; color:var(--muted); font-size:13px; padding:24px 0;">${t('folderEmpty')}</div>`;
@@ -1172,14 +1444,7 @@ function StimuliAOIView() {
     const cardsHtml = available.length === 0
       ? `<div style="grid-column:1/-1;color:var(--muted);font-size:14px;padding:24px 0;text-align:center;">${CURRENT_LANG === 'en' ? 'All stimuli have already been added to this folder' : 'Все стимулы уже добавлены в эту папку'}</div>`
       : available.map(s => {
-          const previewUrl = s._previewObjectUrl || s.url;
-          const thumb = ((s.type === 'image' || s.type === 'slides') && previewUrl)
-            ? `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#eee;">
-                <img src="${escapeStimulusHtml(previewUrl)}" style="width:100%;height:100%;object-fit:cover;display:block;">
-              </div>`
-            : `<div style="width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin-bottom:8px;background:rgba(92,102,189,.07);display:flex;align-items:center;justify-content:center;">
-                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="28" height="28" style="color:var(--muted);">${getIconForType(s.type)}</svg>
-              </div>`;
+          const thumb = `<div data-stimulus-thumbnail="${escapeStimulusHtml(s.id)}" style="width:100%;height:96px;flex:none;border-radius:8px;overflow:hidden;margin-bottom:8px;background:var(--panel2);display:flex;align-items:center;justify-content:center;">${stimulusPreviewHtml(s)}</div>`;
 
           return `
             <div class="stimulus-card modal-pick" data-id="${escapeStimulusHtml(s.id)}" style="position:relative;padding:8px;box-sizing:border-box;border:1px solid var(--stroke);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;height:100%;transition:all 0.2s;">
@@ -1208,6 +1473,8 @@ function StimuliAOIView() {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     dialogLifetime.onDispose(() => { stopStimulusUiMedia(overlay); overlay.remove(); });
+    observeStimulusThumbnails(modal.querySelector('#modalGallery'));
+    dialogLifetime.onDispose(() => modal.querySelector('#modalGallery')._thumbnailUiScope?.dispose());
 
     let selectedIds = new Set();
     modal.querySelectorAll('.modal-pick').forEach(card => {
@@ -1329,57 +1596,69 @@ async function handleFileUpload(files, onProgress, folder = null) {
   const projectId = await resolveApiProjectId();
   requireCurrentStimulusOperation(operation);
   const uploadScope = stimulusLibraryScope();
-  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
-    requireCurrentStimulusOperation(operation);
-    const entry = files[fileIndex]?.file ? files[fileIndex] : { file: files[fileIndex], name: files[fileIndex]?.name, previewObjectUrl: '' };
-    const file = entry.file;
-    const customName = String(entry.name || file.name || '').trim() || file.name;
-    onProgress?.(fileIndex + 1, files.length);
-    const type = stimulusTypeFromFile(file);
-    let newItem;
-    if (useApi) {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('project_id', String(projectId));
-      formData.append('name', customName);
-      if (folder?.apiFolderId) formData.append('folder_id', String(folder.apiFolderId));
-      const row = await apiPost('/stimuli/upload', formData);
+  try {
+    onProgress?.(0, files.length);
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
       requireCurrentStimulusOperation(operation);
-      if (uploadScope !== stimulusLibraryScope()) throw new Error(CURRENT_LANG === 'en'
-        ? 'Project changed. The uploaded file is saved in the original project.'
-        : 'Проект изменился. Загруженный файл сохранён в исходном проекте.');
-      const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(row.id)}/content`;
-      newItem = {
-        id: String(row.id),
-        name: row.name || customName,
-        type,
-        info: `${(Number(row.size_bytes || file.size) / 1024).toFixed(1)} KB`,
-        url: absoluteStimulusApiUrl(apiContentUrl),
-        apiContentUrl, apiPreviewUrl: row.preview_url || null,
-        visibility: row.visibility || 'private', createdBy: row.created_by, contentVersion: row.current_version_id,
-        apiStimulusId: row.id,
-        projectId,
-        folderId: row.folder_id || null,
-        mimeType: row.mime_type || file.type,
-        contentAvailable: row.content_available !== false,
-        createdAt: row.created_at || new Date().toISOString(),
-        _previewObjectUrl: ''
-      };
-      await hydrateStimulusThumbnail(newItem).catch(() => {});
-      if (!isCurrentStimulusOperation(operation)) {
-        newItem._previewRetired = true;
-        releaseStimulusMedia(newItem);
+      const entry = files[fileIndex]?.file ? files[fileIndex] : { file: files[fileIndex], name: files[fileIndex]?.name, previewObjectUrl: '' };
+      const file = entry.file;
+      const customName = String(entry.name || file.name || '').trim() || file.name;
+      const type = stimulusTypeFromFile(file);
+      let newItem;
+      if (useApi) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('project_id', String(projectId));
+        formData.append('name', customName);
+        if (folder?.apiFolderId) formData.append('folder_id', String(folder.apiFolderId));
+        const row = await uploadStimulusMediaOperation(entry, { kind: 'upload', project_id: Number(projectId),
+          name: customName, folder_id: folder?.apiFolderId ? Number(folder.apiFolderId) : null }, '/stimuli/upload', formData);
+        requireCurrentStimulusOperation(operation);
+        if (uploadScope !== stimulusLibraryScope()) throw new Error(CURRENT_LANG === 'en'
+          ? 'Project changed. The uploaded file is saved in the original project.'
+          : 'Проект изменился. Загруженный файл сохранён в исходном проекте.');
+        const apiContentUrl = row.content_url || `/stimuli/${encodeURIComponent(row.id)}/content`;
+        newItem = {
+          id: String(row.id),
+          name: row.name || customName,
+          type,
+          info: `${(Number(row.size_bytes || file.size) / 1024).toFixed(1)} KB`,
+          url: absoluteStimulusApiUrl(apiContentUrl),
+          apiContentUrl, apiPreviewUrl: row.preview_url || null,
+          visibility: row.visibility || 'private', createdBy: row.created_by, contentVersion: row.current_version_id,
+          apiStimulusId: row.id,
+          projectId,
+          folderId: row.folder_id || null,
+          mimeType: row.mime_type || file.type,
+          contentAvailable: row.content_available !== false,
+          createdAt: row.created_at || new Date().toISOString(),
+          _previewObjectUrl: ''
+        };
+        // A thumbnail is optional; persist the acknowledged upload before fetching it.
+        stimuliList = [newItem, ...stimuliList.filter(item => String(item.id) !== String(newItem.id))];
+        newIds.push(String(newItem.id));
+        if (folder) {
+          folder.stimuliIds = [...new Set([...(folder.stimuliIds || []), String(newItem.id)])];
+          localStorage.setItem('emocog_folders', JSON.stringify(folders));
+        }
+        persistStimuliList();
+        onProgress?.(newIds.length, files.length);
+        await hydrateStimulusThumbnail(newItem).catch(() => {});
+        if (!isCurrentStimulusOperation(operation)) {
+          newItem._previewRetired = true;
+          releaseStimulusMedia(newItem);
+        }
+        requireCurrentStimulusOperation(operation);
+        if (uploadScope !== stimulusLibraryScope()) throw new Error(CURRENT_LANG === 'en'
+          ? 'Project changed. The file is saved in the original project.' : 'Проект изменился. Файл сохранён в исходном проекте.');
+        if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl);
       }
-      requireCurrentStimulusOperation(operation);
-      if (uploadScope !== stimulusLibraryScope()) throw new Error(CURRENT_LANG === 'en'
-        ? 'Project changed. The file is saved in the original project.' : 'Проект изменился. Файл сохранён в исходном проекте.');
-      if (entry.previewObjectUrl) URL.revokeObjectURL(entry.previewObjectUrl);
     }
-    stimuliList.unshift(newItem);
-    newIds.push(String(newItem.id));
+    return newIds;
+  } catch (error) {
+    if (isCurrentStimulusOperation(operation)) error.uploadedStimulusIds = newIds.slice();
+    throw error;
   }
-  persistStimuliList();
-  return newIds;
 }
 
 function showCreateFolderModal(onCreated) {
@@ -1468,6 +1747,17 @@ function updateStimuliSubnav() {
   }
 }
 
+let stimulusLibrarySort = 'name';
+
+function sortLibraryStimuli(items, mode = 'name') {
+  const natural = new Intl.Collator(CURRENT_LANG === 'en' ? 'en' : 'ru', { numeric: true, sensitivity: 'base' });
+  const date = item => Date.parse(item.createdAt) || 0;
+  const name = item => (typeof localizedStimulusName === 'function' ? localizedStimulusName(item) : item.name) || '';
+  return [...items].sort((a, b) => (mode === 'recent' ? date(b) - date(a) : 0)
+    || natural.compare(name(a), name(b)) || natural.compare(String(a.id), String(b.id))
+    || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+}
+
 function renderStimuliGallery(container) {
   if (!container) return;
   stopStimulusUiMedia(container);
@@ -1475,6 +1765,7 @@ function renderStimuliGallery(container) {
   if (currentStimuliFilter !== 'all') {
     filtered = filtered.filter(s => s.type === currentStimuliFilter);
   }
+  filtered = sortLibraryStimuli(filtered, stimulusLibrarySort);
   container.innerHTML = filtered.length === 0
     ? `<div style="grid-column:1/-1;color:var(--muted);font-size:13px;padding:24px 0;">${CURRENT_LANG === 'en' ? 'No stimuli. Upload files using the Upload tab.' : 'Нет стимулов. Загрузите файлы через вкладку «Загрузка».'}</div>`
     : filtered.map(s => `
@@ -1598,7 +1889,8 @@ function replaceStimulusContent(id, onReplaced) {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const row = await apiPost(`/stimuli/${encodeURIComponent(stimulus.apiStimulusId)}/content`, formData);
+      const row = await uploadStimulusMediaOperation({ file }, { kind: 'replace', project_id: Number(stimulus.projectId),
+        stimulus_id: Number(stimulus.apiStimulusId) }, `/stimuli/${encodeURIComponent(stimulus.apiStimulusId)}/content`, formData);
       if (scope !== stimulusLibraryScope() || !stimuliList.includes(stimulus)) return;
       stimulus._previewRetired = true;
       releaseStimulusMedia(stimulus);
@@ -1667,9 +1959,9 @@ function selectStimulus(id) {
   const stimulus = stimuliList.find(s => String(s.id) === String(id));
   if (!stimulus) return;
 
-  document.querySelectorAll('.stimulus-card').forEach(c => c.classList.remove('selected'));
-  const card = document.querySelector(`.stimulus-card[data-id="${id}"]`);
-  if (card) card.classList.add('selected');
+  document.querySelectorAll('.stimulus-card').forEach(card => {
+    card.classList.toggle('selected', card.dataset.id === String(id));
+  });
 
 }
 
@@ -1693,9 +1985,11 @@ function normalizeAoi(aoi, stimulusId, fallbackOrder = 1) {
   const geometry = globalThis.EmocogAoiGeometry?.normalizeGeometry(aoi.shape, aoi.points);
   if (!geometry?.ok) return null;
   const points = geometry.points;
-  const startMs = Math.max(0, parseInt(aoi.validityInterval?.startMs, 10) || 0);
-  const endRaw = parseInt(aoi.validityInterval?.endMs, 10);
-  const endMs = Number.isFinite(endRaw) && endRaw > startMs ? endRaw : Math.max(startMs + 1, 1000);
+  const intervalNumber = (value, fallback) => value == null ? fallback
+    : (typeof value === 'number' || (typeof value === 'string' && value.trim())) ? Number(value) : NaN;
+  const startMs = intervalNumber(aoi.validityInterval?.startMs, 0);
+  const endMs = intervalNumber(aoi.validityInterval?.endMs, Number.MAX_SAFE_INTEGER);
+  if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs) || startMs < 0 || endMs <= startMs) return null;
   const orderRaw = parseInt(aoi.order, 10);
   return {
     id: String(aoi.id || `aoi-${Date.now()}`),
@@ -1741,12 +2035,16 @@ let activeAoiUiScope = null;
 async function openAoiEditor(stimulusId, options = {}) {
   const stimulus = stimuliList.find(item => String(item.id) === String(stimulusId));
   if (!stimulus) return;
+  if (stimulus.type === 'audio') {
+    toast(CURRENT_LANG === 'en' ? 'Audio has no spatial areas of interest.' : 'У аудио нет экранных зон интереса.');
+    return;
+  }
   activeAoiUiScope?.dispose();
   const lifetime = createStimulusUiScope();
   activeAoiUiScope = lifetime;
   lifetime.onDispose(() => { if (activeAoiUiScope === lifetime) activeAoiUiScope = null; });
   try {
-  if (stimulus.apiContentUrl && !stimulus._previewObjectUrl) {
+  if (stimulus.apiContentUrl && !stimulusObjectUrl(stimulus, '_previewObjectUrl')) {
     try {
       await hydrateApiStimulusPreview(stimulus);
     } catch (error) {
@@ -1761,13 +2059,14 @@ async function openAoiEditor(stimulusId, options = {}) {
   let mediaUrl = stimulusPreviewSource(stimulus);
   const standard = window.StandardStimuli?.resolveStandardStimulus?.(stimulus.id, stimulus, { lang: CURRENT_LANG });
   let previewHtml = options.previewHtml;
-  if (standard?.type === 'image' && !mediaUrl) mediaUrl = standard.src;
+  if (standard?.type === 'image' && !mediaUrl) mediaUrl = safeStimulusMediaUrl(standard.src);
   if (!previewHtml && ['shape', 'text'].includes(standard?.type)) {
     const element = document.createElement('div');
     Object.assign(element.style, standard.style || {});
     element.textContent = standard.text || '';
     previewHtml = element.outerHTML;
   }
+  previewHtml = safeStimulusPreviewHtml(previewHtml);
 
   const hasScopedAois = Object.prototype.hasOwnProperty.call(options, 'initialAois');
   let aois = (hasScopedAois ? options.initialAois : stimulus.aois || [])
@@ -1808,9 +2107,9 @@ async function openAoiEditor(stimulusId, options = {}) {
       <div id="aoiViewport" style="padding:18px;display:flex;align-items:center;justify-content:center;background:var(--panel2);min-width:0;min-height:0;overflow:hidden;">
         <div id="aoiStage" style="position:relative;width:100%;aspect-ratio:16/9;background:#fff;border:1px solid #d8deea;border-radius:12px;box-shadow:0 8px 24px rgba(30,41,59,.10);overflow:hidden;user-select:none;touch-action:none;flex:none;">
           ${(stimulus.type === 'image' || stimulus.type === 'slides') && mediaUrl
-            ? `<img id="aoiMedia" src="${aoiEscape(mediaUrl)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
+            ? `<img id="aoiMedia" crossorigin="anonymous" referrerpolicy="no-referrer" src="${aoiEscape(mediaUrl)}" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
             : stimulus.type === 'video' && mediaUrl
-              ? `<video id="aoiMedia" src="${aoiEscape(mediaUrl)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`
+              ? `<video id="aoiMedia" crossorigin="anonymous" referrerpolicy="no-referrer" src="${aoiEscape(mediaUrl)}" muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;"></video>`
               : previewHtml
                 ? `<div id="aoiStandardPreview" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;">${previewHtml}</div>`
                 : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#111827;font-size:42px;font-weight:800;">${aoiEscape(stimulus.text || stimulus.name)}</div>`}
@@ -1824,15 +2123,38 @@ async function openAoiEditor(stimulusId, options = {}) {
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);"><input id="aoiTarget" type="checkbox"> ${CURRENT_LANG === 'en' ? 'Target area' : 'Целевая зона'}</label>
           <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Gaze sequence number' : 'Номер в последовательности взгляда'}<select id="aoiOrder" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;background:var(--card-bg);color:var(--text);"></select></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-            <label style="font-size:11px;color:var(--muted);">startMs<input id="aoiStart" type="number" min="0" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
-            <label style="font-size:11px;color:var(--muted);">endMs<input id="aoiEnd" type="number" min="1" placeholder="${CURRENT_LANG === 'en' ? 'Until stimulus ends' : 'До конца показа'}" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
+            <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'Start, ms' : 'Начало, мс'}<input id="aoiStart" type="number" min="0" step="1" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
+            <label style="font-size:11px;color:var(--muted);">${CURRENT_LANG === 'en' ? 'End, ms' : 'Конец, мс'}<input id="aoiEnd" type="number" min="1" step="1" placeholder="${CURRENT_LANG === 'en' ? 'Until stimulus ends' : 'До конца показа'}" style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--stroke);border-radius:8px;"></label>
           </div>
+          <div id="aoiIntervalHint" role="status" style="font-size:12px;line-height:1.4;color:var(--muted);"></div>
           <div id="aoiCoordinates" style="font:10px/1.45 var(--mono,monospace);color:var(--muted);background:rgba(92,102,189,.06);padding:8px;border-radius:8px;word-break:break-all;"></div>
+          <div id="aoiSizeHint" style="font-size:12px;line-height:1.4;color:var(--muted);"></div>
           <div style="display:flex;gap:7px;"><button id="aoiSave" class="quick-btn" style="flex:1;background:var(--accent);color:white;border-color:var(--accent);">${CURRENT_LANG === 'en' ? 'Save changes' : 'Сохранить изменения'}</button><button id="aoiDelete" class="quick-btn" style="color:var(--bad);">${CURRENT_LANG === 'en' ? 'Delete' : 'Удалить'}</button></div>
         </div>
+        ${options.batchTargets?.length ? `<details id="aoiBatch" style="font-size:12px;line-height:1.5;">
+          <summary>${CURRENT_LANG === 'en' ? 'Apply to other stimuli in this block' : 'Применить к другим стимулам блока'}</summary>
+          <p>${CURRENT_LANG === 'en' ? 'Copy replaces their zones. Applying an interval keeps their geometry.' : 'Копирование заменит их зоны. Применение интервала сохранит геометрию.'}</p>
+          <label><input type="checkbox" id="aoiSelectAllTargets"> ${CURRENT_LANG === 'en' ? 'Select all' : 'Выбрать все'}</label>
+          ${options.batchFolders?.length ? `<label style="display:block;margin:8px 0;">${CURRENT_LANG === 'en' ? 'Select folder stimuli in this block' : 'Отметить стимулы папки в этом блоке'}
+            <select id="aoiBatchFolder" style="display:block;width:100%;">
+              <option value="">${CURRENT_LANG === 'en' ? 'Choose folder' : 'Выберите папку'}</option>
+              ${options.batchFolders.map((folder, index) => `<option value="${index}">${aoiEscape(folder.name)} (${folder.ids.length})</option>`).join('')}
+            </select>
+          </label>` : ''}
+          <div id="aoiBatchTargets" style="display:grid;gap:6px;max-height:180px;overflow:auto;margin:8px 0;">
+            ${options.batchTargets.map(target => `<label><input type="checkbox" data-aoi-batch-target value="${aoiEscape(target.id)}"> ${aoiEscape(target.name)}</label>`).join('')}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="quick-btn" id="aoiCopySelected">${CURRENT_LANG === 'en' ? 'Copy all zones' : 'Копировать зоны'}</button>
+            <button type="button" class="quick-btn" id="aoiApplyInterval">${CURRENT_LANG === 'en' ? 'Apply selected interval' : 'Применить интервал'}</button>
+          </div>
+        </details>` : ''}
       </aside>
     </div>
-    ${hasQueue ? `<div style="padding:12px 14px;border-top:1px solid var(--stroke);display:flex;align-items:center;justify-content:flex-end;gap:10px;background:var(--card-bg);"><button id="aoiSaveNext" class="quick-btn" style="background:var(--accent);border-color:var(--accent);color:white;font-weight:800;">${isQueueLast ? (CURRENT_LANG === 'en' ? 'Save and finish queue' : 'Сохранить и завершить очередь') : (CURRENT_LANG === 'en' ? 'Save material and continue' : 'Сохранить материал и далее')} →</button></div>` : ''}`;
+    ${hasQueue ? `<div style="padding:12px 14px;border-top:1px solid var(--stroke);display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;background:var(--card-bg);">
+      ${typeof options.onPrevious === 'function' ? `<button type="button" id="aoiPrevious" class="quick-btn">← ${CURRENT_LANG === 'en' ? 'Previous stimulus' : 'Предыдущий стимул'}</button>` : ''}
+      <button type="button" id="aoiSaveNext" class="quick-btn" style="background:var(--accent);border-color:var(--accent);color:white;font-weight:800;">${isQueueLast ? (CURRENT_LANG === 'en' ? 'Save and finish queue' : 'Сохранить и завершить очередь') : (CURRENT_LANG === 'en' ? 'Save material and continue' : 'Сохранить материал и далее')} →</button>
+    </div>` : ''}`;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
   lifetime.onDispose(() => { stopStimulusUiMedia(overlay); overlay.remove(); });
@@ -1891,6 +2213,7 @@ async function openAoiEditor(stimulusId, options = {}) {
       const scale = Math.min(width / Math.max(1, bounds.width), height / Math.max(1, bounds.height));
       standardElement.style.transform = `scale(${scale})`;
     }
+    updateSizeHint();
   }
   const media = modal.querySelector('#aoiMedia');
   const useMediaRatio = () => {
@@ -1920,30 +2243,46 @@ async function openAoiEditor(stimulusId, options = {}) {
     }
     aois = normalized.sort((left, right) => left.order - right.order);
     aois.forEach((aoi, index) => { aoi.order = index + 1; });
-    if (hasScopedAois && typeof options.onPersist === 'function') {
-      options.onPersist(aois);
-    } else {
-      persistStimulusAois(stimulus, aois);
+    try {
+      if (hasScopedAois && typeof options.onPersist === 'function') {
+        options.onPersist(aois);
+      } else {
+        persistStimulusAois(stimulus, aois);
+      }
+    } catch (_) {
+      toast(CURRENT_LANG === 'en' ? 'AOIs could not be saved. Free browser storage and retry; keep this editor open.'
+        : 'Не удалось сохранить AOI. Освободите хранилище браузера и повторите; не закрывайте редактор.');
+      return false;
     }
     const gallery = document.getElementById('stimuliGallery');
-    if (gallery) renderStimuliGallery(gallery);
+    if (gallery && !hasScopedAois) renderStimuliGallery(gallery);
     if (typeof options.onChange === 'function') options.onChange(stimulus, aois);
     return true;
   }
+  function selectedInterval() {
+    const start = modal.querySelector('#aoiStart');
+    const end = modal.querySelector('#aoiEnd');
+    const startMs = start.valueAsNumber;
+    const endMs = end.value === '' ? Number.MAX_SAFE_INTEGER : end.valueAsNumber;
+    return start.validity.valid && end.validity.valid && Number.isSafeInteger(startMs) && startMs >= 0
+      && Number.isSafeInteger(endMs) && endMs > startMs ? { startMs, endMs } : null;
+  }
   function captureSelectedFormDraft() {
     const aoi = selectedAoi();
-    if (!aoi || form.style.display === 'none') return;
+    if (!aoi || form.style.display === 'none') return true;
     const name = modal.querySelector('#aoiName').value.trim();
-    const startMs = parseInt(modal.querySelector('#aoiStart').value, 10);
-    const endMs = modal.querySelector('#aoiEnd').value === '' ? Number.MAX_SAFE_INTEGER : parseInt(modal.querySelector('#aoiEnd').value, 10);
-    if (name) aoi.name = name;
-    aoi.isTarget = modal.querySelector('#aoiTarget').checked;
-    if (Number.isFinite(startMs) && startMs >= 0 && Number.isFinite(endMs) && endMs > startMs) {
-      aoi.validityInterval = { startMs, endMs };
+    const interval = selectedInterval();
+    if (!name || !interval) {
+      toast(CURRENT_LANG === 'en' ? 'Enter a name and a valid interval (end after start).' : 'Введите название и корректный интервал (конец позже начала).');
+      return false;
     }
+    aoi.name = name;
+    aoi.isTarget = modal.querySelector('#aoiTarget').checked;
+    aoi.validityInterval = interval;
+    return true;
   }
   function moveAoiToOrder(aoiId, requestedOrder) {
-    captureSelectedFormDraft();
+    if (!captureSelectedFormDraft()) { renderForm(); return false; }
     const fromIndex = aois.findIndex(aoi => aoi.id === aoiId);
     const toIndex = Math.max(0, Math.min(aois.length - 1, requestedOrder - 1));
     if (fromIndex < 0 || fromIndex === toIndex) return false;
@@ -1955,7 +2294,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     return true;
   }
   function moveAoiRelative(aoiId, targetId, placeAfter) {
-    captureSelectedFormDraft();
+    if (!captureSelectedFormDraft()) return false;
     const fromIndex = aois.findIndex(aoi => aoi.id === aoiId);
     if (fromIndex < 0 || aoiId === targetId) return false;
     const [moved] = aois.splice(fromIndex, 1);
@@ -2020,8 +2359,34 @@ async function openAoiEditor(stimulusId, options = {}) {
     modal.querySelector('#aoiOrder').innerHTML = aois.map((item, index) => `<option value="${index + 1}" ${aoi.order === index + 1 ? 'selected' : ''}>${index + 1}</option>`).join('');
     modal.querySelector('#aoiStart').value = aoi.validityInterval.startMs;
     modal.querySelector('#aoiEnd').value = aoi.validityInterval.endMs === Number.MAX_SAFE_INTEGER ? '' : aoi.validityInterval.endMs;
+    updateIntervalHint();
+    updateSizeHint();
     modal.querySelector('#aoiCoordinates').textContent = aoi.points.map(point => `(${point.x.toFixed(4)}, ${point.y.toFixed(4)})`).join(' · ');
   }
+  function updateSizeHint() {
+    const aoi = selectedAoi();
+    if (!aoi?.points.length) return;
+    const extent = axis => Math.max(...aoi.points.map(point => point[axis])) - Math.min(...aoi.points.map(point => point[axis]));
+    const w = extent('x'), h = extent('y');
+    const px = `${Math.round(w * stage.clientWidth)} × ${Math.round(h * stage.clientHeight)} px`;
+    const en = CURRENT_LANG === 'en';
+    const percent = new Intl.NumberFormat(en ? 'en' : 'ru', { style: 'percent', maximumFractionDigits: 1 });
+    modal.querySelector('#aoiSizeHint').textContent = en
+      ? `Bounds in preview: ${px} (${percent.format(w)} × ${percent.format(h)} of stimulus). Check that the zone is distinguishable at the gaze accuracy achieved on the participant's device.`
+      : `Границы зоны в предпросмотре: ${px} (${percent.format(w)} × ${percent.format(h)} от стимула). Проверьте, что зона различима при точности взгляда на устройстве участника.`;
+  }
+  function updateIntervalHint() {
+    const interval = selectedInterval();
+    const duration = options.stimulusDurationMs;
+    const en = CURRENT_LANG === 'en';
+    const hint = modal.querySelector('#aoiIntervalHint');
+    const partial = interval && duration > 0 && (interval.startMs > 0 || interval.endMs < duration);
+    hint.textContent = !interval ? (en ? 'End must follow start.' : 'Конец должен быть позже начала.')
+      : partial ? (en ? `This zone does not cover the full ${duration} ms presentation.` : `Зона действует не весь показ (${duration} мс).`)
+      : interval.startMs === 0 && interval.endMs === Number.MAX_SAFE_INTEGER ? (en ? 'Active for the whole presentation.' : 'Действует весь показ.')
+      : (en ? 'An empty end means until the stimulus ends.' : 'Пустой конец означает «до конца показа».');
+  }
+  for (const id of ['aoiStart', 'aoiEnd']) modal.querySelector('#' + id).addEventListener('input', updateIntervalHint);
   function shapeMarkup(aoi) {
     const selected = aoi.id === selectedId;
     const color = aoi.isTarget ? '#10b981' : '#5c66bd';
@@ -2089,7 +2454,7 @@ async function openAoiEditor(stimulusId, options = {}) {
   }
   function finishPolygon() {
     if (draftPoints.length < 3) return toast(CURRENT_LANG === 'en' ? 'Polygon needs at least 3 points' : 'Полигону нужно минимум 3 точки');
-    const aoi = normalizeAoi({ id: newId('polygon'), name: CURRENT_LANG === 'en' ? 'Polygon AOI' : 'Полигон AOI', shape: 'polygon', points: draftPoints, order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false, validityInterval: { startMs: 0, endMs: 1000 } }, stimulus.id, aois.length + 1);
+    const aoi = normalizeAoi({ id: newId('polygon'), name: CURRENT_LANG === 'en' ? 'Polygon AOI' : 'Полигон AOI', shape: 'polygon', points: draftPoints, order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false }, stimulus.id, aois.length + 1);
     if (!aoi) return toast(CURRENT_LANG === 'en' ? 'Polygon must not intersect itself' : 'Полигон не должен пересекать сам себя');
     aois.push(aoi); selectedId = aoi.id; setDrawMode(null); saveAll(); renderAll();
   }
@@ -2212,7 +2577,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     const shapeName = shape === 'ellipse'
       ? (CURRENT_LANG === 'en' ? 'Ellipse AOI' : 'Овальная AOI')
       : (CURRENT_LANG === 'en' ? 'Rectangle AOI' : 'Прямоугольник AOI');
-    const aoi = normalizeAoi({ id: newId(shape), name: shapeName, shape, points: [rectangleStart, end], order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false, validityInterval: { startMs: 0, endMs: 1000 } }, stimulus.id, aois.length + 1);
+    const aoi = normalizeAoi({ id: newId(shape), name: shapeName, shape, points: [rectangleStart, end], order: Math.max(0, ...aois.map(item => item.order)) + 1, isTarget: false }, stimulus.id, aois.length + 1);
     if (!aoi) return toast(CURRENT_LANG === 'en' ? 'Draw a larger shape' : 'Нарисуйте область большего размера');
     aois.push(aoi); selectedId = aoi.id; setDrawMode(null); saveAll(); renderAll();
   });
@@ -2243,20 +2608,7 @@ async function openAoiEditor(stimulusId, options = {}) {
     }
   });
   modal.querySelector('#aoiSave').addEventListener('click', () => {
-    const aoi = selectedAoi();
-    if (!aoi) return;
-    const name = modal.querySelector('#aoiName').value.trim();
-    const order = parseInt(modal.querySelector('#aoiOrder').value, 10);
-    const startMs = Math.max(0, parseInt(modal.querySelector('#aoiStart').value, 10) || 0);
-    const endMs = modal.querySelector('#aoiEnd').value === '' ? Number.MAX_SAFE_INTEGER : parseInt(modal.querySelector('#aoiEnd').value, 10);
-    if (!name) return toast(CURRENT_LANG === 'en' ? 'Enter an AOI name' : 'Введите название AOI');
-    if (!Number.isFinite(order) || order < 1 || order > aois.length) return toast(CURRENT_LANG === 'en' ? `Order must be from 1 to ${aois.length}` : `Номер должен быть от 1 до ${aois.length}`);
-    if (!Number.isFinite(endMs) || endMs <= startMs) return toast(CURRENT_LANG === 'en' ? 'endMs must be greater than startMs' : 'endMs должен быть больше startMs');
-    const previousOrder = aoi.order;
-    const occupied = aois.find(item => item.id !== aoi.id && item.order === order);
-    if (occupied) occupied.order = previousOrder;
-    aoi.name = name; aoi.order = order; aoi.isTarget = modal.querySelector('#aoiTarget').checked; aoi.validityInterval = { startMs, endMs };
-    if (saveAll()) {
+    if (selectedAoi() && captureSelectedFormDraft() && saveAll()) {
       renderAll();
       toast(CURRENT_LANG === 'en' ? 'AOI saved' : 'AOI сохранена');
     }
@@ -2272,17 +2624,54 @@ async function openAoiEditor(stimulusId, options = {}) {
     lifetime.dispose();
     if (notify && shouldNotify && typeof options.onClose === 'function') options.onClose(stimulus, aois);
   };
-  modal.querySelector('#aoiSaveNext')?.addEventListener('click', () => {
-    captureSelectedFormDraft();
-    if (!aois.length) {
-      toast(CURRENT_LANG === 'en' ? 'Create at least one AOI' : 'Создайте хотя бы одну AOI');
-      return;
+  const targetInputs = [...modal.querySelectorAll('[data-aoi-batch-target]')];
+  const allTargets = modal.querySelector('#aoiSelectAllTargets');
+  function syncBatchSelection() {
+    const count = targetInputs.filter(target => target.checked).length;
+    allTargets.checked = count === targetInputs.length;
+    allTargets.indeterminate = count > 0 && count < targetInputs.length;
+  }
+  allTargets?.addEventListener('change', () => {
+    targetInputs.forEach(input => { input.checked = allTargets.checked; });
+    syncBatchSelection();
+  });
+  for (const input of targetInputs) input.addEventListener('change', syncBatchSelection);
+  modal.querySelector('#aoiBatchFolder')?.addEventListener('change', event => {
+    const folder = options.batchFolders[event.target.value];
+    if (!folder) return;
+    const ids = new Set(folder.ids);
+    targetInputs.forEach(input => { input.checked = ids.has(input.value); });
+    syncBatchSelection();
+    event.target.value = '';
+  });
+  function applyBatch(kind) {
+    if (!lifetime.current() || !overlay.isConnected || typeof options.onBatch !== 'function') return;
+    const en = CURRENT_LANG === 'en';
+    const ids = targetInputs.filter(input => input.checked).map(input => input.value);
+    if (!ids.length) return toast(en ? 'Select destination stimuli.' : 'Выберите стимулы для применения.');
+    if (!selectedAoi() || drawMode) return toast(en ? 'Finish drawing and select a zone.' : 'Завершите рисование и выберите зону.');
+    if (kind === 'copy' && !window.confirm(en ? 'Replace all zones on the selected stimuli?' : 'Заменить все зоны на отмеченных стимулах?')) return;
+    if (!captureSelectedFormDraft() || !saveAll()) return;
+    let count;
+    try { count = options.onBatch({ kind, ids, aois, interval: selectedAoi()?.validityInterval }); }
+    catch (_) {
+      return toast(en ? 'Changes to other stimuli were not saved. Free browser storage and retry.'
+        : 'Изменения других стимулов не сохранены. Освободите хранилище браузера и повторите.');
     }
-    if (!saveAll()) return;
+    toast(count ? (en ? `Updated stimuli: ${count}` : `Обновлено стимулов: ${count}`)
+      : (en ? 'No destination zones were changed.' : 'Зоны выбранных стимулов не изменились.'));
+  }
+  modal.querySelector('#aoiCopySelected')?.addEventListener('click', () => applyBatch('copy'));
+  modal.querySelector('#aoiApplyInterval')?.addEventListener('click', () => applyBatch('interval'));
+  function leaveQueue(callback, detail) {
+    if (drawMode) return toast(CURRENT_LANG === 'en' ? 'Finish or cancel drawing first.' : 'Сначала завершите или отмените рисование.');
+    if (!captureSelectedFormDraft() || !saveAll()) return;
     close(false);
-    if (typeof options.onSaveAndNext === 'function') {
-      options.onSaveAndNext({ stimulus, aois, queueIndex, queueTotal, isLast: isQueueLast });
-    }
+    callback?.(detail);
+  }
+  modal.querySelector('#aoiPrevious')?.addEventListener('click', () => leaveQueue(options.onPrevious));
+  modal.querySelector('#aoiSaveNext')?.addEventListener('click', () => {
+    leaveQueue(options.onSaveAndNext, { stimulus, aois, queueIndex, queueTotal, isLast: isQueueLast });
   });
   modal.querySelector('#aoiClose').addEventListener('click', () => close());
   overlay.addEventListener('click', event => { if (event.target === overlay) close(); });

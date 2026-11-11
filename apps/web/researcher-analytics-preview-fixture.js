@@ -2,9 +2,79 @@
   'use strict';
 
   const enabled = new URLSearchParams(global.location && global.location.search || '').get('analyticsPreview') === '1';
-  if (!enabled) return;
+  if (!enabled || !['localhost', '127.0.0.1'].includes(global.location.hostname)) return;
+
+  const interval = (startMs, duration, pulse, breath) => {
+    const signal = (mean, offset) => ({
+      mean, observedMs: mean == null ? 0 : duration - offset,
+      count: mean == null ? 0 : 8, methodVersion: 'preview_only',
+    });
+    return { startMs, endMs: startMs + duration, heartRate: signal(pulse, 4000), respiration: signal(breath, 6500) };
+  };
+  const physiologyIntervals = {
+    minutes: [72, 76, 82, null, 77, 74, 79, 71].map((pulse, index) =>
+      interval(index * 60000, 60000, pulse, [13, 14, 16, null, 15, 14, 15, 12][index])),
+    blocks: [
+      { ...interval(12000, 32000, 73, 13), blockId: 'training-block', attempt: 1, status: 'accepted' },
+      { ...interval(69000, 52000, 81, null), blockId: 'main-block', attempt: 1, status: 'repeat_required' },
+      { ...interval(147000, 55000, 77, 14), blockId: 'main-block', attempt: 2, status: 'accepted' },
+    ],
+  };
+  const rt = [405, 542, 369, 438, null, 474, 490, 413];
+  const connectedness = {
+    sessionId: 105, algorithmVersion: 'preview_only', schemaVersion: 'rt_alignment.v1',
+    clock: 'session_elapsed_ms', baselineMs: 1000, postMs: 1000, truncated: true, trialCountTotal: 24,
+    trials: rt.map((rtMs, index) => {
+      const onsetMs = 149000 + index * 2500;
+      const responseMs = rtMs === null ? null : onsetMs + rtMs;
+      const endMs = responseMs ?? onsetMs + 1000;
+      const window = (startMs, endMs, value) => ({
+        startMs, endMs, channels: { gaze: { status: 'observed', value, n: 12, nValid: Math.round(value * 12), maxGapMs: 75 } },
+      });
+      return { trialId: `T${index + 1}`, blockId: 'main-block', condition: 'condition-a', attempt: 2,
+        onsetMs, responseMs, endMs, rtMs, correct: rtMs === null ? null : index !== 5,
+        qualityValid: index !== 1, status: responseMs === null ? 'no_response' : 'responded',
+        windows: { baseline: window(onsetMs - 1000, onsetMs, .75), response: window(onsetMs, endMs, [1, .5, .92, .83][index % 4]),
+          post: window(endMs, endMs + 1000, .83) } };
+    }),
+  };
+  const groupSessions = Array.from({ length: 12 }, (_, index) => {
+    const participant = `P-${String(index + 1).padStart(3, '0')}`;
+    return { id: 201 + index, participant_id: participant, participant_alias: participant,
+      status: 'completed', protocol_version: '1.0.0' };
+  });
+
+  function customComparison(spec) {
+    const accuracy = spec.metricId === 'task.accuracy_pct';
+    const physiology = spec.metricId.startsWith('physiology.');
+    const paired = spec.design === 'paired';
+    const sample = (id, level) => {
+      const i = Number(id.slice(-3)) - 1;
+      const offset = level === 'main-block' || level === 'B' ? [37, -15, 51, 25][i % 4] : 0;
+      if (physiology) return (spec.metricId === 'physiology.bpm_mean' ? 67 + i : 10 + (i % 5)) + Math.round(offset / 10);
+      return accuracy ? 73 + i + Math.round(offset / 8) : 350 + (i * 37) % 130 + offset;
+    };
+    const describe = values => ({ nParticipants: values.length,
+      mean: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null, values });
+    const ids = groupSessions.map(row => row.participant_id);
+    const reference = describe((paired ? ids : spec.referenceParticipantIds).filter(id => ids.includes(id))
+      .map(id => sample(id, paired ? spec.referenceId : 'A')));
+    const comparison = describe((paired ? ids : spec.comparisonParticipantIds).filter(id => ids.includes(id))
+      .map(id => sample(id, paired ? spec.comparisonId : 'B')));
+    const pairs = paired ? ids.map((participantId, i) => ({ participantId, reference: reference.values[i],
+      comparison: comparison.values[i], difference: comparison.values[i] - reference.values[i] })) : [];
+    const available = reference.nParticipants && comparison.nParticipants;
+    return { modelId: 'descriptive-participant-difference', modelVersion: 'preview_only',
+      metricId: spec.metricId, design: spec.design, effectUnit: accuracy ? 'pct' : spec.metricId === 'physiology.bpm_mean' ? 'bpm'
+        : spec.metricId === 'physiology.respiration_mean' ? 'breaths/min' : 'ms', reference, comparison,
+      pairs, excludedParticipants: [], readiness: available ? 'available' : 'insufficient_data',
+      effect: available ? comparison.mean - reference.mean : null,
+      nParticipants: paired ? pairs.length : reference.nParticipants + comparison.nParticipants,
+      nObservations: reference.nParticipants + comparison.nParticipants, formula: 'mean(B) - mean(A)' };
+  }
 
   global.EmocogAnalyticsPreviewFixture = {
+    groupSessions, customComparison,
     projects: [{ id: 12, name_ru: 'Исследование визуального внимания', name_en: 'Visual attention study' }],
     protocols: [{
       id: 25,
@@ -56,6 +126,7 @@
       actual_fps: 29.7,
       protocol_version: '1.0.0',
       analytics_summary: {
+        physiologyIntervals, connectedness,
         contractVersion: '1.0',
         snapshotId: 'preview-snapshot-001',
         algorithmVersion: 'analytics-api-1.0.0',

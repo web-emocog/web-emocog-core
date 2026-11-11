@@ -44,6 +44,62 @@ function harness() {
     baseline: window.count(), evaluate: code => vm.runInContext(code, context) };
 }
 
+test('batch upload persists each acknowledgement, reports partial success and does not repeat or continue mutations', async () => {
+  const h = harness();
+  h.context.localStorage.setItem = (key, value) => h.store.set(key, value);
+  h.context.FormData = FormData;
+  h.context.crypto = require('node:crypto').webcrypto;
+  h.context.TextEncoder = TextEncoder;
+  h.context.hasResearcherApiToken = () => true;
+  h.context.resolveApiProjectId = async () => 7;
+  h.context.folders = [];
+  h.context.hydrateStimulusThumbnail = async () => { throw new Error('optional_preview_failed'); };
+  let calls = 0;
+  const progress = [];
+  h.context.progress = (count, total) => progress.push([count, total]);
+  h.context.apiGet = async () => ({ state: 'uncertain', recovery_required: true });
+  h.context.apiPost = async url => {
+    if (url === '/stimuli/operations') return { state: 'reserved' };
+    assert.match(url, /^\/stimuli\/upload\?operation_key=/);
+    if (++calls === 2) throw Object.assign(new Error('offline'), { mutationMayHaveCommitted: true });
+    return { id: 55, name: 'Saved', project_id: 7, current_version_id: 'v55', mime_type: 'image/png', content_url: '/stimuli/55/content' };
+  };
+  h.context.files = [1, 2, 3].map(id => new File(['png'], `${id}.png`, { type: 'image/png' }));
+  await assert.rejects(h.evaluate('handleFileUpload(files, progress)'), error => {
+    assert.equal(error.mutationMayHaveCommitted, true);
+    assert.deepEqual(Array.from(error.uploadedStimulusIds), ['55']);
+    return true;
+  });
+  assert.equal(calls, 2);
+  assert.equal(JSON.parse(h.store.get('emocog_media_operations_v1')).length, 1);
+  assert.deepEqual(progress, [[0, 3], [1, 3]]);
+  assert.ok(JSON.parse(h.store.get('emocog_stimuli')).some(item => item.id === '55'));
+});
+
+test('document conversion sends the original Unicode name as a UTF-8 form field', async () => {
+  const h = harness();
+  h.context.localStorage.setItem = (key, value) => h.store.set(key, value);
+  h.context.FormData = FormData;
+  h.context.crypto = require('node:crypto').webcrypto;
+  h.context.TextEncoder = TextEncoder;
+  h.context.hasResearcherApiToken = () => true;
+  h.context.resolveApiProjectId = async () => 7;
+  h.context.hydrateStimulusThumbnail = async () => {};
+  h.context.file = new File(['%PDF-synthetic'], 'Проверка.pdf', { type: 'application/pdf' });
+  h.context.apiPost = async (url, data) => {
+    if (url === '/stimuli/operations') {
+      assert.equal(data.file.name, 'Проверка.pdf');
+      assert.match(data.file.sha256, /^[a-f0-9]{64}$/);
+      return { state: 'reserved' };
+    }
+    assert.match(url, /^\/stimuli\/convert\?operation_key=/);
+    assert.equal(data.get('original_name'), 'Проверка.pdf');
+    return { stimuli: [{ id: 77, name: 'Проверка_page_1.jpg', project_id: 7, current_version_id: 'v77' }] };
+  };
+  const result = await h.evaluate('convertDocumentToStimuli(file)');
+  assert.equal(result[0].name, 'Проверка_page_1.jpg');
+});
+
 test('stimulus UI cancels owned handle zero, removes global handlers and ignores captured late callbacks', () => {
   const h = harness();
   h.evaluate(`var calls = 0, cleaned = 0, ui = createStimulusUiScope();

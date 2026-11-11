@@ -1039,14 +1039,14 @@ const participantViews = {
 
 function render() {
   const route = normalizeRoute();
-  const participantView = Object.hasOwn(participantViews, route) ? participantViews[route] : null;
+  // Standalone mockup pages select layout only; API authorization never uses this router.
+  const standaloneViews = { ...participantViews, "/login": loginView };
+  const standaloneView = Object.hasOwn(standaloneViews, route) ? standaloneViews[route] : null;
   const knownView = Object.hasOwn(views, route) ? views[route] : null;
   document.body.classList.remove("nav-open");
 
-  if (route === "/login") {
-    app.innerHTML = loginView();
-  } else if (participantView) {
-    app.innerHTML = participantView();
+  if (standaloneView) {
+    app.innerHTML = standaloneView();
   } else {
     const view = knownView || views["/overview"];
     app.innerHTML = shell(view(), knownView ? route : "/overview");

@@ -45,7 +45,12 @@ test.beforeAll(async () => {
       if (authMode === 'malformed') return json({ csrf_token: 'must-not-be-cached' });
       return json({ ...user, csrf_token: 'synthetic-csrf' });
     }
-    if (pathname === '/auth/login') { loginCalls++; req.resume(); return setTimeout(() => json({ error: 'invalid_credentials' }, 401), 200); }
+    if (pathname === '/auth/login') {
+      loginCalls++;
+      req.resume();
+      if (authMode === 'login_throttled' && loginCalls === 1) return json({ code: 'rate_limit_exceeded', retry_after_seconds: 2 }, 429);
+      return setTimeout(() => json({ error: 'invalid_credentials' }, 401), 200);
+    }
     if (pathname === '/auth/permissions') return json({ can_open_admin_panel: true, operations: [] });
     if (pathname === '/protocols') return json([{ id: 10, name: 'Synthetic protocol', definition: { protocolId: 'synthetic' } }]);
     if (pathname === '/invitations' && req.method === 'POST') {
@@ -207,9 +212,28 @@ test('a second submit does not issue a concurrent login POST', async ({ page }) 
   await page.locator('#login').fill('synthetic@example.test');
   await page.locator('#password').fill('Synthetic-Password-Only');
   await page.locator('#form').evaluate(form => { form.dispatchEvent(new Event('submit', { cancelable: true })); form.dispatchEvent(new Event('submit', { cancelable: true })); });
-  await expect(page.locator('#error')).toContainText('invalid_credentials');
+  await expect(page.locator('#error')).toContainText('Неверный email или пароль');
   expect(loginCalls).toBe(1);
   await expect(page.locator('#form button[type=submit]')).toBeEnabled();
+});
+
+test('login cooldown shows a human message and prevents repeated requests without weakening API limits', async ({ page }) => {
+  authMode = 'login_throttled';
+  await page.goto('/apps/web/developer/login.html?portal=researcher');
+  await page.locator('#login').fill('synthetic@example.test');
+  await page.locator('#password').fill('Synthetic-Password-Only');
+  const button = page.locator('#form button[type=submit]');
+  await button.click();
+  await expect(page.locator('#error')).toContainText('Слишком много попыток входа');
+  await expect(button).toBeDisabled();
+  await page.locator('#form').evaluate(form => {
+    for (let i = 0; i < 6; i++) form.dispatchEvent(new Event('submit', { cancelable: true }));
+  });
+  expect(loginCalls).toBe(1);
+  await expect(button).toBeEnabled({ timeout: 5000 });
+  await button.click();
+  await expect(page.locator('#error')).toContainText('Неверный email или пароль');
+  expect(loginCalls).toBe(2);
 });
 
 test('an inaccessible requested protocol is never replaced with the first available protocol', async ({ page }) => {

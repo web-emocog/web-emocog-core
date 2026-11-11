@@ -105,6 +105,38 @@ test('local feature-copy hook sees only accepted unique captures and does not tr
   assert.throws(()=>createCalibrationCapture({start:100,wallStart:2000,policy,onLandmarkCopy:true}));
 });
 
+test('eye-gate probe counts unique rejects and overlaps without changing the live capture decision', async () => {
+  const { createCalibrationCapture, calibrationCapturePolicy } = await load('calibration-capture.mjs');
+  const { createEyeGateProbeWindow } = await import(pathToFileURL(path.resolve(__dirname, '../../web/developer/gaze-eye-gate-probe.mjs')));
+  const policy = calibrationCapturePolicy({ x: 50, y: 50 });
+  const probe = createEyeGateProbeWindow();
+  const plain = createCalibrationCapture({ start: 100, wallStart: 2000, policy });
+  const observed = createCalibrationCapture({ start: 100, wallStart: 2000, policy, onFrameAssessment: probe.observe });
+  const apply = f => { plain.observe(f, f.timestamp); observed.observe(f, f.timestamp); };
+  apply(frame(100));
+  const precheckReject = { ...frame(133), eyes: { bothOpen: false, left: { ear: .18, isOpen: false } },
+    blendShapes: { eyeBlinkLeft: .8, unlisted: 'PRIVATE_VALUE' }, pose: { status: 'error' } };
+  apply(precheckReject); apply(precheckReject);
+  const shut = frame(166);
+  shut.landmarks = changeEyelids(shut.landmarks, { factor: .1 });
+  shut.eyes.bothOpen = false;
+  apply(shut);
+  apply({ ...frame(199), landmarks: null, eyes: null });
+  for (let t = 232; t <= 232 + 33 * policy.minFrames; t += 33) apply(frame(t));
+  const result = observed.finish();
+  assert.deepEqual(result, plain.finish());
+  assert.equal(result.summary.accepted, true);
+  assert.equal(result.summary.invalidPose, 0, 'eye rejection still takes precedence in the live counter');
+  const s = probe.summary();
+  assert.deepEqual([s.counts.precheckEyesRejected, s.counts.gazeConfidenceRejected, s.counts.gazeAndPrecheckRejected,
+    s.counts.poseRejected, s.counts.eyesAndPoseRejected, s.counts.missingGazeFeatures, s.counts.missingPrecheckEyeFlags], [2, 1, 1, 1, 1, 1, 1]);
+  assert.equal(s.counts.fresh, policy.minFrames + 5);
+  assert.equal(s.longestEyeRejectionMs, 66);
+  assert.deepEqual(s.blendShapes.eyeBlinkLeft, { available: 1, mean: .8, min: .8, max: .8 });
+  assert.deepEqual(s.blendShapes.eyeBlinkRight, { available: 0, mean: null, min: null, max: null });
+  assert.doesNotMatch(JSON.stringify(s), /PRIVATE_VALUE|landmarks|timestamp/);
+});
+
 test('shared correction math agrees with original functions, and independent worsening rolls back', async () => {
   const { fitValidationCorrection, calculateValidationMetrics, filterValidationPointsForMetrics, assessCorrectionBenchmark } = await load('validation-metrics.mjs');
   const { fitResidualBias, applyResidualBiasCorrection, evaluateResidualBiasLOOCV, shouldApplyResidualBiasCorrection } = await load('bias-correction.mjs');

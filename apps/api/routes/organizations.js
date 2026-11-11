@@ -74,11 +74,11 @@ router.get(
   [param('id').isInt()],
   async (req, res) => {
     try {
-      const allowed = await hasOrganizationMembership(pool, req.params.id, req.user);
-      if (!allowed) return res.status(404).json({ error: 'Not found' });
+      const globalAccess = isPlatformAdmin(req.user);
       const r = await pool.query(
-        'SELECT id, name, slug, created_at FROM organizations WHERE id = $1',
-        [req.params.id]
+        `SELECT id, name, slug, created_at FROM organizations o WHERE id = $1
+         ${globalAccess ? '' : 'AND EXISTS (SELECT 1 FROM user_organizations uo WHERE uo.organization_id = o.id AND uo.user_id = $2)'}`,
+        globalAccess ? [req.params.id] : [req.params.id, req.user.sub]
       );
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
       res.json(r.rows[0]);
@@ -104,12 +104,15 @@ router.patch(
       if (req.body.name !== undefined) { updates.push(`name = $${i++}`); values.push(req.body.name); }
       if (req.body.slug !== undefined) { updates.push(`slug = $${i++}`); values.push(req.body.slug); }
       if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
-      const allowed = await hasOrganizationMembership(pool, req.params.id, req.user);
-      if (!allowed) return res.status(404).json({ error: 'Not found' });
+      const globalAccess = isPlatformAdmin(req.user);
       values.push(req.params.id);
+      if (!globalAccess) values.push(req.user.sub);
       const r = await pool.query(
-        `UPDATE organizations SET ${updates.join(', ')}, updated_at = current_timestamp
-         WHERE id = $${i} RETURNING id, name, slug, updated_at`,
+        `UPDATE organizations o SET ${updates.join(', ')}, updated_at = current_timestamp
+         WHERE id = $${i}
+         ${globalAccess ? '' : `AND EXISTS (SELECT 1 FROM user_organizations uo
+           WHERE uo.organization_id = o.id AND uo.user_id = $${i + 1} FOR SHARE OF uo)`}
+         RETURNING id, name, slug, updated_at`,
         values
       );
       if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });

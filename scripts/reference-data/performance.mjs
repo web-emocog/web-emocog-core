@@ -7,6 +7,24 @@ export function distribution(values) {
     max: sorted.length ? sorted.at(-1) : null };
 }
 
+// DevTools CPU time includes every thread of each browser-owned process.
+// Reject process churn instead of silently losing a process's consumed time.
+export function processCpuDelta(before, after, elapsedMs) {
+  const valid = rows => Array.isArray(rows) && rows.length > 0 && rows.every(row =>
+    Number.isSafeInteger(row.id) && typeof row.type === 'string' && Number.isFinite(row.cpuTime) && row.cpuTime >= 0)
+    && new Set(rows.map(row => row.id)).size === rows.length;
+  if (!valid(before) || !valid(after) || !Number.isFinite(elapsedMs) || elapsedMs <= 0) return { status: 'not_measured' };
+  const prior = new Map(before.map(row => [row.id, row]));
+  if (before.length !== after.length || after.some(row => !prior.has(row.id)
+    || prior.get(row.id).type !== row.type || prior.get(row.id).cpuTime > row.cpuTime)) return { status: 'process_set_changed' };
+  const secondsByType = {};
+  for (const row of after) secondsByType[row.type] = (secondsByType[row.type] || 0) + row.cpuTime - prior.get(row.id).cpuTime;
+  const cpuSeconds = Object.values(secondsByType).reduce((a, b) => a + b, 0);
+  return { status: 'measured', cpuSeconds, secondsByType, processCount: after.length,
+    cpuCoreEquivalents: cpuSeconds * 1000 / elapsedMs,
+    scope: 'browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system' };
+}
+
 // Playback totals include drops; never relabel them as presented/inferred frames.
 export function frameCadencePerformance({ sourceFrames, processedFrames, elapsedMs, method, playbackQuality, fallbackReason = null }) {
   if (![sourceFrames, processedFrames].every(n => Number.isSafeInteger(n) && n >= 0)

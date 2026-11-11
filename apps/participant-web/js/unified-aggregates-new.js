@@ -1,5 +1,6 @@
-import { getEmotionSummary } from './emotion-stub-new.js';
+import { getEmotionSummary } from './emotion-stub-new.js?v=20261110-integration1';
 import '../../shared/rt-alignment.js?v=20261025-1';
+import '../../shared/metric-quality.js?v=20261110-integration1';
 import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs';
 
 /**
@@ -322,12 +323,16 @@ function normalizeRespirationSummaryPayload(summary) {
         resp_rate_min: respRateMin,
         resp_rate_max: respRateMax,
         resp_sample_count: respSampleCount,
-        resp_available: Boolean(respAvailable)
+        resp_available: Boolean(respAvailable),
+        methodVersion: typeof summary?.methodVersion === 'string' ? summary.methodVersion : null
     };
 }
 
 function buildRespirationSummary(sessionData) {
-    if (sessionData.continuousSignalState) return normalizeRespirationSummaryPayload(sessionData.continuousSignalState);
+    if (sessionData.continuousSignalState) return normalizeRespirationSummaryPayload({
+        ...sessionData.continuousSignalState,
+        methodVersion: sessionData.continuousSignalState.respMethodVersion || 'legacy_summary'
+    });
     const provided = sessionData?.respiration_summary ?? sessionData?.respirationSummary ?? null;
     if (provided && typeof provided === 'object') {
         return normalizeRespirationSummaryPayload(provided);
@@ -533,7 +538,7 @@ export function buildAggregatesPayload(sessionData, options = {}) {
     const rppg_summary = buildRppgSummary(sessionData);
     const respiration_summary = buildRespirationSummary(sessionData);
     const gaze_analytics = buildGazeAnalyticsPayload(sessionData);
-    return {
+    const payload = {
         schemaVersion: SESSION_CONTRACT_VERSION,
         ids,
         meta: {
@@ -577,4 +582,6 @@ export function buildAggregatesPayload(sessionData, options = {}) {
         testHub: sessionData.testHub ? { ...sessionData.testHub } : null,
         gazeTests: sessionData.gazeTests ? { ...sessionData.gazeTests } : null
     };
+    payload.quality_assessment = globalThis.EmocogMetricQuality.build(payload);
+    return payload;
 }

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { protocolCameraConstraints } = require('../../participant-web/js/session-runtime/protocol-profile.mjs');
+const { participantDebug: dbg, participantDebugError: dbgErr } = require('../../participant-web/js/session-runtime/participant-diagnostic.mjs');
 
 function load(file, context, exports) {
   const source = fs.readFileSync(path.resolve(__dirname, '../../participant-web/js', file), 'utf8')
@@ -36,7 +37,7 @@ function precheckFixture(file = 'precheck-updated.js') {
   const state = { flags: {}, runtime: { localAnalyzer: { reset() { resets++; }, analyzeFrame() { analyses++; return frame.promise; } },
     faceSegmenter: { segmentFrame: async () => ({ isComplete: true, faceVisibility: {} }) } }, sessionData: { tech: {} }, currentLang: 'en' };
   const context = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state,
-    translations: { en: {} }, window: {}, AbortController, DOMException, protocolCameraConstraints,
+    translations: { en: {} }, window: {}, AbortController, DOMException, protocolCameraConstraints, dbg, dbgErr,
     getFramePixels: frame => frame?.fixturePixels,
     document: { getElementById: id => id === 'precheck-layout-fix-v1' ? {} : node(id), querySelector: node },
     navigator: { mediaDevices: { getUserMedia() { const request = deferred(); permissions.push(request); return request.promise; } } },
@@ -52,6 +53,17 @@ function precheckFixture(file = 'precheck-updated.js') {
   return { subject, state, frame, node, permissions, timers, stream, get analyses() { return analyses; },
     get resets() { return resets; }, get stopped() { return stopped; } };
 }
+
+test('issue132: explicit precheck stop resets a failed segmenter, but never the shared live pipeline', () => {
+  const f = precheckFixture();
+  let resets = 0;
+  f.state.runtime.faceSegmenter.reset = () => { resets++; };
+  f.subject.stopPreCheck();
+  assert.equal(resets, 1);
+  f.state.runtime.sessionRuntime = { isAnalysisRunning: () => true };
+  f.subject.stopPreCheck();
+  assert.equal(resets, 1);
+});
 
 test('issue132: concurrent precheck starts share one permission request; stop releases late camera acquisition', async () => {
   const f = precheckFixture();

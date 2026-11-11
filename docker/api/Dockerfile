@@ -15,19 +15,24 @@ LABEL org.opencontainers.image.title="Wecog API" \
       org.opencontainers.image.source="https://github.com/web-emocog/web-emocog-core" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-RUN apt-get update && \
+COPY docker/api/pgdg.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+RUN echo '0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' | sha256sum --check && \
+    apt-get update && \
+    apt-get install --yes --no-install-recommends ca-certificates && \
+    printf '%s\n' 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
       ca-certificates \
       fonts-dejavu-core \
       ffmpeg \
       libreoffice-impress \
       poppler-utils \
-      postgresql-client \
+      postgresql-client-16 \
       python3 \
       tini && \
     install --directory /usr/local/share/wecog && \
     dpkg-query --show --showformat='${Package} ${Version}\n' \
-      ffmpeg postgresql-client python3 > /usr/local/share/wecog/runtime-packages.txt && \
+      ffmpeg postgresql-client-16 python3 > /usr/local/share/wecog/runtime-packages.txt && \
     ffmpeg -version > /usr/local/share/wecog/ffmpeg-build.txt && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid 10001 wecog && \

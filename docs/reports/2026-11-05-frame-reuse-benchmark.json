@@ -1,0 +1,6580 @@
+{
+  "schemaVersion": "frame-reuse-investigation.v1",
+  "date": "2026-11-05",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro",
+    "ramBytes": 25769803776
+  },
+  "sameHostReference": {
+    "dataset": {
+      "id": "kyegorov/mcd_rppg",
+      "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+      "license": "CC-BY-4.0",
+      "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+      "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+    },
+    "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+    "bytes": 138119703,
+    "input": "chromium-file-backed-fake-camera",
+    "playbackRate": 1,
+    "physicalCamera": false,
+    "fakeVideoSha256": "ec54ffeea040dbbb82911f80df5d294b4b0e5f530561c188457ba3f208076004",
+    "fakeVideoBytes": 826686046,
+    "fakeVideoProvenance": {
+      "schemaVersion": "fake-camera-file.v1",
+      "sourceSha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+      "outputSha256": "ec54ffeea040dbbb82911f80df5d294b4b0e5f530561c188457ba3f208076004",
+      "outputBytes": 826686046,
+      "decoderImage": "sha256:21a4a6efd8fe95e39732136e2a2acb60e8db77d8e7b7df8fa6655b444c1f81d7",
+      "transformation": "VP9-to-YUV420-Y4M-no-scaling-no-rate-override-no-audio"
+    }
+  },
+  "sourceHashes": {
+    "baseline": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c",
+    "candidate": "a73394281a4c7ac125782d000874695e057ed86b0c923a910d4b016e2bafc22d"
+  },
+  "runtimeUnchangedAfterBenchmark": true,
+  "scope": "Local engineering optimization and diagnostic experiments only; no production deployment",
+  "changes": {
+    "facePixelHelperImportedOnce": true,
+    "auxiliarySharedImageDataNoBitmap": true,
+    "sharedBufferTransferred": false,
+    "modelWeightsOrThresholdsChanged": false,
+    "productionDelegatePolicyChanged": false
+  },
+  "conclusion": {
+    "reliableFpsImprovementFromTransport": false,
+    "largeCpuReductionFromTransportConfirmed": false,
+    "fakeCameraFpsAtSourceLimit": true,
+    "gpuSegmentationPromisingButNotAdopted": true,
+    "issue132Closed": false
+  },
+  "limitations": [
+    "Physical camera, installed Safari/Chrome, thermals and scientific accuracy were not validated.",
+    "CPU counters measure browser process CPU time across all threads, not GPU utilization or whole-system CPU percentage.",
+    "Canvas-based cohorts change the sign of the Chromium FPS difference; all completed runs and the failed warmup are retained.",
+    "One 15-second-warmup baseline did not collect enough neutral samples; the complete comparison used 20 seconds for both variants without changing calibration policy.",
+    "GPU experiment was run after the paired CPU cohort; no randomization of delegates or matched-frame CPU/GPU QC validation was performed.",
+    "A faster GPU experiment is not permission to change the production backend policy."
+  ],
+  "rows": [
+    {
+      "cohort": "probe-firefox-bitmap-default.json",
+      "engine": "firefox",
+      "variant": "candidate-v2-no-body",
+      "count": 1,
+      "meanFps": 22.4977502249775,
+      "fps": [
+        22.4977502249775
+      ],
+      "meanPrimaryMs": 41.89333333333333,
+      "meanSegmentMs": 27.42105263157895,
+      "sharedBitmapConversions": [
+        null
+      ],
+      "cpuSeconds": [
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "probe-firefox-imageData-default.json",
+      "engine": "firefox",
+      "variant": "candidate-v2-no-body",
+      "count": 1,
+      "meanFps": 22.495500899820037,
+      "fps": [
+        22.495500899820037
+      ],
+      "meanPrimaryMs": 41.888888888888886,
+      "meanSegmentMs": 27.3,
+      "sharedBitmapConversions": [
+        null
+      ],
+      "cpuSeconds": [
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "probe-firefox-bitmap-compute.json",
+      "engine": "firefox",
+      "variant": "candidate-v2-no-body",
+      "count": 1,
+      "meanFps": 4.99850044986504,
+      "fps": [
+        4.99850044986504
+      ],
+      "meanPrimaryMs": 44.04,
+      "meanSegmentMs": 26.142857142857142,
+      "sharedBitmapConversions": [
+        null
+      ],
+      "cpuSeconds": [
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse.json",
+      "engine": "chromium",
+      "variant": "before-v2-no-body",
+      "count": 2,
+      "meanFps": 20.131860108703513,
+      "fps": [
+        19.66509345919091,
+        20.59862675821612
+      ],
+      "meanPrimaryMs": 12.501636498258067,
+      "meanSegmentMs": 163.4867167919734,
+      "sharedBitmapConversions": [
+        56,
+        57
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse.json",
+      "engine": "chromium",
+      "variant": "candidate-v2-no-body",
+      "count": 2,
+      "meanFps": 26.696957304745773,
+      "fps": [
+        27.098735392348022,
+        26.295179217143524
+      ],
+      "meanPrimaryMs": 11.626604745127905,
+      "meanSegmentMs": 160.44913793104735,
+      "sharedBitmapConversions": [
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse.json",
+      "engine": "firefox",
+      "variant": "before-v2-no-body",
+      "count": 1,
+      "meanFps": 22.26518232117859,
+      "fps": [
+        22.26518232117859
+      ],
+      "meanPrimaryMs": 42.17664670658683,
+      "meanSegmentMs": 28.137931034482758,
+      "sharedBitmapConversions": [
+        57
+      ],
+      "cpuSeconds": [
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse.json",
+      "engine": "firefox",
+      "variant": "candidate-v2-no-body",
+      "count": 2,
+      "meanFps": 22.299627234647737,
+      "fps": [
+        22.233333333333334,
+        22.365921135962136
+      ],
+      "meanPrimaryMs": 43.13925935690873,
+      "meanSegmentMs": 28.411222020568662,
+      "sharedBitmapConversions": [
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse-warm20.json",
+      "engine": "chromium",
+      "variant": "before-v2-no-body",
+      "count": 2,
+      "meanFps": 24.199072202305548,
+      "fps": [
+        24.099116365733554,
+        24.29902803887754
+      ],
+      "meanPrimaryMs": 12.092657195376331,
+      "meanSegmentMs": 162.34490320622285,
+      "sharedBitmapConversions": [
+        58,
+        57
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse-warm20.json",
+      "engine": "chromium",
+      "variant": "candidate-v2-no-body",
+      "count": 2,
+      "meanFps": 23.281346605362742,
+      "fps": [
+        21.73043594187442,
+        24.832257268851066
+      ],
+      "meanPrimaryMs": 12.098171038008267,
+      "meanSegmentMs": 164.2128694580783,
+      "sharedBitmapConversions": [
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse-warm20.json",
+      "engine": "firefox",
+      "variant": "before-v2-no-body",
+      "count": 2,
+      "meanFps": 21.982240109322404,
+      "fps": [
+        22.1,
+        21.864480218644804
+      ],
+      "meanPrimaryMs": 42.67937221793032,
+      "meanSegmentMs": 27.50877192982456,
+      "sharedBitmapConversions": [
+        57,
+        57
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse-warm20.json",
+      "engine": "firefox",
+      "variant": "candidate-v2-no-body",
+      "count": 2,
+      "meanFps": 22.299256691443617,
+      "fps": [
+        22.365921135962136,
+        22.2325922469251
+      ],
+      "meanPrimaryMs": 42.98858692859234,
+      "meanSegmentMs": 27.12280701754386,
+      "sharedBitmapConversions": [
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse-warm20.json",
+      "engine": "webkit",
+      "variant": "before-v2-no-body",
+      "count": 2,
+      "meanFps": 28.648091825596275,
+      "fps": [
+        28.597140285971403,
+        28.69904336522115
+      ],
+      "meanPrimaryMs": 13.746832435856813,
+      "meanSegmentMs": 31.3645528930446,
+      "sharedBitmapConversions": [
+        58,
+        59
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-reuse-warm20.json",
+      "engine": "webkit",
+      "variant": "candidate-v2-no-body",
+      "count": 2,
+      "meanFps": 28.464765714133343,
+      "fps": [
+        28.36572114262858,
+        28.5638102856381
+      ],
+      "meanPrimaryMs": 13.575494956170587,
+      "meanSegmentMs": 29.92241379310326,
+      "sharedBitmapConversions": [
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        null,
+        null
+      ],
+      "meanCpuSeconds": null
+    },
+    {
+      "cohort": "paired-fake-camera.json",
+      "engine": "chromium",
+      "variant": "before-v2-no-body",
+      "count": 3,
+      "meanFps": 28.99806682797684,
+      "fps": [
+        28.99671370577965,
+        28.998550072496375,
+        28.998936705654486
+      ],
+      "meanPrimaryMs": 11.693180076620218,
+      "meanSegmentMs": 161.02528735639893,
+      "sharedBitmapConversions": [
+        58,
+        58,
+        58
+      ],
+      "cpuSeconds": [
+        20.695429,
+        20.667419999999996,
+        20.583021000000002
+      ],
+      "meanCpuSeconds": 20.648623333333333
+    },
+    {
+      "cohort": "paired-fake-camera.json",
+      "engine": "chromium",
+      "variant": "candidate-v2-no-body",
+      "count": 3,
+      "meanFps": 28.99855007700683,
+      "fps": [
+        28.99903336555448,
+        28.998453415818183,
+        28.99816344964783
+      ],
+      "meanPrimaryMs": 11.800957854415408,
+      "meanSegmentMs": 160.16609195402512,
+      "sharedBitmapConversions": [
+        0,
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        20.669130999999997,
+        19.938853000000005,
+        20.490839
+      ],
+      "meanCpuSeconds": 20.366274333333333
+    },
+    {
+      "cohort": "experimental-gpu-segmentation.json",
+      "engine": "chromium",
+      "variant": "candidate-v2-no-body",
+      "count": 3,
+      "meanFps": 28.99803460350107,
+      "fps": [
+        28.999226687287617,
+        28.997680185586592,
+        28.997196937629003
+      ],
+      "meanPrimaryMs": 12.72417624524627,
+      "meanSegmentMs": 29.985632183865224,
+      "sharedBitmapConversions": [
+        0,
+        0,
+        0
+      ],
+      "cpuSeconds": [
+        14.791243999999999,
+        14.953123999999999,
+        15.151791
+      ],
+      "meanCpuSeconds": 14.965386333333333
+    }
+  ],
+  "cohorts": [
+    {
+      "file": "probe-firefox-bitmap-default.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T12:36:49.255Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 10000,
+      "warmupMs": 15000,
+      "repeats": 1,
+      "captureMode": "automatic",
+      "faceInput": "bitmap",
+      "faceCanvas": "default",
+      "diagnosticInstrumentation": true,
+      "sourceHashes": {
+        "baseline": "457555765d0cdca1b1d340c2151bee48cee19ba335626fdde004ffb0eea28315",
+        "candidate": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "78018b3b43eee3d6d449ed1d7a2286c8a3f5f449ef7a4ff76fee00cff4857a12",
+        "pipeline-benchmark-page.mjs": "70c8756f91b7ca0ca11c7a4063d680f3fdfc04db6482bc84e79c47f8d5ccd97f"
+      },
+      "baselineCommit": "b16ce38462050ffa3f646d908a8b37ccf92d877b",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "same-640x480-canvas-MediaStream-from-locked-video",
+        "playbackRate": 1,
+        "physicalCamera": false
+      },
+      "runs": [
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 10001,
+          "initializationMs": 1243,
+          "mediaElapsedMs": 10012.098,
+          "analysisFps": 22.4977502249775,
+          "cameraDeliveryFps": 22.397760223977603,
+          "renderFps": 119.98800119988002,
+          "frames": 225,
+          "faceFrames": 225,
+          "faceCoverage": 1,
+          "uiTicks": 445,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 445,
+            "mean": 2.487640449438202,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 445,
+            "mean": 2.5101123595505617,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 225,
+            "mean": 41.89333333333333,
+            "p50": 40,
+            "p95": 52,
+            "max": 63
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              22,
+              23,
+              23,
+              22,
+              22,
+              23,
+              22,
+              23,
+              22,
+              22
+            ],
+            "fullWindows": 10,
+            "partialTailMs": 1,
+            "distribution": {
+              "n": 10,
+              "mean": 22.4,
+              "p50": 22,
+              "p95": 23,
+              "max": 23
+            },
+            "below25Windows": 10,
+            "longestBelow25RunMs": 10000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 225,
+              "mean": 0.26666666666666666,
+              "p50": 0,
+              "p95": 1,
+              "max": 2
+            },
+            "inference": {
+              "n": 225,
+              "mean": 40.77777777777778,
+              "p50": 39,
+              "p95": 52,
+              "max": 62
+            },
+            "derived": {
+              "n": 225,
+              "mean": 0.05333333333333334,
+              "p50": 0,
+              "p95": 0,
+              "max": 1
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 462,
+            "roundTripMs": {
+              "face": {
+                "n": 225,
+                "mean": 41.47555555555556,
+                "p50": 40,
+                "p95": 52,
+                "max": 63
+              },
+              "segment": {
+                "n": 19,
+                "mean": 27.157894736842106,
+                "p50": 27,
+                "p95": 32,
+                "max": 37
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8998100189981002,
+          "poseHz": 0,
+          "segmentMeanMs": 27.42105263157895,
+          "poseMeanMs": 0,
+          "emotionSamples": 46,
+          "bpmSamples": 0,
+          "respirationSamples": 2,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "completedAt": "2026-11-05T12:37:17.238Z",
+      "complete": true
+    },
+    {
+      "file": "probe-firefox-imageData-default.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T12:37:17.692Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 10000,
+      "warmupMs": 15000,
+      "repeats": 1,
+      "captureMode": "automatic",
+      "faceInput": "imageData",
+      "faceCanvas": "default",
+      "diagnosticInstrumentation": true,
+      "sourceHashes": {
+        "baseline": "457555765d0cdca1b1d340c2151bee48cee19ba335626fdde004ffb0eea28315",
+        "candidate": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "78018b3b43eee3d6d449ed1d7a2286c8a3f5f449ef7a4ff76fee00cff4857a12",
+        "pipeline-benchmark-page.mjs": "70c8756f91b7ca0ca11c7a4063d680f3fdfc04db6482bc84e79c47f8d5ccd97f"
+      },
+      "baselineCommit": "b16ce38462050ffa3f646d908a8b37ccf92d877b",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "same-640x480-canvas-MediaStream-from-locked-video",
+        "playbackRate": 1,
+        "physicalCamera": false
+      },
+      "runs": [
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 10002,
+          "initializationMs": 1239,
+          "mediaElapsedMs": 10028.305000000002,
+          "analysisFps": 22.495500899820037,
+          "cameraDeliveryFps": 22.495500899820037,
+          "renderFps": 119.9760047990402,
+          "frames": 225,
+          "faceFrames": 225,
+          "faceCoverage": 1,
+          "uiTicks": 445,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 445,
+            "mean": 2.4719101123595504,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 445,
+            "mean": 2.487640449438202,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 225,
+            "mean": 41.888888888888886,
+            "p50": 40,
+            "p95": 50,
+            "max": 61
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              23,
+              23,
+              21,
+              23,
+              23,
+              23,
+              22,
+              23,
+              22,
+              22
+            ],
+            "fullWindows": 10,
+            "partialTailMs": 2,
+            "distribution": {
+              "n": 10,
+              "mean": 22.5,
+              "p50": 23,
+              "p95": 23,
+              "max": 23
+            },
+            "below25Windows": 10,
+            "longestBelow25RunMs": 10000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 225,
+              "mean": 0.29333333333333333,
+              "p50": 0,
+              "p95": 1,
+              "max": 2
+            },
+            "inference": {
+              "n": 225,
+              "mean": 40.73777777777778,
+              "p50": 39,
+              "p95": 49,
+              "max": 60
+            },
+            "derived": {
+              "n": 225,
+              "mean": 0.08888888888888889,
+              "p50": 0,
+              "p95": 1,
+              "max": 1
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 486,
+            "roundTripMs": {
+              "face": {
+                "n": 225,
+                "mean": 41.471111111111114,
+                "p50": 40,
+                "p95": 50,
+                "max": 61
+              },
+              "segment": {
+                "n": 20,
+                "mean": 27,
+                "p50": 27,
+                "p95": 32,
+                "max": 33
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9996000799840032,
+          "poseHz": 0,
+          "segmentMeanMs": 27.3,
+          "poseMeanMs": 0,
+          "emotionSamples": 45,
+          "bpmSamples": 8,
+          "respirationSamples": 2,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "completedAt": "2026-11-05T12:37:45.419Z",
+      "complete": true
+    },
+    {
+      "file": "probe-firefox-bitmap-compute.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T12:37:45.801Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 10000,
+      "warmupMs": 15000,
+      "repeats": 1,
+      "captureMode": "automatic",
+      "faceInput": "bitmap",
+      "faceCanvas": "compute",
+      "diagnosticInstrumentation": true,
+      "sourceHashes": {
+        "baseline": "457555765d0cdca1b1d340c2151bee48cee19ba335626fdde004ffb0eea28315",
+        "candidate": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "78018b3b43eee3d6d449ed1d7a2286c8a3f5f449ef7a4ff76fee00cff4857a12",
+        "pipeline-benchmark-page.mjs": "70c8756f91b7ca0ca11c7a4063d680f3fdfc04db6482bc84e79c47f8d5ccd97f"
+      },
+      "baselineCommit": "b16ce38462050ffa3f646d908a8b37ccf92d877b",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "same-640x480-canvas-MediaStream-from-locked-video",
+        "playbackRate": 1,
+        "physicalCamera": false
+      },
+      "runs": [
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 10003,
+          "initializationMs": 1246,
+          "mediaElapsedMs": 10007.049,
+          "analysisFps": 4.99850044986504,
+          "cameraDeliveryFps": 4.99850044986504,
+          "renderFps": 26.891932420273918,
+          "frames": 50,
+          "faceFrames": 50,
+          "faceCoverage": 1,
+          "uiTicks": 448,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 448,
+            "mean": 2.2857142857142856,
+            "p50": 2,
+            "p95": 5,
+            "max": 7
+          },
+          "syntheticInputLatenessMs": {
+            "n": 448,
+            "mean": 2.345982142857143,
+            "p50": 2,
+            "p95": 5,
+            "max": 7
+          },
+          "primaryMs": {
+            "n": 50,
+            "mean": 44.04,
+            "p50": 42,
+            "p95": 54,
+            "max": 76
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              20,
+              22,
+              6,
+              0,
+              1,
+              0,
+              1,
+              0,
+              0,
+              0
+            ],
+            "fullWindows": 10,
+            "partialTailMs": 3,
+            "distribution": {
+              "n": 10,
+              "mean": 5,
+              "p50": 0,
+              "p95": 20,
+              "max": 22
+            },
+            "below25Windows": 10,
+            "longestBelow25RunMs": 10000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 50,
+              "mean": 0.22,
+              "p50": 0,
+              "p95": 1,
+              "max": 1
+            },
+            "inference": {
+              "n": 50,
+              "mean": 42.66,
+              "p50": 40,
+              "p95": 53,
+              "max": 67
+            },
+            "derived": {
+              "n": 50,
+              "mean": 0.08,
+              "p50": 0,
+              "p95": 1,
+              "max": 1
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 98,
+            "roundTripMs": {
+              "face": {
+                "n": 50,
+                "mean": 43.46,
+                "p50": 41,
+                "p95": 53,
+                "max": 72
+              },
+              "segment": {
+                "n": 7,
+                "mean": 26,
+                "p50": 24,
+                "p95": 30,
+                "max": 33
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 0.6997900629811057,
+          "poseHz": 0,
+          "segmentMeanMs": 26.142857142857142,
+          "poseMeanMs": 0,
+          "emotionSamples": 12,
+          "bpmSamples": 0,
+          "respirationSamples": 0,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "completedAt": "2026-11-05T12:38:13.534Z",
+      "complete": true
+    },
+    {
+      "file": "paired-reuse.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T12:42:20.762Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 30000,
+      "warmupMs": 15000,
+      "repeats": 2,
+      "captureMode": "automatic",
+      "faceInput": "bitmap",
+      "faceCanvas": "default",
+      "diagnosticInstrumentation": false,
+      "sourceHashes": {
+        "baseline": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c",
+        "candidate": "a73394281a4c7ac125782d000874695e057ed86b0c923a910d4b016e2bafc22d"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "6695dfe5c9a84981f375035ea13681a1de31dce19a689584775063b02f0dbbf1",
+        "pipeline-benchmark-page.mjs": "2dc8987c253feb59e330fe047d3691530dd921490b93ba1b73f15e61a68286fb"
+      },
+      "baselineCommit": null,
+      "baselineProfile": "v2",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "same-640x480-canvas-MediaStream-from-locked-video",
+        "playbackRate": 1,
+        "physicalCamera": false
+      },
+      "runs": [
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30002.39999999851,
+          "initializationMs": 734.3999999985099,
+          "mediaElapsedMs": 30002.670000000002,
+          "analysisFps": 19.66509345919091,
+          "cameraDeliveryFps": 19.66509345919091,
+          "renderFps": 34.73055488894394,
+          "frames": 590,
+          "faceFrames": 590,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.6877333332995573,
+            "p50": 0.2000000011175871,
+            "p95": 2.5,
+            "max": 5.600000001490116
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.6957333332933485,
+            "p50": 0.2999999988824129,
+            "p95": 2.5,
+            "max": 5.600000001490116
+          },
+          "primaryMs": {
+            "n": 590,
+            "mean": 12.91152542370482,
+            "p50": 13,
+            "p95": 18.40000000037253,
+            "max": 27.199999999254942
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              19,
+              16,
+              22,
+              18,
+              14,
+              20,
+              22,
+              20,
+              23,
+              21,
+              15,
+              19,
+              19,
+              22,
+              20,
+              16,
+              21,
+              18,
+              24,
+              18,
+              18,
+              17,
+              21,
+              24,
+              20,
+              19,
+              19,
+              16,
+              24,
+              25
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 2.399999998509884,
+            "distribution": {
+              "n": 30,
+              "mean": 19.666666666666668,
+              "p50": 19,
+              "p95": 24,
+              "max": 25
+            },
+            "below25Windows": 29,
+            "longestBelow25RunMs": 29000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 590,
+              "mean": 0.18322033893506406,
+              "p50": 0.19999999925494194,
+              "p95": 0.30000000074505806,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 56,
+              "mean": 0.6232142857209381,
+              "p50": 0.599999999627471,
+              "p95": 1,
+              "max": 2.400000000372529
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1877.6000000052154,
+            "roundTripMs": {
+              "face": {
+                "n": 590,
+                "mean": 12.18830508475776,
+                "p50": 12.400000000372529,
+                "p95": 16.700000001117587,
+                "max": 22.40000000037253
+              },
+              "segment": {
+                "n": 56,
+                "mean": 162.639285714299,
+                "p50": 162.2000000011176,
+                "p95": 167.40000000037253,
+                "max": 170.5
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.866517345279137,
+          "poseHz": 0,
+          "segmentMeanMs": 163.28571428571428,
+          "poseMeanMs": 0,
+          "emotionSamples": 132,
+          "bpmSamples": 2,
+          "respirationSamples": 5,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30001.400000000373,
+          "initializationMs": 688.6999999992549,
+          "mediaElapsedMs": 30001.521999999997,
+          "analysisFps": 27.098735392348022,
+          "cameraDeliveryFps": 27.098735392348022,
+          "renderFps": 35.498343410640395,
+          "frames": 813,
+          "faceFrames": 813,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.7314000000034769,
+            "p50": 0,
+            "p95": 3.099999999627471,
+            "max": 5.100000001490116
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.737333333345751,
+            "p50": 0,
+            "p95": 3.099999999627471,
+            "max": 5.400000000372529
+          },
+          "primaryMs": {
+            "n": 813,
+            "mean": 11.400738007390155,
+            "p50": 11.200000001117587,
+            "p95": 15.199999999254942,
+            "max": 21.5
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              27,
+              26,
+              27,
+              26,
+              25,
+              28,
+              25,
+              28,
+              29,
+              28,
+              27,
+              25,
+              26,
+              25,
+              25,
+              30,
+              27,
+              28,
+              29,
+              27,
+              28,
+              29,
+              27,
+              28,
+              27,
+              28,
+              27,
+              27,
+              27,
+              27
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.400000000372529,
+            "distribution": {
+              "n": 30,
+              "mean": 27.1,
+              "p50": 27,
+              "p95": 29,
+              "max": 30
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 813,
+              "mean": 0.14710947108967057,
+              "p50": 0.10000000149011612,
+              "p95": 0.2000000011175871,
+              "max": 0.30000000074505806
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2525.0999999940395,
+            "roundTripMs": {
+              "face": {
+                "n": 813,
+                "mean": 10.733825338257507,
+                "p50": 10.599999999627471,
+                "p95": 14.099999999627471,
+                "max": 16.800000000745058
+              },
+              "segment": {
+                "n": 58,
+                "mean": 160.51724137931035,
+                "p50": 160.39999999850988,
+                "p95": 164.2999999988824,
+                "max": 168.7999999988824
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.933243115321261,
+          "poseHz": 0,
+          "segmentMeanMs": 160.5224137931163,
+          "poseMeanMs": 0,
+          "emotionSamples": 138,
+          "bpmSamples": 17,
+          "respirationSamples": 7,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30005.5,
+          "initializationMs": 690.1999999992549,
+          "mediaElapsedMs": 30005.631999999998,
+          "analysisFps": 26.295179217143524,
+          "cameraDeliveryFps": 26.261851993801137,
+          "renderFps": 42.55886420822849,
+          "frames": 789,
+          "faceFrames": 789,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.6748666666572293,
+            "p50": 0,
+            "p95": 2.900000000372529,
+            "max": 5
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.6863333333271245,
+            "p50": 0,
+            "p95": 2.900000000372529,
+            "max": 5
+          },
+          "primaryMs": {
+            "n": 789,
+            "mean": 11.852471482865655,
+            "p50": 12,
+            "p95": 15.700000001117587,
+            "max": 22.59999999962747
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              25,
+              27,
+              27,
+              29,
+              25,
+              27,
+              25,
+              28,
+              28,
+              27,
+              26,
+              26,
+              25,
+              25,
+              25,
+              23,
+              29,
+              27,
+              27,
+              28,
+              25,
+              27,
+              25,
+              25,
+              27,
+              27,
+              26,
+              24,
+              27,
+              27
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 5.5,
+            "distribution": {
+              "n": 30,
+              "mean": 26.3,
+              "p50": 27,
+              "p95": 28,
+              "max": 29
+            },
+            "below25Windows": 2,
+            "longestBelow25RunMs": 1000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 788,
+              "mean": 0.1644670050803969,
+              "p50": 0.19999999925494194,
+              "p95": 0.2999999988824129,
+              "max": 0.30000000074505806
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2384.9999999981374,
+            "roundTripMs": {
+              "face": {
+                "n": 789,
+                "mean": 11.189353612203185,
+                "p50": 11.299999998882413,
+                "p95": 14.700000001117587,
+                "max": 16.300000000745058
+              },
+              "segment": {
+                "n": 58,
+                "mean": 160.36379310347397,
+                "p50": 160.09999999962747,
+                "p95": 164.69999999925494,
+                "max": 166.2000000011176
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9329789538584592,
+          "poseHz": 0,
+          "segmentMeanMs": 160.37586206897836,
+          "poseMeanMs": 0,
+          "emotionSamples": 136,
+          "bpmSamples": 5,
+          "respirationSamples": 8,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30002,
+          "initializationMs": 693.8000000007451,
+          "mediaElapsedMs": 30002.083,
+          "analysisFps": 20.59862675821612,
+          "cameraDeliveryFps": 20.59862675821612,
+          "renderFps": 35.164322378508096,
+          "frames": 618,
+          "faceFrames": 618,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.7885999999592702,
+            "p50": 0,
+            "p95": 3.299999998882413,
+            "max": 6.199999999254942
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.7941333332893749,
+            "p50": 0,
+            "p95": 3.299999998882413,
+            "max": 6.299999998882413
+          },
+          "primaryMs": {
+            "n": 618,
+            "mean": 12.091747572811315,
+            "p50": 12,
+            "p95": 17.199999999254942,
+            "max": 23.799999998882413
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              17,
+              15,
+              24,
+              21,
+              18,
+              20,
+              17,
+              17,
+              18,
+              24,
+              24,
+              23,
+              24,
+              25,
+              17,
+              18,
+              25,
+              24,
+              24,
+              22,
+              15,
+              20,
+              17,
+              21,
+              24,
+              18,
+              19,
+              18,
+              23,
+              26
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 2,
+            "distribution": {
+              "n": 30,
+              "mean": 20.6,
+              "p50": 20,
+              "p95": 25,
+              "max": 26
+            },
+            "below25Windows": 27,
+            "longestBelow25RunMs": 13000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 618,
+              "mean": 0.17686084138898595,
+              "p50": 0.19999999925494194,
+              "p95": 0.30000000074505806,
+              "max": 1.900000000372529
+            },
+            "sharedPixels": {
+              "n": 57,
+              "mean": 0.5596491228789091,
+              "p50": 0.5,
+              "p95": 0.7000000011175871,
+              "max": 1.300000000745058
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1927.300000006333,
+            "roundTripMs": {
+              "face": {
+                "n": 618,
+                "mean": 11.480582524335139,
+                "p50": 11.400000000372529,
+                "p95": 16,
+                "max": 21.700000001117587
+              },
+              "segment": {
+                "n": 57,
+                "mean": 163.10701754378775,
+                "p50": 163.59999999962747,
+                "p95": 165.80000000074506,
+                "max": 167.40000000037253
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.899873341777215,
+          "poseHz": 0,
+          "segmentMeanMs": 163.68771929823254,
+          "poseMeanMs": 0,
+          "emotionSamples": 132,
+          "bpmSamples": 0,
+          "respirationSamples": 0,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "before-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30002,
+          "initializationMs": 1220,
+          "mediaElapsedMs": 30002.595999999998,
+          "analysisFps": 22.26518232117859,
+          "cameraDeliveryFps": 22.298513432437836,
+          "renderFps": 119.99200053329778,
+          "frames": 668,
+          "faceFrames": 668,
+          "faceCoverage": 1,
+          "uiTicks": 1335,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1335,
+            "mean": 2.466666666666667,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1335,
+            "mean": 2.480149812734082,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 668,
+            "mean": 42.17664670658683,
+            "p50": 41,
+            "p95": 53,
+            "max": 62
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              22,
+              22,
+              23,
+              22,
+              22,
+              23,
+              22,
+              22,
+              22,
+              22,
+              23,
+              22,
+              23,
+              22,
+              22,
+              22,
+              21,
+              23,
+              22,
+              22,
+              24,
+              23,
+              22,
+              22,
+              22,
+              22,
+              23,
+              22,
+              21,
+              23
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 2,
+            "distribution": {
+              "n": 30,
+              "mean": 22.266666666666666,
+              "p50": 22,
+              "p95": 23,
+              "max": 24
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 668,
+              "mean": 0.04491017964071856,
+              "p50": 0,
+              "p95": 0,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 57,
+              "mean": 0.2807017543859649,
+              "p50": 0,
+              "p95": 1,
+              "max": 4
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1459,
+            "roundTripMs": {
+              "face": {
+                "n": 668,
+                "mean": 41.72305389221557,
+                "p50": 40,
+                "p95": 53,
+                "max": 61
+              },
+              "segment": {
+                "n": 58,
+                "mean": 27.75862068965517,
+                "p50": 28,
+                "p95": 34,
+                "max": 38
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332044530364643,
+          "poseHz": 0,
+          "segmentMeanMs": 28.137931034482758,
+          "poseMeanMs": 0,
+          "emotionSamples": 136,
+          "bpmSamples": 0,
+          "respirationSamples": 11,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30000,
+          "initializationMs": 1222,
+          "mediaElapsedMs": 30045.996,
+          "analysisFps": 22.233333333333334,
+          "cameraDeliveryFps": 22.233333333333334,
+          "renderFps": 120,
+          "frames": 667,
+          "faceFrames": 667,
+          "faceCoverage": 1,
+          "uiTicks": 1341,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1341,
+            "mean": 2.3803131991051454,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1341,
+            "mean": 2.3870246085011186,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 667,
+            "mean": 42.97151424287856,
+            "p50": 41,
+            "p95": 54,
+            "max": 62
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              23,
+              23,
+              22,
+              23,
+              22,
+              23,
+              22,
+              21,
+              21,
+              23,
+              23,
+              23,
+              22,
+              23,
+              21,
+              22,
+              22,
+              23,
+              23,
+              23,
+              22,
+              23,
+              22,
+              21,
+              21,
+              22,
+              23,
+              21,
+              22,
+              22
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 0,
+            "distribution": {
+              "n": 30,
+              "mean": 22.233333333333334,
+              "p50": 22,
+              "p95": 23,
+              "max": 23
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 667,
+              "mean": 0.05847076461769116,
+              "p50": 0,
+              "p95": 1,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1496,
+            "roundTripMs": {
+              "face": {
+                "n": 667,
+                "mean": 42.5472263868066,
+                "p50": 41,
+                "p95": 53,
+                "max": 61
+              },
+              "segment": {
+                "n": 58,
+                "mean": 28.086206896551722,
+                "p50": 27,
+                "p95": 35,
+                "max": 37
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9333333333333333,
+          "poseHz": 0,
+          "segmentMeanMs": 28.120689655172413,
+          "poseMeanMs": 0,
+          "emotionSamples": 135,
+          "bpmSamples": 0,
+          "respirationSamples": 14,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001,
+          "initializationMs": 1232,
+          "mediaElapsedMs": 29972.033999999996,
+          "analysisFps": 22.365921135962136,
+          "cameraDeliveryFps": 22.365921135962136,
+          "renderFps": 119.99600013332889,
+          "frames": 671,
+          "faceFrames": 671,
+          "faceCoverage": 1,
+          "uiTicks": 1334,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1334,
+            "mean": 2.5037481259370313,
+            "p50": 2,
+            "p95": 5,
+            "max": 9
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1334,
+            "mean": 2.52023988005997,
+            "p50": 2,
+            "p95": 5,
+            "max": 9
+          },
+          "primaryMs": {
+            "n": 671,
+            "mean": 43.3070044709389,
+            "p50": 42,
+            "p95": 55,
+            "max": 62
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              21,
+              22,
+              23,
+              22,
+              23,
+              22,
+              23,
+              22,
+              23,
+              22,
+              23,
+              23,
+              22,
+              23,
+              21,
+              21,
+              23,
+              23,
+              22,
+              22,
+              23,
+              22,
+              23,
+              22,
+              23,
+              21,
+              23,
+              23,
+              22,
+              23
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1,
+            "distribution": {
+              "n": 30,
+              "mean": 22.366666666666667,
+              "p50": 22,
+              "p95": 23,
+              "max": 23
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 671,
+              "mean": 0.03278688524590164,
+              "p50": 0,
+              "p95": 0,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1530,
+            "roundTripMs": {
+              "face": {
+                "n": 671,
+                "mean": 42.865871833084945,
+                "p50": 41,
+                "p95": 54,
+                "max": 61
+              },
+              "segment": {
+                "n": 57,
+                "mean": 28.70175438596491,
+                "p50": 29,
+                "p95": 34,
+                "max": 35
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8999366687777075,
+          "poseHz": 0,
+          "segmentMeanMs": 28.70175438596491,
+          "poseMeanMs": 0,
+          "emotionSamples": 135,
+          "bpmSamples": 0,
+          "respirationSamples": 19,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "complete": false,
+      "completedAt": "2026-11-05T12:48:07.090Z",
+      "failedRun": {
+        "engine": "firefox",
+        "variant": "before-v2-no-body",
+        "round": 2
+      },
+      "failedPhase": "warmup",
+      "invalidMeasurement": null,
+      "failure": "benchmark_neutral_not_ready_collecting"
+    },
+    {
+      "file": "paired-reuse-warm20.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T12:48:51.833Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 30000,
+      "warmupMs": 20000,
+      "repeats": 2,
+      "captureMode": "automatic",
+      "faceInput": "bitmap",
+      "faceCanvas": "default",
+      "diagnosticInstrumentation": false,
+      "sourceHashes": {
+        "baseline": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c",
+        "candidate": "a73394281a4c7ac125782d000874695e057ed86b0c923a910d4b016e2bafc22d"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "6695dfe5c9a84981f375035ea13681a1de31dce19a689584775063b02f0dbbf1",
+        "pipeline-benchmark-page.mjs": "6cc052135d2e452dd0de814eab9e600327f13b4fec32b9705ebee84c580f1b2c"
+      },
+      "baselineCommit": null,
+      "baselineProfile": "v2",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "same-640x480-canvas-MediaStream-from-locked-video",
+        "playbackRate": 1,
+        "physicalCamera": false
+      },
+      "runs": [
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30001.099999999627,
+          "initializationMs": 737.2999999988824,
+          "mediaElapsedMs": 30001.287,
+          "analysisFps": 24.099116365733554,
+          "cameraDeliveryFps": 24.13244847688948,
+          "renderFps": 39.96520127595371,
+          "frames": 723,
+          "faceFrames": 723,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.7102000000153978,
+            "p50": 0,
+            "p95": 3.099999999627471,
+            "max": 5.100000001490116
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.7220666666987041,
+            "p50": 0.09999999962747097,
+            "p95": 3.099999999627471,
+            "max": 5.199999999254942
+          },
+          "primaryMs": {
+            "n": 723,
+            "mean": 12.032365145226155,
+            "p50": 11.900000000372529,
+            "p95": 16.299999998882413,
+            "max": 24.399999998509884
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              23,
+              23,
+              21,
+              23,
+              21,
+              26,
+              25,
+              23,
+              23,
+              25,
+              24,
+              25,
+              25,
+              23,
+              27,
+              26,
+              28,
+              25,
+              25,
+              25,
+              25,
+              29,
+              22,
+              27,
+              25,
+              26,
+              26,
+              17,
+              14,
+              26
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.099999999627471,
+            "distribution": {
+              "n": 30,
+              "mean": 24.1,
+              "p50": 25,
+              "p95": 27,
+              "max": 29
+            },
+            "below25Windows": 12,
+            "longestBelow25RunMs": 5000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 723,
+              "mean": 0.1652835407841791,
+              "p50": 0.19999999925494194,
+              "p95": 0.30000000074505806,
+              "max": 0.900000000372529
+            },
+            "sharedPixels": {
+              "n": 58,
+              "mean": 0.46379310342258423,
+              "p50": 0.40000000037252903,
+              "p95": 0.6000000014901161,
+              "max": 1.200000001117587
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2369.799999995157,
+            "roundTripMs": {
+              "face": {
+                "n": 723,
+                "mean": 11.420331950195102,
+                "p50": 11.399999998509884,
+                "p95": 15.300000000745058,
+                "max": 19.300000000745058
+              },
+              "segment": {
+                "n": 58,
+                "mean": 161.30000000010276,
+                "p50": 161.09999999962747,
+                "p95": 165.30000000074506,
+                "max": 169.2000000011176
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332624470436324,
+          "poseHz": 0,
+          "segmentMeanMs": 161.78103448277147,
+          "poseMeanMs": 0,
+          "emotionSamples": 136,
+          "bpmSamples": 8,
+          "respirationSamples": 2,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30004,
+          "initializationMs": 705.7999999988824,
+          "mediaElapsedMs": 30004.294,
+          "analysisFps": 21.73043594187442,
+          "cameraDeliveryFps": 21.73043594187442,
+          "renderFps": 41.56112518330889,
+          "frames": 652,
+          "faceFrames": 652,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.6737999999970198,
+            "p50": 0.19999999925494194,
+            "p95": 2.599999999627471,
+            "max": 5.200000001117587
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.6877333333219091,
+            "p50": 0.19999999925494194,
+            "p95": 2.699999999254942,
+            "max": 5.200000001117587
+          },
+          "primaryMs": {
+            "n": 652,
+            "mean": 12.27607361960619,
+            "p50": 12.200000001117587,
+            "p95": 16.800000000745058,
+            "max": 21.800000000745058
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              18,
+              22,
+              27,
+              27,
+              29,
+              27,
+              28,
+              24,
+              23,
+              21,
+              19,
+              24,
+              20,
+              25,
+              20,
+              24,
+              19,
+              17,
+              27,
+              21,
+              21,
+              17,
+              21,
+              23,
+              20,
+              22,
+              18,
+              15,
+              18,
+              15
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 4,
+            "distribution": {
+              "n": 30,
+              "mean": 21.733333333333334,
+              "p50": 21,
+              "p95": 27,
+              "max": 29
+            },
+            "below25Windows": 23,
+            "longestBelow25RunMs": 11000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 652,
+              "mean": 0.17868098154938294,
+              "p50": 0.19999999925494194,
+              "p95": 0.30000000074505806,
+              "max": 0.8000000007450581
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2181.2999999821186,
+            "roundTripMs": {
+              "face": {
+                "n": 652,
+                "mean": 11.639263803662127,
+                "p50": 11.699999999254942,
+                "p95": 15.599999999627471,
+                "max": 19.100000001490116
+              },
+              "segment": {
+                "n": 56,
+                "mean": 165.78392857150175,
+                "p50": 165.59999999962747,
+                "p95": 170.59999999962747,
+                "max": 171.59999999962747
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8664178109585388,
+          "poseHz": 0,
+          "segmentMeanMs": 165.79642857152172,
+          "poseMeanMs": 0,
+          "emotionSamples": 131,
+          "bpmSamples": 0,
+          "respirationSamples": 0,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001.300000000745,
+          "initializationMs": 708.0999999996275,
+          "mediaElapsedMs": 30001.533,
+          "analysisFps": 24.832257268851066,
+          "cameraDeliveryFps": 24.832257268851066,
+          "renderFps": 37.431711292509725,
+          "frames": 745,
+          "faceFrames": 745,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.7198000000355145,
+            "p50": 0,
+            "p95": 2.900000000372529,
+            "max": 5.099999999627471
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.7273333333743115,
+            "p50": 0,
+            "p95": 2.900000000372529,
+            "max": 5.099999999627471
+          },
+          "primaryMs": {
+            "n": 745,
+            "mean": 11.920268456410342,
+            "p50": 12.099999999627471,
+            "p95": 15.800000000745058,
+            "max": 20.700000001117587
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              22,
+              27,
+              19,
+              25,
+              25,
+              25,
+              28,
+              23,
+              22,
+              23,
+              24,
+              26,
+              24,
+              29,
+              25,
+              26,
+              27,
+              26,
+              29,
+              22,
+              19,
+              27,
+              22,
+              23,
+              26,
+              24,
+              25,
+              27,
+              26,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.300000000745058,
+            "distribution": {
+              "n": 30,
+              "mean": 24.833333333333332,
+              "p50": 25,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 12,
+            "longestBelow25RunMs": 4000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 745,
+              "mean": 0.1625503355449678,
+              "p50": 0.19999999925494194,
+              "p95": 0.30000000074505806,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2412.000000011176,
+            "roundTripMs": {
+              "face": {
+                "n": 745,
+                "mean": 11.362416107415052,
+                "p50": 11.599999999627471,
+                "p95": 15.100000001490116,
+                "max": 18.90000000037253
+              },
+              "segment": {
+                "n": 58,
+                "mean": 162.6206896549797,
+                "p50": 162.19999999925494,
+                "p95": 167.40000000037253,
+                "max": 168.7999999988824
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332495591857206,
+          "poseHz": 0,
+          "segmentMeanMs": 162.6293103446349,
+          "poseMeanMs": 0,
+          "emotionSamples": 135,
+          "bpmSamples": 1,
+          "respirationSamples": 0,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001.200000001118,
+          "initializationMs": 715,
+          "mediaElapsedMs": 30001.489,
+          "analysisFps": 24.29902803887754,
+          "cameraDeliveryFps": 24.29902803887754,
+          "renderFps": 37.13184805940957,
+          "frames": 729,
+          "faceFrames": 729,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.7869333332789441,
+            "p50": 0,
+            "p95": 3.399999998509884,
+            "max": 5.100000001490116
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.7946666666169961,
+            "p50": 0,
+            "p95": 3.400000000372529,
+            "max": 5.100000001490116
+          },
+          "primaryMs": {
+            "n": 729,
+            "mean": 12.152949245526507,
+            "p50": 12.199999999254942,
+            "p95": 16.399999998509884,
+            "max": 25.40000000037253
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              22,
+              22,
+              26,
+              27,
+              23,
+              29,
+              26,
+              21,
+              24,
+              24,
+              25,
+              24,
+              25,
+              26,
+              29,
+              26,
+              25,
+              22,
+              23,
+              24,
+              23,
+              23,
+              24,
+              23,
+              24,
+              20,
+              23,
+              23,
+              25,
+              28
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.200000001117587,
+            "distribution": {
+              "n": 30,
+              "mean": 24.3,
+              "p50": 24,
+              "p95": 28,
+              "max": 29
+            },
+            "below25Windows": 18,
+            "longestBelow25RunMs": 11000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 728,
+              "mean": 0.16126373624122078,
+              "p50": 0.19999999925494194,
+              "p95": 0.2999999988824129,
+              "max": 0.599999999627471
+            },
+            "sharedPixels": {
+              "n": 57,
+              "mean": 0.5473684211375943,
+              "p50": 0.5,
+              "p95": 1.099999999627471,
+              "max": 1.200000001117587
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2433.2999999970198,
+            "roundTripMs": {
+              "face": {
+                "n": 729,
+                "mean": 11.472153635128352,
+                "p50": 11.5,
+                "p95": 15.300000000745058,
+                "max": 20.40000000037253
+              },
+              "segment": {
+                "n": 57,
+                "mean": 162.33684210505402,
+                "p50": 161.7999999988824,
+                "p95": 166.30000000074506,
+                "max": 167.90000000037253
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8999240030398077,
+          "poseHz": 0,
+          "segmentMeanMs": 162.90877192967423,
+          "poseMeanMs": 0,
+          "emotionSamples": 137,
+          "bpmSamples": 5,
+          "respirationSamples": 4,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "before-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30000,
+          "initializationMs": 1217,
+          "mediaElapsedMs": 30039.610000000004,
+          "analysisFps": 22.1,
+          "cameraDeliveryFps": 22.1,
+          "renderFps": 120,
+          "frames": 663,
+          "faceFrames": 663,
+          "faceCoverage": 1,
+          "uiTicks": 1334,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1334,
+            "mean": 2.494752623688156,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1334,
+            "mean": 2.5119940029985006,
+            "p50": 2,
+            "p95": 6,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 663,
+            "mean": 42.52337858220211,
+            "p50": 41,
+            "p95": 53,
+            "max": 64
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              23,
+              23,
+              22,
+              22,
+              23,
+              22,
+              23,
+              23,
+              21,
+              22,
+              20,
+              22,
+              24,
+              21,
+              22,
+              22,
+              22,
+              21,
+              21,
+              23,
+              21,
+              21,
+              23,
+              22,
+              23,
+              22,
+              23,
+              22,
+              22,
+              22
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 0,
+            "distribution": {
+              "n": 30,
+              "mean": 22.1,
+              "p50": 22,
+              "p95": 23,
+              "max": 24
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 663,
+              "mean": 0.04675716440422323,
+              "p50": 0,
+              "p95": 0,
+              "max": 2
+            },
+            "sharedPixels": {
+              "n": 57,
+              "mean": 0.43859649122807015,
+              "p50": 0,
+              "p95": 2,
+              "max": 6
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1513,
+            "roundTripMs": {
+              "face": {
+                "n": 663,
+                "mean": 42.085972850678736,
+                "p50": 41,
+                "p95": 52,
+                "max": 64
+              },
+              "segment": {
+                "n": 57,
+                "mean": 27.771929824561404,
+                "p50": 28,
+                "p95": 33,
+                "max": 40
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9,
+          "poseHz": 0,
+          "segmentMeanMs": 28.31578947368421,
+          "poseMeanMs": 0,
+          "emotionSamples": 136,
+          "bpmSamples": 0,
+          "respirationSamples": 12,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30001,
+          "initializationMs": 1242,
+          "mediaElapsedMs": 30017.395999999997,
+          "analysisFps": 22.365921135962136,
+          "cameraDeliveryFps": 22.365921135962136,
+          "renderFps": 120.02933235558815,
+          "frames": 671,
+          "faceFrames": 671,
+          "faceCoverage": 1,
+          "uiTicks": 1337,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1337,
+            "mean": 2.4465220643231116,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1337,
+            "mean": 2.4577412116679134,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 671,
+            "mean": 42.806259314456035,
+            "p50": 41,
+            "p95": 52,
+            "max": 64
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              23,
+              23,
+              21,
+              22,
+              23,
+              23,
+              22,
+              22,
+              22,
+              23,
+              21,
+              23,
+              22,
+              23,
+              22,
+              23,
+              22,
+              23,
+              22,
+              21,
+              22,
+              22,
+              23,
+              23,
+              22,
+              23,
+              23,
+              22,
+              22,
+              23
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1,
+            "distribution": {
+              "n": 30,
+              "mean": 22.366666666666667,
+              "p50": 22,
+              "p95": 23,
+              "max": 23
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 671,
+              "mean": 0.037257824143070044,
+              "p50": 0,
+              "p95": 0,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1373,
+            "roundTripMs": {
+              "face": {
+                "n": 671,
+                "mean": 42.40685543964233,
+                "p50": 41,
+                "p95": 52,
+                "max": 64
+              },
+              "segment": {
+                "n": 57,
+                "mean": 26.94736842105263,
+                "p50": 27,
+                "p95": 31,
+                "max": 33
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8999366687777075,
+          "poseHz": 0,
+          "segmentMeanMs": 27.017543859649123,
+          "poseMeanMs": 0,
+          "emotionSamples": 136,
+          "bpmSamples": 0,
+          "respirationSamples": 16,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001,
+          "initializationMs": 1237,
+          "mediaElapsedMs": 29997.233,
+          "analysisFps": 22.2325922469251,
+          "cameraDeliveryFps": 22.2325922469251,
+          "renderFps": 119.99600013332889,
+          "frames": 667,
+          "faceFrames": 667,
+          "faceCoverage": 1,
+          "uiTicks": 1337,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1337,
+            "mean": 2.442034405385191,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1337,
+            "mean": 2.4480179506357516,
+            "p50": 2,
+            "p95": 5,
+            "max": 8
+          },
+          "primaryMs": {
+            "n": 667,
+            "mean": 43.17091454272864,
+            "p50": 42,
+            "p95": 53,
+            "max": 64
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              23,
+              22,
+              23,
+              21,
+              23,
+              22,
+              23,
+              23,
+              22,
+              23,
+              21,
+              24,
+              23,
+              21,
+              22,
+              23,
+              21,
+              21,
+              22,
+              23,
+              23,
+              23,
+              22,
+              23,
+              20,
+              22,
+              21,
+              21,
+              23,
+              23
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1,
+            "distribution": {
+              "n": 30,
+              "mean": 22.233333333333334,
+              "p50": 22,
+              "p95": 23,
+              "max": 24
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 667,
+              "mean": 0.043478260869565216,
+              "p50": 0,
+              "p95": 0,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1428,
+            "roundTripMs": {
+              "face": {
+                "n": 667,
+                "mean": 42.74362818590705,
+                "p50": 41,
+                "p95": 52,
+                "max": 62
+              },
+              "segment": {
+                "n": 57,
+                "mean": 27.228070175438596,
+                "p50": 27,
+                "p95": 32,
+                "max": 34
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8999366687777075,
+          "poseHz": 0,
+          "segmentMeanMs": 27.228070175438596,
+          "poseMeanMs": 0,
+          "emotionSamples": 136,
+          "bpmSamples": 16,
+          "respirationSamples": 12,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "firefox",
+          "browserVersion": "144.0.2",
+          "variant": "before-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30003,
+          "initializationMs": 1243,
+          "mediaElapsedMs": 30013.322999999997,
+          "analysisFps": 21.864480218644804,
+          "cameraDeliveryFps": 21.8978102189781,
+          "renderFps": 120.02133120021331,
+          "frames": 656,
+          "faceFrames": 656,
+          "faceCoverage": 1,
+          "uiTicks": 1230,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1230,
+            "mean": 4.38130081300813,
+            "p50": 4,
+            "p95": 10,
+            "max": 13
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1230,
+            "mean": 4.39349593495935,
+            "p50": 4,
+            "p95": 10,
+            "max": 13
+          },
+          "primaryMs": {
+            "n": 656,
+            "mean": 42.83536585365854,
+            "p50": 41,
+            "p95": 52,
+            "max": 61
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              21,
+              21,
+              22,
+              23,
+              21,
+              23,
+              21,
+              22,
+              22,
+              22,
+              22,
+              22,
+              22,
+              21,
+              22,
+              22,
+              21,
+              23,
+              20,
+              23,
+              22,
+              22,
+              22,
+              23,
+              22,
+              21,
+              23,
+              22,
+              22,
+              21
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 3,
+            "distribution": {
+              "n": 30,
+              "mean": 21.866666666666667,
+              "p50": 22,
+              "p95": 23,
+              "max": 23
+            },
+            "below25Windows": 30,
+            "longestBelow25RunMs": 30000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 657,
+              "mean": 0.0410958904109589,
+              "p50": 0,
+              "p95": 0,
+              "max": 1
+            },
+            "sharedPixels": {
+              "n": 57,
+              "mean": 0.14035087719298245,
+              "p50": 0,
+              "p95": 1,
+              "max": 1
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 1389,
+            "roundTripMs": {
+              "face": {
+                "n": 656,
+                "mean": 42.38109756097561,
+                "p50": 41,
+                "p95": 51,
+                "max": 61
+              },
+              "segment": {
+                "n": 57,
+                "mean": 26.50877192982456,
+                "p50": 26,
+                "p95": 33,
+                "max": 35
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.8998100189981002,
+          "poseHz": 0,
+          "segmentMeanMs": 26.70175438596491,
+          "poseMeanMs": 0,
+          "emotionSamples": 134,
+          "bpmSamples": 0,
+          "respirationSamples": 19,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple M1, or similar",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "webkit",
+          "browserVersion": "26.0",
+          "variant": "before-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30003,
+          "initializationMs": 867,
+          "mediaElapsedMs": 30002.994415999485,
+          "analysisFps": 28.597140285971403,
+          "cameraDeliveryFps": 28.597140285971403,
+          "renderFps": 44.29557044295571,
+          "frames": 858,
+          "faceFrames": 858,
+          "faceCoverage": 1,
+          "uiTicks": 1250,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1250,
+            "mean": 3.9832,
+            "p50": 4,
+            "p95": 5.000000000003638,
+            "max": 6.000000000007276
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1250,
+            "mean": 3.996800000000003,
+            "p50": 4,
+            "p95": 5.000000000003638,
+            "max": 6.000000000007276
+          },
+          "primaryMs": {
+            "n": 858,
+            "mean": 13.68181818181827,
+            "p50": 13,
+            "p95": 19,
+            "max": 24
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              28,
+              30,
+              29,
+              30,
+              27,
+              30,
+              29,
+              29,
+              30,
+              29,
+              29,
+              26,
+              29,
+              30,
+              28,
+              29,
+              30,
+              24,
+              27,
+              29,
+              29,
+              30,
+              28,
+              30,
+              29,
+              29,
+              30,
+              29,
+              29,
+              23
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 3,
+            "distribution": {
+              "n": 30,
+              "mean": 28.6,
+              "p50": 29,
+              "p95": 30,
+              "max": 30
+            },
+            "below25Windows": 2,
+            "longestBelow25RunMs": 1000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 858,
+              "mean": 0.5664335664336936,
+              "p50": 1,
+              "p95": 1.000000000007276,
+              "max": 2
+            },
+            "sharedPixels": {
+              "n": 58,
+              "mean": 0.17241379310357371,
+              "p50": 0,
+              "p95": 1,
+              "max": 2
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 802.9999999999745,
+            "roundTripMs": {
+              "face": {
+                "n": 858,
+                "mean": 12.50815850815833,
+                "p50": 12,
+                "p95": 18,
+                "max": 24
+              },
+              "segment": {
+                "n": 58,
+                "mean": 30.81034482758583,
+                "p50": 31,
+                "p95": 33,
+                "max": 38
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9331400193314001,
+          "poseHz": 0,
+          "segmentMeanMs": 31.017241379310093,
+          "poseMeanMs": 0,
+          "emotionSamples": 142,
+          "bpmSamples": 36,
+          "respirationSamples": 22,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple GPU",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "webkit",
+          "browserVersion": "26.0",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30001,
+          "initializationMs": 871,
+          "mediaElapsedMs": 30001.882625334492,
+          "analysisFps": 28.36572114262858,
+          "cameraDeliveryFps": 28.332388920369322,
+          "renderFps": 52.764907836405456,
+          "frames": 851,
+          "faceFrames": 851,
+          "faceCoverage": 1,
+          "uiTicks": 1250,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1250,
+            "mean": 3.990400000000003,
+            "p50": 4,
+            "p95": 6,
+            "max": 11
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1250,
+            "mean": 4.0056000000000145,
+            "p50": 4,
+            "p95": 6,
+            "max": 11
+          },
+          "primaryMs": {
+            "n": 851,
+            "mean": 13.566392479435727,
+            "p50": 12,
+            "p95": 20,
+            "max": 27
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              26,
+              30,
+              28,
+              30,
+              28,
+              30,
+              24,
+              28,
+              29,
+              29,
+              28,
+              29,
+              26,
+              27,
+              30,
+              29,
+              30,
+              29,
+              27,
+              25,
+              30,
+              29,
+              29,
+              30,
+              28,
+              29,
+              29,
+              28,
+              30,
+              27
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1,
+            "distribution": {
+              "n": 30,
+              "mean": 28.366666666666667,
+              "p50": 29,
+              "p95": 30,
+              "max": 30
+            },
+            "below25Windows": 1,
+            "longestBelow25RunMs": 1000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 850,
+              "mean": 0.5399999999997731,
+              "p50": 0.999999999992724,
+              "p95": 1,
+              "max": 1.000000000007276
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 823.0000000000073,
+            "roundTripMs": {
+              "face": {
+                "n": 851,
+                "mean": 12.3995299647474,
+                "p50": 11,
+                "p95": 18,
+                "max": 26
+              },
+              "segment": {
+                "n": 58,
+                "mean": 30.17241379310345,
+                "p50": 30.999999999992724,
+                "p95": 36,
+                "max": 39
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332688910369655,
+          "poseHz": 0,
+          "segmentMeanMs": 30.224137931034484,
+          "poseMeanMs": 0,
+          "emotionSamples": 141,
+          "bpmSamples": 41,
+          "respirationSamples": 17,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple GPU",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "webkit",
+          "browserVersion": "26.0",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30003,
+          "initializationMs": 854,
+          "mediaElapsedMs": 30003.013750334092,
+          "analysisFps": 28.5638102856381,
+          "cameraDeliveryFps": 28.597140285971403,
+          "renderFps": 59.99400059994001,
+          "frames": 857,
+          "faceFrames": 857,
+          "faceCoverage": 1,
+          "uiTicks": 1250,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1250,
+            "mean": 3.988,
+            "p50": 4,
+            "p95": 5.000000000003638,
+            "max": 8
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1250,
+            "mean": 4.014399999999994,
+            "p50": 4,
+            "p95": 5.000000000003638,
+            "max": 9
+          },
+          "primaryMs": {
+            "n": 857,
+            "mean": 13.584597432905445,
+            "p50": 12.000000000003638,
+            "p95": 20,
+            "max": 26.000000000007276
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              25,
+              28,
+              30,
+              29,
+              30,
+              29,
+              29,
+              30,
+              29,
+              30,
+              28,
+              29,
+              24,
+              30,
+              29,
+              30,
+              29,
+              29,
+              23,
+              30,
+              29,
+              30,
+              29,
+              30,
+              23,
+              28,
+              30,
+              29,
+              30,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 3,
+            "distribution": {
+              "n": 30,
+              "mean": 28.566666666666666,
+              "p50": 29,
+              "p95": 30,
+              "max": 30
+            },
+            "below25Windows": 3,
+            "longestBelow25RunMs": 1000,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 858,
+              "mean": 0.5372960372961179,
+              "p50": 0.999999999996362,
+              "p95": 1.000000000003638,
+              "max": 1.000000000007276
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 785.99999999996,
+            "roundTripMs": {
+              "face": {
+                "n": 857,
+                "mean": 12.434072345390755,
+                "p50": 11,
+                "p95": 18.000000000003638,
+                "max": 26.000000000007276
+              },
+              "segment": {
+                "n": 58,
+                "mean": 29.56896551724113,
+                "p50": 30,
+                "p95": 36,
+                "max": 38
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9331400193314001,
+          "poseHz": 0,
+          "segmentMeanMs": 29.620689655172036,
+          "poseMeanMs": 0,
+          "emotionSamples": 141,
+          "bpmSamples": 41,
+          "respirationSamples": 18,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple GPU",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        },
+        {
+          "engine": "webkit",
+          "browserVersion": "26.0",
+          "variant": "before-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001.000000000007,
+          "initializationMs": 891,
+          "mediaElapsedMs": 30000.83091633493,
+          "analysisFps": 28.69904336522115,
+          "cameraDeliveryFps": 28.69904336522115,
+          "renderFps": 59.99800006666443,
+          "frames": 861,
+          "faceFrames": 861,
+          "faceCoverage": 1,
+          "uiTicks": 1249,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1249,
+            "mean": 4.016813450760608,
+            "p50": 4,
+            "p95": 5.000000000003638,
+            "max": 20
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1249,
+            "mean": 4.044835868694962,
+            "p50": 4,
+            "p95": 5.000000000003638,
+            "max": 20
+          },
+          "primaryMs": {
+            "n": 861,
+            "mean": 13.811846689895356,
+            "p50": 12.999999999996362,
+            "p95": 20,
+            "max": 37
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              27,
+              30,
+              29,
+              28,
+              26,
+              27,
+              29,
+              29,
+              30,
+              27,
+              29,
+              28,
+              29,
+              30,
+              29,
+              30,
+              29,
+              29,
+              30,
+              29,
+              29,
+              30,
+              26,
+              27,
+              30,
+              29,
+              29,
+              30,
+              27
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.000000000007276,
+            "distribution": {
+              "n": 30,
+              "mean": 28.666666666666668,
+              "p50": 29,
+              "p95": 30,
+              "max": 30
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 860,
+              "mean": 0.5616279069765877,
+              "p50": 0.999999999996362,
+              "p95": 1.000000000003638,
+              "max": 3
+            },
+            "sharedPixels": {
+              "n": 59,
+              "mean": 0.16949152542385212,
+              "p50": 0,
+              "p95": 1,
+              "max": 2
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 845.9999999999709,
+            "roundTripMs": {
+              "face": {
+                "n": 861,
+                "mean": 12.667828106852438,
+                "p50": 11.000000000007276,
+                "p95": 18.000000000003638,
+                "max": 33.99999999999636
+              },
+              "segment": {
+                "n": 59,
+                "mean": 31.47457627118576,
+                "p50": 31,
+                "p95": 37,
+                "max": 39
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.966601113296223,
+          "poseHz": 0,
+          "segmentMeanMs": 31.711864406779107,
+          "poseMeanMs": 0,
+          "emotionSamples": 140,
+          "bpmSamples": 44,
+          "respirationSamples": 25,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "Apple GPU",
+          "captureMode": "automatic",
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "completedAt": "2026-11-05T12:59:14.640Z",
+      "complete": true
+    },
+    {
+      "file": "paired-fake-camera.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T13:01:59.600Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 30000,
+      "warmupMs": 20000,
+      "repeats": 3,
+      "captureMode": "automatic",
+      "faceInput": "bitmap",
+      "faceCanvas": "default",
+      "diagnosticInstrumentation": false,
+      "collectCpu": true,
+      "sourceHashes": {
+        "baseline": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c",
+        "candidate": "a73394281a4c7ac125782d000874695e057ed86b0c923a910d4b016e2bafc22d"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "a4bd61e2a049125b3dc4a2817722904860367756bf3a424321dce761de3d0c66",
+        "pipeline-benchmark-page.mjs": "6db559d5805e5e33670225c57b30b92eb9904ceadcf627a73cc71b95e626a5f3",
+        "performance.mjs": "11f6af07424aa1802bc37edc3bc084780510dc2a7e670ef419d5908a7d810ff3"
+      },
+      "baselineCommit": null,
+      "baselineProfile": "v2",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "chromium-file-backed-fake-camera",
+        "playbackRate": 1,
+        "physicalCamera": false,
+        "fakeVideoSha256": "ec54ffeea040dbbb82911f80df5d294b4b0e5f530561c188457ba3f208076004",
+        "fakeVideoBytes": 826686046,
+        "fakeVideoProvenance": {
+          "schemaVersion": "fake-camera-file.v1",
+          "sourceSha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+          "outputSha256": "ec54ffeea040dbbb82911f80df5d294b4b0e5f530561c188457ba3f208076004",
+          "outputBytes": 826686046,
+          "decoderImage": "sha256:21a4a6efd8fe95e39732136e2a2acb60e8db77d8e7b7df8fa6655b444c1f81d7",
+          "transformation": "VP9-to-YUV420-Y4M-no-scaling-no-rate-override-no-audio"
+        }
+      },
+      "runs": [
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30003.400000000373,
+          "initializationMs": 819.3999999985099,
+          "mediaElapsedMs": 30028.730999999996,
+          "analysisFps": 28.99671370577965,
+          "cameraDeliveryFps": 28.99671370577965,
+          "renderFps": 119.95307198517352,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.555600000033776,
+            "p50": 0.09999999962747097,
+            "p95": 2.200000001117587,
+            "max": 6
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.5652000000228484,
+            "p50": 0.09999999962747097,
+            "p95": 2.200000001117587,
+            "max": 6.5
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 11.752413793115865,
+            "p50": 11.899999998509884,
+            "p95": 15.900000000372529,
+            "max": 20.800000000745058
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 3.400000000372529,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.10126436783279154,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.30000000074505806
+            },
+            "sharedPixels": {
+              "n": 58,
+              "mean": 0.5637931034033155,
+              "p50": 0.5,
+              "p95": 0.7999999988824129,
+              "max": 2.300000000745058
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2608.099999992177,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.15264367812538,
+                "p50": 11.300000000745058,
+                "p95": 14.900000000372529,
+                "max": 16.800000000745058
+              },
+              "segment": {
+                "n": 58,
+                "mean": 160.415517241405,
+                "p50": 160.09999999962747,
+                "p95": 163,
+                "max": 167.30000000074506
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9331142470519769,
+          "poseHz": 0,
+          "segmentMeanMs": 160.9913793103127,
+          "poseMeanMs": 0,
+          "emotionSamples": 144,
+          "bpmSamples": 51,
+          "respirationSamples": 40,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 20.695429,
+            "secondsByType": {
+              "browser": 0.103904,
+              "renderer": 14.981977000000002,
+              "GPU": 5.382429,
+              "network.mojom.NetworkService": 0.009103,
+              "storage.mojom.StorageService": 0.0000449999999999999,
+              "video_capture.mojom.VideoCaptureService": 0.21797099999999997
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.6897694594612525,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30001,
+          "initializationMs": 771.5,
+          "mediaElapsedMs": 29997.223999999995,
+          "analysisFps": 28.99903336555448,
+          "cameraDeliveryFps": 28.99903336555448,
+          "renderFps": 119.99600013332889,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.5710666667421659,
+            "p50": 0,
+            "p95": 2.199999999254942,
+            "max": 4.799999998882413
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.5800000000745058,
+            "p50": 0.09999999962747097,
+            "p95": 2.200000001117587,
+            "max": 4.799999998882413
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 11.806091954070947,
+            "p50": 11.900000000372529,
+            "p95": 15.900000000372529,
+            "max": 22.799999998882413
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 871,
+              "mean": 0.10539609647380567,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.30000000074505806
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2623.200000004843,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.179080459773113,
+                "p50": 11.300000000745058,
+                "p95": 14.900000000372529,
+                "max": 15.900000000372529
+              },
+              "segment": {
+                "n": 58,
+                "mean": 161.0051724137096,
+                "p50": 161.19999999925494,
+                "p95": 162.90000000037253,
+                "max": 165.39999999850988
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332688910369655,
+          "poseHz": 0,
+          "segmentMeanMs": 161.02241379308418,
+          "poseMeanMs": 0,
+          "emotionSamples": 144,
+          "bpmSamples": 54,
+          "respirationSamples": 37,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 20.669130999999997,
+            "secondsByType": {
+              "browser": 0.09776700000000005,
+              "renderer": 14.968570000000001,
+              "GPU": 5.360897,
+              "network.mojom.NetworkService": 0.02365199999999998,
+              "storage.mojom.StorageService": 0.000028000000000000247,
+              "video_capture.mojom.VideoCaptureService": 0.218217
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.68894806839772,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001.599999999627,
+          "initializationMs": 759.3000000007451,
+          "mediaElapsedMs": 30035.539000000004,
+          "analysisFps": 28.998453415818183,
+          "cameraDeliveryFps": 28.965121860167816,
+          "renderFps": 130.0263985920767,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.31553333334128064,
+            "p50": 0,
+            "p95": 1.200000001117587,
+            "max": 4.800000000745058
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.32186666667213043,
+            "p50": 0.09999999962747097,
+            "p95": 1.299999998882413,
+            "max": 4.800000000745058
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 11.858620689646608,
+            "p50": 12.099999999627471,
+            "p95": 15.799999998882413,
+            "max": 21.199999999254942
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.599999999627471,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 869,
+              "mean": 0.09838895280861538,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.40000000037252903
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2729.199999978766,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.229885057443433,
+                "p50": 11.699999999254942,
+                "p95": 14.800000000745058,
+                "max": 16.90000000037253
+              },
+              "segment": {
+                "n": 58,
+                "mean": 159.13448275860142,
+                "p50": 159.40000000037253,
+                "p95": 162,
+                "max": 163.30000000074506
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332302277212121,
+          "poseHz": 0,
+          "segmentMeanMs": 159.155172413761,
+          "poseMeanMs": 0,
+          "emotionSamples": 145,
+          "bpmSamples": 54,
+          "respirationSamples": 42,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 19.938853000000005,
+            "secondsByType": {
+              "browser": 0.09165199999999996,
+              "renderer": 14.575248000000002,
+              "GPU": 5.052279,
+              "network.mojom.NetworkService": 0.007896999999999987,
+              "storage.mojom.StorageService": 0.0000449999999999999,
+              "video_capture.mojom.VideoCaptureService": 0.21173200000000003
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.6645929883739619,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30001.5,
+          "initializationMs": 758,
+          "mediaElapsedMs": 29999.847,
+          "analysisFps": 28.998550072496375,
+          "cameraDeliveryFps": 28.998550072496375,
+          "renderFps": 119.994000299985,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.3781999999967714,
+            "p50": 0,
+            "p95": 1.5,
+            "max": 6.800000000745058
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.3869999999925494,
+            "p50": 0,
+            "p95": 1.599999999627471,
+            "max": 6.800000000745058
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 11.726551724118234,
+            "p50": 12.099999999627471,
+            "p95": 15.300000000745058,
+            "max": 23.300000000745058
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.5,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.1042528735773488,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.30000000074505806
+            },
+            "sharedPixels": {
+              "n": 58,
+              "mean": 0.498275862107503,
+              "p50": 0.5,
+              "p95": 0.6999999992549419,
+              "max": 0.7999999988824129
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2673.8999999854714,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.076091954011428,
+                "p50": 11.5,
+                "p95": 14.200000001117587,
+                "max": 15.599999999627471
+              },
+              "segment": {
+                "n": 58,
+                "mean": 160.44137931043474,
+                "p50": 160.30000000074506,
+                "p95": 162.60000000149012,
+                "max": 164.59999999962747
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332366714997584,
+          "poseHz": 0,
+          "segmentMeanMs": 160.96034482770182,
+          "poseMeanMs": 0,
+          "emotionSamples": 144,
+          "bpmSamples": 54,
+          "respirationSamples": 39,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 20.667419999999996,
+            "secondsByType": {
+              "browser": 0.102908,
+              "renderer": 15.016489,
+              "GPU": 5.323481999999999,
+              "network.mojom.NetworkService": 0.007801000000000002,
+              "storage.mojom.StorageService": 0.00003700000000000231,
+              "video_capture.mojom.VideoCaptureService": 0.21670300000000003
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.6888795560221987,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "before-v2-no-body",
+          "round": 3,
+          "elapsedMs": 30001.099999999627,
+          "initializationMs": 755.6999999992549,
+          "mediaElapsedMs": 29999.871,
+          "analysisFps": 28.998936705654486,
+          "cameraDeliveryFps": 28.998936705654486,
+          "renderFps": 119.99560016132891,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.312799999995778,
+            "p50": 0.09999999962747097,
+            "p95": 1.1000000014901161,
+            "max": 7.400000000372529
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.32059999999652306,
+            "p50": 0.09999999962747097,
+            "p95": 1.199999999254942,
+            "max": 7.400000000372529
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 11.60057471262655,
+            "p50": 12,
+            "p95": 15,
+            "max": 21.90000000037253
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.099999999627471,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.09793103449903,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.2999999988824129
+            },
+            "sharedPixels": {
+              "n": 58,
+              "mean": 0.49310344820521,
+              "p50": 0.5,
+              "p95": 0.6999999992549419,
+              "max": 0.7999999988824129
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2598.500000005588,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 10.975287356311135,
+                "p50": 11.099999999627471,
+                "p95": 14.300000000745058,
+                "max": 15.5
+              },
+              "segment": {
+                "n": 58,
+                "mean": 160.60172413813015,
+                "p50": 160.30000000074506,
+                "p95": 163.2000000011176,
+                "max": 165
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332624470436324,
+          "poseHz": 0,
+          "segmentMeanMs": 161.12413793118222,
+          "poseMeanMs": 0,
+          "emotionSamples": 144,
+          "bpmSamples": 53,
+          "respirationSamples": 40,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 20.583021000000002,
+            "secondsByType": {
+              "browser": 0.09766999999999992,
+              "renderer": 14.934644,
+              "GPU": 5.328212000000001,
+              "network.mojom.NetworkService": 0.007645000000000013,
+              "storage.mojom.StorageService": 0.0000460000000000009,
+              "video_capture.mojom.VideoCaptureService": 0.214804
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.6860755438967323,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 3,
+          "elapsedMs": 30001.900000000373,
+          "initializationMs": 761,
+          "mediaElapsedMs": 29999.546999999995,
+          "analysisFps": 28.99816344964783,
+          "cameraDeliveryFps": 28.99816344964783,
+          "renderFps": 120.02573170365727,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.373866666658471,
+            "p50": 0,
+            "p95": 1.599999999627471,
+            "max": 4.699999999254942
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.3816666666418314,
+            "p50": 0,
+            "p95": 1.599999999627471,
+            "max": 4.699999999254942
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 11.738160919528669,
+            "p50": 12.099999999627471,
+            "p95": 15.299999998882413,
+            "max": 20.5
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 1.900000000372529,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.10402298847149158,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.30000000074505806
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "CPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 2715.5999999903142,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.085632183908046,
+                "p50": 11.200000001117587,
+                "p95": 14.399999998509884,
+                "max": 15.400000000372529
+              },
+              "segment": {
+                "n": 58,
+                "mean": 160.31034482765043,
+                "p50": 160.7000000011176,
+                "p95": 162.30000000074506,
+                "max": 162.90000000037253
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332108966431887,
+          "poseHz": 0,
+          "segmentMeanMs": 160.3206896552302,
+          "poseMeanMs": 0,
+          "emotionSamples": 143,
+          "bpmSamples": 53,
+          "respirationSamples": 39,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 20.490839,
+            "secondsByType": {
+              "browser": 0.09699000000000002,
+              "renderer": 14.816680999999999,
+              "GPU": 5.356086000000001,
+              "network.mojom.NetworkService": 0.008945000000000008,
+              "storage.mojom.StorageService": 0.00003599999999999784,
+              "video_capture.mojom.VideoCaptureService": 0.21210099999999998
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.6829847109682968,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "completedAt": "2026-11-05T13:07:08.656Z",
+      "complete": true
+    },
+    {
+      "file": "experimental-gpu-segmentation.json",
+      "schemaVersion": "pipeline-comparison.v1",
+      "startedAt": "2026-11-05T13:07:33.930Z",
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4 Pro",
+        "ramBytes": 25769803776
+      },
+      "automationVersion": "1.57.0",
+      "durationMs": 30000,
+      "warmupMs": 20000,
+      "repeats": 3,
+      "captureMode": "automatic",
+      "faceInput": "bitmap",
+      "faceCanvas": "default",
+      "diagnosticInstrumentation": true,
+      "collectCpu": true,
+      "segmentDelegate": "GPU",
+      "sourceHashes": {
+        "baseline": "f4a2d94c72ccd66cfd201f932389fb8d56fbcfdfcbcec38e902db716b2e8aa4c",
+        "candidate": "a73394281a4c7ac125782d000874695e057ed86b0c923a910d4b016e2bafc22d"
+      },
+      "modelAssets": {
+        "face": {
+          "file": "face_landmarker.task",
+          "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+        },
+        "segment": {
+          "file": "selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+        },
+        "pose": {
+          "file": "pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
+        }
+      },
+      "harnessHashes": {
+        "compare-pipeline.mjs": "4d54a42d59ba4ad04491bc8c37eae16c7c030eba62bd0c3bf6d2e878cea17e1f",
+        "pipeline-benchmark-page.mjs": "6db559d5805e5e33670225c57b30b92eb9904ceadcf627a73cc71b95e626a5f3",
+        "performance.mjs": "11f6af07424aa1802bc37edc3bc084780510dc2a7e670ef419d5908a7d810ff3"
+      },
+      "baselineCommit": null,
+      "baselineProfile": "v2",
+      "source": {
+        "dataset": {
+          "id": "kyegorov/mcd_rppg",
+          "revision": "bf59b3cd1414c2a510d83c3125f16bb87d469ebb",
+          "license": "CC-BY-4.0",
+          "source": "https://huggingface.co/datasets/kyegorov/mcd_rppg",
+          "citation": "Egorov et al. (2025), Gaze into the Heart, doi:10.1145/3746027.3758255"
+        },
+        "sha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+        "bytes": 138119703,
+        "input": "chromium-file-backed-fake-camera",
+        "playbackRate": 1,
+        "physicalCamera": false,
+        "fakeVideoSha256": "ec54ffeea040dbbb82911f80df5d294b4b0e5f530561c188457ba3f208076004",
+        "fakeVideoBytes": 826686046,
+        "fakeVideoProvenance": {
+          "schemaVersion": "fake-camera-file.v1",
+          "sourceSha256": "2b926fb33f32d5d99609870d4456a5c1e8525b8978ae4ef2869d9d524eb8dd40",
+          "outputSha256": "ec54ffeea040dbbb82911f80df5d294b4b0e5f530561c188457ba3f208076004",
+          "outputBytes": 826686046,
+          "decoderImage": "sha256:21a4a6efd8fe95e39732136e2a2acb60e8db77d8e7b7df8fa6655b444c1f81d7",
+          "transformation": "VP9-to-YUV420-Y4M-no-scaling-no-rate-override-no-audio"
+        }
+      },
+      "runs": [
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 1,
+          "elapsedMs": 30000.800000000745,
+          "initializationMs": 769.5,
+          "mediaElapsedMs": 30034.036,
+          "analysisFps": 28.999226687287617,
+          "cameraDeliveryFps": 28.999226687287617,
+          "renderFps": 120.03013252979622,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.36646666666741173,
+            "p50": 0,
+            "p95": 1.5,
+            "max": 8.900000000372529
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.3753333333345751,
+            "p50": 0,
+            "p95": 1.5,
+            "max": 8.900000000372529
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 12.299080459820642,
+            "p50": 11.199999999254942,
+            "p95": 18.09999999962747,
+            "max": 26.90000000037253
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 0.8000000007450581,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.12011494255656827,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.40000000037252903
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 692.3000000007451,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.512758620676381,
+                "p50": 10.599999999627471,
+                "p95": 15.300000000745058,
+                "max": 26.300000000745058
+              },
+              "segment": {
+                "n": 58,
+                "mean": 28.534482758652803,
+                "p50": 27.200000001117587,
+                "p95": 36.80000000074506,
+                "max": 39
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9332817791525079,
+          "poseHz": 0,
+          "segmentMeanMs": 28.548275862081812,
+          "poseMeanMs": 0,
+          "emotionSamples": 143,
+          "bpmSamples": 54,
+          "respirationSamples": 39,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 14.791243999999999,
+            "secondsByType": {
+              "browser": 0.11251100000000003,
+              "renderer": 7.259552999999999,
+              "GPU": 7.16142,
+              "network.mojom.NetworkService": 0.007827,
+              "storage.mojom.StorageService": 0.000054999999999999494,
+              "video_capture.mojom.VideoCaptureService": 0.24987799999999993
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.49302831924480783,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 2,
+          "elapsedMs": 30002.39999999851,
+          "initializationMs": 759.8000000007451,
+          "mediaElapsedMs": 30032.253,
+          "analysisFps": 28.997680185586592,
+          "cameraDeliveryFps": 28.997680185586592,
+          "renderFps": 120.05706210170449,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.4502666666805744,
+            "p50": 0,
+            "p95": 1.700000001117587,
+            "max": 6.099999999627471
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.45840000001961984,
+            "p50": 0,
+            "p95": 1.700000001117587,
+            "max": 6.099999999627471
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 12.570229885080593,
+            "p50": 11.699999999254942,
+            "p95": 18,
+            "max": 25.5
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              28,
+              30,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 2.399999998509884,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 30
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.12160919541600107,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.40000000037252903
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 679.4999999944121,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 11.836781609161147,
+                "p50": 11,
+                "p95": 15.699999999254942,
+                "max": 25
+              },
+              "segment": {
+                "n": 58,
+                "mean": 29.09137931026133,
+                "p50": 28.300000000745058,
+                "p95": 35.59999999962747,
+                "max": 38.100000001490116
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9331786790391061,
+          "poseHz": 0,
+          "segmentMeanMs": 29.105172413658224,
+          "poseMeanMs": 0,
+          "emotionSamples": 144,
+          "bpmSamples": 53,
+          "respirationSamples": 39,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 14.953123999999999,
+            "secondsByType": {
+              "browser": 0.11499800000000004,
+              "renderer": 7.353628,
+              "GPU": 7.218191999999999,
+              "network.mojom.NetworkService": 0.009315999999999991,
+              "storage.mojom.StorageService": 0.00004599999999999743,
+              "video_capture.mojom.VideoCaptureService": 0.256944
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.4983975948591027,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        },
+        {
+          "engine": "chromium",
+          "browserVersion": "143.0.7499.4",
+          "variant": "candidate-v2-no-body",
+          "round": 3,
+          "elapsedMs": 30002.900000000373,
+          "initializationMs": 776.6999999992549,
+          "mediaElapsedMs": 30008.868,
+          "analysisFps": 28.997196937629003,
+          "cameraDeliveryFps": 28.997196937629003,
+          "renderFps": 119.98840112122346,
+          "frames": 870,
+          "faceFrames": 870,
+          "faceCoverage": 1,
+          "uiTicks": 1500,
+          "hiddenTicks": 0,
+          "uiTimerLatenessMs": {
+            "n": 1500,
+            "mean": 0.5041333333440124,
+            "p50": 0,
+            "p95": 1.800000000745058,
+            "max": 5.400000000372529
+          },
+          "syntheticInputLatenessMs": {
+            "n": 1500,
+            "mean": 0.5112000000141561,
+            "p50": 0.09999999962747097,
+            "p95": 1.800000000745058,
+            "max": 5.400000000372529
+          },
+          "primaryMs": {
+            "n": 870,
+            "mean": 13.303218390837568,
+            "p50": 12.300000000745058,
+            "p95": 19.09999999962747,
+            "max": 35.09999999962747
+          },
+          "fpsWindows": {
+            "windowMs": 1000,
+            "counts": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              29
+            ],
+            "fullWindows": 30,
+            "partialTailMs": 2.900000000372529,
+            "distribution": {
+              "n": 30,
+              "mean": 29,
+              "p50": 29,
+              "p95": 29,
+              "max": 29
+            },
+            "below25Windows": 0,
+            "longestBelow25RunMs": 0,
+            "interpretation": "diagnostic_25fps_reference_not_protocol_qc_override"
+          },
+          "faceStagesMs": {
+            "pixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "inference": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "derived": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "bitmapCaptures": {
+            "video": {
+              "n": 870,
+              "mean": 0.12275862066910184,
+              "p50": 0.09999999962747097,
+              "p95": 0.2000000011175871,
+              "max": 0.40000000037252903
+            },
+            "sharedPixels": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            },
+            "other": {
+              "n": 0,
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "max": null
+            }
+          },
+          "workers": {
+            "face": "worker",
+            "segment": "worker",
+            "pose": "uninitialized",
+            "faceDelegate": "GPU",
+            "segmentDelegate": "GPU",
+            "maxPending": {
+              "face": 1,
+              "segment": 1,
+              "pose": 0
+            },
+            "overlapMs": 934.4000000078231,
+            "roundTripMs": {
+              "face": {
+                "n": 870,
+                "mean": 12.542643678149787,
+                "p50": 11.599999999627471,
+                "p95": 16.299999998882413,
+                "max": 34.5
+              },
+              "segment": {
+                "n": 58,
+                "mean": 32.28793103446991,
+                "p50": 32.600000001490116,
+                "p95": 43.80000000074506,
+                "max": 46.59999999962747
+              },
+              "pose": {
+                "n": 0,
+                "mean": null,
+                "p50": null,
+                "p95": null,
+                "max": null
+              }
+            }
+          },
+          "segmentHz": 1.9331464625086001,
+          "poseHz": 0,
+          "segmentMeanMs": 32.303448275855644,
+          "poseMeanMs": 0,
+          "emotionSamples": 144,
+          "bpmSamples": 49,
+          "respirationSamples": 45,
+          "errors": {},
+          "neutralStatus": "ready",
+          "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+          "captureMode": "automatic",
+          "cameraInput": "fake-file",
+          "cameraSettings": {
+            "width": 640,
+            "height": 480,
+            "frameRate": 29
+          },
+          "liveCameraUsed": false,
+          "calibratedGazeEvaluated": false,
+          "processCpu": {
+            "status": "measured",
+            "cpuSeconds": 15.151791,
+            "secondsByType": {
+              "browser": 0.11789000000000005,
+              "renderer": 7.500353,
+              "GPU": 7.25836,
+              "network.mojom.NetworkService": 0.010187000000000002,
+              "storage.mojom.StorageService": 0.0001349999999999997,
+              "video_capture.mojom.VideoCaptureService": 0.26486600000000005
+            },
+            "processCount": 7,
+            "cpuCoreEquivalents": 0.5050108822813731,
+            "scope": "browser_process_cpu_all_threads_not_gpu_utilization_or_whole_system"
+          }
+        }
+      ],
+      "limitations": [
+        "Not a scientific accuracy validation; no calibrated gaze; no physical keyboard RT.",
+        "Common video-to-canvas-to-stream adapter adds overhead in every variant.",
+        "Native browser builds under automation, not a test of installed Safari.",
+        "Concurrent pending Worker requests demonstrate overlap, not OS CPU-core utilization."
+      ],
+      "completedAt": "2026-11-05T13:10:08.177Z",
+      "complete": true
+    }
+  ],
+  "verification": {
+    "unit": {
+      "total": 710,
+      "passed": 705,
+      "failed": 0,
+      "skipped": 5
+    },
+    "browsers": {
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "fpsAndDuplicate": 84,
+      "profileAndLifecycle": 90,
+      "workersAndRuntime": 240,
+      "totalPassed": 414,
+      "totalFailed": 0
+    },
+    "typecheck": true,
+    "syntax": true,
+    "diffCheck": true,
+    "postgresIntegrationExecuted": false,
+    "physicalSensorsUsed": false,
+    "productionDeployment": false
+  }
+}

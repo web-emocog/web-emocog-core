@@ -4,7 +4,7 @@
  * @module qc-metrics
  */
 
-export { default, QCMetrics } from './QCMetrics.js?v=20261104-4';
+export { default, QCMetrics } from './QCMetrics.js?v=20261110-integration1';
 export { DEFAULT_THRESHOLDS, VIDEO_ELEMENT_IDS, QC_WEIGHTS, QC_PENALTIES, createThresholds } from './constants.js';
 export { clamp01, round1, round3, median, percentile, average, stdDev } from './helpers.js';
 export { VideoFpsMonitor } from './fps-monitor.js?v=20261104-4';

@@ -28,14 +28,16 @@
  */
 
 import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
-import { DEFAULT_THRESHOLDS } from './thresholds.js';
+import { createSegmentThresholds } from './thresholds.js?v=20261110-integration1';
 import { analyzeMasks } from './mask-analyzer.js?v=20261104-4';
-import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261028-139';
+import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261110-integration1';
 import { createVisualizationMask } from './visualization.js?v=20261104-4';
 import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261104-4';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261110-integration1';
 import { segmentationDelegate } from './delegate-policy.mjs';
 import { MaskReader } from './mask-reader.mjs';
+import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
+    notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class FaceSegmenter {
     constructor(options = {}) {
@@ -51,16 +53,7 @@ class FaceSegmenter {
         this.segmentationType = options.segmentationType || "selfie_multiclass";
         
         // Пороговые значения (мержим с дефолтными)
-        this.thresholds = {
-            ...DEFAULT_THRESHOLDS,
-            maskConfidence: options.maskConfidence ?? DEFAULT_THRESHOLDS.maskConfidence,
-            minSkinVisibility: options.minSkinVisibility ?? DEFAULT_THRESHOLDS.minSkinVisibility,
-            minTotalFaceSkin: options.minTotalFaceSkin ?? DEFAULT_THRESHOLDS.minTotalFaceSkin,
-            hairOcclusionThreshold: options.hairOcclusionThreshold ?? DEFAULT_THRESHOLDS.hairOcclusionThreshold,
-            handOcclusionThreshold: options.handOcclusionThreshold ?? DEFAULT_THRESHOLDS.handOcclusionThreshold,
-            globalHandThreshold: options.globalHandThreshold ?? DEFAULT_THRESHOLDS.globalHandThreshold,
-            maxAsymmetry: options.maxAsymmetry ?? DEFAULT_THRESHOLDS.maxAsymmetry
-        };
+        this.thresholds = createSegmentThresholds(options);
         
         // Константы класса (для обратной совместимости)
         this.CLASS_INDICES = CLASS_INDICES;
@@ -83,6 +76,7 @@ class FaceSegmenter {
         this.backend = 'uninitialized';
         this.inferenceDelegate = null;
         this.maskReader = new MaskReader();
+        this.initializationFailed = false;
     }
 
     /**
@@ -104,10 +98,11 @@ class FaceSegmenter {
                 const initialized = await worker.start({ ...this.thresholds, segmentationType: this.segmentationType, runningMode: this.runningMode });
                 if (generation !== this.generation) { worker.dispose(); return false; }
                 this.isInitialized = true;
+                this.initializationFailed = false;
                 this.backend = 'worker';
                 this.inferenceDelegate = ['CPU', 'GPU'].includes(initialized?.inferenceDelegate) ? initialized.inferenceDelegate : null;
                 this.cpuFallbackReason = initialized?.delegateFallbackReason || null;
-                this.onInitialized?.();
+                notifyParticipantCallback(this.onInitialized, this, [], 'segment', 'initialization:callback-failed');
                 return true;
             } catch (_) {
                 worker.dispose();
@@ -118,7 +113,7 @@ class FaceSegmenter {
         }
         if (generation !== this.generation) return false;
         try {
-            console.log('[FaceSegmenter] Инициализация v1.3 (MediaPipe Image Segmenter)...');
+            dbg('segment', 'initialization:start');
             
             // Проверяем наличие MediaPipe
             if (typeof FilesetResolver === 'undefined' || typeof ImageSegmenter === 'undefined') {
@@ -169,20 +164,22 @@ class FaceSegmenter {
             this._maskCtx = this._maskCanvas.getContext('2d', { willReadFrequently: true });
             
             this.isInitialized = true;
+            this.initializationFailed = false;
             this.backend = 'main';
-            console.log(`[FaceSegmenter] MediaPipe Image Segmenter готов (${this.segmentationType})`);
+            dbg('segment', 'initialization:ready');
             
-            if (this.onInitialized) {
-                this.onInitialized();
-            }
+            notifyParticipantCallback(this.onInitialized, this, [], 'segment', 'initialization:callback-failed');
             
             return true;
             
         } catch (error) {
-            console.error('[FaceSegmenter] Ошибка инициализации:', error);
-            if (this.onError) {
-                this.onError(error);
-            }
+            if (generation !== this.generation) return false;
+            this.isInitialized = false;
+            this.initializationFailed = true;
+            this.backend = 'failed';
+            this.inferenceDelegate = null;
+            dbgErrorOnce(this, 'segment', 'initialization:failed');
+            notifyParticipantCallback(this.onError, this, [error], 'segment', 'error:callback-failed');
             return false;
         }
     }
@@ -205,6 +202,7 @@ class FaceSegmenter {
 
     async _segmentFrame(videoElement, faceLandmarks, captureTimestamp) {
         const generation = this.generation;
+        if (!this.isInitialized && this.initializationFailed) return this._createErrorResult('segment_model_unavailable');
         if (!this.isInitialized && !await this.initialize()) return this._createErrorResult('Segmenter unavailable');
         if (generation !== this.generation) return this._createErrorResult('Segmentation interrupted');
 
@@ -274,8 +272,8 @@ class FaceSegmenter {
                 this.cpuFallbackReason = 'gpu_mask_or_inference_failed';
                 return await this._segmentFrame(videoElement, faceLandmarks, captureTimestamp);
             }
-            console.error('[FaceSegmenter] Ошибка сегментации:', error);
-            return this._createErrorResult(error.message);
+            dbgErrorOnce(this, 'segment', 'inference:failed');
+            return this._createErrorResult('segment_inference_failed');
         } finally {
             segmentationResult?.categoryMask?.close();
             segmentationResult?.confidenceMasks?.forEach(mask => mask.close());
@@ -324,6 +322,8 @@ class FaceSegmenter {
      * Сброс состояния
      */
     reset() {
+        resetParticipantDiagnostics(this);
+        this.initializationFailed = false;
         this.generation++;
         this.worker?.reset();
         this.lastResult = null;
