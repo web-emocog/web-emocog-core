@@ -231,6 +231,64 @@ test('uploaded heatmap media is authenticated and one unavailable file does not 
   await expect(page.locator('.analytics-heatmap-canvas').first()).toBeVisible();
 });
 
+for (const changeAccount of [false, true]) test(`heatmap backgrounds share four download slots and deduplicate versions${changeAccount ? ' across account changes' : ''}`, async ({ page }) => {
+  await page.locator('#analyticsApplyFilters').click();
+  await expect(page.locator('.analytics-heatmap-canvas')).toBeVisible();
+  const result = await page.evaluate(async changeAccount => {
+    const app = window as any;
+    const production = app.EmocogAnalyticsProduction;
+    const snapshot = production.store.state.snapshot;
+    const template = await production.api.sessionVisuals(105, snapshot);
+    const first = template.data.contexts[0];
+    template.data.contexts = Array.from({ length: 24 }, (_, index) => {
+      const context = structuredClone(first);
+      context.stimulus.contentUrl = `/stimuli/${500 + index}/content`;
+      if (context.heatmap?.stimulus) context.heatmap.stimulus.contentUrl = context.stimulus.contentUrl;
+      return context;
+    });
+    app.EmocogAnalyticsPreviewFixture = null;
+    app.apiGet = async () => structuredClone(template);
+    let active = 0, peak = 0, calls = 0;
+    const pending: (() => void)[] = [];
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    app.WecogHttp.blob = async () => {
+      calls++;
+      peak = Math.max(peak, ++active);
+      if (changeAccount) await new Promise<void>(resolve => pending.push(resolve));
+      else await new Promise(resolve => setTimeout(resolve, 10));
+      active--;
+      return new Blob([bytes], { type: 'image/png' });
+    };
+    const loading = production.api.sessionVisuals(105, snapshot).then((value: any) => ({ value, error: '' }),
+      (error: Error) => ({ value: null, error: error.message }));
+    if (!changeAccount) {
+      const loaded = await loading;
+      return { calls, peak, urls: loaded.value.data.contexts.map((c: any) => c.stimulus.contentUrl), error: loaded.error };
+    }
+    for (let count = 0; calls < 4 && count < 100; count++) await new Promise(resolve => setTimeout(resolve, 5));
+    if (calls !== 4) throw new Error('The download queue did not reach four active requests');
+    app.dispatchEvent(new Event('wecog:researcherauthenticated'));
+    pending.forEach(resolve => resolve());
+    const old = await loading;
+    const retiredCalls = calls;
+    app.WecogHttp.blob = async () => {
+      calls++;
+      return new Blob([bytes], { type: 'image/png' });
+    };
+    const current = await production.api.sessionVisuals(105, snapshot);
+    return { calls, peak, retiredCalls, urls: current.data.contexts.map((c: any) => c.stimulus.contentUrl), error: old.error };
+  }, changeAccount);
+  expect(result.peak).toBe(4);
+  expect(result.calls).toBe(changeAccount ? 28 : 24);
+  expect(result.urls).toHaveLength(24);
+  expect(new Set(result.urls).size).toBe(24);
+  expect(result.urls.every((url: string) => url.startsWith('blob:'))).toBe(true);
+  if (changeAccount) {
+    expect(result.retiredCalls).toBe(4);
+    expect(result.error).toContain('scope changed');
+  } else expect(result.error).toBe('');
+});
+
 test('completed session shows every AOI heatmap without selection filters and exports the same snapshot', async ({ page }) => {
   await expect(page.locator('#analyticsBlockFilter')).toHaveCount(0);
   await expect(page.locator('#analyticsStimulusFilter')).toHaveCount(0);

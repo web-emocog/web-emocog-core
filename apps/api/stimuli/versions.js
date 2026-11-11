@@ -70,7 +70,7 @@ async function ensureStimulusVersion(client, row, options = {}) {
   if (!resolved.ok) throw new HttpError(422, 'Stimulus file is unavailable', resolved.code);
   const checksum = await hashFile(resolved.absolutePath, resolved.root);
   const size = (await fs.promises.stat(resolved.absolutePath)).size;
-  await accountObject(client, await organizationForProject(client, row.project_id), resolved.relativePath, size);
+  await accountObject(client, await organizationForProject(client, row.project_id), resolved.relativePath, size, undefined, resolved.root);
   const result = await client.query(`
     INSERT INTO stimulus_versions (id, stimulus_id, content_path, mime_type, size_bytes, sha256)
     VALUES ($1, $2, $3, $4, $5, $6)

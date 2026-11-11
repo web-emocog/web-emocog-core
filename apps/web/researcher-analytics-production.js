@@ -10,6 +10,8 @@
   const INGEST_PAYLOAD_MAX_BYTES = 1750 * 1024;
   const stimulusMediaCache = new Map();
   const stimulusMediaSources = new Map();
+  const stimulusMediaWaiters = [];
+  let stimulusMediaFetches = 0;
   let stimulusMediaGeneration = 0;
   let resultImportGeneration = 0;
   ['hashchange', 'wecog:projectchange', 'wecog:researcherauthenticated', 'wecog:staffsessionblocked', 'pagehide']
@@ -61,6 +63,19 @@
     return importApiUrl(path);
   }
 
+  function takeStimulusMediaSlot() {
+    if (stimulusMediaFetches < 4) {
+      stimulusMediaFetches++;
+      return Promise.resolve();
+    }
+    return new Promise(resolve => stimulusMediaWaiters.push(resolve));
+  }
+
+  function releaseStimulusMediaSlot() {
+    const next = stimulusMediaWaiters.shift();
+    if (next) next(); else stimulusMediaFetches--;
+  }
+
   async function hydrateStimulusMedia(stimulus) {
     const generation = stimulusMediaGeneration;
     if (!stimulus?.contentUrl) return stimulus;
@@ -71,17 +86,22 @@
     }
     let request = stimulusMediaCache.get(url);
     if (!request) {
-      request = global.WecogHttp.blob(url, {
-        headers: typeof global.apiRequestHeaders === 'function' ? global.apiRequestHeaders(false) : {},
-        credentials: 'include',
-        redirect: 'error'
-      }, { scope: 'workspace', transfer: true }).then(blob => {
-        if (!blob.size) throw new Error(tr('Файл стимула пуст', 'Stimulus file is empty'));
-        if (generation !== stimulusMediaGeneration) throw new Error('Stimulus media scope changed');
-        const objectUrl = URL.createObjectURL(blob);
-        stimulusMediaSources.set(objectUrl, url);
-        return { url: objectUrl, type: blob.type || null };
-      }).catch(error => {
+      request = (async () => {
+        await takeStimulusMediaSlot();
+        try {
+          if (generation !== stimulusMediaGeneration) throw new Error('Stimulus media scope changed');
+          const blob = await global.WecogHttp.blob(url, {
+            headers: typeof global.apiRequestHeaders === 'function' ? global.apiRequestHeaders(false) : {},
+            credentials: 'include',
+            redirect: 'error'
+          }, { scope: 'workspace', transfer: true });
+          if (!blob.size) throw new Error(tr('Файл стимула пуст', 'Stimulus file is empty'));
+          if (generation !== stimulusMediaGeneration) throw new Error('Stimulus media scope changed');
+          const objectUrl = URL.createObjectURL(blob);
+          stimulusMediaSources.set(objectUrl, url);
+          return { url: objectUrl, type: blob.type || null };
+        } finally { releaseStimulusMediaSlot(); }
+      })().catch(error => {
         if (generation === stimulusMediaGeneration) stimulusMediaCache.delete(url);
         throw error;
       });

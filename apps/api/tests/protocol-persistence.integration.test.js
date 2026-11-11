@@ -359,6 +359,62 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     assert.equal((await fetch(`${url}/invitations/by-code/${first.public_code}`)).status, 404);
     assert.equal((await request(`/protocols/${saved.id}`, 'DELETE')).status, 204);
   });
+  for (const mode of ['measured', 'missing', 'over-quota']) it(`publishes from a migrated media inventory without a storage-page visit: ${mode}`, async () => {
+    const folder = path.join(uploads, 'stimuli');
+    await fs.mkdir(folder, { recursive: true });
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+    const source = randomUUID() + '.png', legacy = randomUUID() + '.jpg';
+    const title = `Migrated publication ${mode} ${randomUUID()}`;
+    const oldQuota = process.env.MEDIA_ORGANIZATION_QUOTA_BYTES;
+    let stimulus;
+    try {
+      await fs.writeFile(path.join(folder, source), png);
+      if (mode !== 'missing') await fs.writeFile(path.join(folder, legacy), 'retained legacy poster');
+      stimulus = (await pool.query(`INSERT INTO stimuli(project_id,name,mime_type,size_bytes,metadata,created_by,visibility)
+        VALUES($1,'Legacy source','image/png',$2,$3::jsonb,$4,'project') RETURNING id`,
+      [projectId, png.length, JSON.stringify({ content_path: source }), users[0]])).rows[0];
+      // Migration 0019 retains unknown sizes for legacy sources and posters,
+      // including objects not selected by this protocol.
+      await pool.query(`INSERT INTO media_storage_objects(organization_id,content_path,size_bytes)
+        VALUES($1,$2,NULL),($1,$3,NULL)`, [organizationId, source, legacy]);
+      if (mode === 'over-quota') process.env.MEDIA_ORGANIZATION_QUOTA_BYTES = '1';
+      const data = definition(title);
+      data.blocks.push({ id: 'main', type: 'cognitive_task', taskType: 'simple_rt',
+        trials: [{ stimulusId: String(stimulus.id), action: 'KeyD', duration: 1000 }] });
+      const response = await request('/protocols', 'POST', { project_id: projectId, name: title, definition: data });
+      if (mode === 'measured') {
+        assert.equal(response.status, 201, await response.clone().text());
+        const saved = await response.json();
+        assert.ok(saved.definition.mediaManifest[String(stimulus.id)].versionId);
+        const measured = (await pool.query(`SELECT size_bytes FROM media_storage_objects
+          WHERE organization_id=$1 AND content_path=$2`, [organizationId, legacy])).rows[0];
+        assert.equal(Number(measured.size_bytes), Buffer.byteLength('retained legacy poster'));
+        await pool.query('UPDATE media_storage_objects SET size_bytes=NULL WHERE organization_id=$1 AND content_path=$2', [organizationId, legacy]);
+        const update = await request(`/protocols/${saved.id}`, 'PATCH', { definition: data, name: title + ' edited' });
+        assert.equal(update.status, 200, await update.clone().text());
+        const invitation = await request('/invitations', 'POST', { protocol_id: saved.id });
+        assert.equal(invitation.status, 201, await invitation.clone().text());
+        const link = await invitation.json();
+        assert.equal((await fetch(`${url}/invitations/by-code/${link.code}`)).status, 200);
+        assert.equal((await request(`/protocols/${saved.id}`, 'DELETE')).status, 204);
+      } else {
+        assert.equal(response.status, mode === 'missing' ? 503 : 413, await response.clone().text());
+        assert.equal((await response.json()).code, mode === 'missing' ? 'media_inventory_unmeasured' : 'media_quota_exceeded');
+        assert.equal(Number((await pool.query('SELECT count(*) FROM protocols WHERE project_id=$1 AND name=$2', [projectId, title])).rows[0].count), 0);
+        const unmeasured = await pool.query(`SELECT count(*) FROM media_storage_objects
+          WHERE organization_id=$1 AND content_path=ANY($2::text[]) AND size_bytes IS NULL`, [organizationId, [source, legacy]]);
+        assert.equal(Number(unmeasured.rows[0].count), 2, 'failed publication rolls back partial inventory changes');
+      }
+    } finally {
+      if (oldQuota === undefined) delete process.env.MEDIA_ORGANIZATION_QUOTA_BYTES;
+      else process.env.MEDIA_ORGANIZATION_QUOTA_BYTES = oldQuota;
+      await pool.query('DELETE FROM media_storage_objects WHERE organization_id=$1 AND content_path=ANY($2::text[])', [organizationId, [source, legacy]]);
+      if (stimulus) await pool.query('DELETE FROM stimuli WHERE id=$1', [stimulus.id]);
+      await fs.rm(path.join(folder, source), { force: true });
+      await fs.rm(path.join(folder, legacy), { force: true });
+    }
+  });
+
   it('loads each version with its own media and custom response, including after a new publication', async () => {
     const stimuli = [];
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');

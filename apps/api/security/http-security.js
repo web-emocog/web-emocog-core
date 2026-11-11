@@ -11,7 +11,8 @@ function classifyRoute(pathname) {
 
 function classifyRateLimitRoute(req) {
   if (['GET', 'HEAD'].includes(req.method)
-      && /^\/invitations\/by-code\/[^/]+\/stimuli(?:\/\d+\/content)?\/?$/i.test(req.path)) {
+      && (/^\/invitations\/by-code\/[^/]+\/stimuli(?:\/\d+\/content)?\/?$/i.test(req.path)
+        || /^\/stimuli\/[1-9]\d*\/(?:content|preview)\/?$/i.test(req.path))) {
     return 'media';
   }
   return classifyRoute(req.path);

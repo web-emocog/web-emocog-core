@@ -7,7 +7,7 @@ import { syntheticWave } from './helpers/syntheticAudio';
 const fixturePath = process.env.LIVE_STIMULUS_FIXTURE;
 const fixture = fixturePath ? JSON.parse(readFileSync(fixturePath, 'utf8')) : null;
 const api = fixture?.apiBase || 'http://127.0.0.1:3000';
-const web = 'http://127.0.0.1:4173';
+const web = process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173';
 
 async function uploadStimulus(request: APIRequestContext, headers: Record<string, string>, name: string,
   file: { name: string; mimeType: string; buffer: Buffer }) {
@@ -221,6 +221,29 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       // Historical project analytics can read a published version, never a private replacement.
       expect((await request.get(`${api}${stimulus.content_url}`, { headers: peer })).status()).toBe(200);
       expect((await request.get(`${api}${stimulus.content_url}`, { headers: outsider })).status()).toBe(403);
+
+      if (kind === 'image' && width === 800 && height === 200 && viewport.width === 1280) {
+        const buffer = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+        const key = randomUUID();
+        const reserved = await request.post(`${api}/stimuli/operations`, { headers: owner, data: {
+          key, kind: 'replace', project_id: fixture.projectId, stimulus_id: stimulus.id,
+          file: { name: 'replacement.png', type: 'image/png', size: buffer.length,
+            sha256: createHash('sha256').update(buffer).digest('hex') },
+        } });
+        expect(reserved.status(), await reserved.text()).toBe(201);
+        const replaced = await request.post(`${api}/stimuli/${stimulus.id}/content?operation_key=${key}`, {
+          headers: owner, multipart: { file: { name: 'replacement.png', mimeType: 'image/png', buffer } },
+        });
+        expect(replaced.status(), await replaced.text()).toBe(200);
+        const current = await replaced.json();
+        expect(current.current_version_id).not.toBe(stimulus.current_version_id);
+        expect((await request.get(`${api}${current.content_url}`, { headers: peer })).status()).toBe(403);
+        const historical = await request.get(`${api}${stimulus.content_url}`, { headers: peer });
+        expect(historical.status()).toBe(200);
+        expect(createHash('sha256').update(await historical.body()).digest('hex'))
+          .toBe(createHash('sha256').update(bytes).digest('hex'));
+        // The invitation and the heatmap below must still display the original 800x200 file, not the new 1x1 file.
+      }
 
       await page.goto(`${web}/apps/participant-web/mvp_with_precheck_1-updated.html?code=${invitation.code}`);
       await page.waitForFunction(id => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap?.[id]?.metadata?.url), String(stimulus.id));

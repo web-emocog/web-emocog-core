@@ -36,6 +36,47 @@ test.beforeEach(async ({ page }) => {
   }).toPass({ timeout: 5000 });
 });
 
+test('full previews share a four-request bound and reuse an in-flight request', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const w = window as any, previous = w.WecogHttp;
+    let active = 0, peak = 0, requests = 0;
+    w.WecogHttp = { ...previous, blob: async () => {
+      requests++; active++; peak = Math.max(peak, active);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      active--;
+      return new Blob(['synthetic image'], { type: 'image/png' });
+    } };
+    try {
+      const items = Array.from({ length: 20 }, (_, index) => ({ id: String(2000 + index), projectId: 7,
+        type: 'image', apiContentUrl: `/stimuli/${2000 + index}/content`, contentAvailable: true }));
+      await Promise.all([...items, items[0], items[0]].map(stimulus => w.hydrateApiStimulusPreview(stimulus)));
+      return { peak, requests, active, loaded: items.filter((item: any) => item._previewObjectUrl).length };
+    } finally { w.WecogHttp = previous; }
+  });
+  expect(result).toEqual({ peak: 4, requests: 20, active: 0, loaded: 20 });
+});
+
+test('builder only hydrates selected stimuli, not every file in a large library', async ({ page }) => {
+  const hydrated = await page.evaluate(async () => {
+    const w = window as any;
+    const calls: string[] = [];
+    w.hydrateApiStimulusPreview = async (stimulus: any) => {
+      calls.push(String(stimulus.id));
+      stimulus._previewObjectUrl = 'blob:synthetic-selected-preview';
+      return stimulus;
+    };
+    for (let id = 1000; id < 1400; id++) stimuliList.push({ id: String(id), projectId: 7, type: 'image',
+      apiContentUrl: `/stimuli/${id}/content`, contentAvailable: true });
+    localStorage.setItem('emocog_my_experiments', JSON.stringify([{ id: 'selected-media-only', title: 'Selected media', protocolId: 'selected-media-only',
+      blocks: [{ id: 'main', type: 'cognitive_task', label: 'RT', content: { taskType: 'simple_rt',
+        trials: [{ stimulusId: '42', duration: 1000, action: 'Space' }] } }] }]));
+    document.getElementById('view')!.replaceChildren(w.ExperimentBuilderView({ experimentId: 'selected-media-only', startStep: 3 }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return calls;
+  });
+  expect(hydrated).toEqual(['42']);
+});
+
 async function instrument(page: Page) {
   await page.evaluate(() => {
     const w = window as any;

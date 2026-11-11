@@ -19,6 +19,7 @@
     "identity:local": "node scripts/identity-local.js",
     "media:reconcile": "node scripts/reconcile-media.js",
     "load:ingest": "node scripts/load-ingest.js",
+    "load:stimuli": "node scripts/load-stimuli.js",
     "admin:bootstrap": "node scripts/bootstrap-admin.js",
     "test": "node --test tests/*.test.js tests/*.test.mjs",
     "test:postgres": "node --test --test-concurrency=1 tests/*.integration.test.js",
