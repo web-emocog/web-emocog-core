@@ -85,6 +85,36 @@ test('invalid geometry does not advance calibration and resets preserve no candi
     a.clear(); assert.equal(a.getCalibrationDiagnostics().ready,false);
     assert.equal(a.featureGeometry,null);
 });
+test('v2 uses the same accepted neutral frames for two distinct fixed baselines', async () => {
+    const { NeutralCalibration } = await import('../../participant-web/js/emotion/neutral-calibration.mjs');
+    const policy = {minSamples:25, minDurationMs:5000, intervalMs:200, timeoutMs:30000};
+    const collector = new NeutralCalibration(policy);
+    const comparison = new Comparison();
+    const legacy = new Legacy();
+    legacy.startSession(null, { explicitNeutral:true, requiredNeutralFrames:25 });
+    comparison.attachNeutralCalibration(collector);
+    collector.begin(0);
+    const add = (at, lm) => collector.add({timestamp:at, face:{detected:true}, landmarks:lm}, at);
+    const invalid = face(); invalid[10] = invalid[152];
+    add(0, invalid);
+    for (let i = 1; i <= 24; i++) add(i*200, face());
+    assert.equal(collector.samples.length, 24);
+    assert.equal(comparison.candidate.getCalibrationDiagnostics().ready, false);
+    add(5000, face());
+    assert.equal(collector.status, 'ready');
+    legacy.setNeutralBaseline(collector.baseline, 25);
+    const before = comparison.candidate.getCalibrationDiagnostics();
+    assert.equal(before.frames, 25);
+    assert.equal(before.requiredFrames, 25);
+    assert.ok(before.baseline.AU10 < 0);
+    assert.ok(collector.baseline.AU10 >= 0);
+    const lm = face();
+    comparison.record(legacy.analyzeLandmarks(lm), legacy.getCalibrationDiagnostics(), lm);
+    assert.equal(comparison.snapshot().paired.commonValid, 1);
+    assert.equal(comparison.beginTrial('smile_closed_mouth'), true);
+    assert.deepEqual(comparison.candidate.getCalibrationDiagnostics().baseline, before.baseline);
+});
+
 test('paired trial summaries count shared frames, missingness and interruptions without retaining landmarks',()=>{
     let now=0;const c=new Comparison(()=>now),old=new Legacy();
     const record=lm=>{const r=old.analyzeLandmarks(lm);c.record(r,old.getCalibrationDiagnostics(),lm);};

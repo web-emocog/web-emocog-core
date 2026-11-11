@@ -23,10 +23,12 @@ const row = (id, person, data = payload()) => ({ id, participant_id: person, ses
 
 test('passive catalog and valid query share stable metric IDs and units', () => {
   assert.equal(validateAnalyticsQuery(query()).ok, true);
+  const responseUnits = require('../../web/docs/analytics-contract/analytics-response-v1.schema.json').$defs.unit.enum;
   for (const definition of definitions) {
     const catalog = METRIC_CATALOG.metrics.find(item => item.id === definition.id);
     assert.equal(catalog.unit, definition.unit);
     assert.deepEqual(catalog.label, definition.label);
+    assert.ok(responseUnits.includes(definition.unit), 'response schema must include unit ' + definition.unit);
   }
 });
 

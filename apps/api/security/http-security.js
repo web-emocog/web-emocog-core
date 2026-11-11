@@ -2,8 +2,8 @@ const express = require('express');
 const { ipKeyGenerator, rateLimit } = require('express-rate-limit');
 
 function classifyRoute(pathname) {
-  const path = String(pathname || '');
-  if (path === '/auth' || path.startsWith('/auth/')) return 'auth';
+  const path = String(pathname || '').toLowerCase();
+  if (path === '/auth' || path.startsWith('/auth/') || path === '/identity' || path.startsWith('/identity/')) return 'auth';
   if (path === '/ingest' || path.startsWith('/ingest/')) return 'ingest';
   if (/^\/invitations\/by-code\/[^/]+(?:\/.*)?$/.test(path)) return 'ingest';
   return 'default';
@@ -11,7 +11,7 @@ function classifyRoute(pathname) {
 
 function classifyRateLimitRoute(req) {
   if (['GET', 'HEAD'].includes(req.method)
-      && /^\/invitations\/by-code\/[^/]+\/stimuli(?:\/\d+\/content)?\/?$/.test(req.path)) {
+      && /^\/invitations\/by-code\/[^/]+\/stimuli(?:\/\d+\/content)?\/?$/i.test(req.path)) {
     return 'media';
   }
   return classifyRoute(req.path);
@@ -47,7 +47,7 @@ function buildCorsOptions(allowedOrigins) {
   const allowlist = new Set((allowedOrigins || []).map(origin => String(origin).trim()));
   return {
     credentials: true,
-    exposedHeaders: ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition', 'Retry-After'],
+    exposedHeaders: ['X-Analysis-Snapshot-Id', 'X-Dataset-Hash', 'Content-Disposition', 'Retry-After', 'X-Request-ID'],
     origin(origin, callback) {
       if (!origin || allowlist.has(origin)) {
         return callback(null, true);
@@ -61,12 +61,14 @@ function buildCorsOptions(allowedOrigins) {
 }
 
 function createRouteAwareJsonParser(bodyLimits) {
+  const identityParser = express.json({ limit: '8kb', strict: true });
   const parsers = {
     auth: express.json({ limit: bodyLimits.auth, strict: true }),
     ingest: express.json({ limit: bodyLimits.ingest, strict: true }),
     default: express.json({ limit: bodyLimits.default, strict: true }),
   };
-  return (req, res, next) => parsers[classifyRoute(req.path)](req, res, next);
+  return (req, res, next) => /^\/(identity|workspace)(?:\/|$)/i.test(req.path)
+    ? identityParser(req, res, next) : parsers[classifyRoute(req.path)](req, res, next);
 }
 
 function buildRouteRateLimitOptions(rateLimits, options = {}) {

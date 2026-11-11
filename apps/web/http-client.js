@@ -117,6 +117,14 @@
     if (!detail && Array.isArray(body?.errors)) detail = body.errors.map(function (item) { return item.msg || item.message; }).filter(Boolean).join('; ');
     var error = new Error(response.status + (detail ? ' — ' + String(detail).slice(0, 1500) : ' ' + response.statusText));
     error.status = response.status; error.code = typeof body?.code === 'string' ? body.code : null;
+    var retryAfter = response.headers?.get('Retry-After');
+    if (retryAfter) {
+      var retryMs = /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+      if (Number.isFinite(retryMs)) error.retryAfterMs = Math.max(0, retryMs);
+    }
+    if (response.status === 429 && error.retryAfterMs == null && Number.isFinite(body?.retry_after_seconds)) {
+      error.retryAfterMs = Math.max(0, body.retry_after_seconds * 1000);
+    }
     return error;
   }
   function consume(kind) {

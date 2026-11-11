@@ -10,6 +10,20 @@
 
 import { EMOTION_CONFIG } from './emotion-config.js';
 
+export function validEmotionLandmarks(lm, minLandmarks = EMOTION_CONFIG.minLandmarks) {
+    if (!Array.isArray(lm) || lm.length < minLandmarks) return false;
+    for (let i = 0; i < lm.length; i++) {
+        const point = lm[i];
+        if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)
+            || (point.z !== undefined && !Number.isFinite(point.z))) return false;
+    }
+    // Internal geometry rounds these dimensions to four decimal places.
+    return [[234, 454], [10, 152]].every(([a, b]) => {
+        const size = dist3(lm[a], lm[b]);
+        return Number.isFinite(size) && Number(size.toFixed(4)) > 0;
+    });
+}
+
 // ── Утилиты ───────────────────────────────────────────────────────────────────
 
 /** Ограничение значения в диапазоне [min, max] */

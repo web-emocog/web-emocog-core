@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 const RESEARCHER_URL = process.env.EMOCOG_RESEARCHER_URL
   || 'http://127.0.0.1:4173/apps/web/researcher.html';
 const RUN_RESEARCHER_CONTRACT = process.env.RUN_RESEARCHER_CONTRACT === '1';
+const api = process.env.WECOG_AUDIT_API_BASE || 'http://127.0.0.1:3000';
 
 type AuthPayload = {
   csrf_token?: string;
@@ -22,7 +23,7 @@ test.describe('Researcher regressions', () => {
     const password = admin ? process.env.EMOCOG_ADMIN_PASSWORD : process.env.EMOCOG_RESEARCHER_PASSWORD;
     const key = admin ? 'admin' : 'researcher';
     if (!authCache.has(key)) {
-      const response = await page.context().request.post('http://127.0.0.1:3000/auth/login', {
+      const response = await page.context().request.post(`${api}/auth/login`, {
         headers: { 'X-Auth-Transport': 'cookie' },
         data: {
           email: email || 'local.researcher@wecog.test',
@@ -30,18 +31,18 @@ test.describe('Researcher regressions', () => {
         },
       });
       expect(response.ok(), `login failed with HTTP ${response.status()}`).toBe(true);
-      authCache.set(key, { auth: await response.json() as AuthPayload, cookies: await page.context().cookies('http://127.0.0.1:3000') });
+      authCache.set(key, { auth: await response.json() as AuthPayload, cookies: await page.context().cookies(api) });
     } else {
       await page.context().addCookies(authCache.get(key)!.cookies);
     }
-    await page.addInitScript(({ auth: { csrf_token, user }, projectId }) => {
+    await page.addInitScript(({ auth: { csrf_token, user }, projectId, api }) => {
       localStorage.setItem('emocog_developer_auth', '1');
       localStorage.setItem('emocog_api_user', JSON.stringify(user));
       localStorage.setItem('emocog_workspace_owner_v1', String(user.id));
       if (projectId) localStorage.setItem('emocog_selected_project_id', projectId);
-      localStorage.setItem('emocog_api_base', 'http://127.0.0.1:3000');
+      localStorage.setItem('emocog_api_base', api);
       if (csrf_token) sessionStorage.setItem('emocog_csrf_token', csrf_token);
-    }, { auth: authCache.get(key)!.auth, projectId: process.env.EMOCOG_RESEARCHER_PROJECT_ID });
+    }, { auth: authCache.get(key)!.auth, projectId: process.env.EMOCOG_RESEARCHER_PROJECT_ID, api });
   });
 
   test('saves a protocol from the final builder step and confirms the result', async ({ page }, testInfo) => {
@@ -91,6 +92,7 @@ test.describe('Researcher regressions', () => {
     await expect(page.locator('#participantLinkInput')).toHaveValue('');
     await expect(page.locator('#copyParticipantLinkBtn')).toBeDisabled();
     await saveButton.click();
+    await page.locator('[data-preflight-continue]').click();
 
     await expect
       .poll(async () => page.evaluate(protocolId => {
@@ -114,7 +116,7 @@ test.describe('Researcher regressions', () => {
       return saved.find((entry: { protocolId?: string }) => entry.protocolId === protocolId)?.invitationCode;
     }, protocolId);
     const invitation = await page.request.get(
-      `http://127.0.0.1:3000/invitations/by-code/${encodeURIComponent(invitationCode)}`
+      `${api}/invitations/by-code/${encodeURIComponent(invitationCode)}`
     );
     expect(invitation.ok()).toBe(true);
     const participantLink = await page.evaluate(protocolId => {
@@ -213,6 +215,9 @@ test.describe('Researcher regressions', () => {
           content: {
             taskType: 'go_nogo',
             useAOI: true,
+            // An explicit empty override must still require markup, even when
+            // the other built-in stimulus gets its default zone.
+            aoiDefinitions: { std_nogo_red_circle: [] },
             trials: [
               { stimulusId: 'std_go_green_circle', condition: 'Go', action: 'Space', duration: 500, repetitions: 1 },
               { stimulusId: 'std_nogo_red_circle', condition: 'No-Go', action: '', duration: 500, repetitions: 1 },
@@ -239,6 +244,8 @@ test.describe('Researcher regressions', () => {
     await expect(page.locator('#builderAoiBlocks')).toContainText('std_go_green_circle');
     await expect(page.locator('#builderAoiBlocks')).toContainText('std_nogo_red_circle');
     await expect(page.locator('#builderAoiBlocks')).not.toContainText('std_simple_black_square');
+    await expect(page.locator('.builder-aoi-card').filter({ hasText: 'std_go_green_circle' })).toHaveAttribute('data-aoi-ready', 'true');
+    await expect(page.locator('.builder-aoi-card').filter({ hasText: 'std_nogo_red_circle' })).toHaveAttribute('data-aoi-ready', 'false');
     await expect(page.locator('#aoiQueueButton')).toContainText(/Очередь разметки|Markup queue/);
     await expect(page.locator('#aoiStepNext')).toHaveAttribute('aria-disabled', 'true');
 

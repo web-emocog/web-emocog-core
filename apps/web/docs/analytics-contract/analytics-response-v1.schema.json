@@ -186,6 +186,11 @@
         "pct",
         "count",
         "count_per_min",
+        "bpm",
+        "breaths/min",
+        "blinks/min",
+        "torso/s",
+        "index",
         "ratio",
         "boolean",
         null
@@ -597,6 +602,9 @@
         },
         "algorithm": {
           "$ref": "#/$defs/algorithm"
+        },
+        "presentationCoverage": {
+          "$ref": "#/$defs/presentationCoverage"
         }
       },
       "allOf": [
@@ -2174,12 +2182,19 @@
         },
         "physiologyIntervals": {
           "anyOf": [
-            { "type": "null" },
-            { "$ref": "../../../../packages/shared/contracts/physiology-intervals.v1.schema.json" }
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "../../../../packages/shared/contracts/physiology-intervals.v1.schema.json"
+            }
           ]
         },
         "quality": {
           "type": "object"
+        },
+        "qualityAssessment": {
+          "$ref": "../../../../packages/shared/contracts/session-feature-data.v1.schema.json#/$defs/assessment"
         },
         "audio": {
           "type": "object"
@@ -2812,6 +2827,9 @@
         },
         "algorithm": {
           "$ref": "#/$defs/algorithm"
+        },
+        "presentationCoverage": {
+          "$ref": "#/$defs/presentationCoverage"
         }
       },
       "additionalProperties": false
@@ -2991,6 +3009,18 @@
             "independent"
           ]
         },
+        "pairedDifferences": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["mean", "median", "q1", "q3", "sd"],
+          "properties": {
+            "mean": { "type": ["number", "null"] },
+            "median": { "type": ["number", "null"] },
+            "q1": { "type": ["number", "null"] },
+            "q3": { "type": ["number", "null"] },
+            "sd": { "type": ["number", "null"] }
+          }
+        },
         "reference": {
           "type": "object",
           "additionalProperties": false,
@@ -3001,6 +3031,10 @@
             "values"
           ],
           "properties": {
+            "nObservations": { "type": "integer", "minimum": 0 },
+            "q1": { "type": ["number", "null"] },
+            "q3": { "type": ["number", "null"] },
+            "sd": { "type": ["number", "null"] },
             "nParticipants": {
               "type": "integer",
               "minimum": 0
@@ -3035,6 +3069,10 @@
             "values"
           ],
           "properties": {
+            "nObservations": { "type": "integer", "minimum": 0 },
+            "q1": { "type": ["number", "null"] },
+            "q3": { "type": ["number", "null"] },
+            "sd": { "type": ["number", "null"] },
             "nParticipants": {
               "type": "integer",
               "minimum": 0
@@ -3251,6 +3289,24 @@
         }
       },
       "additionalProperties": false
+    },
+    "presentationCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "observed"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

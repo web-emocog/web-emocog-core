@@ -156,6 +156,39 @@ test('role is revalidated on Start, not trusted from the initial page or local f
   expect(await page.evaluate(() => (window as any).cameraRequests)).toBe(0);
 });
 
+test('developer AOI is an explicit program, requires consent and revalidates the account before the camera', async ({ page }) => {
+  const access = await installGazeAccess(page, 'admin'); await pendingCamera(page);
+  await page.goto(url + '?models=aoi-continuous');
+  await expect(page.locator('#protocol')).toBeEnabled();
+  await expect(page.locator('#protocol')).toHaveValue('spatial');
+  await page.locator('#protocol').selectOption('aoi-continuous');
+  await expect(page).toHaveURL(/\?protocol=aoi-continuous$/);
+  await expect(page.locator('#modelDescription')).toContainText('обычный eye-patch');
+  await expect(page.locator('#modelDescription')).not.toContainText('Четыре модели');
+  await expect(page.locator('#status')).toContainText('Доступ подтверждён');
+  await expect(page.locator('#start')).toBeDisabled();
+  await expect(page.locator('#aoiBoard')).toBeHidden();
+  expect(await page.evaluate(() => (window as any).cameraRequests)).toBe(0);
+  access.role('researcher');
+  await page.locator('#consent').check();
+  await page.locator('#start').click();
+  await expect(page.locator('#download')).toBeVisible();
+  const report = JSON.parse((await page.locator('#result').textContent())!);
+  expect(report).toMatchObject({ version: 'gaze_continuous_aoi.v1', benchmark: {
+    protocol: 'aoi-continuous.v1', diagnosticSurface: 'developer_panel', completed: false, reason: 'access_denied' } });
+  expect(report.aoiBlock).toBeUndefined();
+  expect(await page.evaluate(() => (window as any).cameraRequests)).toBe(0);
+});
+
+for (const [name, protocol] of [['AOI', 'aoi-continuous'], ['eye-gate', 'eye-gate']]) {
+  test(`opening the developer ${name} URL directly does not bypass role access`, async ({ page }) => {
+    await installGazeAccess(page, 'researcher'); await pendingCamera(page);
+    await page.goto(url + '?protocol=' + protocol);
+    await expect(page).toHaveURL(/apps\/web\/researcher.html/);
+    expect(await page.evaluate(() => (window as any).cameraRequests)).toBe(0);
+  });
+}
+
 test('a different cookie account cannot inherit permission from the initial page', async ({ page }) => {
   const account = await installGazeAccess(page); await pendingCamera(page); await page.goto(url);
   await expect(page.locator('#status')).toContainText('Доступ подтверждён'); account.id('2');

@@ -1,28 +1,12 @@
-/**
- * Face Segmenter Module v1.3 — Browser Wrapper / Loader
- *
- * Загрузка устроена так:
- *   1) Сразу синхронно объявляется inline-класс FaceSegmenterInline (упрощённая
- *      реализация ниже) и публикуется как window.FaceSegmenter — safety net
- *      для кода, который делает new FaceSegmenter() до резолва Promise (с warn).
- *   2) Параллельно стартует dynamic import() ./face-segmenter/index.js. При
- *      успехе window.FaceSegmenter переписывается на полную модульную версию
- *      с per-region/symmetry/visualization функциональностью.
- *   3) При ошибке загрузки папки остаёмся на inline-классе (console.error).
- *   4) Promise window.FaceSegmenterReady резолвится в 'module' | 'inline'.
- *      Новые потребители ждут его перед `new FaceSegmenter()`.
- *
- * Inline fallback сохраняет публичный API и использует те же чистые
- * mask/region-анализаторы, что и Worker/main-thread класс.
- *
- * @version 1.3.0
- * @requires @mediapipe/tasks-vision
- */
+// Classic loader; consumers await the canonical module before constructing the model.
+let segmentInlineDiagnostic;
 
-// Встроенный класс — fallback при сбое загрузки папки.
 class FaceSegmenterInline {
     constructor(options = {}) {
         this.isInitialized = false;
+        this.initializationFailed = false;
+        this.initializing = null;
+        this.generation = 0;
         this.imageSegmenter = null;
         this.runningMode = options.runningMode || "VIDEO";
         this.segmentationType = options.segmentationType || "selfie_multiclass";
@@ -44,8 +28,6 @@ class FaceSegmenterInline {
         };
         
         this.CLASS_NAMES = ['background', 'hair', 'body_skin', 'face_skin', 'clothes', 'others'];
-        this._maskCanvas = null;
-        this._maskCtx = null;
         this.lastResult = null;
         this.onInitialized = options.onInitialized || null;
         this.onError = options.onError || null;
@@ -53,43 +35,65 @@ class FaceSegmenterInline {
 
     async initialize() {
         if (this.isInitialized) return true;
+        if (this.initializing) return this.initializing;
+        const attempt = this._initialize(this.generation);
+        this.initializing = attempt;
+        try { return await attempt; }
+        finally { if (this.initializing === attempt) this.initializing = null; }
+    }
+
+    async _initialize(generation) {
         try {
             const [mask, region] = await Promise.all([
                 import('./face-segmenter/mask-analyzer.js?v=20261104-4'),
-                import('./face-segmenter/region-analyzer.js?v=20261028-139')
+                import('./face-segmenter/region-analyzer.js?v=20261110-integration1')
             ]);
+            if (generation !== this.generation) return false;
             this.analysisCore = { ...mask, ...region };
-            console.log('[FaceSegmenter] Инициализация v1.3...');
             if (typeof FilesetResolver === 'undefined' || typeof ImageSegmenter === 'undefined') {
                 throw new Error('MediaPipe Vision не загружен.');
             }
             const vision = await FilesetResolver.forVisionTasks(
                 "js/vendor/mediapipe/wasm"
             );
+            if (generation !== this.generation) return false;
             const modelPath = this.segmentationType === 'selfie_multiclass'
                 ? "js/vendor/mediapipe/models/selfie_multiclass_256x256.tflite"
                 : "js/vendor/mediapipe/models/selfie_segmenter.tflite";
-            this.imageSegmenter = await ImageSegmenter.createFromOptions(vision, {
+            const model = await ImageSegmenter.createFromOptions(vision, {
                 baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
                 runningMode: this.runningMode,
                 outputCategoryMask: true,
                 outputConfidenceMasks: true
             });
-            this._maskCanvas = document.createElement('canvas');
-            this._maskCtx = this._maskCanvas.getContext('2d', { willReadFrequently: true });
+            if (generation !== this.generation) { model.close(); return false; }
+            this.imageSegmenter = model;
             this.isInitialized = true;
-            console.log(`[FaceSegmenter] Готов (${this.segmentationType})`);
-            if (this.onInitialized) this.onInitialized();
+            this.initializationFailed = false;
+            this._notify(this.onInitialized, [], 'initialization:callback-failed');
             return true;
         } catch (error) {
-            console.error('[FaceSegmenter] Ошибка:', error);
-            if (this.onError) this.onError(error);
+            if (generation !== this.generation) return false;
+            this.initializationFailed = true;
+            segmentInlineDiagnostic?.participantDebugErrorOnce(this, 'segment', 'initialization:failed');
+            this._notify(this.onError, [error], 'error:callback-failed');
             return false;
         }
     }
 
+    _notify(callback, args, event) {
+        if (typeof callback !== 'function') return;
+        void Promise.resolve().then(() => callback.apply(this, args)).catch(() => {
+            segmentInlineDiagnostic?.participantDebugErrorOnce(this, 'segment', event);
+        });
+    }
+
     async segmentFrame(videoElement, faceLandmarks = null) {
-        if (!this.isInitialized && !await this.initialize()) return this._createErrorResult('segmentation_unavailable');
+        const generation = this.generation;
+        if (!this.isInitialized && (this.initializationFailed || !await this.initialize())) {
+            return this._createErrorResult('segment_model_unavailable');
+        }
+        if (generation !== this.generation) return this._createErrorResult('segment_analysis_interrupted');
         if (!videoElement || videoElement.readyState < 2) {
             return this._createErrorResult('Видео не готово');
         }
@@ -110,8 +114,9 @@ class FaceSegmenterInline {
                 frameSize: { width, height }
             };
             return this.lastResult;
-        } catch (error) {
-            return this._createErrorResult(error.message);
+        } catch (_) {
+            segmentInlineDiagnostic?.participantDebugErrorOnce(this, 'segment', 'inference:failed');
+            return this._createErrorResult('segment_inference_failed');
         } finally {
             segResult?.categoryMask?.close();
             segResult?.confidenceMasks?.forEach(mask => mask.close());
@@ -141,10 +146,15 @@ class FaceSegmenterInline {
     }
 
     getLastResult() { return this.lastResult; }
-    reset() { this.lastResult = null; }
+    reset() {
+        this.generation++;
+        this.initializing = null;
+        this.initializationFailed = false;
+        this.lastResult = null;
+        segmentInlineDiagnostic?.resetParticipantDiagnostics(this);
+    }
     dispose() {
         if (this.imageSegmenter) { this.imageSegmenter.close(); this.imageSegmenter = null; }
-        this._maskCanvas = null; this._maskCtx = null;
         this.isInitialized = false; this.reset();
     }
 }
@@ -154,39 +164,23 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = FaceSegmenterInline;
 }
 
-// Browser: loader-паттерн.
 if (typeof window !== 'undefined') {
-    let _faceSegmenterResolvedKind = null; // 'module' | 'inline' | null
-
-    function FaceSegmenterProxy(...args) {
-        if (_faceSegmenterResolvedKind === null) {
-            console.warn(
-                '[FaceSegmenter] sync use before Ready — using inline fallback. ' +
-                'Update the consumer to `await window.FaceSegmenterReady` before `new FaceSegmenter()`.'
-            );
-        }
-        return new FaceSegmenterInline(...args);
-    }
-    FaceSegmenterProxy.prototype = FaceSegmenterInline.prototype;
-
-    window.FaceSegmenter = FaceSegmenterProxy;
-
-    window.FaceSegmenterReady = (async () => {
-        try {
-            const mod = await import('./face-segmenter/index.js?v=20261104-4');
-            const Cls = mod && (mod.FaceSegmenter || mod.default);
-            if (typeof Cls !== 'function') {
-                throw new Error('module did not export FaceSegmenter class');
-            }
-            window.FaceSegmenter = Cls;
-            _faceSegmenterResolvedKind = 'module';
-            console.info('[FaceSegmenter] folder version loaded');
+    window.FaceSegmenter = FaceSegmenterInline;
+    window.FaceSegmenterReady = import('./face-segmenter/index.js?v=20261110-integration1')
+        .then(module => {
+            const Model = module.FaceSegmenter || module.default;
+            if (typeof Model !== 'function') throw new Error('segment_export_missing');
+            window.FaceSegmenter = Model;
             return 'module';
-        } catch (e) {
-            window.FaceSegmenter = FaceSegmenterInline;
-            _faceSegmenterResolvedKind = 'inline';
-            console.error('[FaceSegmenter] folder load failed, using inline fallback', e);
+        })
+        .catch(() => {
+            void import('./session-runtime/participant-diagnostic.mjs?v=20261110-integration1').then(
+                diagnostic => {
+                    segmentInlineDiagnostic = diagnostic;
+                    diagnostic.participantDebugError('segment', 'module:inline-fallback');
+                },
+                () => { /* Diagnostics are optional. */ }
+            );
             return 'inline';
-        }
-    })();
+        });
 }

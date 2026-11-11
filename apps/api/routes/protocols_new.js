@@ -13,6 +13,8 @@ const {
   OPERATIONS,
   isPlatformAdmin,
   hasProjectMembership,
+  lockProjectWriteAccess,
+  projectMembershipPredicate,
 } = require('../middleware/auth');
 const { listProtocolProxyMetrics } = require('./proxy_metrics');
 const { validateProtocolAois } = require('../../web/aoi-protocol');
@@ -33,6 +35,13 @@ const protocolQuality = require('../../shared/protocol-quality');
 
 const router = express.Router();
 router.use(requireAuth);
+
+async function assertProtocolPublishable(definition, mediaReport = null) {
+  const { inspectProtocolPreflight } = await import('../../shared/protocol-preflight.mjs');
+  const report = inspectProtocolPreflight(definition, { mediaReport });
+  if (!report.ok) throw new HttpError(422, 'Protocol preflight failed', 'protocol_preflight_failed', report);
+  return report;
+}
 
 async function checkDraftStimulusAccess(client, projectId, definition, user) {
   const ids = referencedDatabaseStimulusIds(definition, { includeBuilderState: true });
@@ -159,22 +168,27 @@ router.post(
       if (!definition.isDraft && rejectInvalidSurveys(res, definition)) return;
       const projectAllowed = await hasProjectMembership(pool, project_id, req.user);
       if (!projectAllowed) return res.status(403).json({ error: 'Not member of project' });
+      let preflight = null;
       const r = await withMediaWrite(pool, async client => {
-        if (!(await hasProjectMembership(client, project_id, req.user))) throw new HttpError(403, 'Not member of project', 'project_access_denied');
+        if (!(await lockProjectWriteAccess(client, project_id, req.user, OPERATIONS.PROTOCOL_WRITE))) throw new HttpError(403, 'Not member of project', 'project_access_denied');
         if (!definition.isDraft) {
+          await assertProtocolPublishable(definition);
           const report = await inspectProtocolStimuli(client, project_id, definition, { user: req.user });
           if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
+          preflight = await assertProtocolPublishable(definition, report);
         }
         if (definition.isDraft) await checkDraftStimulusAccess(client, project_id, definition, req.user);
         const pinned = definition.isDraft ? definition : await pinProtocolMedia(client, project_id, definition, req.user);
+        if (!definition.isDraft) preflight = await assertProtocolPublishable(pinned, { ok: true });
         return client.query(
         `INSERT INTO protocols (project_id, name, definition) VALUES ($1, $2, $3)
          RETURNING id, project_id, name, definition, created_at, updated_at`,
         [project_id, name, JSON.stringify(pinned)]
       );
       });
-      res.status(201).json(publicProtocol(r.rows[0]));
+      res.status(201).json({ ...publicProtocol(r.rows[0]), ...(preflight ? { preflight } : {}) });
     } catch (err) {
+      if (err.code === 'protocol_preflight_failed') return res.status(422).json({ error: err.message, code: err.code, preflight: err.details });
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       if (err.code === '23503') return res.status(400).json({ error: 'Project not found' });
       if (err.code === '23505') return rejectProtocolConflict(res, err);
@@ -248,25 +262,32 @@ router.patch('/:id', requireRole('admin', 'PI', 'researcher', 'analyst', 'assist
         definition.isDraft = req.body.save_mode === 'draft';
       }
       if (definition && !definition.isDraft && (rejectInvalidAois(res, definition) || rejectInvalidSurveys(res, definition))) return;
+      let preflight = null;
       const row = await withMediaWrite(pool, async client => {
-        const current = (await client.query('SELECT * FROM protocols WHERE id = $1 FOR UPDATE', [req.params.id])).rows[0];
-        if (!current || !(await hasProjectMembership(client, current.project_id, req.user))) throw new HttpError(404, 'Not found', 'protocol_not_found');
+        const current = (await client.query(`SELECT pr.* FROM protocols pr
+          WHERE pr.id = $1 AND ${projectMembershipPredicate(req.user, 'pr.project_id', 2)} FOR UPDATE OF pr`,
+        isPlatformAdmin(req.user) ? [req.params.id] : [req.params.id, req.user.sub])).rows[0];
+        if (!current || !(await lockProjectWriteAccess(client, current.project_id, req.user, OPERATIONS.PROTOCOL_WRITE))) throw new HttpError(404, 'Not found', 'protocol_not_found');
         if ((req.body.expected_revision && req.body.expected_revision !== protocolRevision(current))
           || (req.body.expected_updated_at && new Date(req.body.expected_updated_at).getTime() !== new Date(current.updated_at).getTime())) {
           throw new HttpError(409, 'Protocol was changed by another researcher. Reload before saving.', 'protocol_revision_conflict');
         }
         if (definition && !definition.isDraft) {
+          await assertProtocolPublishable(definition);
           const report = await inspectProtocolStimuli(client, current.project_id, definition, { user: req.user });
           if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
+          preflight = await assertProtocolPublishable(definition, report);
         }
         if (definition?.isDraft) await checkDraftStimulusAccess(client, current.project_id, definition, req.user);
         const pinned = definition ? (definition.isDraft ? definition : await pinProtocolMedia(client, current.project_id, definition, req.user)) : current.definition;
+        if (definition && !definition.isDraft) preflight = await assertProtocolPublishable(pinned, { ok: true });
         return (await client.query(`UPDATE protocols SET name = $1, definition = $2::jsonb, updated_at = current_timestamp
            WHERE id = $3 RETURNING id, project_id, name, definition, updated_at`,
           [req.body.name === undefined ? current.name : req.body.name, JSON.stringify(pinned), current.id])).rows[0];
       });
-      return res.json(publicProtocol(row));
+      return res.json({ ...publicProtocol(row), ...(preflight ? { preflight } : {}) });
     } catch (error) {
+      if (error.code === 'protocol_preflight_failed') return res.status(422).json({ error: error.message, code: error.code, preflight: error.details });
       if (error instanceof HttpError) return res.status(error.status).json({ error: error.message, code: error.code });
       if (error.code === '23505') return rejectProtocolConflict(res, error);
       return res.status(500).json({ error: 'Update failed' });
@@ -283,11 +304,14 @@ router.delete(
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
       await withMediaWrite(pool, async client => {
-        const row = (await client.query('SELECT * FROM protocols WHERE id = $1', [req.params.id])).rows[0];
-        if (!row || !(await hasProjectMembership(client, row.project_id, req.user))) throw new HttpError(404, 'Not found', 'protocol_not_found');
+        const row = (await client.query(`SELECT pr.id, pr.project_id FROM protocols pr
+          WHERE pr.id = $1 AND ${projectMembershipPredicate(req.user, 'pr.project_id', 2)}`,
+        isPlatformAdmin(req.user) ? [req.params.id] : [req.params.id, req.user.sub])).rows[0];
+        if (!row) throw new HttpError(404, 'Not found', 'protocol_not_found');
         // Admission locks invitations too. Serialize deletion with a participant starting a run.
         await client.query('SELECT id FROM invitations WHERE protocol_id = $1 ORDER BY id FOR UPDATE', [row.id]);
         await client.query('SELECT id FROM protocols WHERE id = $1 FOR UPDATE', [row.id]);
+        if (!(await lockProjectWriteAccess(client, row.project_id, req.user, OPERATIONS.PROTOCOL_WRITE))) throw new HttpError(404, 'Not found', 'protocol_not_found');
         const sessions = await client.query('SELECT 1 FROM sessions WHERE protocol_id = $1 LIMIT 1', [row.id]);
         if (sessions.rows.length) throw new HttpError(409, 'Protocol has collected sessions and cannot be deleted', 'protocol_has_sessions');
         await client.query('DELETE FROM protocols WHERE id = $1', [row.id]);
@@ -302,3 +326,4 @@ router.delete(
 );
 
 module.exports = router;
+module.exports.assertProtocolPublishable = assertProtocolPublishable;

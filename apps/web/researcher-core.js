@@ -50,7 +50,7 @@ async function apiFailError(r){
 }
 function apiRequestHeaders(json){ const h=json?apiHeaders():authHeaders(); const csrf=sessionStorage.getItem('emocog_csrf_token'); if(csrf) h['X-CSRF-Token']=csrf; return h; }
 function apiRequestScope(path){ return /^\/auth(?:\/|$)|^\/projects(?:\?|$)/.test(path) ? 'document' : 'workspace'; }
-async function apiGet(path){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; return WecogHttp.json(url, {headers: apiRequestHeaders(true),credentials:'include'}, {scope:apiRequestScope(path)}); }
+async function apiGet(path, { signal } = {}){ const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path; return WecogHttp.json(url, {headers: apiRequestHeaders(true),credentials:'include',signal}, {scope:apiRequestScope(path)}); }
 async function apiPost(path, body){
   const base = (window.API_BASE||'').replace(/\/$/,''); const url = base ? (base + path) : path;
   const isFormData = (typeof FormData !== 'undefined') && body instanceof FormData;
@@ -76,11 +76,7 @@ function buildParticipantRunLink(codeOrProtocolId){
 window.getParticipantWebBasePath = getParticipantWebBasePath;
 window.buildParticipantRunLink = buildParticipantRunLink;
 function parseParticipantInviteCodeFromHash(hash) {
-  var m = String(hash || location.hash || '').match(/^#\/?participant\/([^/?#]+)/i);
-  if (!m || !m[1]) return null;
-  var code = decodeURIComponent(m[1]).trim();
-  if (!code || code.length < 2 || code.length > 256 || !/^[a-zA-Z0-9_-]+$/.test(code)) return null;
-  return code;
+  return window.EmocogInvitationLink.fromHash(hash ?? location.hash);
 }
 function redirectLegacyParticipantInviteHash() {
   var code = parseParticipantInviteCodeFromHash();
@@ -459,8 +455,10 @@ function parseHash(h){
 }
 
 // INSTANT render - контент остается видимым
+let renderedHash = null;
 function render(hashOverride){
-  const {route,parts}=parseHash(hashOverride);
+  const routeHash = hashOverride || location.hash || '#/overview';
+  const {route,parts}=parseHash(routeHash);
   const view=$('#view');
   let routeKey=route;
   const subKey=parts[1]||'';
@@ -514,20 +512,19 @@ function render(hashOverride){
   else node=OverviewView();
 
   // Instantly replace content - NO wrapper, NO animation
+  view.firstElementChild?.disposeExperimentList?.();
   view.innerHTML = '';
   view.appendChild(node);
+  renderedHash = routeHash;
 
   applyAutoI18n(document.body);
 }
 
 // Instant navigation
-let isNavigating = false;
 function navigate(href){
   if(!href||!href.startsWith('#/')) return;
-  isNavigating = true;
   if(location.hash!==href) location.hash=href;
   render(href);
-  setTimeout(()=>isNavigating=false, 0);
 }
 
 function clearExperimentBuilderDraft() {
@@ -550,10 +547,11 @@ function startNewExperimentBuilder() {
 // Event listeners
 //$('#orgSelect').addEventListener('change',e=>{state.org=e.target.value.replace('Org: ','');render();toast('Org changed');});
 $('#projectSelect').addEventListener('change',e=>{
-  state.project=e.target.value.replace('Project: ','');
+  const selected = e.target.selectedOptions[0];
+  state.project = selected?.value ? selected.textContent : '';
   try {
     const workspaceProjects = JSON.parse(localStorage.getItem('emocog_ws_projects')) || [];
-    const workspaceProject = workspaceProjects.find(project => project.name === state.project || String(project.id) === String(e.target.value));
+    const workspaceProject = workspaceProjects.find(project => String(project.id) === selected?.value);
     if (workspaceProject) localStorage.setItem('emocog_selected_workspace_project_id', String(workspaceProject.id));
   } catch (_) { /* keep the previously selected project id */ }
   render();
@@ -628,7 +626,8 @@ document.addEventListener('click',(e)=>{
 
 window.addEventListener('hashchange',()=>{
   if (redirectLegacyParticipantInviteHash()) return;
-  if(isNavigating) return;
+  // navigate() already rendered this hash; history and direct edits still render.
+  if (renderedHash === (location.hash || '#/overview')) return;
   render();
 });
 
@@ -738,9 +737,7 @@ bootstrapAdminAccess();
     // Check if option already exists
     let found = false;
     for (let i = 0; i < sel.options.length; i++) {
-      if (String(sel.options[i].value) === String(projectId) ||
-          sel.options[i].textContent.trim() === projectName ||
-          sel.options[i].value === projectName) {
+      if (sel.options[i].value === String(projectId)) {
         sel.selectedIndex = i;
         found = true;
         break;

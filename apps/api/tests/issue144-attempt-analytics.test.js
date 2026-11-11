@@ -38,6 +38,16 @@ test('issue144: default stimulus metrics exclude rejected attempts without delet
   assert.equal(row.features_payload.gaze_analytics.presentations.length, 2);
 });
 
+test('a known AOI hit and dwell do not imply that its first fixation onset is available', () => {
+  const row = fixture();
+  delete row.features_payload.gaze_analytics.presentations[0].fixationPoints[0].startMs;
+  const [dwell, ttff] = buildAoiRows(row, protocol, query)[0].metrics;
+  assert.equal(dwell.value, 500);
+  assert.equal(ttff.status, 'no_data');
+  assert.equal(ttff.reason, 'fixation_onset_missing');
+  assert.equal(ttff.value, null);
+});
+
 test('issue144: heatmaps are per presentation, chronological and retain rejection identity', () => {
   const visuals = buildSessionVisuals(fixture(), protocol, query);
   assert.deepEqual(visuals.map(item => item.presentationId), ['first', 'retry']);

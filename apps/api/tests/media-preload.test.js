@@ -9,18 +9,19 @@ function environment(mode = 'ready') {
   let releaseDecode;
   class Probe {
     constructor(kind) { this.kind = kind; this.complete = false; this.naturalWidth = this.videoWidth = mode === 'invalid' ? 0 : 10;
+      this.duration = mode === 'invalid' ? NaN : 1;
       this.naturalHeight = this.videoHeight = 10; this.loads = this.pauses = this.decodes = 0; probes.push(this); }
     set src(value) { this.value = value; if (this.kind === 'image') { this.complete = mode === 'ready'; queueMicrotask(() => this.fire()); } }
     get src() { return this.value; }
     fire() { if (!this.value || mode === 'idle') return; if (mode === 'error') this.onerror?.();
-      else if (this.kind === 'video') this.onloadedmetadata?.(); else this.onload?.(); }
+      else if (this.kind !== 'image') this.onloadedmetadata?.(); else this.onload?.(); }
     load() { this.loads++; if (this.value) queueMicrotask(() => this.fire()); }
     decode() { this.decodes++; return mode === 'decode-error' ? Promise.reject(new Error('synthetic decode failure'))
       : mode === 'decode-pending' ? new Promise(resolve => { releaseDecode = resolve; }) : Promise.resolve(); }
     pause() { this.pauses++; }
     removeAttribute() { this.value = ''; }
   }
-  const env = { Image: class extends Probe { constructor() { super('image'); } }, document: { createElement: () => new Probe('video') },
+  const env = { Image: class extends Probe { constructor() { super('image'); } }, document: { createElement: kind => new Probe(kind) },
     URL: { createObjectURL: () => 'blob:owned-test', revokeObjectURL: url => revoked.push(url) },
     setTimeout(callback, delay) { const id = setTimeout(callback, delay); timers.add(id); return id; },
     clearTimeout(id) { timers.delete(id); clearTimeout(id); } };
@@ -34,6 +35,23 @@ function assertReleased(fixture) {
     if (probe.kind === 'video') { assert.equal(probe.pauses, 1); assert.equal(probe.loads, 2); }
   }
 }
+
+test('audio preparation validates metadata, never plays, and releases its decoder', async () => {
+  const { preloadMediaBlob } = await load();
+  for (const type of ['audio/wav', 'audio/x-wav', 'audio/mpeg']) {
+    const fixture = environment();
+    assert.equal(await preloadMediaBlob(new Blob(['synthetic'], { type }), type, { environment: fixture.env }), 'blob:owned-test');
+    assert.equal(fixture.probes[0].kind, 'audio');
+    assert.equal(fixture.probes[0].pauses, 1);
+    assertReleased(fixture);
+  }
+  const invalid = environment('invalid');
+  await assert.rejects(preloadMediaBlob(new Blob(['synthetic'], { type: 'audio/wav' }), 'audio/wav', { environment: invalid.env }), /invalid duration/);
+  assert.deepEqual(invalid.revoked, ['blob:owned-test']);
+  const mismatch = environment();
+  await assert.rejects(preloadMediaBlob(new Blob(['synthetic'], { type: 'audio/wav' }), 'image/png', { environment: mismatch.env }), /unexpected media type/);
+  assert.equal(mismatch.probes.length, 0);
+});
 
 test('whole media preparation is bounded and results preserve row order', async () => {
   const { mapMediaPreloads } = await load();

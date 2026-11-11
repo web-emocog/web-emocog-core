@@ -9,9 +9,10 @@
  */
 
 import { EMOTION_CONFIG }                        from './emotion-config.js';
-import { buildInternalMask, extractActionUnits } from './au-extractor.js';
+import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js';
 import { classifyFACS, calcAffective }           from './facs-classifier.js';
 import { computeAggregatedMetrics }              from './emotion-aggregator.js';
+import { participantDebugError } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
@@ -58,7 +59,6 @@ export class EmotionAnalyzer {
         this._dominantCandidate = 'neutral';
         this._dominantCandidateFrames = 0;
 
-        console.log('[EmotionAnalyzer] Инициализирован (FACS AU v4.1, без ONNX)');
     }
 
     // ── Инициализация ──────────────────────────────────────────────────────
@@ -67,11 +67,10 @@ export class EmotionAnalyzer {
         try {
             if (faceMaskCollector && typeof faceMaskCollector.generateMask === 'function') {
                 this.faceMaskCollector = faceMaskCollector;
-                console.log('[EmotionAnalyzer] FaceMaskCollector подключён');
             }
             return true;
-        } catch (err) {
-            console.error('[EmotionAnalyzer] Ошибка инициализации:', err);
+        } catch (_) {
+            participantDebugError('expression', 'initialization:failed');
             return false;
         }
     }
@@ -82,12 +81,13 @@ export class EmotionAnalyzer {
      * Начало новой сессии. Полностью сбрасывает буферы предыдущей.
      * @param {string} [sessionId]
      */
-    startSession(sessionId = null) {
+    startSession(sessionId = null, options = {}) {
         this.clear();
+        this.requireExplicitBaseline = options.explicitNeutral === true;
+        this.requiredNeutralFrames = options.requiredNeutralFrames;
         this.sessionId    = sessionId ?? `session_${Date.now()}`;
         this.sessionStart = Date.now();
         this.isRunning    = true;
-        console.log(`[EmotionAnalyzer] ▶️ Сессия начата: ${this.sessionId}`);
     }
 
     /**
@@ -97,10 +97,6 @@ export class EmotionAnalyzer {
     endSession() {
         this.isRunning = false;
         const durationMs = this.sessionStart ? Date.now() - this.sessionStart : 0;
-        console.log(
-            `[EmotionAnalyzer] ⏹️ Сессия завершена: ${this.sessionId}` +
-            ` (${durationMs}мс, ${this.emotionEvents.length} событий)`
-        );
         return { sessionId: this.sessionId, durationMs, eventCount: this.emotionEvents.length };
     }
 
@@ -206,8 +202,8 @@ export class EmotionAnalyzer {
                 faceMask,
                 ...this._featureDiagnostics(),
             };
-        } catch (err) {
-            console.error('[EmotionAnalyzer] Ошибка analyzeLandmarks:', err);
+        } catch (_) {
+            participantDebugError('expression', 'landmarks:analysis-failed');
             this._auBaseline = baseline;
             this._auBaselineFrames = baselineFrames;
             this._auBaselineReady = baselineReady;
@@ -220,7 +216,7 @@ export class EmotionAnalyzer {
 
     getCalibrationDiagnostics() {
         return { ready: this._auBaselineReady, frames: this._auBaselineFrames,
-            requiredFrames: this.config.baseline.minFrames,
+            requiredFrames: this.requiredNeutralFrames ?? this.config.baseline.minFrames,
             baseline: this._auBaseline ? { ...this._auBaseline } : null,
             deadzone: this.config.baseline.deadzone, gain: this.config.baseline.gain };
     }
@@ -264,6 +260,8 @@ export class EmotionAnalyzer {
 
     /** Полный сброс состояния (вызывается автоматически в startSession) */
     clear() {
+        this.requiredNeutralFrames = null;
+        this.requireExplicitBaseline = false;
         this.emotionEvents       = [];
         this.smoothingBuffer     = [];
         this.temporalBuffer      = [];
@@ -277,7 +275,6 @@ export class EmotionAnalyzer {
         this._dominantCandidateFrames = 0;
         this.affectiveDimensions = { valence: 0, arousal: 0 };
         this._resetCategoryCounts();
-        console.log('[EmotionAnalyzer] Данные очищены');
     }
 
     // ── Приватные методы ───────────────────────────────────────────────────
@@ -294,22 +291,7 @@ export class EmotionAnalyzer {
     }
 
     _validateLandmarks(lm) {
-        if (!Array.isArray(lm) || lm.length < this.config.minLandmarks) return false;
-        // Validate the face mesh (including mask zones), not optional iris points.
-        // An indexed loop also rejects sparse arrays; Array.every skips holes.
-        for (let i = 0; i < this.config.minLandmarks; i++) {
-            const point = lm[i];
-            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
-                || (point.z !== undefined && !Number.isFinite(point.z))) return false;
-        }
-        const distance = (a, b) => Math.sqrt(
-            (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + ((a.z ?? 0) - (b.z ?? 0)) ** 2
-        );
-        // Internal geometry rounds these dimensions to four decimal places.
-        return [[234, 454], [10, 152]].every(([a, b]) => {
-            const size = distance(lm[a], lm[b]);
-            return Number.isFinite(size) && Number(size.toFixed(4)) > 0;
-        });
+        return validEmotionLandmarks(lm, this.config.minLandmarks);
     }
 
     _dominant(scores) {
@@ -370,9 +352,26 @@ export class EmotionAnalyzer {
         );
     }
 
+    setNeutralBaseline(baseline, count) {
+        const entries = Object.entries(baseline || {});
+        if (!this.requireExplicitBaseline || !Number.isInteger(count) || count < 1 || entries.length !== 16
+            || !entries.every(([key, value]) => /^AU\d+$/.test(key) && Number.isFinite(value))) {
+            throw new Error('Invalid neutral baseline');
+        }
+        this._validateRawActionUnits(baseline);
+        this._auBaseline = { ...baseline };
+        this._auBaselineFrames = count;
+        this._auBaselineReady = true;
+        this.smoothingBuffer = []; this.temporalBuffer = [];
+        this._stableDominant = 'neutral'; this._dominantCandidate = 'neutral'; this._dominantCandidateFrames = 0;
+    }
+
     _calibrateActionUnits(rawActionUnits) {
         const cfg = this.config.baseline;
         const keys = Object.keys(rawActionUnits || {});
+        if (this.requireExplicitBaseline && !this._auBaselineReady) {
+            return { ready: false, actionUnits: Object.fromEntries(keys.map(key => [key, 0])) };
+        }
         if (!this._auBaseline) {
             this._auBaseline = Object.fromEntries(keys.map(key => [key, Number(rawActionUnits[key]) || 0]));
             this._auBaselineFrames = 1;
@@ -398,7 +397,7 @@ export class EmotionAnalyzer {
             return [key, clamp(delta * cfg.gain, 0, 1)];
         }));
         const activity = Object.values(adjusted).reduce((sum, value) => sum + value, 0) / Math.max(1, keys.length);
-        if (activity <= cfg.adaptiveMaxActivity) {
+        if (!this.requireExplicitBaseline && activity <= cfg.adaptiveMaxActivity) {
             keys.forEach(key => {
                 this._auBaseline[key] += ((Number(rawActionUnits[key]) || 0) - this._auBaseline[key]) * cfg.adaptiveRate;
             });
@@ -421,7 +420,7 @@ export class EmotionAnalyzer {
             valence: null, arousal: null, dominant: 'unknown', confidence: 0,
             calibrationReady: this._auBaselineReady,
             calibrationFrames: this._auBaselineFrames,
-            degraded: true,
+            missingData: true, emotionInferred: false, degraded: true,
         };
     }
 

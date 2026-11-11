@@ -5,6 +5,10 @@
 require('../load-env');
 const DEFAULT_JWT_SECRET = 'dev-secret-change-in-production-min-32';
 const nodeEnv = process.env.NODE_ENV || 'development';
+const rateLimitStore = process.env.RATE_LIMIT_STORE || (nodeEnv === 'production' ? 'postgres' : 'memory');
+if (!['postgres', 'memory'].includes(rateLimitStore) || (nodeEnv === 'production' && rateLimitStore !== 'postgres')) {
+  throw new Error('Production request protection requires RATE_LIMIT_STORE=postgres');
+}
 const jwtSecret = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
 const path = require('path');
 
@@ -115,6 +119,7 @@ module.exports = {
       media: positiveInt(process.env.MEDIA_RATE_LIMIT_PER_MINUTE, 300),
       default: positiveInt(process.env.DEFAULT_RATE_LIMIT_PER_MINUTE, 300),
     },
+    rateLimitStore,
   },
   storage: {
     uploadsRoot: path.resolve(

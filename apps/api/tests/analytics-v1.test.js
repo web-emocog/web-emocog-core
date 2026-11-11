@@ -144,6 +144,25 @@ test('analytics v1 contract and computations', async t => {
     assert.deepEqual(heatmap.grid.values, [0.5, 0, 0, 1]);
   });
 
+  await t.test('reach distinguishes missing gaze, a measured miss and an observed hit', () => {
+    const source = row();
+    const presentations = source.features_payload.gaze_analytics.presentations;
+    const lookup = () => buildAoiRows(source, protocol, query())[0].metrics.find(metric => metric.metricId === 'aoi.target_reached_pct');
+    assert.equal(lookup().value, 50);
+    presentations[1].validObservationDurationMs = 0;
+    assert.deepEqual(lookup().presentationCoverage, { total: 2, observed: 1 });
+    assert.equal(lookup().value, 100);
+    assert.equal(lookup().denominator, 1);
+    assert.equal(lookup().algorithm.id, 'gaze-aoi-observed-reach');
+    presentations[0].validObservationDurationMs = 0;
+    assert.equal(lookup().status, 'no_data');
+    assert.equal(lookup().value, null);
+    assert.deepEqual(lookup().presentationCoverage, { total: 2, observed: 0 });
+    presentations[1].validObservationDurationMs = 1000;
+    assert.equal(lookup().status, 'computed');
+    assert.equal(lookup().value, 0);
+  });
+
   await t.test('returns every AOI heatmap context without narrowing the session snapshot', () => {
     const source = row();
     source.features_payload.gaze_analytics.presentations.push({

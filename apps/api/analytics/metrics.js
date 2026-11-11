@@ -2,6 +2,7 @@ const { METRIC_CATALOG } = require('./query');
 const { buildConnectedness } = require('./connectedness');
 const { IDS: PASSIVE_IDS, passiveMetric, intervalData, intervalExportRows } = require('./passive');
 const { definitions: passiveDefinitions, measurement } = require('../../shared/passive-metrics');
+const { build: assessMetricQuality } = require('../../shared/metric-quality');
 const { presentationAttempts, attemptMetadata, trialSummary, taskTrials, matchesTrialFilters } = require('./attempts');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
 
@@ -174,6 +175,7 @@ function metricBase(metricId, row, options = {}) {
       : metricId.startsWith('aoi.') ? null : sessionDurationMs(row),
     nParticipants: options.nParticipants ?? (row?.participant_id ? 1 : 0),
     nObservations: options.nObservations ?? 0,
+    ...(options.presentationCoverage ? { presentationCoverage: options.presentationCoverage } : {}),
     signalConfidence: options.signalConfidence ?? null,
     ...(options.distribution ? { distribution: options.distribution } : {}),
     scope: {
@@ -377,9 +379,21 @@ function gazeAlgorithm(presentation, id = GAZE_ALGORITHM.id) {
 }
 
 function aoiMetric(metricId, row, aoiRow, presentations) {
+  const reachMetric = ['aoi.target_reached', 'aoi.target_reached_pct'].includes(metricId);
+  const totalPresentations = presentations.length;
+  if (reachMetric) presentations = presentations.filter(item => (finite(item.validObservationDurationMs) ?? 0) > 0);
+  const presentationCoverage = reachMetric
+    ? { total: totalPresentations, observed: presentations.length } : null;
+  const reachAlgorithm = reachMetric ? (() => {
+    const fixation = gazeAlgorithm(presentations[0]);
+    const parameters = { fixationVersion: fixation.version, fixationParametersHash: fixation.parametersHash,
+      denominator: 'positive_valid_observation_presentations' };
+    return { id: 'gaze-aoi-observed-reach', version: '1.0.0', parametersHash: sha256(parameters), parameters };
+  })() : null;
   const scope = { blockId: aoiRow.blockId, stimulusId: aoiRow.stimulusId, aoiId: aoiRow.aoi.id,
-    presentationId: presentations.length === 1 ? presentations[0].presentationId : null,
-    trialId: presentations.length === 1 ? presentations[0].trialId : null };
+    ...(presentationCoverage ? { presentationCoverage, algorithm: reachAlgorithm } : {}),
+    presentationId: totalPresentations === 1 ? presentations[0]?.presentationId : null,
+    trialId: totalPresentations === 1 ? presentations[0]?.trialId : null };
   if (gazeSpatialAccuracy(row).validationStatus === 'failed') return metricBase(metricId, row, {
     ...scope, status: 'insufficient_quality', reason: 'gaze_spatial_validation_failed',
   });
@@ -389,7 +403,8 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
   const mixedMappings = coordinateMappings(presentations).size > 1;
   if (!presentations.length || mixedMappings) return metricBase(metricId, row, {
     ...scope,
-    reason: mixedMappings ? 'gaze_coordinate_mappings_mixed' : 'gaze_presentation_missing',
+    reason: mixedMappings ? 'gaze_coordinate_mappings_mixed'
+      : totalPresentations ? 'valid_observation_missing' : 'gaze_presentation_missing',
     blockId: aoiRow.blockId,
     stimulusId: aoiRow.stimulusId,
     aoiId: aoiRow.aoi.id,
@@ -439,16 +454,16 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
     nObservations: 0,
   });
   const common = {
+    ...scope,
     status: 'computed',
     observationDurationMs: observation,
-    nObservations: fixations.length,
+    nObservations: reachMetric ? presentations.length : fixations.length,
     signalConfidence: confidence,
     blockId: aoiRow.blockId,
     stimulusId: aoiRow.stimulusId,
     aoiId: aoiRow.aoi.id,
-    trialId: presentations.length === 1 ? presentations[0].trialId : null,
-    presentationId: presentations.length === 1 ? presentations[0].presentationId : null,
-    algorithm: gazeAlgorithm(presentations[0]),
+    algorithm: reachAlgorithm || gazeAlgorithm(presentations[0]),
+    presentationCoverage,
   };
   const values = {
     'aoi.gaze_on_target_pct': [observation ? round(dwell / observation * 100) : 0, dwell, observation],
@@ -464,6 +479,9 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
     'aoi.revisit_count': [revisits, revisits, fixations.length],
   };
   if (metricId === 'aoi.ttff_ms') {
+    if (presentationRows.some(item => item.reached && item.first == null)) {
+      return metricBase(metricId, row, { ...common, status: 'no_data', reason: 'fixation_onset_missing' });
+    }
     return metricBase(metricId, row, {
       ...common,
       value: first,
@@ -707,6 +725,30 @@ function estimateCi95(values) {
   };
 }
 
+function groupAlgorithm(records) {
+  const contributing = records.filter(record => numericMetricValue(record.metric) != null);
+  const methods = new Map();
+  // Match the existing value contributors; missing sessions must not label their measurements.
+  for (const record of contributing.length ? contributing : records) {
+    const source = record.metric?.algorithm;
+    const algorithm = {
+      ...source,
+      id: source?.id || 'participant-equal-summary',
+      version: source?.version || 'legacy_summary',
+      parametersHash: source?.parametersHash ?? null,
+    };
+    methods.set(sha256(algorithm), algorithm);
+  }
+  const algorithms = [...methods.keys()].sort().map(key => methods.get(key));
+  if (!algorithms.length) return { id: 'participant-equal-summary', version: 'legacy_summary', parametersHash: null };
+  if (algorithms.length === 1) return algorithms[0];
+  return {
+    id: algorithms.every(algorithm => algorithm.id === algorithms[0].id) ? algorithms[0].id : 'participant-equal-summary',
+    version: 'mixed_versions',
+    parametersHash: sha256({ methods: algorithms }),
+  };
+}
+
 function buildGroupMetric(metricId, records, scope = null) {
   const participantRecords = new Map();
   records.forEach(record => {
@@ -726,7 +768,6 @@ function buildGroupMetric(metricId, records, scope = null) {
   });
   const values = participantValues.map(item => item.value);
   const stats = distribution(values);
-  const firstMetric = records.find(record => record.metric)?.metric || null;
   const statuses = [...new Set(records.map(record => record.metric?.status).filter(Boolean))];
   const status = values.length
     ? 'computed'
@@ -735,6 +776,7 @@ function buildGroupMetric(metricId, records, scope = null) {
     ? null
     : (records.find(record => record.metric?.reason)?.metric.reason || 'metric_data_missing');
   const measurementRecords = records.filter(record => ['computed', 'no_event'].includes(record.metric?.status));
+  const coverage = records.map(record => record.metric?.presentationCoverage).filter(Boolean);
   return {
     metricId,
     unit: CATALOG_BY_ID.get(metricId)?.unit ?? null,
@@ -745,6 +787,10 @@ function buildGroupMetric(metricId, records, scope = null) {
     numerator: sumMetricField(measurementRecords, 'numerator'),
     denominator: sumMetricField(measurementRecords, 'denominator'),
     observationDurationMs: sumMetricField(measurementRecords, 'observationDurationMs'),
+    ...(coverage.length ? { presentationCoverage: {
+      total: coverage.reduce((sum, item) => sum + item.total, 0),
+      observed: coverage.reduce((sum, item) => sum + item.observed, 0),
+    } } : {}),
     median: stats?.median ?? null,
     q1: stats?.q1 ?? null,
     q3: stats?.q3 ?? null,
@@ -755,11 +801,7 @@ function buildGroupMetric(metricId, records, scope = null) {
     estimateCi95: estimateCi95(values),
     participantValues,
     ...(scope ? { scope } : {}),
-    algorithm: firstMetric?.algorithm || {
-      id: 'participant-equal-summary',
-      version: '1.0.0',
-      parametersHash: null,
-    },
+    algorithm: groupAlgorithm(records),
   };
 }
 
@@ -962,6 +1004,7 @@ function exportMetric(metric, sourceKind, context = {}) {
     nParticipants: metric.nParticipants ?? null,
     nObservations: metric.nObservations ?? null,
     observationDurationMs: metric.observationDurationMs ?? null,
+    ...(metric.presentationCoverage ? { presentationCoverage: metric.presentationCoverage } : {}),
     scope: metric.scope || null,
     algorithm: metric.algorithm || null,
     sourceKind,
@@ -979,6 +1022,7 @@ function buildExportBundle(hydrated, content = 'both') {
       sessionId: Number(row.id),
       participantId: row.participant_id || null,
       metrics: buildSessionMetrics(row, query),
+      qualityAssessment: assessMetricQuality(row.features_payload || {}, { serverAcknowledged: !!row.features_payload }),
       connectedness: buildConnectedness(row, query),
       ...(query.mode === 'session' ? { physiologyIntervals: intervalData(row, query) } : {}),
       trialCounts: trials.counts,

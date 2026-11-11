@@ -119,6 +119,7 @@ function mediaTypeFromMeta(meta) {
     meta?.mime_type || meta?.mimeType || metadata.mime_type || metadata.mimeType || ''
   ).toLowerCase();
   if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
   if (mimeType.startsWith('image/')) return 'image';
   return 'image';
 }
@@ -298,7 +299,7 @@ function resolveUrlFromMeta(meta) {
 }
 
 /**
- * Prefer uploaded/API image URL; otherwise resolve std_*; otherwise fallback shape.
+ * Prefer uploaded/API media; otherwise resolve std_*; otherwise fallback shape.
  */
 function resolveParticipantStimulus(params) {
   params = params || {};
@@ -334,7 +335,7 @@ function resolveParticipantStimulus(params) {
   // transient delivery failure from silently displaying the blue fallback.
   if (/^(?:api:)?[1-9]\d*$/.test(rawStimulusId)) {
     return {
-      type: 'image',
+      type: mediaTypeFromMeta(meta),
       src: '',
       mediaUnavailable: true,
       style: params.imageStyle || {},

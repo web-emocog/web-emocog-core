@@ -55,11 +55,12 @@ export class SessionQualityDetector {
 
     _conditions(frame, segmenterResult, context) {
         const cameraFps = Number(context?.cameraFps);
+        const available = !hasAnalysisError(frame);
         return {
-            face_missing: frame?.face?.detected === false,
-            low_light: hasBadIllumination(frame),
-            head_pose: hasBadPose(frame),
-            face_occluded: hasRegionalFaceOcclusion(segmenterResult),
+            face_missing: available && frame?.face?.detected === false,
+            low_light: available && hasBadIllumination(frame),
+            head_pose: available && hasBadPose(frame),
+            face_occluded: available && hasRegionalFaceOcclusion(segmenterResult),
             low_fps: Number.isFinite(cameraFps) && cameraFps > 0 && cameraFps < 12
         };
     }

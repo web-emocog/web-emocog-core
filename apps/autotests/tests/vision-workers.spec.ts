@@ -239,6 +239,147 @@ test('blocked worker script falls back without changing the no-face contract', a
   expect(result).toEqual({ ready: true, backend: 'main', error: null, face: false });
 });
 
+test('real face model starts on CPU after a GPU initialization failure, then releases the model', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const root = '/apps/participant-web/js/';
+    const vision = await import(root + 'vendor/mediapipe/vision_bundle.mjs');
+    Object.assign(window, { FilesetResolver: vision.FilesetResolver, FaceLandmarker: vision.FaceLandmarker });
+    const original = vision.FaceLandmarker.createFromOptions;
+    const delegates: string[] = [];
+    vision.FaceLandmarker.createFromOptions = async (files: any, options: any) => {
+      delegates.push(options.baseOptions.delegate);
+      if (options.baseOptions.delegate === 'GPU') throw new Error('Synthetic GPU initialization failure');
+      return original.call(vision.FaceLandmarker, files, options);
+    };
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1');
+    const analyzer = new PrecheckAnalyzer({ worker: false });
+    try {
+      const ready = await analyzer.initialize();
+      const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
+      const frame = await analyzer.analyzeFrame(canvas);
+      return { ready, delegates, delegate: analyzer.inferenceDelegate, reason: analyzer.cpuFallbackReason,
+        face: frame.face.detected, error: frame.error || null };
+    } finally { analyzer.dispose(); vision.FaceLandmarker.createFromOptions = original; }
+  });
+  expect(result).toEqual({ ready: true, delegates: ['GPU', 'CPU'], delegate: 'CPU',
+    reason: 'face_gpu_initialization_failed', face: false, error: null });
+});
+
+test('face runtime GPU loss retries once on CPU with the same capture clocks and no retry storm', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const root = '/apps/participant-web/js/';
+    const vision = await import(root + 'vendor/mediapipe/vision_bundle.mjs');
+    Object.assign(window, { FilesetResolver: vision.FilesetResolver, FaceLandmarker: vision.FaceLandmarker });
+    const original = vision.FaceLandmarker.createFromOptions;
+    const delegates: string[] = [], timestamps: number[] = [];
+    let closes = 0, cpuFails = false, sourceCanvas: HTMLCanvasElement;
+    const inputPixels: number[] = [];
+    vision.FaceLandmarker.createFromOptions = async (files: any, options: any) => {
+      const delegate = options.baseOptions.delegate;
+      delegates.push(delegate);
+      if (delegate === 'GPU') return { detectForVideo() {
+        // The camera/source can advance during model recovery, unlike the owned capture.
+        sourceCanvas.getContext('2d')!.fillStyle = '#ffffff';
+        sourceCanvas.getContext('2d')!.fillRect(0, 0, 320, 240);
+        throw Error('synthetic_context_loss');
+      }, close() { closes++; } };
+      const model = await original.call(vision.FaceLandmarker, files, options);
+      const detect = model.detectForVideo.bind(model), close = model.close.bind(model);
+      model.detectForVideo = (input: any, timestamp: number) => {
+        timestamps.push(timestamp);
+        if (cpuFails) throw Error('synthetic_cpu_error');
+        inputPixels.push(input.getContext('2d').getImageData(0, 0, 1, 1).data[0]);
+        return detect(input, timestamp);
+      };
+      model.close = () => { closes++; close(); };
+      return model;
+    };
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1');
+    const analyzer = new PrecheckAnalyzer({ worker: false });
+    try {
+      await analyzer.initialize();
+      const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
+      sourceCanvas = canvas;
+      canvas.getContext('2d')!.fillStyle = '#000000'; canvas.getContext('2d')!.fillRect(0, 0, 320, 240);
+      const frame = await analyzer.analyzeFrame(canvas, { timestamp: 1234, wallTimestamp: 5678 });
+      cpuFails = true;
+      const failures = [];
+      for (let i = 0; i < 3; i++) failures.push(Boolean((await analyzer.analyzeFrame(canvas, { timestamp: 1300 + i })).error));
+      return { delegates, timestamp: frame.timestamp, wallTimestamp: frame.wallTimestamp, timestamps,
+        delegate: analyzer.inferenceDelegate, reason: analyzer.cpuFallbackReason, error: frame.error || null,
+        failures, inputPixels, closesBeforeDispose: closes };
+    } finally { analyzer.dispose(); vision.FaceLandmarker.createFromOptions = original; }
+  });
+  expect(result).toEqual({ delegates: ['GPU', 'CPU'], timestamp: 1234, wallTimestamp: 5678,
+    timestamps: [1234, 1300, 1301, 1302], delegate: 'CPU', reason: 'face_gpu_inference_failed', error: null,
+    failures: [true, true, true], inputPixels: [0], closesBeforeDispose: 2 });
+});
+
+test('unavailable face delegates produce technical failure without repeated model creation', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const root = '/apps/participant-web/js/';
+    const vision = await import(root + 'vendor/mediapipe/vision_bundle.mjs');
+    Object.assign(window, { FilesetResolver: vision.FilesetResolver, FaceLandmarker: vision.FaceLandmarker });
+    const original = vision.FaceLandmarker.createFromOptions;
+    const attempts: string[] = [];
+    vision.FaceLandmarker.createFromOptions = async (_files: any, options: any) => {
+      attempts.push(options.baseOptions.delegate); throw Error('synthetic_no_graphics_backend');
+    };
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1');
+    const analyzer = new PrecheckAnalyzer({ worker: false });
+    try {
+      const ready = await analyzer.initialize();
+      const canvas = document.createElement('canvas');
+      const errors = [];
+      for (let i = 0; i < 4; i++) errors.push((await analyzer.analyzeFrame(canvas)).error);
+      const beforeReset = attempts.length;
+      analyzer.reset();
+      await analyzer.initialize();
+      return { ready, errors, attempts, beforeReset, backend: analyzer.backend };
+    } finally { analyzer.dispose(); vision.FaceLandmarker.createFromOptions = original; }
+  });
+  expect(result).toEqual({ ready: false, errors: Array(4).fill('face_model_unavailable'),
+    attempts: ['GPU', 'CPU', 'GPU', 'CPU'], beforeReset: 2, backend: 'failed' });
+});
+
+test('actual face task without any WebGL contexts either works on CPU or fails explicitly without repeated initialization', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const constructors = [HTMLCanvasElement, OffscreenCanvas];
+    const originals = constructors.map(type => type.prototype.getContext);
+    constructors.forEach((type: any, i) => {
+      type.prototype.getContext = function(kind: string, ...args: any[]) {
+        return /webgl/i.test(kind) ? null : originals[i].call(this, kind, ...args);
+      };
+    });
+    const root = '/apps/participant-web/js/';
+    const vision = await import(root + 'vendor/mediapipe/vision_bundle.mjs');
+    Object.assign(window, { FilesetResolver: vision.FilesetResolver, FaceLandmarker: vision.FaceLandmarker });
+    const original = vision.FaceLandmarker.createFromOptions, attempts: string[] = [];
+    vision.FaceLandmarker.createFromOptions = async (files: any, options: any) => {
+      attempts.push(options.baseOptions.delegate); return original.call(vision.FaceLandmarker, files, options);
+    };
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1');
+    const analyzer = new PrecheckAnalyzer({ worker: false });
+    try {
+      await analyzer.initialize();
+      const canvas = document.createElement('canvas'), errors = [];
+      for (let i = 0; i < 3; i++) errors.push((await analyzer.analyzeFrame(canvas)).error || null);
+      return { attempts, errors, delegate: analyzer.inferenceDelegate, backend: analyzer.backend };
+    } finally {
+      analyzer.dispose(); vision.FaceLandmarker.createFromOptions = original;
+      constructors.forEach((type: any, i) => { type.prototype.getContext = originals[i]; });
+    }
+  });
+  expect(result.attempts).toEqual(['GPU', 'CPU']);
+  if (result.backend === 'failed') {
+    expect(result.errors.every(error => ['face_model_unavailable', 'face_inference_failed'].includes(error))).toBe(true);
+  }
+  else {
+    expect(result.delegate).toBe('CPU');
+    expect(result.errors).toEqual([null, null, null]);
+  }
+});
+
 test('auxiliary main-thread fallback accepts the shared ImageData frame', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const root = '/apps/participant-web/js/';
@@ -261,6 +402,57 @@ test('auxiliary main-thread fallback accepts the shared ImageData frame', async 
   });
   expect(result).toEqual({ segmentReady: true, poseReady: true, hasMaskData: true,
     segmentationError: null, errors: [] });
+});
+
+test('real auxiliary models reuse shared pixels without bitmap conversion and preserve same-image output', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261110-integration1';
+    const { FaceSegmenter } = await import(modulePath);
+    const clientPath = '/apps/participant-web/js/session-runtime/vision-worker-client.mjs?v=20261110-integration1';
+    const { VisionWorkerClient } = await import(clientPath);
+    const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
+    const { faceVisibilityFixture } = await import(fixturePath);
+    const { landmarks } = faceVisibilityFixture();
+    const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
+    const ctx = canvas.getContext('2d')!;
+    const gradient = ctx.createLinearGradient(0, 0, 320, 240);
+    gradient.addColorStop(0, '#bba08a'); gradient.addColorStop(1, '#304659');
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 320, 240);
+    const pixels = ctx.getImageData(0, 0, 320, 240);
+    const bitmap = await createImageBitmap(pixels);
+    const direct = new FaceSegmenter(), legacy = new FaceSegmenter();
+    const directPose = new VisionWorkerClient('pose'), legacyPose = new VisionWorkerClient('pose');
+    const nativeCapture = window.createImageBitmap;
+    let captures = 0;
+    try {
+      if (!await direct.initialize() || !await legacy.initialize()) throw new Error('model_not_ready');
+      window.createImageBitmap = ((...args: Parameters<typeof createImageBitmap>) => {
+        captures++; return Reflect.apply(nativeCapture, window, args);
+      }) as typeof createImageBitmap;
+      const next = await direct.segmentFrame(pixels, landmarks, 100);
+      const directCaptures = captures;
+      const previous = await legacy.segmentFrame(bitmap, landmarks, 100);
+      await directPose.start(); await legacyPose.start();
+      const poseStart = captures;
+      const poseNext = await directPose.analyze(pixels, { timestamp: 100 });
+      const poseDirectCaptures = captures - poseStart;
+      const posePrevious = await legacyPose.analyze(bitmap, { timestamp: 100 });
+      const projection = (row: any) => ({ mask: row.maskAnalysis, visibility: row.faceVisibility,
+        complete: row.isComplete, score: row.score, issues: row.issues, frameSize: row.frameSize });
+      return { directBackend: direct.backend, legacyBackend: legacy.backend, directCaptures,
+        totalCaptures: captures, poseDirectCaptures, poseEqual: JSON.stringify(poseNext) === JSON.stringify(posePrevious),
+        byteLength: pixels.data.byteLength, errors: [next.error || null, previous.error || null],
+        next: projection(next), previous: projection(previous) };
+    } finally {
+      window.createImageBitmap = nativeCapture;
+      direct.dispose(); legacy.dispose(); bitmap.close();
+      directPose.dispose(); legacyPose.dispose();
+    }
+  });
+  expect(result).toMatchObject({ directBackend: 'worker', legacyBackend: 'worker',
+    directCaptures: 0, poseDirectCaptures: 0, totalCaptures: 2, poseEqual: true,
+    byteLength: 320 * 240 * 4, errors: [null, null] });
+  expect(result.next).toEqual(result.previous);
 });
 
 test('slow inference leaves UI timers responsive in the worker, with unchanged derived values', async ({ page }, info) => {
@@ -314,4 +506,91 @@ test('slow inference leaves UI timers responsive in the worker, with unchanged d
   expect(result[1].values).toEqual(result[0].values);
   expect(result[1].ticks).toBeGreaterThan(result[0].ticks);
   expect(result[1].ticks).toBeGreaterThan(5);
+});
+
+for (const kind of ['face', 'segment'] as const) for (const mode of ['throw', 'reject'] as const) {
+  test(`${kind} Worker: ${mode} from the ready observer cannot spawn a fallback model or leak an exception`, async ({ page }) => {
+    const errors: string[] = [];
+    const workers: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('worker', worker => workers.push(worker.url()));
+    const result = await page.evaluate(async ({ kind, mode }) => {
+      const path = kind === 'face' ? '/apps/participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1'
+        : '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261110-integration1';
+      const module = await import(path);
+      const Analyzer = module.PrecheckAnalyzer || module.FaceSegmenter;
+      const events: any[] = [];
+      (window as any).WECOG_DEBUG = { enabled: true, log() {}, error: (...args: any[]) => {
+        events.push(args); throw new Error('SYNTHETIC-PRIVATE-DIAGNOSTIC-SINK');
+      } };
+      let notifications = 0;
+      const analyzer = new Analyzer({ onInitialized() {
+        notifications++;
+        if (mode === 'throw') throw new Error('SYNTHETIC-PRIVATE-INITIALIZED');
+        return Promise.reject(new Error('SYNTHETIC-PRIVATE-INITIALIZED'));
+      } });
+      try {
+        const ready = await analyzer.initialize();
+        await Promise.resolve(); await Promise.resolve();
+        return { ready, backend: analyzer.backend, notifications, allowed: analyzer.workerAllowed,
+          fallback: analyzer.workerFallbackReason || null, initialized: analyzer.isInitialized, events };
+      } finally { analyzer.dispose(); }
+    }, { kind, mode });
+    expect(result).toEqual({ ready: true, backend: 'worker', notifications: 1, allowed: true,
+      fallback: null, initialized: true, events: [[kind, 'initialization:callback-failed', undefined]] });
+    expect(workers).toHaveLength(1);
+    expect(errors).toEqual([]);
+    await expect.poll(() => page.workers().length).toBe(0);
+  });
+}
+
+test('optional QC diagnostics preserve exact counters and summaries with disabled, enabled and throwing sinks', async ({ page }) => {
+  const output = await page.evaluate(async () => {
+    const modulePath = '/apps/participant-web/js/qc-metrics/index.js?v=20261110-integration1';
+    const { QCMetrics } = await import(modulePath);
+    const originalNow = Object.getOwnPropertyDescriptor(performance, 'now');
+    const originalDateNow = Date.now, originalDebug = (window as any).WECOG_DEBUG;
+    let time = 1000;
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => time });
+    Date.now = () => 1700000000000 + time;
+    const summaries: any[] = [], reports: any[] = [];
+    try {
+      for (const mode of ['off', 'on', 'throw']) {
+        time = 1000;
+        const events: any[] = [];
+        (window as any).WECOG_DEBUG = { enabled: mode !== 'off', log: (...args: any[]) => {
+          events.push(args); if (mode === 'throw') throw new Error('SYNTHETIC-PRIVATE-QC-SINK');
+        } };
+        const qc = new QCMetrics();
+        try {
+          qc.start({ useRealCameraFps: false });
+          qc.setValidationData([{ gazeX: 10, gazeY: 10, targetX: 10, targetY: 10 },
+            { gazeX: 20, gazeY: 20, targetX: 20, targetY: 20 },
+            { gazeX: 30, gazeY: 30, targetX: 30, targetY: 30 }]);
+          qc.setTrackingDeviationData([{ shapeX: 10, shapeY: 10, gazeX: 10, gazeY: 10 },
+            { shapeX: 20, shapeY: 20, gazeX: 20, gazeY: 20 },
+            { shapeX: 30, shapeY: 30, gazeX: 30, gazeY: 30 }]);
+          for (let i = 0; i < 100; i++) {
+            time += 50;
+            qc.processFrame({ face: { detected: true, status: 'valid' }, pose: { status: 'stable' },
+              eyes: { bothOpen: true }, illumination: { status: 'optimal' } }, { isComplete: true, score: 1 });
+          }
+          summaries.push({ counters: { ...qc._counters }, summary: qc.getSummary() });
+        } finally { qc.stop(); }
+        reports.push(events);
+      }
+      return { summaries, reports };
+    } finally {
+      Date.now = originalDateNow;
+      if (originalNow) Object.defineProperty(performance, 'now', originalNow); else delete (performance as any).now;
+      (window as any).WECOG_DEBUG = originalDebug;
+    }
+  });
+  expect(output.summaries[0]).toEqual(output.summaries[1]);
+  expect(output.summaries[0]).toEqual(output.summaries[2]);
+  expect(output.reports[0]).toHaveLength(0);
+  expect(output.reports[1].length).toBeGreaterThanOrEqual(3);
+  expect(output.reports[2]).toEqual(output.reports[1]);
+  expect(JSON.stringify(output.reports)).not.toContain('gazeX');
+  expect(JSON.stringify(output.reports)).not.toContain('shapeX');
 });

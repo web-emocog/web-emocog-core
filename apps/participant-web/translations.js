@@ -73,7 +73,7 @@ export const translations = {
         btn_camera: "Включить камеру",
         final_title: "Сессия завершена!",
         final_desc: "Спасибо за участие. Данные сформированы.",
-        qc_passed: "✅ Данные прошли проверку качества",
+        qc_passed: "✅ Условия регистрации прошли QC",
         label_secure_sender: "Включить дополнительную защищенную отправку (security2 sender)",
         btn_download: "📥 Скачать JSON",
         btn_restart: "Начать заново",
@@ -93,6 +93,7 @@ export const translations = {
         btn_start_precheck: "🎥 Начать проверку",
         btn_start_calib: "✅ Начать калибровку",
         status_error: "❌ Ошибка",
+        status_technical_failure: "Не работает обработка видео. Проверьте поддержку WebGL в браузере или используйте другой браузер. Это техническая ошибка, а не предупреждение о положении лица.",
         // статусы индикаторов (pre-check)
         status_too_dark: "Темно",
         status_too_bright: "Ярко",
@@ -265,7 +266,7 @@ export const translations = {
         issue_camera_frames_stalled: "Камера перестала передавать новые кадры. Проверьте камеру.",
         
         // QC status messages
-        qc_passed_full: "✅ Данные прошли проверку качества",
+        qc_passed_full: "✅ Условия регистрации прошли QC",
         qc_failed_full: "⚠️ Качество данных ниже нормы",
         qc_duration: "Длительность",
         qc_valid: "Валидных",
@@ -351,7 +352,7 @@ export const translations = {
         btn_camera: "Enable Camera",
         final_title: "Session Completed!",
         final_desc: "Thank you for participating. Data generated.",
-        qc_passed: "✅ Data Valid (QC Passed)",
+        qc_passed: "✅ Recording conditions passed QC",
         label_secure_sender: "Enable additional secure upload (security2 sender)",
         btn_download: "📥 Download JSON",
         btn_restart: "Start Over",
@@ -385,6 +386,7 @@ export const translations = {
         status_unstable: "Unstable",
         status_no_face: "No Face",
         status_all_good: "🎉 All good! You can start calibration",
+        status_technical_failure: "Visual analysis is unavailable. Check that your browser supports WebGL, or use another browser. This is a technical failure, not a face-position warning.",
         precheck_must_pass: "Complete the camera pre-check successfully first.",
         status_needs_fix: "🔴 Needs Correction",
         status_checking: "⏳ Under Review",
@@ -543,7 +545,7 @@ export const translations = {
         issue_camera_frames_stalled: "The camera stopped delivering new frames. Check the camera.",
         
         // QC status messages
-        qc_passed_full: "✅ Data Valid (QC Passed)",
+        qc_passed_full: "✅ Recording conditions passed QC",
         qc_failed_full: "⚠️ Data quality below threshold",
         qc_duration: "Duration",
         qc_valid: "Valid",
@@ -1146,8 +1148,8 @@ Object.entries(participantProtocolErrorLocaleAdditions).forEach(([locale, additi
 });
 
 const participantFinalLocaleAdditions = {
-    ru: { qc_attention_label: 'Внимание', qc_blinks_label: 'Моргания', qc_valence_label: 'Валентность', qc_arousal_label: 'Возбуждение', label_aggregates_only: 'Только сводка (без сырых массивов)', issue_low_face_ok_pct: 'Качество изображения лица ниже порога', runtime_upload_rejected: 'Сервер отклонил результат (HTTP {status}). Сохраните JSON и сообщите исследователю.' },
-    en: { qc_attention_label: 'Attention', qc_blinks_label: 'Blinks', qc_valence_label: 'Valence', qc_arousal_label: 'Arousal', label_aggregates_only: 'Summary only (no raw arrays)', issue_low_face_ok_pct: 'Face image quality below threshold', runtime_upload_rejected: 'The server rejected the result (HTTP {status}). Save the JSON and contact the researcher.' },
+    ru: { qc_attention_label: 'Внимание', qc_blinks_label: 'Моргания', qc_valence_label: 'Валентность мимики', qc_arousal_label: 'Активность мимики', label_aggregates_only: 'Только сводка (без сырых массивов)', issue_low_face_ok_pct: 'Качество изображения лица ниже порога', runtime_upload_rejected: 'Сервер отклонил результат (HTTP {status}). Сохраните JSON и сообщите исследователю.' },
+    en: { qc_attention_label: 'Attention', qc_blinks_label: 'Blinks', qc_valence_label: 'Facial valence', qc_arousal_label: 'Facial activity', label_aggregates_only: 'Summary only (no raw arrays)', issue_low_face_ok_pct: 'Face image quality below threshold', runtime_upload_rejected: 'The server rejected the result (HTTP {status}). Save the JSON and contact the researcher.' },
     zh: { qc_attention_label: '注意力', qc_blinks_label: '眨眼', qc_valence_label: '效价', qc_arousal_label: '唤醒度', label_aggregates_only: '仅摘要（不含原始数组）', issue_low_face_ok_pct: '面部图像质量低于阈值', runtime_upload_rejected: '服务器拒绝了结果（HTTP {status}）。请保存 JSON 并联系研究人员。' },
     es: { qc_attention_label: 'Atención', qc_blinks_label: 'Parpadeos', qc_valence_label: 'Valencia', qc_arousal_label: 'Activación', label_aggregates_only: 'Solo resumen (sin matrices de datos sin procesar)', issue_low_face_ok_pct: 'Calidad de imagen facial por debajo del umbral', runtime_upload_rejected: 'El servidor rechazó el resultado (HTTP {status}). Guarde el JSON y contacte al investigador.' },
     hi: { qc_attention_label: 'ध्यान', qc_blinks_label: 'पलक झपकना', qc_valence_label: 'भावात्मक मान', qc_arousal_label: 'उत्तेजना', label_aggregates_only: 'केवल सारांश (कच्ची डेटा सरणियों के बिना)', issue_low_face_ok_pct: 'चेहरे की छवि की गुणवत्ता सीमा से कम है', runtime_upload_rejected: 'सर्वर ने परिणाम अस्वीकार किया (HTTP {status})। JSON सहेजें और शोधकर्ता से संपर्क करें।' },
@@ -1160,6 +1162,39 @@ const participantFinalLocaleAdditions = {
 Object.entries(participantFinalLocaleAdditions).forEach(([locale, additions]) => {
     Object.assign(translations[locale], additions);
 });
+
+const cameraAccessHelp = {
+    ru: 'Не удалось включить камеру. Разрешите доступ в браузере, проверьте, не занята ли камера другим приложением, и повторите проверку.',
+    en: 'The camera could not start. Allow camera access in your browser, check that another app is not using it, and retry the check.',
+    zh: '无法启动摄像头。请允许浏览器访问摄像头，检查其他应用是否正在使用摄像头，然后重试。',
+    es: 'No se pudo iniciar la cámara. Permita el acceso en el navegador, compruebe que otra aplicación no la esté usando y repita la comprobación.',
+    hi: 'कैमरा शुरू नहीं हो सका। ब्राउज़र में कैमरे की अनुमति दें, जाँचें कि कोई अन्य ऐप उसका उपयोग न कर रहा हो, और फिर कोशिश करें।',
+    ar: 'تعذر تشغيل الكاميرا. اسمح للمتصفح بالوصول إليها، وتحقق من أن تطبيقًا آخر لا يستخدمها، ثم أعد المحاولة.',
+    fr: 'La caméra ne démarre pas. Autorisez son accès dans le navigateur, vérifiez qu’aucune autre application ne l’utilise, puis réessayez.',
+    bn: 'ক্যামেরা চালু করা যায়নি। ব্রাউজারে ক্যামেরার অনুমতি দিন, অন্য কোনো অ্যাপ এটি ব্যবহার করছে কি না দেখুন এবং আবার চেষ্টা করুন।',
+    pt: 'Não foi possível iniciar a câmara. Permita o acesso no navegador, verifique se outra aplicação a está a usar e repita a verificação.',
+    ur: 'کیمرہ شروع نہیں ہو سکا۔ براؤزر میں کیمرے کی اجازت دیں، دیکھیں کہ کوئی دوسری ایپ اسے استعمال تو نہیں کر رہی، اور دوبارہ کوشش کریں۔'
+};
+for (const [locale, message] of Object.entries(cameraAccessHelp)) {
+    translations[locale].precheck_camera_error_help = message;
+}
+
+const calibrationCaptureMessages = {
+    ru: ['Собираем кадры. Смотрите в центр точки, глаза держите открытыми.', 'Не хватает устойчивых кадров. Смотрите в центр точки и повторите нажатие; при необходимости вернитесь к проверке камеры.', 'Размер окна изменился или анализ камеры не готов. Вернитесь к проверке камеры и повторите калибровку.', 'Вернуться к проверке камеры'],
+    en: ['Collecting frames. Look at the target center with your eyes open.', 'Not enough stable frames. Look at the target and click again, or return to the camera check.', 'The window size changed or camera analysis is not ready. Return to the camera check and repeat calibration.', 'Return to camera check'],
+    zh: ['正在采集帧。请睁眼看着目标中心。', '稳定帧不足。请看着目标并再次点击，或返回摄像头检查。', '窗口大小已改变或摄像头分析尚未就绪。请返回摄像头检查并重新校准。', '返回摄像头检查'],
+    es: ['Recogiendo fotogramas. Mire el centro del punto con los ojos abiertos.', 'No hay suficientes fotogramas estables. Mire el punto y pulse de nuevo o vuelva a comprobar la cámara.', 'Cambió el tamaño de la ventana o el análisis no está listo. Compruebe la cámara y repita la calibración.', 'Volver a comprobar la cámara'],
+    hi: ['फ़्रेम एकत्र हो रहे हैं। आँखें खुली रखकर बिंदु के केंद्र को देखें।', 'पर्याप्त स्थिर फ़्रेम नहीं हैं। बिंदु को देखकर फिर क्लिक करें या कैमरे की जाँच पर लौटें।', 'विंडो का आकार बदला है या कैमरा विश्लेषण तैयार नहीं है। कैमरे की जाँच करके फिर कैलिब्रेशन करें।', 'कैमरे की जाँच पर लौटें'],
+    ar: ['جارٍ جمع الإطارات. انظر إلى مركز النقطة وعيناك مفتوحتان.', 'الإطارات المستقرة غير كافية. انظر إلى النقطة وانقر مجددًا أو عد إلى فحص الكاميرا.', 'تغير حجم النافذة أو تحليل الكاميرا غير جاهز. عد إلى فحص الكاميرا وأعد المعايرة.', 'العودة إلى فحص الكاميرا'],
+    fr: ['Collecte des images. Regardez le centre du point, les yeux ouverts.', 'Pas assez d’images stables. Regardez le point et cliquez à nouveau ou vérifiez la caméra.', 'La taille de la fenêtre a changé ou l’analyse n’est pas prête. Vérifiez la caméra et recommencez le calibrage.', 'Revenir à la vérification caméra'],
+    bn: ['ফ্রেম সংগ্রহ হচ্ছে। চোখ খোলা রেখে বিন্দুর কেন্দ্রে তাকান।', 'পর্যাপ্ত স্থির ফ্রেম নেই। বিন্দুর দিকে তাকিয়ে আবার ক্লিক করুন অথবা ক্যামেরা পরীক্ষায় ফিরুন।', 'উইন্ডোর আকার বদলেছে অথবা ক্যামেরা বিশ্লেষণ প্রস্তুত নয়। ক্যামেরা পরীক্ষা করে আবার ক্যালিব্রেশন করুন।', 'ক্যামেরা পরীক্ষায় ফিরুন'],
+    pt: ['A recolher imagens. Olhe para o centro do ponto com os olhos abertos.', 'Não há imagens estáveis suficientes. Olhe para o ponto e clique novamente ou verifique a câmara.', 'O tamanho da janela mudou ou a análise não está pronta. Verifique a câmara e repita a calibração.', 'Voltar à verificação da câmara'],
+    ur: ['فریم جمع ہو رہے ہیں۔ آنکھیں کھلی رکھ کر نقطے کے مرکز کو دیکھیں۔', 'مستحکم فریم کافی نہیں ہیں۔ نقطے کو دیکھ کر دوبارہ کلک کریں یا کیمرے کی جانچ پر واپس جائیں۔', 'ونڈو کا سائز بدلا ہے یا کیمرے کا تجزیہ تیار نہیں ہے۔ کیمرے کی جانچ کرکے دوبارہ کیلیبریشن کریں۔', 'کیمرے کی جانچ پر واپس جائیں']
+};
+for (const [locale, messages] of Object.entries(calibrationCaptureMessages)) {
+    [translations[locale].calibration_collecting, translations[locale].calibration_capture_retry,
+        translations[locale].calibration_capture_blocked, translations[locale].calibration_camera_action] = messages;
+}
 
 export const participantLocales = ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur'];
 

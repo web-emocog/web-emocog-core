@@ -1,13 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-const baseUrl = 'http://127.0.0.1:4173';
-
 test.beforeEach(async ({ page }) => {
-  await page.goto(`${baseUrl}/apps/participant-web/documents/privacy-policy-v1.0.html`);
+  await page.goto('/apps/participant-web/documents/privacy-policy-v1.0.html');
 });
 
 test('audio consent is explicit and protocol-gated', async ({ page }) => {
-  await page.goto(`${baseUrl}/apps/participant-web/mvp_with_precheck_1-updated.html`);
+  await page.goto('/apps/participant-web/mvp_with_precheck_1-updated.html');
   const visible = await page.evaluate(async () => {
     const modulePath = '/apps/participant-web/js/audio/consent-ui.js';
     const { configureAudioConsentUI, captureAudioConsent } = await import(modulePath);
@@ -197,7 +195,7 @@ test('multimodal renderer preserves missing emotion and draws gaze layers', asyn
 });
 
 test('15-minute gaze retention stays bounded', async ({ page }) => {
-  await page.goto(`${baseUrl}/apps/participant-web/mvp_with_precheck_1-updated.html`);
+  await page.goto('/apps/participant-web/mvp_with_precheck_1-updated.html');
   const result = await page.evaluate(async () => {
     const [{ appendGazeSample }, { state }] = await Promise.all([
       // @ts-expect-error Production browser module intentionally has no .d.ts.

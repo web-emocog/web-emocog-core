@@ -54,7 +54,8 @@ test('login preserves the exact password and ignores a stored API redirect', asy
   await page.locator('#login').fill('Synthetic@Example.test');
   await page.locator('#password').fill(newPassword);
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
-  await expect(page.locator('#error')).toContainText('Synthetic rejection');
+  await expect(page.locator('#error')).toHaveText('Неверный email или пароль.');
+  await expect(page.locator('#error')).not.toContainText('Synthetic rejection');
   expect(attempts).toEqual([{ email: 'synthetic@example.test', password: newPassword }]);
 });
 
@@ -76,7 +77,8 @@ test('an unavailable login server is explained separately from rejected credenti
   await expect(page.locator('#password')).toHaveValue(initialPassword);
   expect(await page.evaluate(() => localStorage.getItem('emocog_developer_auth'))).toBeNull();
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Synthetic credential rejection');
+  await expect(page.getByRole('alert')).toHaveText('Неверный email или пароль.');
+  await expect(page.getByRole('alert')).not.toContainText('Synthetic credential rejection');
   await expect(page.getByRole('alert')).not.toContainText('локальным сервером');
   expect(attempts).toBe(2);
 });

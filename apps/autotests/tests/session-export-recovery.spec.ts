@@ -2,6 +2,68 @@ import { test, expect } from '@playwright/test';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 import { getPageUrl } from './helpers/testUtils';
 
+for (const stage of ['file-read', 'session-start']) {
+  for (const boundary of ['account', 'project', 'protocol', 'api-origin', 'route-roundtrip']) {
+    test(`import cancels on ${boundary} change during ${stage}, without sending ingest`, async ({ page }) => {
+      let ingests = 0;
+      await page.route('**/ingest', route => { ingests++; return route.fulfill({ status: 500, json: {} }); });
+      await page.goto('http://127.0.0.1:4173/apps/web/researcher.html?analyticsPreview=1#/overview');
+      await page.waitForFunction(() => !!(window as any).EmocogAnalyticsProduction?.importResultJson);
+      const result = await page.evaluate(async ({ stage, boundary }) => {
+        const w = window as any, state = { query: { projectId: 1, protocolId: 1 } };
+        let release!: (value: any) => void, entered!: () => void, starts = 0;
+        const ready = new Promise<void>(resolve => { entered = resolve; });
+        const wait = new Promise(resolve => { release = resolve; });
+        const source = JSON.stringify({ schemaVersion: 'session_feature.v1', ids: { session: 'S-IMPORT-BOUNDARY' }, events: [],
+          lifecycle: { state: 'completed', status: 'completed', finishAttemptId: 'finish-boundary' } });
+        const file = new File([source], 'synthetic.json');
+        if (stage === 'file-read') file.text = () => { entered(); return wait as Promise<string>; };
+        w.apiPost = async () => { starts++; if (stage === 'session-start') { entered(); await wait; } return { id: 1 }; };
+        const pending = w.EmocogAnalyticsProduction.importResultJson(file, state).then(() => 'unexpected_success', (error: any) => error.code);
+        await ready;
+        if (boundary === 'account') localStorage.setItem('emocog_workspace_owner_v1', 'another-synthetic-account');
+        if (boundary === 'project') state.query.projectId = 2;
+        if (boundary === 'protocol') state.query.protocolId = 2;
+        if (boundary === 'api-origin') w.API_BASE = 'http://127.0.0.1:49999';
+        if (boundary === 'route-roundtrip') window.dispatchEvent(new HashChangeEvent('hashchange'));
+        release(source);
+        return { code: await pending, starts };
+      }, { stage, boundary });
+      expect(['request_context_changed', 'staff_account_changed']).toContain(result.code);
+      expect(result.starts).toBe(stage === 'file-read' ? 0 : 1);
+      expect(ingests).toBe(0);
+    });
+  }
+}
+
+test('a cancelled import releases its busy state and allows a new deliberate import', async ({ page }) => {
+  await page.goto('http://127.0.0.1:4173/apps/web/researcher.html?analyticsPreview=1#/overview');
+  await page.waitForFunction(() => !!(window as any).EmocogAnalyticsProduction?.store);
+  await page.route('**/ingest', route => route.fulfill({ status: 201, json: ingestAcknowledgement(route.request()) }));
+  const result = await page.evaluate(async () => {
+    const w = window as any, api = w.EmocogAnalyticsProduction, store = api.store;
+    store.state.query.projectId = 1; store.state.query.protocolId = 1;
+    let release!: (value: string) => void, entered!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const wait = new Promise<string>(resolve => { release = resolve; });
+    const source = JSON.stringify({ schemaVersion: 'session_feature.v1', ids: { session: 'S-IMPORT-RETRY' }, events: [],
+      lifecycle: { state: 'completed', status: 'completed', finishAttemptId: 'finish-retry' } });
+    const file = new File([source], 'synthetic.json');
+    file.text = () => { entered(); return wait; };
+    const pending = store.importResult(file);
+    await ready;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    release(source); await pending;
+    const cancelledStatus = store.state.importStatus;
+    w.apiPost = async () => ({ id: 1 });
+    api.api.sessions = async () => [];
+    store.initialize = async () => {};
+    await store.importResult(new File([source], 'synthetic.json'));
+    return { cancelledStatus, finalStatus: store.state.importStatus };
+  });
+  expect(result).toEqual({ cancelledStatus: 'idle', finalStatus: 'success' });
+});
+
 test('English final results and validation headings stay English after live language changes', async ({ page }, testInfo) => {
   await page.goto(getPageUrl());
   await page.waitForFunction(() => typeof (window as any).setLanguage === 'function');
@@ -19,8 +81,8 @@ test('English final results and validation headings stay English after live lang
   });
   await expect(page.locator('#finalQcSummary')).toContainText('Attention');
   await expect(page.locator('#finalQcSummary')).toContainText('Blinks');
-  await expect(page.locator('#finalQcSummary')).toContainText('Valence');
-  await expect(page.locator('#finalQcSummary')).toContainText('Arousal');
+  await expect(page.locator('#finalQcSummary')).toContainText('Facial valence');
+  await expect(page.locator('#finalQcSummary')).toContainText('Facial activity');
   await expect(page.locator('[data-i18n="label_aggregates_only"]')).toHaveText('Summary only (no raw arrays)');
   await expect(page.locator('#qcStatusBlock')).toContainText('Face image quality below threshold');
   expect(await page.locator('#validationResult .calibration-intro-kicker').textContent()).toBe('Accuracy check');

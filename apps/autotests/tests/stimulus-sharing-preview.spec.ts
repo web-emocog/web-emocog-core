@@ -19,13 +19,15 @@ test('ownership views, explicit sharing and video posters do not download full v
   await page.route('http://127.0.0.1:3000/**', async route => {
     const url = new URL(route.request().url());
     const headers = { 'Access-Control-Allow-Origin': base, 'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, PATCH, OPTIONS' };
+      'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     const json = (body: unknown) => route.fulfill({ status: 200, headers, json: body });
     if (url.pathname === '/auth/me') return json({ id: 1, role: 'researcher', email: 'test@example.org' });
     if (url.pathname === '/auth/permissions') return json({});
     if (url.pathname === '/projects') return json([{ id: 7, name: 'Local project' }]);
     if (url.pathname === '/stimuli/folders') return json([]);
+    if (url.pathname === '/stimuli/operations') return json({ state: 'reserved' });
+    if (url.pathname.startsWith('/stimuli/operations/')) return json({ state: 'failed' });
     if (url.pathname === '/stimuli') return json([
       { id: 42, project_id: 7, created_by: 1, visibility, name: 'Personal image', mime_type: 'image/png',
         current_version_id: '11111111-1111-4111-8111-111111111111', size_bytes: png.length,
@@ -52,7 +54,11 @@ test('ownership views, explicit sharing and video posters do not download full v
   await page.goto(`${base}/apps/web/researcher.html#/stimuli`);
   const personal = page.locator('.stimulus-card[data-id="42"]');
   const shared = page.locator('.stimulus-card[data-id="43"]');
-  await expect(shared.locator('img')).toBeVisible();
+  const revealShared = () => expect(async () => {
+    await shared.scrollIntoViewIfNeeded();
+    await expect(shared.locator('img')).toBeVisible();
+  }).toPass({ timeout: 5000 });
+  await revealShared();
   await expect(shared.locator('video')).toHaveCount(0);
   await expect(personal.locator('.stim-sharing-btn')).toHaveText('Поделиться');
   await expect(shared.locator('.stim-sharing-btn')).toHaveCount(0);
@@ -85,7 +91,7 @@ test('ownership views, explicit sharing and video posters do not download full v
   await expect(personal).toContainText('Личный');
   expect(sharingRequests).toBe(2);
   await page.reload();
-  await expect(shared.locator('img')).toBeVisible();
+  await revealShared();
   expect(contentRequests).toBe(0);
   const originalType = await page.evaluate(async () => {
     const stimulus = stimuliList.find((item: any) => item.id === '43');

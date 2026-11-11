@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "long_session_technical_evidence.v1",
+  "executedAt": "2026-11-05T19:21:22.101Z",
+  "sensors": false,
+  "network": "loopback static files only; no API or server DB",
+  "accelerated": [
+    {
+      "minutes": 40,
+      "syntheticFrames": 72000,
+      "wallMs": 1457.1000000014901,
+      "reloadVerified": true,
+      "writes": {
+        "saves": 480,
+        "sampleRecordsWritten": 168080,
+        "chunksWritten": 2000,
+        "chunksPruned": 650
+      },
+      "retainedCounts": {
+        "eyeTracking": 31980,
+        "eyeSignals": 72000,
+        "emotionSamples": 7200,
+        "bodyPoseSamples": 7200,
+        "events": 80
+      },
+      "saveMs": {
+        "p50": 1.3999999985098839,
+        "p95": 2.899999998509884,
+        "max": 36.30000000074506
+      },
+      "firstSaveMeanMs": 1.6260000000521542,
+      "lastSaveMeanMs": 1.9750000001117587,
+      "storageUsageDeltaBytes": 5934107,
+      "workerBuildMs": 205.19999999925494,
+      "finalPayloadBytes": 25145,
+      "aggregateSampleCount": 72000,
+      "heapUsedBytes": 48335649
+    },
+    {
+      "minutes": 125,
+      "syntheticFrames": 225000,
+      "wallMs": 4164.70000000298,
+      "reloadVerified": true,
+      "writes": {
+        "saves": 1500,
+        "sampleRecordsWritten": 525250,
+        "chunksWritten": 6250,
+        "chunksPruned": 3717
+      },
+      "retainedCounts": {
+        "eyeTracking": 30903,
+        "eyeSignals": 225000,
+        "emotionSamples": 7200,
+        "bodyPoseSamples": 7200,
+        "events": 250
+      },
+      "saveMs": {
+        "p50": 1.6000000014901161,
+        "p95": 6.200000002980232,
+        "max": 36.29999999701977
+      },
+      "firstSaveMeanMs": 1.3090000000596047,
+      "lastSaveMeanMs": 2.481000000052154,
+      "storageUsageDeltaBytes": 18275498,
+      "workerBuildMs": 304.6000000014901,
+      "finalPayloadBytes": 44674,
+      "aggregateSampleCount": 225000,
+      "heapUsedBytes": 113720042
+    }
+  ],
+  "browserVersion": "143.0.7499.4",
+  "faults": [
+    "stale writer and stale clear rejected",
+    "real IDB transaction abort rolled back atomically; retry retained delta",
+    "real busy IDB transaction times out and aborts without a partial commit",
+    "save/save/clear queue leaves no late resurrection",
+    "schemas 1/2 inline and 3 chunks restore and atomically migrate"
+  ],
+  "versionChange": {
+    "upgradeCompletedWithoutBlockedLeak": true,
+    "downgradeExplicitlyFailed": true,
+    "committedCheckpointPreserved": true
+  },
+  "quota": {
+    "mode": "session_storage_compact",
+    "quotaOverrideEnforcedByBrowser": false,
+    "faultInjectionRequired": true,
+    "aggregatePreserved": true
+  },
+  "realtime": {
+    "wallMs": 25009.400000002235,
+    "ticks": 682,
+    "maxSchedulerGapMs": 2519.199999999255,
+    "observedTechnicalGaps": [
+      {
+        "reason": "scheduler_gap",
+        "startTimestamp": 1793906497208,
+        "endTimestamp": 1793906499727,
+        "durationMs": 2519,
+        "sampleCoverage": "not_inferred"
+      }
+    ],
+    "originalTimestampsPreserved": true,
+    "errors": []
+  },
+  "restart": {
+    "browserProcessRestart": true,
+    "finalPayloadKeySequenceAndTimestampsUnchanged": true
+  },
+  "limitations": [
+    "Accelerated synthetic capture-clock samples, not 40-minute or 2-hour physical-camera validation.",
+    "Real-clock run includes a 2.5-second busy main-thread stall, not OS sleep or mobile power management; visibility transitions are deterministic tests.",
+    "Chromium reported the CDP quota override active but accepted bounded over-quota writes; quota recovery uses labeled QuotaExceededError injection.",
+    "No API, working server database, physical sensors or full end-to-end participant workflow exercised.",
+    "Source eyeSignals remain unbounded until an exact streaming attention accumulator is integrated upstream."
+  ]
+}

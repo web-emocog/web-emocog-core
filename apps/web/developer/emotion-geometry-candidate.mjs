@@ -1,4 +1,4 @@
-import { EmotionAnalyzer } from '../../participant-web/js/emotion/emotion-analyzer.js';
+import { EmotionAnalyzer } from '../../participant-web/js/emotion/emotion-analyzer.js?v=20261110-integration1';
 import { extractActionUnits } from '../../participant-web/js/emotion/au-extractor.js';
 import { EMOTION_CONFIG } from '../../participant-web/js/emotion/emotion-config.js';
 
@@ -76,7 +76,7 @@ export class GeometryEmotionAnalyzer extends EmotionAnalyzer {
 
     getCalibrationDiagnostics() {
         return { ...super.getCalibrationDiagnostics(), featureMethod:GEOMETRY_METHOD,
-            featureScales:{...GEOMETRY_SCALES}, adaptiveRate:EMOTION_CONFIG.baseline.adaptiveRate,
+            featureScales:{...GEOMETRY_SCALES}, adaptiveRate:this.requireExplicitBaseline ? 0 : EMOTION_CONFIG.baseline.adaptiveRate,
             baselineUnits:'scaled signed geometry for AU1/2/4/5/10/15/17; legacy AU for others' };
     }
 

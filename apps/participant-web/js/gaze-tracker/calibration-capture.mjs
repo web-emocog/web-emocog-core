@@ -1,5 +1,5 @@
 import { createValidationSamplingWindow } from './validation-sampling.mjs';
-import { extractFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261108-143l';
+import { extractFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261110-integration1';
 import { MIN_GAZE_CONFIDENCE } from './signal-processing.mjs?v=20261106-143';
 
 export const CALIBRATION_CAPTURE_VERSION = 'click_capture.v1';
@@ -26,7 +26,22 @@ export function calibrationCapturePolicy({ x, y }) {
         pitchLimit: 12 + (y >= 72.5 ? 8 : y <= 27.5 ? 4 : 0), allowOffCenter: y >= 72.5 };
 }
 
-export function createCalibrationCapture({ start, wallStart, policy, onLandmarkCopy = null }) {
+export function assessCalibrationFrame(frame, policy, includeOverlaps = false) {
+    const groups = extractFeatureGroups(frame?.landmarks);
+    const gazeConfidenceRejected = Boolean(groups) && confidenceFromFeatureGroups(groups) < MIN_GAZE_CONFIDENCE;
+    const precheckEyesRejected = frame?.eyes?.bothOpen === false || frame?.eyes?.left?.isOpen === false
+        || frame?.eyes?.right?.isOpen === false;
+    const eyesRejected = !groups || gazeConfidenceRejected || precheckEyesRejected;
+    const pose = frame?.pose;
+    const hasPose = (!eyesRejected || includeOverlaps) && [pose?.yaw, pose?.pitch, pose?.roll].every(Number.isFinite);
+    const poseRejected = (!eyesRejected || includeOverlaps) && (pose?.status === 'error'
+        || pose?.status === 'off_center' && !policy.allowOffCenter
+        || hasPose && (Math.abs(pose.yaw) > policy.yawLimit || Math.abs(pose.pitch) > policy.pitchLimit || Math.abs(pose.roll) > policy.rollLimit)
+        || pose?.status === 'tilted' && !hasPose);
+    return { groups, eyesRejected, poseRejected, gazeConfidenceRejected, precheckEyesRejected };
+}
+
+export function createCalibrationCapture({ start, wallStart, policy, onLandmarkCopy = null, onFrameAssessment = null }) {
     if (onLandmarkCopy !== null && typeof onLandmarkCopy !== 'function') throw new Error('invalid_capture_copy_hook');
     const clock = createValidationSamplingWindow({ monotonicStart: start, wallStart });
     if (!Number.isInteger(policy?.minFrames) || policy.minFrames < 1
@@ -46,16 +61,13 @@ export function createCalibrationCapture({ start, wallStart, policy, onLandmarkC
                 counts.outsideWindow++; return;
             }
             if (!clock.accept({ frameTimestamp: timestamp })) return;
-            const groups = extractFeatureGroups(frame?.landmarks);
-            if (!groups || confidenceFromFeatureGroups(groups) < MIN_GAZE_CONFIDENCE
-                || frame.eyes?.bothOpen === false || frame.eyes?.left?.isOpen === false || frame.eyes?.right?.isOpen === false) {
+            const assessment = assessCalibrationFrame(frame, policy, Boolean(onFrameAssessment));
+            const { groups, eyesRejected, poseRejected } = assessment;
+            onFrameAssessment?.(frame, assessment);
+            if (eyesRejected) {
                 counts.invalidEyes++; interrupt(); return;
             }
-            const pose = frame.pose;
-            const hasPose = [pose?.yaw, pose?.pitch, pose?.roll].every(Number.isFinite);
-            if (pose?.status === 'error' || pose?.status === 'off_center' && !policy.allowOffCenter
-                || hasPose && (Math.abs(pose.yaw) > policy.yawLimit || Math.abs(pose.pitch) > policy.pitchLimit || Math.abs(pose.roll) > policy.rollLimit)
-                || pose?.status === 'tilted' && !hasPose) {
+            if (poseRejected) {
                 counts.invalidPose++; interrupt(); return;
             }
             // Own just a bounded calibration copy; do not retain the frame key
@@ -86,9 +98,9 @@ export function createCalibrationCapture({ start, wallStart, policy, onLandmarkC
 // Polls the existing pipeline's latest RESULT, never runs another camera or
 // inference loop. The deadline also bounds stalls with no new camera frames.
 export async function collectCalibrationClick({ getFrame, policy, isActive = () => true,
-    onLandmarkCopy = null,
+    onLandmarkCopy = null, onFrameAssessment = null,
     now = () => performance.now(), wallNow = () => Date.now(), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
-    const start = now(), capture = createCalibrationCapture({ start, wallStart: wallNow(), policy, onLandmarkCopy });
+    const start = now(), capture = createCalibrationCapture({ start, wallStart: wallNow(), policy, onLandmarkCopy, onFrameAssessment });
     while (isActive() && now() < start + policy.timeoutMs) {
         capture.observe(getFrame(), now());
         if (capture.full) break;

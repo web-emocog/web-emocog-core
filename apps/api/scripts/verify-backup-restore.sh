@@ -4,8 +4,11 @@ set -euo pipefail
 : "${DATABASE_URL:?DATABASE_URL is required}"
 : "${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL is required}"
 
-if [[ "$DATABASE_URL" == "$RESTORE_DATABASE_URL" ]]; then
-  echo "Restore drill requires a separate target database." >&2
+node "$(dirname "$0")/../security/restore-target.js" --drill
+target_tables="$(psql --dbname="$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc \
+  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')")"
+if [[ "$target_tables" != 0 ]]; then
+  echo 'Restore drill refuses a nonempty target database.' >&2
   exit 2
 fi
 

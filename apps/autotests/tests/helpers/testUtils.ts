@@ -17,8 +17,6 @@ export function getPageUrl(): string {
     process.env.HTML_PATH,
     path.resolve(process.cwd(), 'mvp_with_precheck_1-updated.html'),
     path.resolve(process.cwd(), '..', 'participant-web', 'mvp_with_precheck_1-updated.html'),
-    path.resolve(process.cwd(), 'mvp_with_precheck_1.html'),
-    path.resolve(process.cwd(), '..', 'participant-web', 'mvp_with_precheck_1.html'),
   ].filter(Boolean) as string[];
 
   const htmlPath = candidates.find(p => existsSync(p));

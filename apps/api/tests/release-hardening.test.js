@@ -69,9 +69,16 @@ describe('S3-01 release hardening', () => {
     assert.doesNotMatch(workflow, /npm start > \/tmp\/wecog-api\.log 2>&1 &/);
     assert.match(workflow, /kill -TERM "\$\(cat \/tmp\/wecog-api\.pid\)"/);
     assert.match(workflow, /grep -q 'api_shutdown_completed' \/tmp\/wecog-api\.log/);
-    assert.match(workflow, /name: PostgreSQL concurrency and negative security tests\s+working-directory: apps\/api\s+env:\s+AUTH_RATE_LIMIT_PER_MINUTE: '1000'\s+INGEST_RATE_LIMIT_PER_MINUTE: '1000'\s+run: npm run test:postgres/);
+    const postgresStep = workflow.split('- name: PostgreSQL concurrency and negative security tests')[1]?.split('- name:')[0];
+    assert.ok(postgresStep);
+    assert.match(postgresStep, /AUTH_RATE_LIMIT_PER_MINUTE: '1000'/);
+    assert.match(postgresStep, /INGEST_RATE_LIMIT_PER_MINUTE: '1000'/);
+    assert.match(postgresStep, /IDENTITY_TEST_DATABASE_URL: [^\n]+\/emocog_test/);
+    assert.match(postgresStep, /MEDIA_TEST_DATABASE_URL: [^\n]+\/emocog_test/);
+    assert.match(postgresStep, /MEDIA_TEST_ISOLATED: '1'/);
+    assert.match(postgresStep, /run: npm run test:postgres/);
     assert.equal(require('../package.json').scripts['test:postgres'],
-      'node --test --test-concurrency=1 tests/s2-postgres.integration.test.js tests/protocol-persistence.integration.test.js');
+      'node --test --test-concurrency=1 tests/*.integration.test.js');
   });
 
   it('does not turn a cancelled superseded release run into a failed gate', () => {
@@ -83,6 +90,21 @@ describe('S3-01 release hardening', () => {
     assert.match(workflow, /\[\[ "\$BROWSER_RESULT" == "success" \]\]/);
   });
 
+  it('requires real participant completion and offline delivery rather than silently skipping the live API tests', () => {
+    const root = path.resolve(apiRoot, '../..');
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-gates.yml'), 'utf8');
+    const step = workflow.split('- name: Verify complete participant delivery against a real API')[1]?.split('- name:')[0];
+    assert.ok(step);
+    assert.match(step, /RESILIENCE_TEST_DATABASE_URL: postgres:\/\/[^\n]+@127\.0\.0\.1:5432\/protocol_fixes_test/);
+    assert.match(step, /DATABASE_URL="\$RESILIENCE_TEST_DATABASE_URL" npm run migrate:up/);
+    assert.match(step, /npx playwright test -c playwright\.session-live\.config\.ts --project=chromium --project=firefox/);
+    const config = fs.readFileSync(path.join(root, 'apps/autotests/playwright.session-live.config.ts'), 'utf8');
+    assert.match(config, /if \(!database \|\| process\.env\.NODE_ENV === 'production'\)/);
+    assert.match(config, /throw new Error/);
+    assert.match(config, /reuseExistingServer: false/);
+    assert.match(config, /testMatch: 'resilience-live\.spec\.ts'/);
+  });
+
   it('keeps Linux regressions required and runs the same WebKit checks only on demand', () => {
     const root = path.resolve(apiRoot, '../..');
     const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-gates.yml'), 'utf8');
@@ -90,6 +112,7 @@ describe('S3-01 release hardening', () => {
     const frameJob = workflow.split('  frame-pipeline-regression:')[1].split('  release-gate:')[0];
     const scripts = require('../../autotests/package.json').scripts;
     assert.match(frameJob, /runs-on: ubuntu-24\.04/);
+    assert.match(frameJob, /timeout-minutes: 30/);
     assert.doesNotMatch(workflow, /macos-|macos-webkit\.yml/);
     assert.match(webkitWorkflow, /^on:\n  workflow_dispatch:\n\npermissions:\n  contents: read$/m);
     assert.match(webkitWorkflow, /runs-on: macos-15/);
@@ -108,6 +131,10 @@ describe('S3-01 release hardening', () => {
     }
     assert.match(workflow, /needs: \[api-security, postgres-release, browser-regression, frame-pipeline-regression\]/);
     assert.match(workflow, /\[\[ "\$FRAME_PIPELINE_RESULT" == "success" \]\]/);
+    assert.match(frameJob, /npx playwright test -c playwright\.metrics\.config\.ts --project=chromium --project=firefox/);
+    assert.match(webkitWorkflow, /npx playwright test -c playwright\.metrics\.config\.ts --project=webkit/);
+    const mainConfig = fs.readFileSync(path.join(root, 'apps/autotests/playwright.config.ts'), 'utf8');
+    assert.match(mainConfig, /testIgnore:[\s\S]*?metric-corrections\.spec\.ts/);
   });
 
   it('uses identical pinned BuildKit sources and keeps the fallback fail-closed', () => {

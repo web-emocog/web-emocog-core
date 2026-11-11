@@ -1,9 +1,12 @@
 // Фаза 1.1: pre-check как gate (paper Table 1) — sessionData.precheck.pass_fail / fail_reason
-import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261025-1';
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
+import { state, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
+import { translations } from '../../translations.js?v=20261110-integration1';
 import { measureCameraFPS } from './camera.js?v=20261104-4';
-import { protocolCameraConstraints } from '../session-runtime/protocol-profile.mjs?v=20261104-4';
+import { protocolCameraConstraints } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { getFramePixels } from '../session-runtime/frame-pixels.mjs';
+import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
+import { PrecheckWindow } from '../session-runtime/precheck-window.mjs';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
     captureHeadPoseReference,
@@ -11,20 +14,6 @@ import {
     setHeadPoseGuideMode,
     updateHeadPoseGuide
 } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
-
-function dbg(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.log(scope, event, data);
-    } catch (_) { /* ignore */ }
-}
-
-function dbgErr(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.error(scope, event, data);
-    } catch (_) { /* ignore */ }
-}
 
 let _precheckFrameLogN = 0;
 let precheckSetup = null;
@@ -88,6 +77,7 @@ const PRECHECK_TEXT_FALLBACK = {
     tip_hand_on_face: 'Remove hand from face',
     status_all_good: 'All checks passed',
     status_needs_fix: 'Adjust setup',
+    status_technical_failure: 'Visual analysis is unavailable. Check that your browser supports WebGL, or use another browser. This is a technical failure, not a face-position warning.',
     status_checking: 'Checking...'
 };
 
@@ -141,6 +131,7 @@ function setCalibrationButtonState(button, { visible, enabled = false }) {
 }
 
 export function startPreCheck() {
+    if (state.runtime.participantPageExited) return Promise.resolve(false);
     if (precheckSetup) return precheckSetup.promise;
     if (state.flags.isPrecheckRunning) return Promise.resolve(true);
     if (state.runtime.sessionRuntime?.isAnalysisRunning?.()) return Promise.resolve(false);
@@ -154,7 +145,6 @@ export function startPreCheck() {
 
 async function preparePrecheck(setup) {
     const isCurrent = () => precheckSetup === setup && !setup.controller.signal.aborted;
-    console.log('Запуск pre-check камеры...');
     dbg('precheck', 'startPreCheck:clicked', {});
     ensurePrecheckLayoutStyles();
     resetHeadPoseReference();
@@ -185,7 +175,6 @@ async function preparePrecheck(setup) {
         video.srcObject = state.runtime.cameraStream;
         await waitForPrecheckVideo(video, setup.controller.signal);
         if (!isCurrent()) return false;
-        console.log(`Разрешение видео: ${video.videoWidth}x${video.videoHeight}`);
         dbg('precheck', 'video:dimensions', {
             videoWidth: video.videoWidth,
             videoHeight: video.videoHeight
@@ -193,7 +182,6 @@ async function preparePrecheck(setup) {
         const videoTrack = setup.stream.getVideoTracks()[0];
         if (videoTrack) {
             const settings = videoTrack.getSettings();
-            console.log(`[Camera] Реальный frameRate: ${settings.frameRate || 'unknown'}`);
             state.sessionData.tech.camera = {
                 width: settings.width,
                 height: settings.height,
@@ -206,10 +194,8 @@ async function preparePrecheck(setup) {
         canvas.height = video.videoHeight;
         
         // Измеряем реальный FPS камеры (2 секунды)
-        console.log('[Camera] Измеряем реальный FPS камеры...');
         const cameraFpsResult = await measureCameraFPS(video, 2000, { signal: setup.controller.signal });
         if (!isCurrent()) return false;
-        console.log(`[Camera] Измеренный FPS: ${cameraFpsResult.fps} (${cameraFpsResult.frames} кадров за ${cameraFpsResult.duration.toFixed(2)}s)`);
         dbg('precheck', 'camera:fps:measured', {
             fps: cameraFpsResult.fps,
             frames: cameraFpsResult.frames,
@@ -220,11 +206,6 @@ async function preparePrecheck(setup) {
         state.sessionData.tech.cameraFPS = cameraFpsResult.fps;
         state.sessionData.tech.cameraFPSDetails = cameraFpsResult;
         
-        // Предупреждение если FPS слишком низкий для BPM детекции
-        if (cameraFpsResult.fps < 15) {
-            console.warn(`[Camera] ⚠️ FPS камеры (${cameraFpsResult.fps}) слишком низкий для детекции BPM! Нужно минимум 15 FPS.`);
-        }
-        
         statusMessage.textContent = translations[state.currentLang].precheck_checking;
         
         // Запускаем анализ
@@ -234,12 +215,9 @@ async function preparePrecheck(setup) {
     } catch (error) {
         if (!isCurrent()) return false;
         releaseSetupStream(setup);
-        console.error('Ошибка камеры:', error);
-        dbgErr('precheck', 'camera:permission:denied', {
-            message: error?.message,
-            name: error?.name
-        });
-        statusMessage.textContent = translations[state.currentLang].precheck_camera_error + error.message;
+        dbgErr('precheck', 'camera:setup-failed');
+        statusMessage.textContent = translations[state.currentLang].precheck_camera_error_help
+            || translations.en.precheck_camera_error_help;
         precheckStatus.className = 'precheck-status error-bg';
         
         startPrecheckBtn.style.display = 'block';
@@ -260,6 +238,7 @@ export function stopPreCheck() {
     if (state.runtime.localAnalyzer && !state.runtime.sessionRuntime?.isAnalysisRunning?.()) {
         state.runtime.localAnalyzer.reset();
     }
+    if (!state.runtime.sessionRuntime?.isAnalysisRunning?.()) state.runtime.faceSegmenter?.reset?.();
 }
 
 function retirePrecheckAnalysis() {
@@ -285,6 +264,7 @@ export function startContinuousAnalysis() {
     };
     state.flags.isPrecheckRunning = true;
     state.runtime.successFrames = 0;
+    state.runtime.precheckGate = null;
     state.runtime.precheckFramesHistory = []; // Сбрасываем историю
     
     const video = document.getElementById('precheckVideo');
@@ -329,7 +309,7 @@ export function startContinuousAnalysis() {
             // Проверяем все индикаторы
             checkAllIndicators();
         } catch (error) {
-            if (isCurrent()) console.error('Ошибка анализа кадра:', error);
+            if (isCurrent()) dbgErr('precheck', 'frame:analysis-failed');
         }
         
         // Интервал анализа 
@@ -361,6 +341,7 @@ export function updateIndicators(data) {
  */
 function getPrecheckFailReason(hasFailed) {
     if (!hasFailed) return null;
+    if (hasPrecheckAnalysisError(state.runtime.precheckData)) return 'technical_analysis_failed';
     const s = state.indicatorsStatus;
     const distance = getDistanceStatus(state.runtime.precheckData);
     if (distance.failed) return 'distance_out_of_range';
@@ -371,6 +352,10 @@ function getPrecheckFailReason(hasFailed) {
     return 'unknown';
 }
 
+function hasPrecheckAnalysisError(frame) {
+    return Boolean(frame?.error || frame?.errorMessage || frame?.visibility?.error);
+}
+
 export function checkAllIndicators() {
     const cameraPreview = document.getElementById('cameraPreview');
     const startCalibBtn = document.getElementById('startCalibBtn');
@@ -378,8 +363,9 @@ export function checkAllIndicators() {
     const precheckStatus = document.querySelector('.precheck-status');
     
     // проверка: все passed или есть failed
-    let allPassed = true;
-    let hasFailed = false;
+    const analysisFailed = hasPrecheckAnalysisError(state.runtime.precheckData);
+    let allPassed = !analysisFailed;
+    let hasFailed = analysisFailed;
     const distanceStatus = getDistanceStatus(state.runtime.precheckData);
     
     Object.values(state.indicatorsStatus).forEach(status => {
@@ -411,7 +397,19 @@ export function checkAllIndicators() {
         state.runtime.successFrames = 0;
     }
     
-    const isConsistentSuccess = state.runtime.successFrames >= CONSTANTS.REQUIRED_SUCCESS_FRAMES;
+    const profile = resolveSignalProfile(state.runtime.invitationProtocolDefinition);
+    let gate = null;
+    let isConsistentSuccess = state.runtime.successFrames >= profile.precheck.required;
+    if (profile.precheck.method === 'recent-window.v2') {
+        state.runtime.precheckGate ||= new PrecheckWindow(profile.precheck);
+        const frame = state.runtime.precheckData;
+        gate = state.runtime.precheckGate.update({
+            frameId: frame?.sourceVideoTime, capturedAt: frame?.timestamp, now: performance.now(),
+            passed: allPassed,
+            criticalFailure: !!frame?.error || frame?.face?.detected !== true || distanceStatus.failed
+        });
+        isConsistentSuccess = gate.passed;
+    }
     if (isConsistentSuccess && !state.runtime.headPoseReference) {
         state.runtime.headPoseReference = captureHeadPoseReference(state.runtime.precheckData);
     }
@@ -421,6 +419,7 @@ export function checkAllIndicators() {
     const fail_reason = pass_fail ? null : getPrecheckFailReason(hasFailed);
     state.sessionData.precheck = {
         pass_fail,
+        ...(gate ? { gate, signalProfileId: profile.id } : {}),
         fail_reason,
         head_pose_reference: state.runtime.headPoseReference
             ? { ...state.runtime.headPoseReference }
@@ -437,8 +436,8 @@ export function checkAllIndicators() {
         isConsistentSuccess,
         pass_fail,
         disabled: !!startCalibBtn?.disabled,
-        successFrames: Number(state.runtime.successFrames || 0),
-        requiredSuccessFrames: Number(CONSTANTS.REQUIRED_SUCCESS_FRAMES || 0),
+        successFrames: gate ? gate.successes : Number(state.runtime.successFrames || 0),
+        requiredSuccessFrames: gate ? profile.precheck.minSuccess : profile.precheck.required,
         distanceStatus: distanceStatus?.status || null,
         distanceFailed: !!distanceStatus?.failed
     };
@@ -457,7 +456,12 @@ export function checkAllIndicators() {
     // статусное сообщение
     let statusHTML = '';
     
-    if (allPassed && isConsistentSuccess) {
+    if (analysisFailed) {
+        statusHTML = tt('status_technical_failure');
+        statusMessage.className = 'status-message';
+        precheckStatus.className = 'precheck-status error-bg';
+        startCalibBtn.disabled = true;
+    } else if (allPassed && isConsistentSuccess) {
         // Все проверки пройдены стабильно
         statusHTML = tt('status_all_good');
         statusMessage.className = 'status-message';
@@ -525,6 +529,7 @@ export function resetIndicatorsToWaiting() {
     };
     
     state.runtime.successFrames = 0;
+    state.runtime.precheckGate = null;
     state.runtime.headPoseReference = null;
     resetHeadPoseReference();
     
@@ -944,8 +949,7 @@ async function runLocalPrecheckAnalysis(videoElement, isCurrent) {
         if (!isCurrent()) return null;
         dbg('precheck', 'PrecheckAnalyzerReady:resolved', { hadPromise: paReady });
         state.runtime.localAnalyzer = new PrecheckAnalyzer({
-            onInitialized: () => console.log('[PreCheck] Локальный анализатор инициализирован'),
-            onError: (err) => console.error('[PreCheck] Ошибка анализатора:', err)
+            onError: () => dbgErr('precheck', 'face:initialization-failed')
         });
         dbg('precheck', 'PrecheckAnalyzer:instance:created', {});
     }
@@ -960,44 +964,50 @@ async function runLocalPrecheckAnalysis(videoElement, isCurrent) {
         dbg('precheck', 'FaceSegmenterReady:resolved', { hadPromise: fsReady });
         state.runtime.faceSegmenter = new FaceSegmenter({
             segmentationType: 'selfie_multiclass',
-            onInitialized: () => console.log('[PreCheck] FaceSegmenter инициализирован'),
-            onError: (err) => console.error('[PreCheck] Ошибка FaceSegmenter:', err)
+            onError: () => dbgErr('precheck', 'segmentation:initialization-failed')
         });
         dbg('precheck', 'FaceSegmenter:instance:created', {});
     }
     
     try {
         // Анализируем кадр локально
+        const sourceVideoTime = videoElement.currentTime;
         const results = await state.runtime.localAnalyzer.analyzeFrame(videoElement);
+        results.sourceVideoTime = sourceVideoTime;
         if (!isCurrent()) return null;
         
         // Анализируем видимость областей лица через FaceSegmenter
         let visibilityResults = null;
-        try {
-            // Передаём landmarks из результатов Face Landmarker для более точного анализа
-            const faceLandmarks = results.landmarks || null;
-            visibilityResults = await state.runtime.faceSegmenter.segmentFrame(
-                getFramePixels(results) || videoElement, faceLandmarks, results.timestamp
-            );
-            if (!isCurrent()) return null;
-            
-            // Добавляем результаты видимости в общие результаты
-            results.visibility = {
-                isComplete: visibilityResults.isComplete,
-                score: visibilityResults.score,
-                issues: visibilityResults.issues || [],
-                regions: visibilityResults.faceVisibility?.regions || {},
-                timestamp: visibilityResults.timestamp
-            };
-        } catch (segmentError) {
-            if (!isCurrent()) return null;
-            console.warn('[PreCheck] Ошибка FaceSegmenter:', segmentError);
-            results.visibility = {
-                isComplete: false,
-                score: 0,
-                issues: (visibilityResults && visibilityResults.issues) || ['segmenter_error'],
-                error: true
-            };
+        if (results.error || results.errorMessage) {
+            results.visibility = { isComplete: false, score: 0, error: true, issues: ['analysis_error'] };
+        } else {
+            try {
+                // Передаём landmarks из результатов Face Landmarker для более точного анализа
+                const faceLandmarks = results.landmarks || null;
+                visibilityResults = await state.runtime.faceSegmenter.segmentFrame(
+                    getFramePixels(results) || videoElement, faceLandmarks, results.timestamp
+                );
+                if (!isCurrent()) return null;
+
+                // Добавляем результаты видимости в общие результаты
+                results.visibility = {
+                    isComplete: visibilityResults.isComplete,
+                    score: visibilityResults.score,
+                    issues: visibilityResults.issues || [],
+                    regions: visibilityResults.faceVisibility?.regions || {},
+                    error: Boolean(visibilityResults.error),
+                    timestamp: visibilityResults.timestamp
+                };
+            } catch (_) {
+                if (!isCurrent()) return null;
+                dbgErr('precheck', 'segmentation:failed');
+                results.visibility = {
+                    isComplete: false,
+                    score: 0,
+                    issues: (visibilityResults && visibilityResults.issues) || ['segmenter_error'],
+                    error: true
+                };
+            }
         }
         
         // Сохраняем в историю для QC-метрик
@@ -1013,10 +1023,10 @@ async function runLocalPrecheckAnalysis(videoElement, isCurrent) {
         
     } catch (error) {
         if (!isCurrent()) return null;
-        console.error('[PreCheck] Ошибка локального анализа:', error);
+        dbgErr('precheck', 'local-analysis:failed');
         return {
             error: true,
-            errorMessage: error.message,
+            errorMessage: 'local_analysis_failed',
             illumination: { value: 0, status: 'error' },
             face: { detected: false, size: 0, status: 'error' },
             pose: { status: 'error', isStable: false },

@@ -1032,8 +1032,8 @@
       "packageId": "continuous_signals",
       "defaultSelected": true,
       "description": {
-        "ru": "Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.",
-        "en": "Background summary of observed data; not a diagnosis or an instantaneous stimulus response."
+        "ru": "Оценка дыхания по видео: периодические изменения освещения могут имитировать дыхание. Без сравнения с дыхательным поясом влияние яркости стимулов не исключено.",
+        "en": "Video-derived respiration estimate: periodic illumination changes may mimic breathing. Stimulus-brightness interference is not excluded without a respiratory-belt reference."
       },
       "kind": "metric",
       "valueType": "number",
@@ -1206,8 +1206,8 @@
     {
       "id": "face.arousal_mean",
       "label": {
-        "ru": "Мимика: возбуждение (proxy)",
-        "en": "Facial expression: arousal (proxy)"
+        "ru": "Мимика: индекс активности",
+        "en": "Facial expression: activity index"
       },
       "unit": "index",
       "channel": "face",

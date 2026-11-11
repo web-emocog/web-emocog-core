@@ -1,5 +1,6 @@
 // Фаза 0: точка входа с обновлённым UI (агрегаты без PII, опция «только сводка»). Исходный: app.js
 // Фаза 1.2: инициализация QC pause overlay
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import { state, getCurrentTaskContext, getRelativeSessionTimeMs, recordSessionEvent } from './state.js?v=20261025-1';
 import { 
     setLanguage, 
@@ -15,17 +16,16 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261108-143l';
+} from './ui-updated.js?v=20261110-integration1';
 
-import { 
-    startPreCheck, 
-    stopPreCheck
-} from './precheck-updated.js?v=20261104-4';
+import { startPreCheck } from './precheck-updated.js?v=20261110-integration1';
 
 import { 
     startCalibration, 
-    finishSession
-} from './tests-updated.js?v=20261108-143l';
+    finishSession,
+    stopParticipantTestLoops,
+    stopSessionMediaResources
+} from './tests-updated.js?v=20261110-integration1';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,27 +34,30 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261108-143l';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261110-integration1';
 import {
     getContentViewport,
     contentToLayoutViewport
 } from '../gaze-tracker/viewport-coordinates.mjs';
-import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs';
-import { createInvitationRequestPool } from '../session-runtime/invitation-http.mjs?v=20261019-hotfix1';
-import { mapMediaPreloads, preloadMediaBlob } from '../session-runtime/media-preload.mjs?v=20261104-1';
-import { fetchWithDeadline } from '../session-runtime/http.mjs?v=20261025-1';
+import { resolveParticipantApiBase } from '../session-runtime/api-base.mjs?v=20261110-integration1';
+import { createInvitationRequestPool, pinnedInvitationContentUrl } from '../session-runtime/invitation-http.mjs?v=20261110-integration1';
+import { fetchMediaWithDeadline } from '../session-runtime/media-preload.mjs?v=20261110-integration1';
+import { createBlockMediaPreparation, invitationMediaDescriptor, invitationMediaScope } from '../session-runtime/block-media-preparation.mjs?v=20261110-integration1';
+import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
 import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261102-1';
 import { mediaContentRect } from './stimulus-geometry.mjs?v=20261025-1';
 import { qcGazeSignal, QC_GAZE_SIGNAL_METHOD } from '../gaze-tracker/qc-signal.mjs';
 import {
     captureAudioConsent,
     configureAudioConsentUI
-} from '../audio/consent-ui.js';
+} from '../audio/consent-ui.js?v=20261110-integration1';
 
 const RETAINED_GAZE_TARGET = 30_000;
 const RETAINED_GAZE_HARD_CAP = 32_000;
 const PARTICIPANT_LOCALES = new Set(['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur']);
-const fetchInvitationResource = createInvitationRequestPool();
+const fetchInvitationResource = createInvitationRequestPool({ fetchRequest: fetchMediaWithDeadline });
+let invitationLoadGeneration = 0;
+let invitationLoadController = null;
 
 function participantText(ru, en, es) {
     if (state.currentLang === 'ru') return ru;
@@ -76,41 +79,9 @@ if (typeof window !== 'undefined') {
     window.__WECOG_STATE__ = state;
 }
 
-function dbg(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.log(scope, event, data);
-    } catch (_) { /* ignore */ }
-}
-
-function dbgErr(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.error(scope, event, data);
-    } catch (_) { /* ignore */ }
-}
-
 function revokeInvitationStimulusObjectUrls() {
-    const urls = Array.isArray(state.runtime?.invitationStimulusObjectUrls)
-        ? state.runtime.invitationStimulusObjectUrls
-        : [];
-    urls.forEach((url) => {
-        try { URL.revokeObjectURL(url); } catch (_) { /* ignore */ }
-    });
+    state.runtime.invitationMediaPreparation?.dispose();
     state.runtime.invitationStimulusObjectUrls = [];
-}
-
-async function preloadInvitationStimulus(contentUrl, declaredMimeType = '') {
-    if (
-        !contentUrl
-        || typeof URL === 'undefined'
-        || typeof URL.createObjectURL !== 'function'
-    ) return null;
-    const blob = await fetchInvitationResource(contentUrl, { credentials: 'include', cache: 'no-store' }, async response => {
-        if (!response.ok) throw new Error(`Stimulus preload failed: HTTP ${response.status}`);
-        return response.blob();
-    }, 120000);
-    return preloadMediaBlob(blob, declaredMimeType);
 }
 
 let _gazeDebugSampleN = 0;
@@ -123,7 +94,7 @@ export function currentStimulusContentRect() {
         const media = document.getElementById(id);
         if (media && getComputedStyle(media).display !== 'none') return mediaContentRect(media, viewport);
     }
-    if (['image', 'slides', 'video'].includes(getCurrentTaskContext().stimulusType)) return null;
+    if (['image', 'slides', 'video', 'audio'].includes(getCurrentTaskContext().stimulusType)) return null;
     const stage = document.getElementById('cognitiveStimulusArea');
     if (!stage || getComputedStyle(stage).display === 'none') return null;
     const rect = stage.getBoundingClientRect();
@@ -398,23 +369,37 @@ export function getActiveInvitationParticipantShell() {
 window.getActiveInvitationParticipantShell = getActiveInvitationParticipantShell;
 
 async function loadInvitationProtocolByCode(code) {
+    const generation = ++invitationLoadGeneration;
+    invitationLoadController?.abort();
+    const controller = new AbortController();
+    invitationLoadController = controller;
+    const assertCurrent = () => {
+        if (generation !== invitationLoadGeneration || controller.signal.aborted) {
+            const error = new Error('Invitation load cancelled'); error.name = 'AbortError'; throw error;
+        }
+    };
     window.Photodiode?.configureProtocol(null);
     const base = resolveParticipantApiBase();
-    dbg('api', 'invitation:load:start', { base, codePresent: true });
+    dbg('api', 'invitation:load:start');
     const lookupUrl = new URL(base + '/invitations/by-code/' + encodeURIComponent(code));
     const restoredSessionId = state.sessionData?.ids?.session;
     if (restoredSessionId) lookupUrl.searchParams.set('session_id', restoredSessionId);
-    const { response, payload } = await fetchInvitationResource(lookupUrl.toString(), { cache: 'no-store' }, async response => ({
+    const { response, payload } = await fetchInvitationResource(lookupUrl.toString(), {
+        cache: 'no-store', signal: controller.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer'
+    }, async response => ({
         response, payload: await response.json().catch(() => null)
     }));
+    assertCurrent();
     if (!response.ok) {
-        dbgErr('api', 'invitation:load:error', { base, status: response.status });
+        dbgErr('api', 'invitation:load:error', { status: response.status });
         let detail = '';
         try {
             const errorPayload = payload;
             detail = errorPayload?.message || errorPayload?.error || '';
         } catch (_) { /* Use the HTTP status below. */ }
-        throw new Error(detail || ('Invitation lookup failed: HTTP ' + response.status));
+        const error = new Error(detail || ('Invitation lookup failed: HTTP ' + response.status));
+        error.httpStatus = response.status;
+        throw error;
     }
     if (!payload?.definition || typeof payload.definition !== 'object' || Array.isArray(payload.definition)) throw new Error('Invalid invitation response');
     if (payload && payload.definition && typeof payload.definition === 'object') {
@@ -422,83 +407,59 @@ async function loadInvitationProtocolByCode(code) {
             ? window.WecogProtocolStimuli.referencedStimulusIds(payload.definition)
             : [];
 
-        const previousMap = state.runtime.invitationStimuliMap || {};
-        const samePublication = state.runtime.invitationProtocolMeta?.code === (payload.code || code)
-            && state.runtime.invitationProtocolMeta?.protocolId === (payload.protocol_id || null)
-            && state.runtime.invitationProtocolMeta?.publicationVersion === (payload.publication_version || null);
-        const reusable = samePublication
-            && stimulusIds.filter(id => /^\d+$/.test(id)).every(id => String(previousMap[id]?.metadata?.url || '').startsWith('blob:'));
-        let stimuliMap = reusable ? previousMap : {};
-        if (!samePublication) revokeInvitationStimulusObjectUrls();
-        if (!reusable && payload.project_id && stimulusIds.length) {
-            try {
-                const { response: stimuliResp, rows } = await fetchInvitationResource(
-                    base + '/invitations/by-code/' + encodeURIComponent(payload.code || code) + '/stimuli', {},
-                    async response => ({ response, rows: await response.json().catch(() => null) })
-                );
-                if (!stimuliResp.ok) {
-                    let detail = '';
-                    try {
-                        const errorPayload = rows;
-                        detail = errorPayload?.message || errorPayload?.error || '';
-                    } catch (_) { /* Use status-only diagnostics. */ }
-                    throw new Error(detail || `Stimulus metadata failed: HTTP ${stimuliResp.status}`);
-                }
-                if (!Array.isArray(rows)) throw new Error('Invalid stimulus metadata response');
-                if (Array.isArray(rows)) {
-                    const mappedRows = await mapMediaPreloads(rows, async (row) => {
-                            const id = String(row?.id);
-                            if (!stimulusIds.includes(id)) return null;
-                            const contentUrl = typeof row?.content_url === 'string'
-                                ? base + row.content_url
-                                : null;
-                            let displayUrl = contentUrl;
-                            const mimeType = String(row?.mime_type || '').toLowerCase();
-                            if (contentUrl && (mimeType.startsWith('image/') || mimeType.startsWith('video/'))) {
-                                const previous = previousMap[id];
-                                const cached = samePublication
-                                    && previous?.metadata?.source_url === contentUrl
-                                    && (previous?.version || null) === (row?.version || null)
-                                    && (previous?.sha256 || null) === (row?.sha256 || null)
-                                    && String(previous?.metadata?.url || '').startsWith('blob:');
-                                try {
-                                    displayUrl = cached ? previous.metadata.url : await preloadInvitationStimulus(contentUrl, mimeType);
-                                    if (displayUrl && !cached) state.runtime.invitationStimulusObjectUrls.push(displayUrl);
-                                } catch (error) {
-                                    // Keep the public invitation URL as a direct browser fallback.
-                                    // Dropping it here used to turn a valid API stimulus into a blue shape.
-                                    displayUrl = contentUrl;
-                                    console.warn('[Invitation] Failed to preload stimulus binary:', error);
-                                }
-                            }
-                            return {
-                                id,
-                                name: row?.name || id,
-                                mime_type: row?.mime_type || null,
-                                version: row?.version || null,
-                                sha256: row?.sha256 || null,
-                                metadata: {
-                                    ...(row?.metadata || {}),
-                                    ...(displayUrl ? { url: displayUrl } : {}),
-                                    ...(contentUrl ? { source_url: contentUrl } : {})
-                                }
-                            };
-                    });
-                    stimuliMap = Object.fromEntries(
-                        mappedRows.filter(Boolean).map(row => [row.id, row])
-                    );
-                    const retained = new Set(Object.values(stimuliMap).map(row => row.metadata?.url));
-                    state.runtime.invitationStimulusObjectUrls = state.runtime.invitationStimulusObjectUrls.filter(url => {
-                        if (retained.has(url)) return true;
-                        URL.revokeObjectURL(url);
-                        return false;
-                    });
-                }
-            } catch (e) {
-                console.warn('[Invitation] Failed to load stimuli metadata:', e);
-                throw e;
+        const protocolMeta = {
+            invitationId: payload.invitation_id || null,
+            protocolId: payload.protocol_id || null,
+            projectId: payload.project_id || null,
+            publicationVersion: payload.publication_version || null,
+            code: payload.code || code
+        };
+        const scope = invitationMediaScope(protocolMeta);
+        let preparation = state.runtime.invitationMediaPreparation;
+        // Refresh metadata even for the same publication: source/version/hash are
+        // part of every cache key, so changed files cannot inherit stale handles.
+        let stimuliMap = {};
+        if (payload.project_id && stimulusIds.length) {
+            const { response: stimuliResp, rows } = await fetchInvitationResource(
+                base + '/invitations/by-code/' + encodeURIComponent(payload.code || code) + '/stimuli',
+                { signal: controller.signal, cache: 'no-store', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' },
+                async response => ({ response, rows: await response.json().catch(() => null) })
+            );
+            assertCurrent();
+            if (!stimuliResp.ok || !Array.isArray(rows)) {
+                const error = new Error('Stimulus metadata is unavailable. Reconnect and retry.');
+                error.httpStatus = stimuliResp.status;
+                throw error;
             }
+            const referenced = new Set(stimulusIds.map(String));
+            stimuliMap = Object.fromEntries(rows.filter(row => referenced.has(String(row?.id))).map(row => {
+                const id = String(row.id);
+                const sourceUrl = pinnedInvitationContentUrl(base, protocolMeta.code, id, row.content_url);
+                return [id, { ...row, id, metadata: { ...(row.metadata || {}), source_url: sourceUrl, url: '' }, mediaReadiness: 'unprepared' }];
+            }));
         }
+        const manifestKey = map => JSON.stringify(Object.values(map).map(row =>
+            [row.id, row.metadata?.source_url, row.version ?? null, row.sha256 ?? null, row.size_bytes ?? null]));
+        const reusable = preparation?.scope === scope && !preparation.cache.snapshot().closed
+            && manifestKey(preparation.rows) === manifestKey(stimuliMap);
+        if (reusable) stimuliMap = preparation.rows;
+        else {
+            if (preparation?.cache.snapshot().pinnedEntries) {
+                throw new Error('Media are in use by the current block. Finish or leave that block before changing invitations.');
+            }
+            revokeInvitationStimulusObjectUrls();
+            await preparation?.cache.whenIdle();
+            assertCurrent();
+            preparation = createBlockMediaPreparation({ scope, rows: stimuliMap, request: fetchInvitationResource,
+                onStatus: stats => {
+                    if (state.runtime.invitationMediaPreparation !== preparation) return;
+                    state.runtime.invitationMediaStatus = { state: 'unprepared', ...stats };
+                    state.runtime.invitationStimulusObjectUrls = preparation.cache.urls();
+                }
+            });
+            state.runtime.invitationMediaPreparation = preparation;
+        }
+        assertCurrent();
 
         state.runtime.invitationProtocolDefinition = payload.definition;
         window.Photodiode?.configureProtocol(payload.definition);
@@ -531,9 +492,27 @@ async function loadInvitationProtocolByCode(code) {
         state.runtime.invitationSelectedMetrics = plan.hubMetrics;
         state.runtime.invitationSessionPlan = plan;
         state.runtime.invitationLoadError = null;
+        // Warm only the first media block, never the entire protocol. Later
+        // blocks are prepared on their own instruction screens, outside RT.
+        const firstMediaBlock = (payload.definition.blocks || []).find(block =>
+            window.WecogProtocolStimuli?.referencedStimulusIds({ blocks: [block] })?.some(id => stimuliMap[id]));
+        const firstIds = firstMediaBlock
+            ? window.WecogProtocolStimuli.referencedStimulusIds({ blocks: [firstMediaBlock] }) : [];
+        state.runtime.invitationMediaStatus = { state: 'preparing', preparedBlockId: firstMediaBlock?.id || null, ...preparation.cache.snapshot() };
+        try {
+            const lease = await preparation.cache.prepare(firstIds.filter(id => stimuliMap[id])
+                .map(id => invitationMediaDescriptor(stimuliMap[id])), { signal: controller.signal });
+            lease.release();
+            assertCurrent();
+            state.runtime.invitationMediaStatus = { state: 'ready', preparedBlockId: firstMediaBlock?.id || null, ...preparation.cache.snapshot() };
+        } catch (error) {
+            assertCurrent();
+            // Admission is still possible; block start has its own explicit
+            // recoverable gate and never substitutes a network source.
+            state.runtime.invitationMediaStatus = { state: 'unavailable', code: error?.code || 'media_unavailable',
+                retryAfterMs: error?.retryAfterMs || null, ...preparation.cache.snapshot() };
+        }
         dbg('api', 'invitation:load:success', {
-            protocolId: payload.protocol_id || null,
-            projectId: payload.project_id || null,
             blockCount: Array.isArray(payload.definition?.blocks) ? payload.definition.blocks.length : 0,
             hubMetrics: plan.hubMetrics,
             shell: plan.shell,
@@ -542,70 +521,29 @@ async function loadInvitationProtocolByCode(code) {
     }
 }
 
-function isPlausibleInvitationCode(code) {
-    const c = String(code || '').trim();
-    if (c.length < 1 || c.length > 64) return false;
-    return /^[a-zA-Z0-9_-]+$/.test(c);
+function extractInvitationCodeFromInput(value) {
+    return window.EmocogInvitationLink.fromInput(value);
 }
 
-function extractInvitationCodeFromInput(rawValue) {
-    const value = String(rawValue || '').trim();
-    if (!value) return null;
-
-    const fromSearchParams = (search) => {
-        try {
-            const sp = new URLSearchParams(search);
-            const code = sp.get('code');
-            return code && code.trim() ? code.trim() : null;
-        } catch (_) {
-            return null;
-        }
-    };
-
-    const fromParticipantHash = (hash) => {
-        const m = String(hash || '').match(/^#\/?participant\/([^/?#]+)/i);
-        if (!m || !m[1]) return null;
-        const c = decodeURIComponent(m[1]).trim();
-        return isPlausibleInvitationCode(c) ? c : null;
-    };
-
-    let code = null;
-    try {
-        const u = new URL(value);
-        code = u.searchParams.get('code');
-        if (code) code = code.trim();
-        if (!code) code = fromParticipantHash(u.hash);
-    } catch (_) {
-        if (value.includes('?')) {
-            const qs = value.split('?')[1] || '';
-            code = fromSearchParams(qs);
-        }
-        if (!code && value.includes('#')) {
-            code = fromParticipantHash(value.slice(value.indexOf('#')));
-        }
-    }
-
-    if (!code && /^https?:\/\//i.test(value)) {
-        return null;
-    }
-    if (!code) {
-        code = value;
-    }
-    if (!isPlausibleInvitationCode(code)) return null;
-    return code;
-}
+const participantPageController = new AbortController();
+const participantPageSignal = participantPageController.signal;
+const listenForPage = (element, event, handler) =>
+    element.addEventListener(event, handler, { signal: participantPageSignal });
+let pageExit = null;
+state.runtime.handlePreparationFailure = handlePreparationFailure;
 
 async function fetchParticipantInviteBypass() {
     try {
-        const token = localStorage.getItem('emocog_api_token');
         const base = resolveParticipantApiBase();
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
         return await fetchWithDeadline(`${base}/auth/me`, {
-            headers,
-            credentials: 'include'
-        }, async r => {
+            credentials: 'include', signal: participantPageController.signal
+        }, async (r, signal) => {
             if (!r.ok) return false;
             const me = await r.json();
+            throwIfRequestAborted(signal);
+            if (typeof me?.csrf_token === 'string') {
+                try { sessionStorage.setItem('emocog_csrf_token', me.csrf_token); } catch (_) {}
+            }
             const role = me?.user?.role || me?.role;
             return role === 'developer' || role === 'admin';
         }, 10000);
@@ -628,22 +566,31 @@ function ensureDeveloperSessionIds() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function initializeParticipantPage() {
     let initialParticipantLanguage = state.currentLang;
     try {
         const pendingLang = window.__EMOCOG_PENDING_LANG__;
+        window.__EMOCOG_PENDING_LANG__ = null;
         const storedLang = localStorage.getItem('emocog_participant_lang');
         const preferredLang = pendingLang || storedLang;
         if (PARTICIPANT_LOCALES.has(preferredLang)) initialParticipantLanguage = preferredLang;
     } catch (_) {}
     setLanguage(initialParticipantLanguage);
+    const langRu = document.getElementById('langRu');
+    const langEn = document.getElementById('langEn');
+    const participantLanguageSelect = document.getElementById('participantLanguageSelect');
+    if (langRu) listenForPage(langRu, 'click', () => setLanguage('ru'));
+    if (langEn) listenForPage(langEn, 'click', () => setLanguage('en'));
+    if (participantLanguageSelect) {
+        listenForPage(participantLanguageSelect, 'change', () => setLanguage(participantLanguageSelect.value));
+    }
 
     const sessionRuntime = await initSessionRuntime();
+    if (participantPageSignal.aborted) return;
     configureAudioConsentUI(state, state.runtime?.invitationProtocolDefinition || null);
-    dbg('app', 'app:init:start', { href: window.location.href });
-    dbg('api', 'api:base', { base: resolveParticipantApiBase() });
-    console.log('App initialized (Phase 0 – privacy & aggregates)');
+    dbg('app', 'app:init:start');
     const participantInviteBypass = await fetchParticipantInviteBypass();
+    if (participantPageSignal.aborted) return;
 
     // Код приглашения из URL (ссылка-приглашение ведёт на пречек с ?code=...)
     const params = new URLSearchParams(window.location.search);
@@ -658,11 +605,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (invitationCode && invitationCode.trim()) {
         try {
             await loadInvitationProtocolByCode(invitationCode.trim());
+            if (participantPageSignal.aborted) return;
             recordSessionEvent('invitation_protocol_loaded', {
                 protocolId: state.runtime?.invitationProtocolMeta?.protocolId || null
             });
         } catch (e) {
-            console.warn('[Invitation] Failed to load protocol by code:', e);
+            if (participantPageSignal.aborted || e?.name === 'AbortError') return;
+            dbgErr('api', 'invitation:initial-load-failed');
             state.runtime.invitationProtocolDefinition = null;
             state.runtime.invitationProtocolMeta = null;
             state.runtime.invitationLoadError = {
@@ -670,7 +619,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 message: e?.message || String(e)
             };
             recordSessionEvent('invitation_protocol_load_failed', {
-                message: e?.message || String(e)
+                httpStatus: Number.isInteger(e?.httpStatus) ? e.httpStatus : null
             });
             if (inviteHintGlobal) {
                 inviteHintGlobal.textContent = e?.message
@@ -699,8 +648,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             url.searchParams.set('code', code);
             window.location.href = url.toString();
         };
-        inviteBtn.addEventListener('click', applyInvite);
-        inviteInput.addEventListener('keydown', (e) => {
+        listenForPage(inviteBtn, 'click', applyInvite);
+        listenForPage(inviteInput, 'keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 applyInvite();
@@ -710,7 +659,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const btnStartIntro = document.getElementById('btnStartIntro');
     if (btnStartIntro) {
-        btnStartIntro.addEventListener('click', async () => {
+        listenForPage(btnStartIntro, 'click', async () => {
             if (btnStartIntro.disabled) return;
             dbg('ui', 'button:btnStartIntro', { hasInviteInput: !!inviteInput });
             const hint = inviteHint || inviteHintGlobal;
@@ -760,11 +709,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 try {
                     await loadInvitationProtocolByCode(code);
                 } catch (e) {
+                    if (e?.name === 'AbortError') return;
                     if (hint) {
                         hint.textContent = e?.httpStatus === 429
                             ? participantText(
                                 'Сервер временно ограничил загрузку. Подождите немного и нажмите «Начать» ещё раз. Ссылку менять не нужно.',
                                 'Loading is temporarily rate limited. Please wait and press Start again. You do not need a new invitation link.'
+                            )
+                            : ![400, 404, 410].includes(e?.httpStatus)
+                            ? participantText(
+                                'Приглашение пока недоступно. Проверьте подключение и повторите. Если блок уже открыт, сначала завершите его. Ссылку менять не нужно.',
+                                'The invitation is temporarily unavailable. Check your connection and retry. If a block is already open, finish it first. You do not need a new invitation link.'
                             )
                             : participantInviteBypass
                             ? 'Приглашение не найдено. Проверьте код или очистите поле для тестового режима.'
@@ -786,26 +741,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const consentCheck = document.getElementById('consentCheck');
-    if (consentCheck) consentCheck.addEventListener('change', toggleConsent);
+    if (consentCheck) listenForPage(consentCheck, 'change', toggleConsent);
+    toggleConsent({ keepError: true });
 
     const consentBtn = document.getElementById('consentBtn');
-    if (consentBtn) consentBtn.addEventListener('click', async () => {
+    if (consentBtn) listenForPage(consentBtn, 'click', async () => {
+        if (consentBtn.disabled || consentBtn.getAttribute('aria-busy') === 'true') return;
         dbg('ui', 'button:consentBtn', {});
+        consentBtn.setAttribute('aria-busy', 'true');
         consentBtn.disabled = true;
         try {
             captureAudioConsent(state);
-            await generateIdsAndProceed();
+            await generateIdsAndProceed({ signal: participantPageSignal });
+        } catch (_) {
+            if (!participantPageSignal.aborted) {
+                dbgErr('ui', 'consent:admission-failed');
+                const status = document.getElementById('consentError');
+                if (status) {
+                    status.hidden = false;
+                    status.textContent = participantText(
+                        'Не удалось продолжить. Повторите попытку.',
+                        'Could not continue. Please try again.');
+                }
+            }
         } finally {
-            consentBtn.disabled = false;
+            consentBtn.removeAttribute('aria-busy');
+            if (!participantPageSignal.aborted) toggleConsent({ keepError: true });
         }
     });
     
     const emailInput = document.getElementById('userEmail');
-    if (emailInput) emailInput.addEventListener('blur', validateEmailField);
+    if (emailInput) listenForPage(emailInput, 'blur', validateEmailField);
 
     const step3Btn = document.getElementById('step3NextBtn');
     if (step3Btn) {
-        step3Btn.addEventListener('click', async (e) => {
+        listenForPage(step3Btn, 'click', async (e) => {
             e.preventDefault();
             dbg('ui', 'button:step3NextBtn', {});
             await collectTechDataAndProceed(4);
@@ -814,47 +784,40 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const userForm = document.getElementById('userForm');
     if (userForm) {
-        userForm.addEventListener('input', checkForm);
-        userForm.addEventListener('change', checkForm);
+        listenForPage(userForm, 'input', checkForm);
+        listenForPage(userForm, 'change', checkForm);
     }
 
     const formBtn = document.getElementById('formBtn');
     if (formBtn) {
-        formBtn.addEventListener('click', (e) => {
+        listenForPage(formBtn, 'click', (e) => {
             e.preventDefault();
-            dbg('ui', 'button:formBtn', { formValid: checkForm() });
-            if (checkForm()) submitForm();
+            const formValid = checkForm();
+            dbg('ui', 'button:formBtn', { formValid });
+            if (formValid) submitForm();
         });
     }
 
     const startPrecheckBtn = document.getElementById('startPrecheckBtn');
-    if (startPrecheckBtn) startPrecheckBtn.addEventListener('click', () => {
+    if (startPrecheckBtn) listenForPage(startPrecheckBtn, 'click', async () => {
         dbg('precheck', 'button:startPrecheckBtn', {});
-        startPreCheck();
+        try { await startPreCheck(); }
+        catch (_) { handlePreparationFailure(); }
     });
 
     const startCalibBtn = document.getElementById('startCalibBtn');
-    if (startCalibBtn) startCalibBtn.addEventListener('click', () => {
+    if (startCalibBtn) listenForPage(startCalibBtn, 'click', async () => {
         dbg('calibration', 'button:startCalibBtn', {});
-        startCalibration();
+        try { await startCalibration(); }
+        catch (_) { handlePreparationFailure(); }
     });
 
     const downloadBtn = document.getElementById('downloadBtn');
-    if (downloadBtn) downloadBtn.addEventListener('click', () => downloadData());
+    if (downloadBtn) listenForPage(downloadBtn, 'click', () => downloadData());
 
     const restartBtn = document.getElementById('restartBtn');
-    if (restartBtn) restartBtn.addEventListener('click', () => window.location.reload());
+    if (restartBtn) listenForPage(restartBtn, 'click', () => window.location.reload());
 
-    const langRu = document.getElementById('langRu');
-    const langEn = document.getElementById('langEn');
-    const participantLanguageSelect = document.getElementById('participantLanguageSelect');
-    if (langRu) langRu.addEventListener('click', () => setLanguage('ru'));
-    if (langEn) langEn.addEventListener('click', () => setLanguage('en'));
-    if (participantLanguageSelect) {
-        participantLanguageSelect.addEventListener('change', () => {
-            setLanguage(participantLanguageSelect.value);
-        });
-    }
 
     // A stale developer flag must never hijack a real invitation session. It used
     // to replace participant/session ids with P-DEV/S-DEV and bypass admission.
@@ -884,12 +847,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    if (window.__EMOCOG_PENDING_LANG__) {
-        setLanguage(window.__EMOCOG_PENDING_LANG__);
-        window.__EMOCOG_PENDING_LANG__ = null;
-    }
     dbg('app', 'app:init:done', {
-        invitationCode: state.sessionData.ids.invitationCode || invitationCode || null,
+        invitationPresent: !!(state.sessionData.ids.invitationCode || invitationCode),
         developerBypass: participantInviteBypass
     });
 
@@ -925,12 +884,110 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
         sessionRuntime.promptReloadRecovery()
-            .catch(error => console.warn('[SessionRuntime] reload recovery prompt failed:', error));
+            .catch(() => dbgErr('app', 'recovery:prompt-failed'));
     }
-});
+}
+document.addEventListener('DOMContentLoaded', () => {
+    void initializeParticipantPage().catch(() => handlePreparationFailure());
+}, { once: true, signal: participantPageSignal });
 
-window.addEventListener('beforeunload', () => {
-    getSessionRuntime()?.saveCheckpoint();
-    stopPreCheckOnLeave();
-    revokeInvitationStimulusObjectUrls();
+function retireParticipantPage() {
+    if (pageExit) return;
+    const runtime = getSessionRuntime();
+    // Keep a terminal document usable (including a failed upload or local-only
+    // result). Only interrupted measurement requires a new document.
+    const keepFinal = state.runtime.participantShellReady === true
+        && ['finishing', 'completed'].includes(runtime?.machine?.state);
+    pageExit = { runtime, keepFinal, returning: false };
+    invitationLoadController?.abort();
+    if (keepFinal) return;
+
+    state.runtime.participantPageExited = true;
+    participantPageController.abort();
+    state.flags.isRecording = false;
+    const cleanup = action => {
+        try { action(); } catch (_) { dbgErr('app', 'page-exit:cleanup-failed'); }
+    };
+    cleanup(() => runtime?.suspendForPageExit());
+    cleanup(() => stopPreCheckOnLeave());
+    cleanup(() => state.runtime.stopCognitiveStimulusPlayback?.());
+    cleanup(stopParticipantTestLoops);
+    cleanup(() => {
+        void runtime?.stopContinuousModules('page_exit')?.catch(() => dbgErr('app', 'page-exit:modules-failed'));
+    });
+    cleanup(stopSessionMediaResources);
+    cleanup(() => state.runtime.qcMetrics?.stop());
+    cleanup(revokeInvitationStimulusObjectUrls);
+    for (const root of document.body.children) root.inert = true;
+}
+window.addEventListener('pagehide', retireParticipantPage);
+
+function handlePreparationFailure() {
+    if (pageExit || participantPageSignal.aborted) return;
+    // Stop uncertain measurement, but neither finish it nor erase accepted data.
+    recordSessionEvent('participant_preparation_failed', { category: 'technical', severity: 'error' });
+    dbgErr('app', 'preparation:failed');
+    retireParticipantPage();
+    if (pageExit?.keepFinal) return;
+    showPageRecovery(true);
+}
+
+async function resumeAfterPageExit() {
+    if (!pageExit || pageExit.returning) return;
+    pageExit.returning = true;
+    let saved = !state.sessionData.ids?.session;
+    if (!saved) {
+        try { saved = await pageExit.runtime?.saveCheckpoint() === true; }
+        catch (_) { dbgErr('app', 'page-exit:checkpoint-failed'); }
+    }
+    if (saved) {
+        window.location.reload();
+        return;
+    }
+    pageExit.returning = false;
+    showPageRecovery();
+}
+
+function showPageRecovery(preparationFailed = false) {
+    if (document.getElementById('participantPageRecovery')) return;
+    const panel = document.createElement('section');
+    panel.id = 'participantPageRecovery';
+    panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;overflow:auto;background:var(--bg,#fff);color:var(--text,#17231c);padding:clamp(20px,6vw,80px);';
+    const title = document.createElement('h2');
+    title.tabIndex = -1;
+    title.textContent = preparationFailed
+        ? participantText('Не удалось подготовить измерение', 'Measurement preparation failed')
+        : participantText('Не удалось сохранить точку восстановления', 'The recovery checkpoint could not be saved');
+    const explanation = document.createElement('p');
+    explanation.textContent = participantText(
+        'Измерение остановлено. Не закрывайте вкладку: повторите восстановление или скачайте имеющиеся данные.',
+        'Measurement has stopped. Keep this tab open: retry recovery or download the available data.');
+    const downloadStatus = document.createElement('p');
+    downloadStatus.hidden = true;
+    downloadStatus.setAttribute('role', 'status');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.textContent = participantText('Повторить восстановление', 'Retry recovery');
+    retry.onclick = async () => {
+        retry.disabled = true;
+        try { await resumeAfterPageExit(); } finally { retry.disabled = false; }
+    };
+    const download = document.createElement('button');
+    download.type = 'button';
+    download.textContent = participantText('Скачать имеющиеся данные', 'Download available data');
+    download.onclick = () => downloadData(downloadStatus);
+    panel.append(title, explanation, retry, download, downloadStatus);
+    document.body.appendChild(panel);
+    title.focus();
+}
+
+window.addEventListener('pageshow', event => {
+    if (!event.persisted) {
+        // Form controls can be restored by the browser without a change event.
+        if (!participantPageSignal.aborted) toggleConsent({ keepError: true });
+        return;
+    }
+    if (!pageExit) return;
+    if (pageExit.keepFinal) { pageExit = null; return; }
+    void resumeAfterPageExit();
 });

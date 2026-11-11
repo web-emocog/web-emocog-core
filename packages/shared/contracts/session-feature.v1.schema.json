@@ -3,196 +3,776 @@
   "$id": "session_feature.v1",
   "title": "POST /ingest participant SessionFeature payload",
   "type": "object",
-  "required": ["schemaVersion", "ids", "lifecycle", "events"],
+  "required": [
+    "schemaVersion",
+    "ids",
+    "lifecycle",
+    "events"
+  ],
   "properties": {
-    "schemaVersion": { "const": "session_feature.v1" },
+    "schemaVersion": {
+      "const": "session_feature.v1"
+    },
     "delivery": {
-      "type": "object", "required": ["schemaVersion", "sequence", "kind"],
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "sequence",
+        "kind"
+      ],
       "properties": {
-        "schemaVersion": { "const": "session_delivery.v1" },
-        "sequence": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-        "kind": { "enum": ["checkpoint", "final"] }
-      }, "additionalProperties": false
+        "schemaVersion": {
+          "const": "session_delivery.v1"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "kind": {
+          "enum": [
+            "checkpoint",
+            "final"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "ids": {
       "type": "object",
-      "required": ["session"],
+      "required": [
+        "session"
+      ],
       "properties": {
-        "session": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "participant": { "type": ["string", "null"], "maxLength": 64 },
-        "invitationCode": { "type": ["string", "null"], "maxLength": 64 }
+        "session": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "participant": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "invitationCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "participantAlias": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        }
       },
       "additionalProperties": false
     },
     "meta": {
-      "type": ["object", "null"],
-      "properties": {
-        "user": {
-          "type": ["object", "null"],
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
           "properties": {
-            "interfaceLanguage": { "type": ["string", "null"], "maxLength": 32 }
+            "user": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "interfaceLanguage": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 32
+                }
+              },
+              "additionalProperties": false
+            },
+            "tech": {
+              "type": [
+                "object",
+                "null"
+              ]
+            }
           },
           "additionalProperties": false
         },
-        "tech": { "type": ["object", "null"], "properties": {
-          "gazeFeatureMethod": { "const": "same_eye_iris.v2" },
-          "gazeCalibrationSampling": { "const": "open_eye_calibration.v1" },
-          "gazeQcSignalMethod": { "const": "corrected_validity.v1" }
-        } }
-      },
-      "additionalProperties": false
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/meta"
+        }
+      ]
     },
-    "precheck": { "type": ["object", "null"] },
-    "qcSummary": { "type": ["object", "null"] },
-    "attentionMetrics": { "type": ["object", "null"] },
-    "blink_summary": { "type": ["object", "null"] },
-    "perclos_summary": { "type": ["object", "null"] },
-    "body_pose_summary": { "type": ["object", "null"] },
+    "precheck": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/precheck"
+        }
+      ]
+    },
+    "qcSummary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/qcSummary"
+        }
+      ]
+    },
+    "attentionMetrics": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/attentionMetrics"
+        }
+      ]
+    },
+    "blink_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/blink_summary"
+        }
+      ]
+    },
+    "perclos_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/perclos_summary"
+        }
+      ]
+    },
+    "body_pose_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/body_pose_summary"
+        }
+      ]
+    },
     "audio_summary": {
-      "type": ["object", "null"],
-      "properties": {
-        "schemaVersion": { "const": "audio_session.v1" },
-        "algorithmVersion": { "type": "string" },
-        "status": { "type": "string" },
-        "enabled": { "type": "boolean" },
-        "consentGranted": { "type": "boolean" },
-        "permission": { "type": "string" },
-        "rawAudioStored": { "const": false },
-        "rawAudioTransmitted": { "const": false },
-        "sampleRate": { "type": ["number", "null"] },
-        "windowDurationMs": { "type": ["number", "null"] },
-        "windowCount": { "type": "number" },
-        "acceptedWindowCount": { "type": "number" },
-        "rejectedWindowCount": { "type": "number" },
-        "droppedWindowCount": { "type": "number" },
-        "durationMs": { "type": "number" },
-        "qualityMean": { "type": ["number", "null"] },
-        "reliabilityMean": { "type": ["number", "null"] },
-        "markers": { "type": "array", "maxItems": 32, "items": { "type": "object" } },
-        "windows": { "type": "array", "maxItems": 360, "items": { "type": "object" } },
-        "provenance": { "type": "object" },
-        "disclaimer": { "type": "string", "maxLength": 512 }
-      },
-      "required": [
-        "schemaVersion",
-        "enabled",
-        "consentGranted",
-        "rawAudioStored",
-        "rawAudioTransmitted",
-        "windows"
-      ],
-      "additionalProperties": false
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "audio_session.v1"
+            },
+            "algorithmVersion": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "consentGranted": {
+              "type": "boolean"
+            },
+            "permission": {
+              "type": "string"
+            },
+            "rawAudioStored": {
+              "const": false
+            },
+            "rawAudioTransmitted": {
+              "const": false
+            },
+            "sampleRate": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "windowDurationMs": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "windowCount": {
+              "type": "number"
+            },
+            "acceptedWindowCount": {
+              "type": "number"
+            },
+            "rejectedWindowCount": {
+              "type": "number"
+            },
+            "droppedWindowCount": {
+              "type": "number"
+            },
+            "durationMs": {
+              "type": "number"
+            },
+            "qualityMean": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "reliabilityMean": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "markers": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object"
+              }
+            },
+            "windows": {
+              "type": "array",
+              "maxItems": 360,
+              "items": {
+                "type": "object"
+              }
+            },
+            "provenance": {
+              "type": "object"
+            },
+            "disclaimer": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "enabled",
+            "consentGranted",
+            "rawAudioStored",
+            "rawAudioTransmitted",
+            "windows"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/audio_summary"
+        }
+      ]
     },
     "multimodal_summary": {
-      "type": ["object", "null"],
-      "properties": {
-        "schemaVersion": { "const": "multimodal_session.v1" },
-        "enabled": { "type": "boolean" },
-        "gamerMode": { "type": "boolean" },
-        "timebase": { "type": "object" },
-        "head": { "type": "object" },
-        "body": { "type": "object" },
-        "eventCount": { "type": "number" },
-        "rawVideoStored": { "const": false },
-        "rawLandmarksStored": { "const": false },
-        "disclaimer": { "type": "string", "maxLength": 512 }
-      },
-      "required": [
-        "schemaVersion",
-        "enabled",
-        "rawVideoStored",
-        "rawLandmarksStored"
-      ],
-      "additionalProperties": false
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "multimodal_session.v1"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "gamerMode": {
+              "type": "boolean"
+            },
+            "timebase": {
+              "type": "object"
+            },
+            "head": {
+              "type": "object"
+            },
+            "body": {
+              "type": "object"
+            },
+            "eventCount": {
+              "type": "number"
+            },
+            "rawVideoStored": {
+              "const": false
+            },
+            "rawLandmarksStored": {
+              "const": false
+            },
+            "disclaimer": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "enabled",
+            "rawVideoStored",
+            "rawLandmarksStored"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/multimodal_summary"
+        }
+      ]
     },
     "multimodal_heatmap": {
-      "type": ["object", "null"],
-      "properties": {
-        "schemaVersion": { "const": "multimodal_heatmap.v1" },
-        "coordinateSpace": { "const": "stimulus_normalized_0_1" },
-        "presentationCountTotal": { "type": "number" },
-        "presentationCountStored": { "type": "number" },
-        "presentationsTruncated": { "type": "boolean" },
-        "alignmentP95Ms": { "type": ["number", "null"], "maximum": 100 },
-        "presentations": { "type": "array", "maxItems": 50, "items": { "type": "object" } },
-        "legend": { "type": "array", "maxItems": 8, "items": { "type": "object" } },
-        "disclaimer": { "type": "string", "maxLength": 512 }
-      },
-      "required": ["schemaVersion", "coordinateSpace", "presentations"],
-      "additionalProperties": false
-    },
-    "blocks": { "type": "array", "maxItems": 200, "items": { "type": "object" } },
-    "emotion_summary": { "type": ["object", "null"] },
-    "bpm_summary": { "type": ["object", "null"] },
-    "rppg_summary": { "type": ["object", "null"] },
-    "respiration_summary": { "type": ["object", "null"] },
-    "experimentMeta": { "type": ["object", "null"] },
-    "cognitiveResults": { "type": "array", "maxItems": 5000, "items": { "type": "object" } },
-    "gazeValidation": {
-      "type": ["object", "null"],
-      "properties": {
-        "samplingVersion": { "const": "unique_capture.v1" },
-        "sampling": {
-          "type": "array", "maxItems": 14,
-          "items": {
-            "type": "object", "additionalProperties": false,
-            "required": ["stage", "pointIndex", "version", "clock", "attempted", "accepted", "duplicate", "beforeWindow", "missingTimestamp", "clockChanged"],
-            "properties": {
-              "stage": { "enum": ["correction", "benchmark"] },
-              "pointIndex": { "type": "integer", "minimum": 0, "maximum": 8 },
-              "version": { "const": "unique_capture.v1" },
-              "clock": { "enum": [null, "monotonic", "wall"] },
-              "attempted": { "type": "integer", "minimum": 0, "maximum": 60 },
-              "accepted": { "type": "integer", "minimum": 0, "maximum": 60 },
-              "duplicate": { "type": "integer", "minimum": 0, "maximum": 60 },
-              "beforeWindow": { "type": "integer", "minimum": 0, "maximum": 60 },
-              "missingTimestamp": { "type": "integer", "minimum": 0, "maximum": 60 },
-              "clockChanged": { "type": "integer", "minimum": 0, "maximum": 60 }
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "multimodal_heatmap.v1"
             },
-            "allOf": [{ "if": { "properties": { "stage": { "const": "benchmark" } } },
-              "then": { "properties": { "pointIndex": { "maximum": 4 } } } }]
+            "coordinateSpace": {
+              "const": "stimulus_normalized_0_1"
+            },
+            "presentationCountTotal": {
+              "type": "number"
+            },
+            "presentationCountStored": {
+              "type": "number"
+            },
+            "presentationsTruncated": {
+              "type": "boolean"
+            },
+            "alignmentP95Ms": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "maximum": 100
+            },
+            "presentations": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object"
+              }
+            },
+            "legend": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object"
+              }
+            },
+            "disclaimer": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "coordinateSpace",
+            "presentations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/multimodal_heatmap"
+        }
+      ]
+    },
+    "blocks": {
+      "allOf": [
+        {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object"
           }
         },
-        "coverage": {
-          "type": "object", "additionalProperties": false,
-          "required": ["version", "expectedTargets", "observedTargets", "missingTargetIndices", "complete"],
-          "properties": {
-            "version": { "const": "target_coverage.v1" },
-            "expectedTargets": { "const": 5 },
-            "observedTargets": { "type": "integer", "minimum": 0, "maximum": 5 },
-            "missingTargetIndices": { "type": "array", "maxItems": 5, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 4 } },
-            "complete": { "type": "boolean" }
-          }
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/blocks"
         }
-      },
-      "dependentRequired": { "samplingVersion": ["sampling", "coverage"], "sampling": ["samplingVersion", "coverage"] }
+      ]
+    },
+    "emotion_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/emotion_summary"
+        }
+      ]
+    },
+    "bpm_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/bpm_summary"
+        }
+      ]
+    },
+    "rppg_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/rppg_summary"
+        }
+      ]
+    },
+    "respiration_summary": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/respiration_summary"
+        }
+      ]
+    },
+    "experimentMeta": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/experimentMeta"
+        }
+      ]
+    },
+    "cognitiveResults": {
+      "allOf": [
+        {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "type": "object"
+          }
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/cognitiveResults"
+        }
+      ]
+    },
+    "gazeValidation": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "samplingVersion": {
+              "const": "unique_capture.v1"
+            },
+            "sampling": {
+              "type": "array",
+              "maxItems": 14,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "stage",
+                  "pointIndex",
+                  "version",
+                  "clock",
+                  "attempted",
+                  "accepted",
+                  "duplicate",
+                  "beforeWindow",
+                  "missingTimestamp",
+                  "clockChanged"
+                ],
+                "properties": {
+                  "stage": {
+                    "enum": [
+                      "correction",
+                      "benchmark"
+                    ]
+                  },
+                  "pointIndex": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8
+                  },
+                  "version": {
+                    "const": "unique_capture.v1"
+                  },
+                  "clock": {
+                    "enum": [
+                      null,
+                      "monotonic",
+                      "wall"
+                    ]
+                  },
+                  "attempted": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60
+                  },
+                  "accepted": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60
+                  },
+                  "duplicate": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60
+                  },
+                  "beforeWindow": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60
+                  },
+                  "missingTimestamp": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60
+                  },
+                  "clockChanged": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "stage": {
+                          "const": "benchmark"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "pointIndex": {
+                          "maximum": 4
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "coverage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "version",
+                "expectedTargets",
+                "observedTargets",
+                "missingTargetIndices",
+                "complete"
+              ],
+              "properties": {
+                "version": {
+                  "const": "target_coverage.v1"
+                },
+                "expectedTargets": {
+                  "const": 5
+                },
+                "observedTargets": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5
+                },
+                "missingTargetIndices": {
+                  "type": "array",
+                  "maxItems": 5,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4
+                  }
+                },
+                "complete": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "dependentRequired": {
+            "samplingVersion": [
+              "sampling",
+              "coverage"
+            ],
+            "sampling": [
+              "samplingVersion",
+              "coverage"
+            ]
+          }
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/gazeValidation"
+        }
+      ]
     },
     "gaze_analytics": {
-      "type": ["object", "null"],
-      "properties": {
-        "schemaVersion": { "const": "gaze_analytics.v1" },
-        "coordinateSpace": { "const": "stimulus_normalized_0_1" },
-        "summary": { "type": "object" },
-        "presentations": { "type": "array", "maxItems": 200, "items": {
-          "type": "object", "properties": {
-            "presentationStartMs": { "type": ["number", "null"], "minimum": 0 }
-          }
-        } }
-      },
-      "required": ["schemaVersion", "coordinateSpace", "summary", "presentations"],
-      "additionalProperties": false
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "gaze_analytics.v1"
+            },
+            "coordinateSpace": {
+              "const": "stimulus_normalized_0_1"
+            },
+            "summary": {
+              "type": "object"
+            },
+            "presentations": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "presentationStartMs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "coordinateSpace",
+            "summary",
+            "presentations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/gaze_analytics"
+        }
+      ]
     },
-    "rt_alignment": { "$ref": "./rt-alignment.v1.schema.json" },
-    "physiology_intervals": { "$ref": "./physiology-intervals.v1.schema.json" },
+    "rt_alignment": {
+      "$ref": "./rt-alignment.v1.schema.json"
+    },
+    "physiology_intervals": {
+      "$ref": "./physiology-intervals.v1.schema.json"
+    },
     "events": {
-      "type": "array",
-      "items": { "$ref": "./session-event.v1.schema.json" },
-      "maxItems": 250
+      "allOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "./session-event.v1.schema.json"
+          },
+          "maxItems": 250
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/events"
+        }
+      ]
     },
-    "lifecycle": { "$ref": "./session-lifecycle.v1.schema.json" },
-    "startTime": { "type": ["number", "string", "null"] },
-    "testHub": { "type": ["object", "null"] },
-    "gazeTests": { "type": ["object", "null"] }
+    "lifecycle": {
+      "allOf": [
+        {
+          "$ref": "./session-lifecycle.v1.schema.json"
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/lifecycle"
+        }
+      ]
+    },
+    "startTime": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ]
+    },
+    "testHub": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/testHub"
+        }
+      ]
+    },
+    "gazeTests": {
+      "allOf": [
+        {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        {
+          "$ref": "session-feature-data.v1.schema.json#/properties/gazeTests"
+        }
+      ]
+    },
+    "quality_assessment": {
+      "$ref": "session-feature-data.v1.schema.json#/properties/quality_assessment"
+    }
   },
   "additionalProperties": false
 }

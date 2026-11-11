@@ -39,7 +39,7 @@
 </head>
 <body>
   <script src="../api-base.js?v=20260819-1"></script>
-  <script src="../http-client.js?v=20261027-1"></script>
+  <script src="../http-client.js?v=20261110-integration1"></script>
   <script src="../account-storage.js?v=20261019-5"></script>
   <script src="../staff-session.js?v=20261027-1"></script>
   <script src="../auth-guard.js?v=20261027-1"></script>
@@ -58,7 +58,7 @@
     })();
   </script>
   <div class="top">
-    <h1>Emotion Test (valence / arousal)</h1>
+    <h1>Индексы мимики</h1>
     <a href="../developer.html?v=20261104-4">← К тестам разработчика</a>
   </div>
   <div class="layout">
@@ -72,15 +72,16 @@
         <button id="stopBtn" type="button" class="secondary">Остановить</button>
       </div>
       <p id="status" class="status">Готов к запуску.</p>
+      <p>Индексы FACS описывают видимые признаки мимики. Баллы не являются вероятностями эмоций, а активность мимики не измеряет физиологическое возбуждение.</p>
       <div class="metrics">
         <div class="metric">
-          <div class="k">valence</div>
-          <div class="v" id="valenceV">0.000</div>
+          <div class="k">Валентность мимики (индекс)</div>
+          <div class="v" id="valenceV">—</div>
           <div class="hint">Диапазон: -1..1</div>
         </div>
         <div class="metric">
-          <div class="k">arousal</div>
-          <div class="v" id="arousalV">0.000</div>
+          <div class="k">Активность мимики (индекс)</div>
+          <div class="v" id="arousalV">—</div>
           <div class="hint">Диапазон: 0..1</div>
         </div>
         <div class="metric">
@@ -94,9 +95,9 @@
           <div class="hint">MediaPipe / профиль протокола</div>
         </div>
         <div class="metric" style="grid-column:1/-1;">
-          <div class="k">доминирующая эмоция (FACS, с калибровкой)</div>
+          <div class="k">Выражение с наибольшим баллом FACS</div>
           <div class="v" id="dominantV">—</div>
-          <div class="hint" id="scoresHint">Топ-3 по scores</div>
+          <div class="hint" id="scoresHint">Баллы модели, не вероятность эмоции</div>
         </div>
       </div>
     </section>
@@ -111,6 +112,6 @@
     </section>
   </div>
 
-  <script type="module" src="emotion-test.js?v=20261104-4"></script>
+  <script type="module" src="emotion-test.js?v=20261110-integration1"></script>
 </body>
 </html>

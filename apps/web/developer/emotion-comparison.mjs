@@ -1,3 +1,4 @@
+import { medianBaseline } from '../../participant-web/js/emotion/neutral-calibration.mjs';
 import { EmotionDiagnostics } from './emotion-diagnostics.mjs';
 import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-candidate.mjs';
 
@@ -25,6 +26,22 @@ export class EmotionComparison extends EmotionDiagnostics {
         this.paired={attempts:0,commonValid:0,dominantAgreement:0,candidateMsTotal:0,candidateMsMax:0};
         this.trials=[];
         this.activeTrial=null;
+    }
+
+    attachNeutralCalibration(collector) {
+        const samples = [];
+        this.candidate.startSession(null, { explicitNeutral: true, requiredNeutralFrames: collector.policy.minSamples });
+        collector.onAccepted = (landmarks, progress) => {
+            if (progress.acceptedSamples === 1) samples.length = 0;
+            const result = this.candidate.analyzeLandmarks(landmarks);
+            if (result.rawActionUnits) samples.push(result.rawActionUnits);
+            if (progress.status === 'ready') {
+                if (samples.length === progress.acceptedSamples) {
+                    this.candidate.setNeutralBaseline(medianBaseline(samples), samples.length);
+                }
+                samples.length = 0;
+            }
+        };
     }
 
     record(sample, calibration, landmarks) {

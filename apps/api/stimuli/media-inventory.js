@@ -26,7 +26,7 @@ async function collectMediaInventory(queryable, uploadsRoot) {
     const resolved = await resolveReadableServerOwnedUploadPath(uploadsRoot, entry.file);
     if (!resolved.ok) throw new Error('Referenced media is unavailable');
     const stat = await fs.promises.stat(resolved.absolutePath);
-    const checksum = await hashFile(resolved.absolutePath);
+    const checksum = await hashFile(resolved.absolutePath, resolved.root);
     if ((entry.bytes !== null && stat.size !== entry.bytes) || (entry.sha256 && entry.sha256 !== checksum)) {
       throw new Error('Referenced media integrity check failed');
     }

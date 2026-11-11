@@ -4,6 +4,7 @@ const TEXT = {
         restore: 'Не удалось прочитать сохранённую сессию. Не очищайте данные сайта и не начинайте новое прохождение. Закройте другие вкладки исследования и повторите загрузку; если ошибка останется, обратитесь к исследователю.',
         network: 'Нет ответа от сервера. Проверьте подключение и повторите попытку. Сессия не будет создана повторно.',
         permission: 'Сервер отклонил доступ к сессии. Проверьте приглашение у исследователя.',
+        consent: 'У сервера нет записи о согласии. Не начинайте новое прохождение и не удаляйте данные браузера. Сохраните доступный JSON и обратитесь к исследователю.',
         expired: 'Приглашение истекло или исчерпан лимит участников. Обратитесь к исследователю.',
         server: 'На сервере временная ошибка. Повторите попытку позже.',
         invalid: 'Сервер отклонил формат данных. Скачайте JSON и передайте исследователю.',
@@ -19,6 +20,7 @@ const TEXT = {
         restore: 'The saved session could not be read. Do not clear site data or start another run. Close other study tabs and reload; if the error persists, contact the researcher.',
         network: 'The server did not respond. Check your connection and retry. This will not create a duplicate session.',
         permission: 'The server denied access to this session. Ask the researcher to check the invitation.',
+        consent: 'The server has no record of consent. Do not start another run or clear browser data. Keep the available JSON and contact the researcher.',
         expired: 'The invitation expired or its participant limit was reached. Contact the researcher.',
         server: 'The server is temporarily unavailable. Please retry later.',
         invalid: 'The server rejected the data format. Download the JSON and send it to the researcher.',
@@ -32,6 +34,7 @@ const TEXT = {
 };
 export function persistenceErrorCode(error, stage) {
     if (stage === 'local' || error?.code === 'checkpoint_persistence_failed') return 'local';
+    if ((error?.payload?.code || error?.code) === 'consent_receipt_required') return 'consent';
     const status = error?.httpStatus ?? error?.status;
     if (status === 410) return 'expired';
     if ([401, 403, 404, 409].includes(status)) return 'permission';

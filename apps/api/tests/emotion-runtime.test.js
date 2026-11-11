@@ -111,6 +111,25 @@ describe('browser emotion runtime', () => {
     assert.deepEqual(api.getEmotionSummary(sessionData), { valence_mean: null, arousal_mean: null, n: 0 });
   }
 
+  it('rejects corrupt coordinates without inventing neutral affect or contaminating the baseline', async () => {
+    const api = await import(pathToFileURL(path.join(root, 'participant-web/js/emotion/public-api.js')).href);
+    api.analyzer.startSession('corrupt-landmarks-regression');
+    const nan = makeLandmarks(); nan[61].x = NaN;
+    const infinite = makeLandmarks(); infinite[1].z = Infinity;
+    const state = { sessionData: {} };
+    for (const landmarks of [Array(478), Array.from({ length: 478 }, () => ({})), nan, infinite]) {
+      const sample = api.getEmotionSample({ landmarks });
+      assert.equal(sample.dominant, 'unknown');
+      assert.equal(sample.valence, null);
+      assert.equal(sample.arousal, null);
+      assert.equal(sample.missingData, true);
+      assert.equal(sample.degraded, true);
+      assert.equal(sample.dataQuality, 'missing');
+      api.appendEmotionSample(state, sample);
+    }
+    assert.equal(api.analyzer._auBaselineFrames, 0);
+    assert.equal(api.getEmotionSummary(state.sessionData).n, 0);
+  });
   it('abstains when only camera metadata is available', async () => {
     const api = await import(pathToFileURL(path.join(root, 'participant-web/js/emotion/public-api.js')).href);
     const sample = api.getEmotionSample({ face: { detected: true }, illumination: { score: 0.95 } });

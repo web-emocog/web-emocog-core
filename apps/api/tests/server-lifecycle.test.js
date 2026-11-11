@@ -88,4 +88,27 @@ describe('production server lifecycle', () => {
     assert.equal(processRef.listenerCount('SIGTERM'), 0);
     assert.equal(processRef.listenerCount('unhandledRejection'), 0);
   });
+
+  it('fatal diagnostics never serialize attacker-controlled names, codes or messages', () => {
+    const processRef = new EventEmitter(), logger = createLogger();
+    const remove = installProcessHandlers({ processRef, logger, shutdown: async () => {} });
+    processRef.emit('uncaughtException', { name: 'PRIVATE_EMAIL', code: 'PRIVATE_TOKEN', message: 'PRIVATE_PASSWORD' });
+    remove();
+    assert.equal(JSON.parse(logger.lines[0]).event, 'uncaught_exception');
+    assert.ok(!logger.lines.join('').includes('PRIVATE'));
+  });
+
+  it('stops service workers before the pool, even when their shutdown fails', async () => {
+    const order = [], processRef = { exitCode: 0 }, logger = createLogger();
+    const controller = createShutdownController({
+      server: { listening: true, close(callback) { this.listening = false; callback(); }, closeIdleConnections() {} },
+      pool: { async end() { order.push('database'); } },
+      app: { locals: { shutdownHooks: [async () => { order.push('mail'); throw new Error('PRIVATE'); }] } },
+      graceMs: 1000, processRef, logger,
+    });
+    await assert.rejects(controller.shutdown());
+    assert.deepEqual(order, ['mail', 'database']);
+    assert.equal(processRef.exitCode, 1);
+    assert.ok(!logger.lines.join('').includes('PRIVATE'));
+  });
 });

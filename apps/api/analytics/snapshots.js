@@ -4,7 +4,7 @@ const { HttpError } = require('../security/http-error');
 const { METRIC_CATALOG } = require('./query');
 const { sessionVersion, resolveProtocolVersion } = require('./protocol-versions');
 
-const ANALYTICS_BACKEND_VERSION = 'analytics-api-1.2.0';
+const ANALYTICS_BACKEND_VERSION = 'analytics-api-1.3.0';
 const QC_RULES_VERSION = 'qc-rules-1.1.0';
 
 function stableJson(value) {
@@ -41,8 +41,8 @@ function collectProtocolOptions(definition) {
     blocks.push({
       id: blockId,
       hasTrials: Boolean(block?.trials?.length || block?.content?.trials?.length),
-      name_ru: block?.title || block?.content?.title || blockId,
-      name_en: block?.title_en || block?.content?.title_en || block?.title || blockId,
+      name_ru: block?.title || block?.label || block?.content?.title || `Блок ${blockIndex + 1}`,
+      name_en: block?.title_en || block?.label_en || block?.content?.title_en || block?.title || block?.label || `Block ${blockIndex + 1}`,
     });
     const config = block?.blockConfig || block?.content || {};
     const trials = Array.isArray(block?.trials) ? block.trials : (block?.content?.trials || []);
@@ -180,7 +180,7 @@ async function loadProtocol(queryable, projectId, protocolId) {
   return result.rows[0] || null;
 }
 
-async function loadCandidateSessions(queryable, projectId, protocolId) {
+async function loadCandidateSessions(queryable, projectId, protocolId, { lock = false } = {}) {
   const result = await queryable.query(
     `SELECT s.id, s.session_id,
             COALESCE(s.participant_id, NULLIF(f.payload->'ids'->>'participantAlias', '')) AS participant_id,
@@ -197,7 +197,7 @@ async function loadCandidateSessions(queryable, projectId, protocolId) {
      LEFT JOIN session_features f ON f.session_id = s.id
      WHERE s.project_id = $1 AND s.protocol_id = $2
      ORDER BY s.started_at ASC NULLS LAST, s.id ASC
-     LIMIT 2001`,
+     LIMIT 2001${lock ? ' FOR SHARE OF s' : ''}`,
     [projectId, protocolId]
   );
   if (result.rows.length > 2000) throw new HttpError(422, 'This protocol requires paginated analysis: the 2000-session limit was exceeded', 'analytics_session_limit');
@@ -268,7 +268,9 @@ async function createSnapshot(pool, query, userId) {
     const current = await loadProtocol(client, query.projectId, query.protocolId);
     if (!current) throw new HttpError(404, 'Protocol not found', 'analytics_protocol_not_found');
     const protocol = await resolveProtocolVersion(client, current, query.protocolVersion);
-    const candidates = await loadCandidateSessions(client, query.projectId, query.protocolId);
+    // Keep erasure behind this transaction until it can remove the newly saved
+    // snapshot too. Lock only sessions, not nullable joined measurement rows.
+    const candidates = await loadCandidateSessions(client, query.projectId, query.protocolId, { lock: true });
     if (query.comparison?.design === 'independent') {
       const roster = new Set(candidates.filter(row => !sessionMatchesQuery(row, { ...query, comparison: null,
         filters: { ...query.filters, sessionIds: [], participantIds: [], qcMode: 'all', minValidFraction: null, minSignalConfidence: null,
@@ -312,7 +314,12 @@ async function createSnapshot(pool, query, userId) {
       ]
     );
     return publicSnapshot({ ...inserted.rows[0], session_rows: included });
-  }, { isolationLevel: 'REPEATABLE READ' });
+  }, { isolationLevel: 'REPEATABLE READ' }).catch(error => {
+    if (['40001', '40P01'].includes(error.code)) {
+      throw new HttpError(409, 'Session selection changed; apply the selection again', 'analytics_selection_changed');
+    }
+    throw error;
+  });
 }
 
 async function loadSnapshot(pool, snapshotId) {
@@ -324,6 +331,9 @@ async function loadSnapshot(pool, snapshotId) {
 }
 
 async function hydrateSnapshot(pool, snapshotRow) {
+  if (snapshotRow.versions?.backend !== ANALYTICS_BACKEND_VERSION) {
+    throw new HttpError(409, 'Analytics methods changed; apply the selection again', 'analytics_snapshot_stale');
+  }
   const current = await loadProtocol(pool, snapshotRow.project_id, snapshotRow.protocol_id);
   if (!current) throw new HttpError(409, 'Snapshot protocol is unavailable', 'analytics_snapshot_stale');
   const protocol = await resolveProtocolVersion(pool, current, snapshotRow.query.protocolVersion);

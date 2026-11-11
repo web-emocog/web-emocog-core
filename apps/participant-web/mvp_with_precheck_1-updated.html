@@ -7,16 +7,17 @@
     <title>wecog — исследование</title>
     <link rel="icon" href="../web/assets/wecog-mark.svg" type="image/svg+xml">
 
-    <link rel="stylesheet" href="style.css?v=20260919-1">
+    <link rel="stylesheet" href="style.css?v=20261106-metrics1">
     <link rel="stylesheet" href="participant-redesign.css?v=20261013-1">
+    <script src="../shared/invitation-link.js?v=1"></script>
     <script>
       (function () {
         var params = new URLSearchParams(window.location.search || '');
         if (params.get('code')) return;
-        var m = (window.location.hash || '').match(/^#\/?participant\/([^/?#]+)/i);
-        if (!m || !m[1]) return;
+        var code = window.EmocogInvitationLink?.fromHash(window.location.hash || '');
+        if (!code) return;
         var u = new URL(window.location.href);
-        u.searchParams.set('code', decodeURIComponent(m[1]).trim());
+        u.searchParams.set('code', code);
         u.hash = '';
         window.location.replace(u.pathname + u.search);
       })();
@@ -55,15 +56,14 @@
     </script>
     
     <!-- PreCheck Analyzer Module (v2.0 MediaPipe Face Landmarker) -->
-    <script src="js/precheck-analyzer.js?v=20261104-4"></script>
+    <script src="js/precheck-analyzer.js?v=20261110-integration1"></script>
     <!-- Face Segmenter Module (проверка видимости частей лица) -->
-    <script src="js/face-segmenter.js?v=20261104-4"></script>
+    <script src="js/face-segmenter.js?v=20261110-integration1"></script>
     <!-- QC Metrics Module -->
-    <script src="js/qc-metrics.js?v=20261104-4"></script>
+    <script src="js/qc-metrics.js?v=20261110-integration1"></script>
     <!-- Gaze Tracker Module (iris landmarks → screen coordinates) -->
-    <script src="js/gaze-tracker.js?v=20261108-143l"></script>
-    <script src="js/face-mask-collector.js?v=1.0.0"></script>
-    <script src="js/web-page/consent-signature.js"></script>
+    <script src="js/gaze-tracker.js?v=20261110-integration1"></script>
+    <script src="js/web-page/consent-signature.js?v=20261110-integration1"></script>
     <script src="js/photodiode.js?v=20261009-1"></script>
 
 </head>
@@ -108,6 +108,10 @@
             </div>
         </div>
         <div id="fullscreenCalibPoint" class="fullscreen-calib-point"></div>
+        <div id="calibrationCaptureStatus" hidden role="status" style="position:fixed;left:50%;transform:translateX(-50%);z-index:2003;width:min(640px,calc(100vw - 32px));box-sizing:border-box;padding:12px;border:1px solid #cfd8d2;border-radius:12px;background:#fff;color:#12241d;text-align:center;pointer-events:none;">
+            <span id="calibrationCaptureStatusText"></span>
+            <button id="calibrationRecoveryBtn" type="button" class="btn btn-secondary" hidden style="pointer-events:auto;margin:8px auto 0;">Вернуться к проверке камеры</button>
+        </div>
     </div>
 
     <!-- Область теста слежения за фигурами (fullscreen) -->
@@ -510,6 +514,7 @@
                     <div id="cogShape" class="cog-shape"></div>
                     <img id="cogImage" class="cog-image" style="display: none;">
                     <video id="cogVideo" class="cog-image cog-video" style="display: none;" playsinline preload="auto"></video>
+                    <audio id="cogAudio" style="display: none;" preload="auto"></audio>
                     <div id="cogFixation" class="cog-fixation">+</div>
                     <div id="cogFeedback" class="cog-feedback" style="display: none;"></div>
                 </div>
@@ -533,6 +538,7 @@
                 <input type="checkbox" id="aggregatesOnlyCheckbox">
                 <span data-i18n="label_aggregates_only">Только сводка (без сырых массивов)</span>
             </label>
+            <p id="downloadResultStatus" role="status" hidden></p>
             <button class="btn" id="downloadBtn" data-i18n="btn_download">📥 Скачать JSON</button>
             <button class="btn btn-secondary" id="restartBtn" data-i18n="btn_restart">Начать заново</button>
         </div>
@@ -565,68 +571,10 @@
       }
     </script>
     <script src="../shared/protocol-stimuli.js?v=20261013-1"></script>
-    <script src="../shared/standard-stimuli.js?v=20261025-1"></script>
+    <script src="../shared/standard-stimuli.js?v=20261110-integration1"></script>
     <script src="../web/cognitive-task-protocols.js?v=20260919-1"></script>
     <script src="../shared/survey-contract.js?v=20260828-2"></script>
-    <script type="module" src="js/web-page/app-updated.js?v=20261108-143l"></script>
-    <script>
-      (function () {
-        const ru = document.getElementById('langRu');
-        const en = document.getElementById('langEn');
-        const switcher = document.querySelector('.lang-switch');
-        const localeSelect = document.getElementById('participantLanguageSelect');
-        const supportedLocales = ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur'];
-
-        if (switcher) {
-          switcher.style.pointerEvents = 'auto';
-          switcher.style.position = 'relative';
-          switcher.style.zIndex = '1001';
-        }
-        if (ru) ru.style.pointerEvents = 'auto';
-        if (en) en.style.pointerEvents = 'auto';
-        if (localeSelect) localeSelect.style.pointerEvents = 'auto';
-
-        function applyLanguageWithRetry(lang, retriesLeft) {
-          if (typeof window.setLanguage === 'function') {
-            try {
-              window.setLanguage(lang);
-              try { localStorage.setItem('emocog_participant_lang', lang); } catch (_) {}
-            } catch (_) {}
-            return true;
-          }
-          if (retriesLeft > 0) {
-            setTimeout(function () {
-              applyLanguageWithRetry(lang, retriesLeft - 1);
-            }, 60);
-          } else {
-            window.__EMOCOG_PENDING_LANG__ = lang;
-          }
-          return false;
-        }
-
-        function onLangClick(lang, ev) {
-          if (ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-          }
-          applyLanguageWithRetry(lang, 20);
-        }
-
-        if (ru) ru.addEventListener('click', function (ev) { onLangClick('ru', ev); }, true);
-        if (en) en.addEventListener('click', function (ev) { onLangClick('en', ev); }, true);
-        if (localeSelect) localeSelect.addEventListener('change', function (ev) {
-          applyLanguageWithRetry(ev.target.value, 20);
-        });
-
-        try {
-          const persistedLang = localStorage.getItem('emocog_participant_lang');
-          if (supportedLocales.indexOf(persistedLang) >= 0) {
-            if (localeSelect) localeSelect.value = persistedLang;
-            applyLanguageWithRetry(persistedLang, 20);
-          }
-        } catch (_) {}
-      })();
-    </script>
+    <script type="module" src="js/web-page/app-updated.js?v=20261110-integration1"></script>
     
 </body>
 </html>

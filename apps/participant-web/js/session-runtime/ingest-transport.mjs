@@ -1,6 +1,6 @@
 import { SESSION_CONTRACT_VERSION } from './contracts.mjs';
-import { resolveParticipantApiBase } from './api-base.mjs';
-import { fetchWithDeadline } from './http.mjs?v=20261025-1';
+import { resolveParticipantApiBase } from './api-base.mjs?v=20261110-integration1';
+import { fetchWithDeadline, throwIfRequestAborted, waitForRequestDelay } from './http.mjs?v=20261110-integration1';
 
 const DEFAULT_RETRIES = 4;
 const DEFAULT_BACKOFF_MS = 1500;
@@ -27,9 +27,9 @@ function writeCooldown(key, cooldown) {
     } catch (_) {}
 }
 
-function getStaffToken() {
+function getStaffCsrfToken() {
     try {
-        return localStorage.getItem('emocog_api_token') || null;
+        return sessionStorage.getItem('emocog_csrf_token') || null;
     } catch (_) {
         return null;
     }
@@ -78,7 +78,7 @@ function parseRetryAfter(value, now = Date.now()) {
     return Number.isFinite(dateMs) ? Math.max(0, dateMs - now) : null;
 }
 
-async function issueParticipantIngestToken(apiBase, sessionId, invitationCode) {
+async function issueParticipantIngestToken(apiBase, sessionId, invitationCode, consentReceipt, signal) {
     const { response, body } = await fetchJsonWithTimeout(
         `${apiBase}/invitations/by-code/${encodeURIComponent(invitationCode)}/ingest-token`,
         {
@@ -88,7 +88,8 @@ async function issueParticipantIngestToken(apiBase, sessionId, invitationCode) {
                 Accept: 'application/json'
             },
             credentials: 'omit',
-            body: JSON.stringify({ session_id: sessionId })
+            signal,
+            body: JSON.stringify({ session_id: sessionId, ...(consentReceipt ? { consent_receipt: consentReceipt } : {}) })
         }
     );
     if (!response.ok || typeof body?.token !== 'string' || !body.token.trim()) {
@@ -104,24 +105,35 @@ async function issueParticipantIngestToken(apiBase, sessionId, invitationCode) {
 
 /** Reserve a participant run before the long experiment starts. */
 export async function primeParticipantSession(options = {}) {
+    throwIfRequestAborted(options.signal);
     const sessionId = options.sessionId;
     const invitationCode = options.invitationCode;
     if (!invitationCode) return { ok: true, skipped: true };
     if (!sessionId) throw new Error('sessionId is required for participant admission');
     const cached = readCachedIngestToken(sessionId, invitationCode);
-    if (cached) return { ok: true, cached: true };
+    if (cached && !options.consentReceipt) return { ok: true, cached: true };
     const apiBase = options.apiBase || resolveParticipantApiBase();
     try {
-        await issueParticipantIngestToken(apiBase, sessionId, invitationCode);
+        await issueParticipantIngestToken(apiBase, sessionId, invitationCode, options.consentReceipt, options.signal);
     } catch (error) {
         if (!isRetryable(error) || error.retryAfterMs > 1500) throw error;
-        await wait(error.retryAfterMs ?? 500);
-        await issueParticipantIngestToken(apiBase, sessionId, invitationCode);
+        await waitForRequestDelay(error.retryAfterMs ?? 500, options.signal);
+        await issueParticipantIngestToken(apiBase, sessionId, invitationCode, options.consentReceipt, options.signal);
     }
     return { ok: true, admitted: true };
 }
 
-async function resolveAuthorization(apiBase, payload, forceRefresh = false) {
+// Recovery may re-send recorded consent, but never invent it from an old token.
+export function recordedConsentReceipt(sessionData, sessionId) {
+    if (!sessionId || sessionData?.ids?.session !== sessionId) return null;
+    const informed = sessionData.consent?.informed_consent;
+    const privacy = sessionData.consent?.privacy_policy;
+    if (informed?.accepted !== true || privacy?.accepted !== true
+        || informed.documentVersion !== 'informed-consent-v1.0' || privacy.documentVersion !== 'privacy-policy-v1.0') return null;
+    return { informedConsentVersion: informed.documentVersion, privacyPolicyVersion: privacy.documentVersion };
+}
+
+async function resolveAuthorization(apiBase, payload, forceRefresh = false, consentReceipt = null) {
     const sessionId = payload?.ids?.session;
     const invitationCode = payload?.ids?.invitationCode;
     if (invitationCode) {
@@ -130,13 +142,11 @@ async function resolveAuthorization(apiBase, payload, forceRefresh = false) {
             const cached = readCachedIngestToken(sessionId, invitationCode);
             if (cached) return `Bearer ${cached}`;
         }
-        const token = await issueParticipantIngestToken(apiBase, sessionId, invitationCode);
+        const token = await issueParticipantIngestToken(apiBase, sessionId, invitationCode, consentReceipt);
         return `Bearer ${token}`;
     }
 
-    const token = getStaffToken();
-    if (!token) throw new Error('Authorization token is required for ingest without invitation');
-    return `Bearer ${token}`;
+    return null;
 }
 
 function isRetryable(error) {
@@ -202,19 +212,25 @@ export async function sendSessionFeature(payload, options = {}) {
         notify(options.onAttempt, { attempt, retries, endpoint: '/ingest' });
         try {
             const refreshedThisAttempt = forceTokenRefresh;
-            const authorization = await resolveAuthorization(apiBase, payload, refreshedThisAttempt);
+            const authorization = await resolveAuthorization(apiBase, payload, refreshedThisAttempt, options.consentReceipt);
             forceTokenRefresh = false;
+            const csrf = authorization ? null : getStaffCsrfToken();
+            if (!authorization && !csrf) {
+                const error = new Error('Sign in again before sending a staff session');
+                error.httpStatus = 401;
+                throw error;
+            }
             const { response, body: responseBody } = await fetchJsonWithTimeout(`${apiBase}/ingest`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'application/json',
-                    Authorization: authorization,
+                    ...(authorization ? { Authorization: authorization } : { 'X-CSRF-Token': csrf }),
                     ...(options.idempotencyKey
                         ? { 'Idempotency-Key': options.idempotencyKey }
                         : {})
                 },
-                credentials: 'omit',
+                credentials: authorization ? 'omit' : 'include',
                 body
             }, timeoutMs);
             if (response.ok) {
@@ -247,7 +263,8 @@ export async function sendSessionFeature(payload, options = {}) {
             error.httpStatus = response.status;
             error.payload = responseBody;
             error.retryAfterMs = parseRetryAfter(response.headers?.get?.('Retry-After'));
-            if (response.status === 401 && payload.ids?.invitationCode && !refreshedThisAttempt) {
+            const needsConsent = response.status === 403 && responseBody?.code === 'consent_receipt_required' && options.consentReceipt;
+            if ((response.status === 401 || needsConsent) && payload.ids?.invitationCode && !refreshedThisAttempt) {
                 clearParticipantIngestToken(payload.ids.session, payload.ids.invitationCode);
                 forceTokenRefresh = true;
             } else {

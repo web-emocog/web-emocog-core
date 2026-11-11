@@ -1,9 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { getPageUrl } from './helpers/testUtils';
 
 const PAGE_URL = getPageUrl();
 const CODE = 'INV-LARGE-SYNTHETIC';
 const IMAGE = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const IMAGE_SHA256 = createHash('sha256').update(IMAGE).digest('hex');
 
 async function mockInvitation(page: Page, count: number, options: { rateLimitOnce?: boolean; unavailableOnce?: boolean } = {}) {
   const state = { requests: new Map<number, number>(), active: 0, peak: 0, version: 1, lookups: 0 };
@@ -30,7 +32,7 @@ async function mockInvitation(page: Page, count: number, options: { rateLimitOnc
     if (url.pathname.endsWith(`/by-code/${CODE}/stimuli`)) {
       await route.fulfill({ json: Array.from({ length: count }, (_, index) => ({
         id: index + 1, name: `Synthetic image ${index + 1}`, mime_type: 'image/png',
-        version: `revision-${state.version}`, sha256: `synthetic-${state.version}-${index + 1}`, metadata: {},
+        version: `revision-${state.version}`, sha256: IMAGE_SHA256, size_bytes: IMAGE.length, metadata: {},
         content_url: `/invitations/by-code/${CODE}/stimuli/${index + 1}/content`,
       })) });
       return;
@@ -53,16 +55,17 @@ async function mockInvitation(page: Page, count: number, options: { rateLimitOnc
   return state;
 }
 
-async function waitForImages(page: Page, count: number) {
+async function waitForImages(page: Page, count: number, timeout = 10_000) {
   await page.waitForFunction(expected => {
     const map = (window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap;
     return Object.values(map || {}).filter((row: any) => row.metadata?.url?.startsWith('blob:')).length === expected;
-  }, count);
+  }, count, { timeout });
 }
 
 test.describe('Large invitation media hotfix', () => {
   for (const count of [63, 360]) {
     test(`preloads ${count} images, recovers from 429, and starts without downloading them twice`, async ({ page }) => {
+      if (count === 360) test.setTimeout(60_000);
       const mock = await mockInvitation(page, count, { rateLimitOnce: true });
       await page.addInitScript(() => {
         const original = HTMLImageElement.prototype.decode;
@@ -76,7 +79,8 @@ test.describe('Large invitation media hotfix', () => {
         };
       });
       await page.goto(`${PAGE_URL}?code=${CODE}`, { waitUntil: 'load' });
-      await waitForImages(page, count);
+      // Preparation is serialized to keep one decode workspace in memory.
+      await waitForImages(page, count, count === 360 ? 40_000 : 10_000);
       const decoding = await page.evaluate(() => {
         const audit = (window as any).__MEDIA_DECODE_AUDIT__;
         return { active: audit.active, peak: audit.peak, finished: audit.finished,
@@ -106,7 +110,7 @@ test.describe('Large invitation media hotfix', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const url = new URL('js/web-page/experimental_task-updated.js?v=20261108-143l', window.location.href).href;
+        const url = new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', window.location.href).href;
         const { loadAndStartCognitiveTask } = await import(url);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
@@ -119,7 +123,7 @@ test.describe('Large invitation media hotfix', () => {
   test('only retries an unavailable image and retains successfully decoded files', async ({ page }) => {
     const mock = await mockInvitation(page, 63, { unavailableOnce: true });
     await page.goto(`${PAGE_URL}?code=${CODE}`, { waitUntil: 'load' });
-    await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationProtocolDefinition));
+    await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.invitationMediaStatus?.state === 'unavailable');
     expect(mock.requests.get(1)).toBe(1);
     await page.locator('#btnStartIntro').click();
     await expect(page.locator('#step2')).toHaveClass(/active/);
@@ -169,7 +173,7 @@ test.describe('Large invitation media hotfix', () => {
 test('temporary image/video probes release their sources while cached media remains readable', async ({ page }) => {
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async png => {
-    const modulePath = '/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261104-1';
+    const modulePath = '/apps/participant-web/js/session-runtime/media-preload.mjs?v=20261110-integration1';
     const { preloadMediaBlob } = await import(modulePath);
     const videos: HTMLVideoElement[] = [], images: HTMLImageElement[] = [];
     const create = document.createElement.bind(document), decode = HTMLImageElement.prototype.decode;

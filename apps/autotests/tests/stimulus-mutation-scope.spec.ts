@@ -28,6 +28,7 @@ for (const boundary of ['project', 'account', 'origin']) {
         if (url.pathname === '/auth/permissions') return json({ operations: [] });
         if (url.pathname === '/projects') return json([{ id: 7, name: 'A' }, { id: 8, name: 'B' }]);
         if (url.pathname === '/stimuli/folders') return json([]);
+        if (url.pathname === '/stimuli/operations' && method === 'POST') return json({ state: 'reserved' });
         if (url.pathname === '/stimuli') {
           const project = Number(url.searchParams.get('project_id'));
           return json([{ id: switched ? 43 : 42, project_id: project, created_by: 1,
@@ -36,7 +37,7 @@ for (const boundary of ['project', 'account', 'origin']) {
         }
         if (url.pathname === '/stimuli/convert') {
           if (mutation === 'conversion-response') { pending = true; await held; }
-          return json({ stimuli: [{ id: 52, project_id: 7, name: 'Old project page', mime_type: 'image/png',
+          return json({ stimuli: [{ id: 52, project_id: 7, name: 'Old project page', mime_type: 'image/png', current_version_id: 'version-52',
             content_url: '/stimuli/52/content', preview_url: '/stimuli/52/preview', metadata: {} }] });
         }
         if (url.pathname === '/stimuli/52/preview' && mutation === 'conversion-thumbnail') {

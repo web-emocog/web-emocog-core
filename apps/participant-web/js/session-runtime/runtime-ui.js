@@ -1,6 +1,6 @@
 import { ERROR_KINDS, SESSION_STATES } from './contracts.mjs';
 import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
-import { translations } from '../../translations.js?v=20261025-1';
+import { translations } from '../../translations.js?v=20261110-integration1';
 
 const POLICY_TEXT = {
     ru: {
@@ -81,6 +81,8 @@ function langText(getLanguage) {
 
 const ISSUE_TRANSLATION_KEYS = Object.freeze({
     continuous_modules_not_started: 'runtime_continuous_start_failed',
+    frame_analysis_failed: 'runtime_generic_technical',
+    frame_pipeline_exception: 'runtime_generic_technical',
     face_missing: 'tip_face_not_found',
     low_light: 'tip_light_dark',
     head_pose: 'tip_pose_unstable',
@@ -180,6 +182,11 @@ export class SessionRuntimeUI {
         window.addEventListener('wecog:session-phase-change', this.boundPhaseChange);
         this.currentPhase = document.documentElement.dataset.sessionPhase || null;
         this._refreshText();
+    }
+
+    suspend() {
+        window.removeEventListener('wecog:session-phase-change', this.boundPhaseChange);
+        if (this.root) this.root.inert = true;
     }
 
     _refreshText() {
