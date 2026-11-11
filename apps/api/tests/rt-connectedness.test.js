@@ -115,6 +115,25 @@ test('descriptive Spearman handles ties, missing/incorrect/QC data and CSV formu
   assert.ok(output.includes('baselineMs'));
 });
 
+test('sorted average ranks match an independent tied-rank reference without changing input order', () => {
+  const averageRanks = values => values.map(value => 1 + values.filter(item => item < value).length
+    + (values.filter(item => item === value).length - 1) / 2);
+  for (let sample = 1; sample <= 20; sample++) {
+    const pairs = Array.from({ length: 60 }, (_, i) => ({ x: (i * sample) % 13, y: (i * 7 + sample) % 17 }));
+    const before = structuredClone(pairs);
+    const x = averageRanks(pairs.map(pair => pair.x)), y = averageRanks(pairs.map(pair => pair.y));
+    const meanX = x.reduce((a, b) => a + b) / x.length, meanY = y.reduce((a, b) => a + b) / y.length;
+    const cov = x.reduce((total, value, i) => total + (value - meanX) * (y[i] - meanY), 0);
+    const varianceX = x.reduce((total, value) => total + (value - meanX) ** 2, 0);
+    const varianceY = y.reduce((total, value) => total + (value - meanY) ** 2, 0);
+    const expected = varianceX && varianceY ? cov / Math.sqrt(varianceX * varianceY) : null;
+    if (expected === null) assert.equal(spearman(pairs), null);
+    else assert.ok(Math.abs(spearman(pairs) - expected) < 1e-12);
+    assert.deepEqual(pairs, before);
+  }
+  assert.equal(spearman(Array.from({ length: 10000 }, (_, x) => ({ x, y: -x }))), -1);
+});
+
 test('long sessions flag truncation and malformed local histories cannot crash aggregation', () => {
   const events = Array.from({ length: 220 }, (_, index) => [
     { type: 'stimulus_on', blockId: 'rt', trialId: String(index), timestamp: index * 2000 + 10000, response_mode: 'keyboard' },

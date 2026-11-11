@@ -35,11 +35,12 @@ const {
 } = require('../ingest/idempotency');
 const {
   findInvitationByCode,
-  reserveInvitationRun,
 } = require('../ingest/invitation-repository');
 const { withTransaction, lockSessionKey } = require('../db/transaction');
 const { HttpError } = require('../security/http-error');
 const { requireSessionFeaturePayload } = require('../security/payload-policy');
+const { assertPublishedSurveyResponses } = require('../security/survey-admission');
+const { build: assessMetricQuality } = require('../../shared/metric-quality');
 const protocolQuality = require('../../shared/protocol-quality');
 const { createHash } = require('node:crypto');
 
@@ -422,6 +423,7 @@ async function resolveIngestContext(client, req, raw, idempotency, locked = fals
   const sessionRow = await client.query(
     `SELECT s.id, s.participant_id, s.started_at, s.stopped_at, s.project_id,
             s.protocol_id, s.invitation_id,
+            EXISTS (SELECT 1 FROM session_consent_receipts r WHERE r.session_db_id = s.id) AS consent_recorded,
             sf.payload->'lifecycle'->>'finishAttemptId' AS stored_finish_attempt_id,
             sf.payload->'delivery'->>'sequence' AS stored_delivery_sequence,
             sf.payload->'experimentMeta'->>'serverDeliveryDigest' AS stored_delivery_digest,
@@ -453,6 +455,9 @@ async function resolveIngestContext(client, req, raw, idempotency, locked = fals
           'Session does not match invitation, project, or protocol',
           'session_invitation_mismatch'
         );
+      }
+      if (!storedSession.consent_recorded) {
+        throw new HttpError(403, 'A consent receipt is required', 'consent_receipt_required');
       }
     } else if (!authenticated) {
       throw new HttpError(403, 'Invitation required for participant ingest');
@@ -524,20 +529,14 @@ async function resolveIngestContext(client, req, raw, idempotency, locked = fals
       participant_id: storedSession.participant_id || participantId || null,
     };
   } else {
-    if (!invitation) {
-      throw new HttpError(
-        authenticated ? 409 : 403,
-        authenticated
-          ? 'Staff must create a project-scoped session before ingest'
-          : 'Invitation required to create session',
-        'session_must_be_precreated'
-      );
+    if (invitation && (await client.query(`SELECT 1 FROM session_erasure_tombstones
+      WHERE session_key_hash = encode(sha256(convert_to($1::text, 'UTF8')), 'hex')`, [sessionId])).rowCount) {
+      throw new HttpError(410, 'Session has been erased', 'session_erased');
     }
-    if (invitation.max_runs != null && Number(invitation.used_runs) >= Number(invitation.max_runs)) {
-      throw new HttpError(410, 'Invitation run limit reached', 'invitation_run_limit');
-    }
-    scope = { project_id: invitation.project_id, protocol_id: invitation.protocol_id,
-      participant_id: participantId };
+    throw new HttpError(authenticated ? 409 : 403,
+      authenticated ? 'Staff must create a project-scoped session before ingest'
+        : 'Complete participant admission before ingest',
+      'session_must_be_precreated');
   }
   let protocolDefinition = invitation?.protocol_definition || null;
   if (!protocolDefinition && storedSession?.invitation_id) {
@@ -558,6 +557,7 @@ async function resolveIngestContext(client, req, raw, idempotency, locked = fals
     }
   }
 
+  assertPublishedSurveyResponses(raw.events, protocolDefinition);
   return { storedSession, invitation, scope, protocolDefinition };
 }
 
@@ -658,45 +658,13 @@ router.post(
         }
         const { storedSession, invitation, scope, protocolDefinition } = context;
         const existingSession = Boolean(storedSession);
-        let dbSessionId = storedSession?.id;
-        if (storedSession) {
-          if (!storedSession.participant_id && participantId) {
-            await client.query(
-              `UPDATE sessions
-               SET participant_id = $1, updated_at = current_timestamp
-               WHERE id = $2 AND participant_id IS NULL`,
-              [participantId, dbSessionId]
-            );
-          }
-        } else {
-          const reserved = await reserveInvitationRun(client, invitation.id);
-          if (!reserved) {
-            throw new HttpError(
-              410,
-              'Invitation run limit reached',
-              'invitation_run_limit'
-            );
-          }
-          const startCandidate = raw.startTime ? new Date(raw.startTime) : new Date();
-          const startTime = Number.isFinite(startCandidate.getTime())
-            ? startCandidate
-            : new Date();
-          const inserted = await client.query(
-            `INSERT INTO sessions (
-               session_id, participant_id, project_id, protocol_id, invitation_id, started_at
-             )
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, participant_id, project_id, protocol_id`,
-            [
-              sessionId,
-              participantId,
-              invitation.project_id,
-              invitation.protocol_id,
-              invitation.id,
-              startTime,
-            ]
+        const dbSessionId = storedSession.id;
+        if (!storedSession.participant_id && participantId) {
+          await client.query(
+            `UPDATE sessions SET participant_id = $1, updated_at = current_timestamp
+             WHERE id = $2 AND participant_id IS NULL`,
+            [participantId, dbSessionId]
           );
-          dbSessionId = inserted.rows[0].id;
         }
 
         let completionApplied = false;
@@ -725,10 +693,16 @@ router.post(
         const protocolQc = protocolQuality.evaluate(protocolDefinition, raw.qcSummary);
         const qcSummary = raw.qcSummary ? { ...raw.qcSummary, protocolQc } : null;
         payload = { ...payload, qcSummary };
+        payload.ids = { ...payload.ids };
+        delete payload.ids.invitationCode;
+        payload.events = payload.events.map(({ invitationCode: _invitationCode, ...event }) => event);
         if (payload.experimentMeta) {
           payload.experimentMeta = { ...payload.experimentMeta };
           delete payload.experimentMeta.serverDeliveryDigest;
+          delete payload.experimentMeta.invitationEntryCode;
+          delete payload.experimentMeta.protocolProgress;
         }
+        payload.quality_assessment = assessMetricQuality(payload, { serverAcknowledged: true, protocolReport: protocolQc });
         if (raw.delivery) payload.experimentMeta = { ...(payload.experimentMeta || {}), serverDeliveryDigest: deliveryDigest(raw) };
         let { validity, qc_score, fail_reasons } = computeQcValidity(qcSummary, payload);
         ({ validity, qc_score, fail_reasons } = mergeBehavioralRtQc(
@@ -861,6 +835,9 @@ router.post(
       return res.status(result.status).json(result.body);
     } catch (err) {
       if (res.destroyed) return;
+      if (err.constraint === 'session_erasure_tombstone') {
+        return res.status(410).json({ error: 'Session has been erased', code: 'session_erased' });
+      }
       if (err instanceof RtAnalysisError) {
         const oversized = err.code === 'rt_analyzer_input_limit';
         if (!oversized) res.set('Retry-After', '5');

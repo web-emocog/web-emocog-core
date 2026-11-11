@@ -228,7 +228,9 @@
               "enum": [
                 "task.rt_mean_ms",
                 "task.rt_median_ms",
-                "task.accuracy_pct"
+                "task.accuracy_pct",
+                "physiology.bpm_mean",
+                "physiology.respiration_mean"
               ]
             },
             "axis": {
@@ -243,7 +245,12 @@
             "comparisonId": {
               "$ref": "#/$defs/id"
             }
-          }
+          },
+          "if": {
+            "properties": { "metricId": { "enum": ["physiology.bpm_mean", "physiology.respiration_mean"] } },
+            "required": ["metricId"]
+          },
+          "then": { "properties": { "axis": { "const": "block" } } }
         },
         {
           "type": "object",
@@ -262,7 +269,9 @@
               "enum": [
                 "task.rt_mean_ms",
                 "task.rt_median_ms",
-                "task.accuracy_pct"
+                "task.accuracy_pct",
+                "physiology.bpm_mean",
+                "physiology.respiration_mean"
               ]
             },
             "referenceParticipantIds": {

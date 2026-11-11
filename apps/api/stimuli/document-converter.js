@@ -183,6 +183,7 @@ async function convertDocument(options) {
     }
     await fs.promises.mkdir(tempRoot, { recursive: true, mode: 0o700 });
     tempDir = await fs.promises.mkdtemp(path.join(tempRoot, 'job-'));
+    await options.onWorkspace?.(path.relative(uploadsRoot, tempDir));
     const document = await validateDocument(source.absolutePath, originalName, declaredMime, maxBytes);
     const sourcePath = path.join(tempDir, `source${document.extension}`);
     // Convert the exact validated bytes, never reopen the upload pathname.

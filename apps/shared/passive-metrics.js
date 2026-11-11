@@ -14,10 +14,13 @@
     ['body.velocity_mean', 'Движение корпуса: средняя скорость', 'Body movement: mean velocity', 'torso/s', 'head_hands'],
     ['body.velocity_p95', 'Движение корпуса: P95 сохранённого окна', 'Body movement: retained-window P95', 'torso/s', 'head_hands'],
     ['face.valence_mean', 'Мимика: валентность (proxy)', 'Facial expression: valence (proxy)', 'index', 'face'],
-    ['face.arousal_mean', 'Мимика: возбуждение (proxy)', 'Facial expression: arousal (proxy)', 'index', 'face']
+    ['face.arousal_mean', 'Мимика: индекс активности', 'Facial expression: activity index', 'index', 'face']
   ].map(([id, ru, en, unit, channel]) => ({ id, label: { ru, en }, unit, channel,
     packageId: 'continuous_signals', defaultSelected: true,
-    description: { ru: 'Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.',
+    description: id === 'physiology.respiration_mean' ? {
+      ru: 'Оценка дыхания по видео: периодические изменения освещения могут имитировать дыхание. Без сравнения с дыхательным поясом влияние яркости стимулов не исключено.',
+      en: 'Video-derived respiration estimate: periodic illumination changes may mimic breathing. Stimulus-brightness interference is not excluded without a respiratory-belt reference.'
+    } : { ru: 'Фоновая сводка измеренных данных; не диагноз и не мгновенный ответ на стимул.',
       en: 'Background summary of observed data; not a diagnosis or an instantaneous stimulus response.' } }));
 
   function measurement(payload, id) {
@@ -57,7 +60,8 @@
       reason: incompleteEyes ? 'signal_history_incomplete' : shortWindow ? 'insufficient_window_duration' : invalidRange ? 'signal_summary_invalid'
         : value == null ? 'signal_data_missing' : null,
       source: field, scope: id === 'body.velocity_p95' ? 'retained_samples' : 'whole_measured_session',
-      methodVersion: id.startsWith('physiology.') ? bpm.methodVersion || 'legacy_summary' : 'passive-summary.v1',
+      methodVersion: id === 'physiology.respiration_mean' ? respiration.methodVersion || 'legacy_summary'
+        : id === 'physiology.bpm_mean' ? bpm.methodVersion || 'legacy_summary' : 'passive-summary.v1',
       countsKnown: n !== null };
   }
   return { definitions, measurement };

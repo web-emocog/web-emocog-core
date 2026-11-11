@@ -1,25 +1,25 @@
 import { extractEyeSignalSample } from '../web-page/eye-signal.js';
 import { updateFromMetrics as updateQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { SessionQualityDetector } from './quality-detector.mjs?v=20261025-1';
+import { SessionQualityDetector } from './quality-detector.mjs?v=20261110-integration1';
 import { ERROR_KINDS } from './contracts.mjs';
-import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261103-2';
+import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261107-resp2';
 import {
     appendEmotionSample,
     endEmotionSession,
     getEmotionSample,
     getEmotionSummary,
+    setExplicitNeutralBaseline,
     startEmotionSession
-} from '../emotion-stub-new.js';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261104-4';
+} from '../emotion-stub-new.js?v=20261110-integration1';
+import { NeutralCalibration } from '../emotion/neutral-calibration.mjs';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261110-integration1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
 import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
-import { FRAME_SCHEDULE, PROTOCOL_PROFILE_ID, frameBudget } from './protocol-profile.mjs?v=20261104-4';
+import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
 
-const TARGET_INTERVAL_MS = FRAME_SCHEDULE.targetIntervalMs;
 const SAME_FRAME_RETRY_MS = 8;
-const SEGMENT_MAX_AGE_MS = FRAME_SCHEDULE.segmentMaxAgeMs;
 const PRIMARY_STAGES = ['face', 'guideGazeEyes', 'emotionMultimodal', 'quality', 'bpm', 'auxiliaryDispatch'];
 
 function recordTiming(stage, durationMs) {
@@ -57,6 +57,10 @@ export class SessionFramePipeline {
         this.state = options.state;
         this.controller = options.controller;
         this.video = options.video;
+        this.profile = resolveSignalProfile(options.definition || this.state.runtime.invitationProtocolDefinition);
+        this.schedule = this.profile.schedule;
+        this.neutralCalibration = this.profile.emotionCalibration.method === 'explicit-neutral.v2'
+            ? new NeutralCalibration(this.profile.emotionCalibration) : null;
         this.active = false;
         this.timeoutId = null;
         this.primaryBusy = false;
@@ -68,19 +72,21 @@ export class SessionFramePipeline {
         this.cameraWindowStarted = 0;
         this.cameraEmptySince = null;
         this.cameraStallReported = false;
-        this.segmenterStride = FRAME_SCHEDULE.segmenterStride;
+        this.segmenterStride = this.schedule.segmenterStride;
         this.segmenterCounter = 0;
         this.lastSegmenterResult = null;
         this.lastSegmenterCapturedAt = 0;
-        this.emotionStride = FRAME_SCHEDULE.emotionStride;
+        this.emotionStride = this.schedule.emotionStride;
         this.emotionCounter = 0;
-        this.bodyPoseStride = FRAME_SCHEDULE.bodyPoseStride;
+        this.bodyPoseStride = this.schedule.bodyPoseStride;
         this.bodyPoseCounter = 0;
         this.auxiliaryTimer = null;
         this.auxiliaryBusy = false;
         this.lastAuxiliaryTask = null;
+        this.lastChannelAt = { segment: -Infinity, pose: -Infinity, emotion: -Infinity };
         this.generation = 0;
         this.diagnostics = { version: 'frame_pipeline.v2', frames: 0, primaryMsTotal: 0,
+            emotionFrames: 0, emotionValidFrames: 0,
             primaryMsMax: 0, auxiliaryDeferredFrames: 0, segmentFrames: 0, poseFrames: 0,
             segmentMsTotal: 0, poseMsTotal: 0, timingMethod: 'completed-primary-stages.v1',
             stages: Object.fromEntries(PRIMARY_STAGES.map(name => [name, { frames: 0, totalMs: 0, maxMs: 0 }])) };
@@ -127,6 +133,7 @@ export class SessionFramePipeline {
         this.generation++;
         const generation = this.generation;
         this.segmenterCounter = 0;
+        this.lastChannelAt = { segment: -Infinity, pose: -Infinity, emotion: -Infinity };
         this.bodyPoseCounter = 0;
         this.lastSegmenterResult = null;
         this.lastVideoTime = -1;
@@ -145,7 +152,8 @@ export class SessionFramePipeline {
         });
         this.diagnostics.frameIdentityMethod = this.videoFrameObserver.method;
         this.qualityDetector.reset();
-        startEmotionSession(this.state.sessionData?.ids?.session || null);
+        this.neutralCalibration?.reset();
+        startEmotionSession(this.state.sessionData?.ids?.session || null, { explicitNeutral: !!this.neutralCalibration });
         this.controller.setModuleStatus('emotion', 'running');
         for (const track of this.video.srcObject.getVideoTracks?.() || []) {
             track.addEventListener('ended', this.boundTrackEnded);
@@ -180,7 +188,7 @@ export class SessionFramePipeline {
 
     _requestFrame() {
         if (!this.active || this.primaryBusy) return;
-        const delay = Math.max(0, TARGET_INTERVAL_MS - (performance.now() - this.primaryStartedAt));
+        const delay = Math.max(0, this.schedule.targetIntervalMs - (performance.now() - this.primaryStartedAt));
         if (delay > 0) this._schedule(delay);
         else {
             clearTimeout(this.timeoutId);
@@ -225,7 +233,7 @@ export class SessionFramePipeline {
         this.primaryBusy = true;
         const generation = this.generation;
         const started = performance.now();
-        let retryDelay = TARGET_INTERVAL_MS;
+        let retryDelay = this.schedule.targetIntervalMs;
         let failedTick = false;
         try {
             this._publishCameraFps(started);
@@ -349,7 +357,7 @@ export class SessionFramePipeline {
                 if (this.active) {
                     if (this.videoFrameObserver) {
                         // Keep only the latest pending frame; no polling loop racing the camera.
-                        if (failedTick) this._schedule(TARGET_INTERVAL_MS);
+                        if (failedTick) this._schedule(this.schedule.targetIntervalMs);
                         else if (this.videoFrameSequence > 0 && this.videoFrameSequence !== this.lastVideoTime) this._requestFrame();
                         else this._schedule(1000); // Heartbeat still detects a completely stalled camera.
                     } else this._schedule(Math.max(0, retryDelay - (performance.now() - started)));
@@ -363,42 +371,52 @@ export class SessionFramePipeline {
         this.diagnosticsPublishedAt = now;
         if (!this.state.sessionData.tech) this.state.sessionData.tech = {};
         this.state.sessionData.tech.framePipeline = { ...this.diagnostics,
-            profileId: PROTOCOL_PROFILE_ID,
+            profileId: this.profile.id, schedule: this.schedule,
             budget: frameBudget({ sourceFps: this.state.cameraFpsState?.currentFps,
                 primaryMs: this.diagnostics.frames > 0 ? this.diagnostics.primaryMsTotal / this.diagnostics.frames : null,
                 segmentMs: this.diagnostics.segmentFrames > 0 ? this.diagnostics.segmentMsTotal / this.diagnostics.segmentFrames : null,
-                poseMs: this.diagnostics.poseFrames > 0 ? this.diagnostics.poseMsTotal / this.diagnostics.poseFrames : null }),
+                poseMs: this.diagnostics.poseFrames > 0 ? this.diagnostics.poseMsTotal / this.diagnostics.poseFrames : null,
+                schedule: this.schedule }),
             // Only bounded timings/counts; no frames, landmarks or per-frame history.
             stages: Object.fromEntries(PRIMARY_STAGES.map(name => [name, { ...this.diagnostics.stages[name] }])),
             faceBackend: this.state.runtime.localAnalyzer?.backend || 'legacy_main',
+            faceDelegate: this.state.runtime.localAnalyzer?.inferenceDelegate || null,
+            faceDelegateFallbackReason: this.state.runtime.localAnalyzer?.cpuFallbackReason || null,
             segmentBackend: this.state.runtime.faceSegmenter?.backend || 'legacy_main',
             segmentDelegate: this.state.runtime.faceSegmenter?.inferenceDelegate || null,
             segmentDelegatePolicy: 'rgba-mask-readback.v2',
             segmentDelegateFallbackReason: this.state.runtime.faceSegmenter?.cpuFallbackReason || null,
-            poseBackend: this.bodyPose.backend,
+            poseBackend: this.bodyPose.enabled ? this.bodyPose.backend : 'disabled',
             fallbackReasons: [this.state.runtime.localAnalyzer?.workerFallbackReason,
                 this.state.runtime.faceSegmenter?.workerFallbackReason, this.bodyPose.workerFallbackReason].filter(Boolean),
             segmentStride: this.segmenterStride, bodyPoseStride: this.bodyPoseStride,
-            emotionStride: this.emotionStride, schedulingMethod: 'frame-notification.v1' };
+            emotionStride: this.emotionStride, schedulingMethod: this.schedule.emotionIntervalMs ? 'elapsed-time.v2' : 'frame-notification.v1' };
     }
 
     _currentSegmentation(now = performance.now()) {
         const age = now - this.lastSegmenterCapturedAt;
-        return age >= 0 && age <= SEGMENT_MAX_AGE_MS ? this.lastSegmenterResult : null;
+        return age >= 0 && age <= this.schedule.segmentMaxAgeMs ? this.lastSegmenterResult : null;
     }
 
     _scheduleAuxiliary(frame, multimodalSample) {
+        if (frame?.error || frame?.errorMessage) return;
         this.segmenterCounter++;
         this.bodyPoseCounter++;
-        const segmentDue = this.segmenterCounter >= this.segmenterStride
+        const at = frame.timestamp;
+        const segmentDue = (this.schedule.segmentIntervalMs
+            ? Number.isFinite(at) && at - this.lastChannelAt.segment >= this.schedule.segmentIntervalMs
+            : this.segmenterCounter >= this.segmenterStride)
             && this.state.runtime.faceSegmenter && Array.isArray(frame?.landmarks);
-        const poseDue = this.bodyPoseCounter >= this.bodyPoseStride && this.bodyPose.ready;
+        const poseDue = (this.schedule.bodyPoseIntervalMs
+            ? Number.isFinite(at) && at - this.lastChannelAt.pose >= this.schedule.bodyPoseIntervalMs
+            : this.bodyPoseCounter >= this.bodyPoseStride) && this.bodyPose.ready;
         if (!segmentDue && !poseDue) return;
         if (this.auxiliaryBusy) { this.diagnostics.auxiliaryDeferredFrames++; return; }
         const task = poseDue && (!segmentDue || this.lastAuxiliaryTask === 'segment') ? 'pose' : 'segment';
         if (task === 'pose') this.bodyPoseCounter = 0;
         else this.segmenterCounter = 0;
         this.lastAuxiliaryTask = task;
+        this.lastChannelAt[task] = at;
         this.auxiliaryBusy = true;
         const generation = this.generation;
         const source = getFramePixels(frame) || this.video;
@@ -441,9 +459,31 @@ export class SessionFramePipeline {
 
     _processEmotion(frame) {
         this.emotionCounter += 1;
-        if (this.emotionCounter < this.emotionStride) return;
+        if (this.schedule.emotionIntervalMs) {
+            if (!Number.isFinite(frame.timestamp) || frame.timestamp - this.lastChannelAt.emotion < this.schedule.emotionIntervalMs) return;
+        } else if (this.emotionCounter < this.emotionStride) return;
         this.emotionCounter = 0;
+        this.lastChannelAt.emotion = frame.timestamp;
+        this.diagnostics.emotionFrames++;
+        if (this.neutralCalibration) {
+            const calibration = this.neutralCalibration;
+            const before = calibration.status;
+            const snapshot = calibration.add(frame, performance.now(),
+                (typeof document === 'undefined' || document.visibilityState !== 'hidden')
+                && this._currentSegmentation()?.isComplete === true);
+            this.state.runtime.emotionCalibration = snapshot;
+            this.state.sessionData.tech.emotionCalibration = snapshot;
+            if (before !== 'ready' && calibration.status === 'ready') {
+                setExplicitNeutralBaseline(calibration.baseline, snapshot.acceptedSamples);
+                calibration.baseline = null;
+            }
+            if (calibration.status !== 'ready') {
+                this.state.runtime.lastEmotionSample = null;
+                return;
+            }
+        }
         const sample = getEmotionSample(frame);
+        if (!sample?.degraded) this.diagnostics.emotionValidFrames++;
         this.state.runtime.lastEmotionSample = sample?.degraded ? null : sample;
         appendEmotionSample(this.state, sample, frame.wallTimestamp ?? Date.now());
     }

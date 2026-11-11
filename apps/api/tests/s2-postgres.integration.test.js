@@ -1,10 +1,14 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+
+const fixtureConsentReceipt = Object.freeze({
+  informedConsentVersion: 'informed-consent-v1.0', privacyPolicyVersion: 'privacy-policy-v1.0',
+});
 
 const databaseUrl = process.env.S2_TEST_DATABASE_URL;
 
@@ -19,6 +23,28 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
   let staffUserId;
   let config;
   const createdUserIds = [];
+
+  async function sendMedia(route, headers, form) {
+    const file = form.get('file');
+    const replacing = /^\/stimuli\/(\d+)\/content$/.exec(route);
+    const descriptor = {
+      key: randomUUID(),
+      kind: replacing ? 'replace' : route.endsWith('/convert') ? 'convert' : 'upload',
+      project_id: Number(form.get('project_id')),
+      ...(replacing ? { stimulus_id: Number(replacing[1]) } : {}),
+      ...(form.get('folder_id') ? { folder_id: Number(form.get('folder_id')) } : {}),
+      ...(form.get('metadata') ? { metadata: JSON.parse(form.get('metadata')) } : {}),
+      file: { name: form.get('original_name') || file.name, type: file.type, size: file.size,
+        sha256: createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex') },
+    };
+    const admission = await fetch(baseUrl + '/stimuli/operations', {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(descriptor),
+    });
+    if (admission.status !== 201) return admission;
+    const payloadHeaders = new Headers(headers);
+    payloadHeaders.delete('Content-Type');
+    return fetch(baseUrl + route + '?operation_key=' + descriptor.key, { method: 'POST', headers: payloadHeaders, body: form });
+  }
 
   before(async () => {
     process.env.DATABASE_URL = databaseUrl;
@@ -107,7 +133,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     return fetch(`${baseUrl}/invitations/by-code/${invitation.code}/ingest-token`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId }),
+      body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt }),
     });
   }
 
@@ -422,6 +448,72 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(state.rows[0].session_count, 0);
   });
 
+  it('requires recorded consent before reserving a run and rejects old participant tokens without it', async () => {
+    const invitation = await createInvitation(2);
+    const sessionId = randomUUID();
+    const admit = (id, receipt) => fetch(`${baseUrl}/invitations/by-code/${invitation.code}/ingest-token`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: id, consent_receipt: receipt }),
+    });
+    const denied = await admit(sessionId);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).code, 'consent_receipt_required');
+    assert.equal((await admit(sessionId, { ...fixtureConsentReceipt, privacyPolicyVersion: 'wrong' })).status, 422);
+    assert.equal((await pool.query('SELECT used_runs FROM invitations WHERE id=$1', [invitation.id])).rows[0].used_runs, 0);
+    assert.equal((await pool.query('SELECT id FROM sessions WHERE session_id=$1', [sessionId])).rowCount, 0);
+    const legacy = randomUUID();
+    const { issueIngestToken } = require('../security/ingest-token');
+    const oldToken = issueIngestToken({ sessionId: legacy, invitation: {
+      ...invitation, project_id: projectId, protocol_id: protocolId
+    } });
+    const notAdmitted = await ingest(invitation, legacy, 'fixture', oldToken, false);
+    assert.equal(notAdmitted.status, 403);
+    assert.equal((await notAdmitted.json()).code, 'session_must_be_precreated');
+    const oldRow = (await pool.query(`INSERT INTO sessions(session_id,project_id,protocol_id,invitation_id)
+      VALUES($1,$2,$3,$4) RETURNING id`, [legacy, projectId, protocolId, invitation.id])).rows[0];
+    const missing = await ingest(invitation, legacy, 'fixture', oldToken, false);
+    assert.equal(missing.status, 403);
+    assert.equal((await missing.json()).code, 'consent_receipt_required');
+    assert.equal((await admit(legacy)).status, 403);
+    assert.equal((await pool.query('SELECT 1 FROM session_features WHERE session_id=$1', [oldRow.id])).rowCount, 0);
+    assert.equal((await admit(legacy, fixtureConsentReceipt)).status, 200);
+    assert.equal((await admit(legacy)).status, 200);
+    assert.equal((await ingest(invitation, legacy, 'fixture', oldToken, false)).status, 200);
+    assert.equal((await pool.query('SELECT 1 FROM session_consent_receipts WHERE session_db_id=$1', [oldRow.id])).rowCount, 1);
+    assert.equal((await admit(sessionId, fixtureConsentReceipt)).status, 200);
+    assert.equal((await admit(sessionId)).status, 200);
+    assert.equal((await pool.query('SELECT used_runs FROM invitations WHERE id=$1', [invitation.id])).rows[0].used_runs, 1);
+  });
+
+  it('keeps readiness responsive under backup lock and admits a valid retry once', async () => {
+    const invitation = await createInvitation(1);
+    const sessionId = randomUUID();
+    const lock = await pool.connect();
+    const { MEDIA_LOCK } = require('../stimuli/versions');
+    try {
+      await lock.query('SELECT pg_advisory_lock(hashtextextended($1,0))', [MEDIA_LOCK]);
+      const request = (code, id) => fetch(`${baseUrl}/invitations/by-code/${code}/ingest-token`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session_id: id, consent_receipt: fixtureConsentReceipt }),
+        signal: AbortSignal.timeout(3000),
+      });
+      const requests = Array.from({ length: 24 }, () => request(randomUUID(), randomUUID()));
+      const allowed = Array.from({ length: 8 }, () => request(invitation.code, sessionId));
+      const [invalid, blocked, ready] = await Promise.all([Promise.all(requests), Promise.all(allowed),
+        fetch(baseUrl + '/ready', { signal: AbortSignal.timeout(3000) })]);
+      assert.ok(invalid.every(result => result.status === 404));
+      assert.ok(blocked.every(result => result.status === 503 && result.headers.get('retry-after') === '1'));
+      assert.equal(ready.status, 200);
+      assert.equal((await pool.query('SELECT used_runs FROM invitations WHERE id=$1', [invitation.id])).rows[0].used_runs, 0);
+    } finally {
+      await lock.query('SELECT pg_advisory_unlock(hashtextextended($1,0))', [MEDIA_LOCK]);
+      lock.release();
+    }
+    assert.equal((await issueToken(invitation, sessionId)).status, 200);
+    assert.equal((await issueToken(invitation, sessionId)).status, 200);
+    assert.equal((await pool.query('SELECT used_runs FROM invitations WHERE id=$1', [invitation.id])).rows[0].used_runs, 1);
+  });
+
   it('cannot bypass ingest authentication by selecting or removing invitationCode', async () => {
     const invitation = await createInvitation();
     const sessionId = randomUUID();
@@ -657,10 +749,89 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       form.append('project_id', String(projectId));
       form.append('file', new Blob([bytes], { type: mime }), 'local-media-test' + (mime === 'image/png' ? '.png' : '.mp4'));
       for (const [key, value] of Object.entries(extra)) form.append(key, String(value));
-      return fetch(baseUrl + url, { method: 'POST', headers, body: form });
+      return sendMedia(url, headers, form);
     };
     const forged = await uploadFile('/stimuli/upload', owner, png, 'image/png', { created_by: users[1].id });
     assert.equal(forged.status, 422);
+    const longName = new FormData();
+    longName.append('project_id', String(projectId));
+    longName.append('file', new Blob([png], { type: 'image/png' }), 'a'.repeat(240) + '.png');
+    const longUpload = await sendMedia('/stimuli/upload', owner, longName);
+    assert.equal(longUpload.status, 201, await longUpload.clone().text());
+    const longRow = await longUpload.json();
+    assert.equal(longRow.name, 'a'.repeat(240) + '.png');
+    const heldWrite = await pool.connect();
+    try {
+      await heldWrite.query('BEGIN');
+      await heldWrite.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['wecog:media-write:v1']);
+      const readyPoster = await fetch(baseUrl + longRow.preview_url, { headers: owner, signal: AbortSignal.timeout(3000) });
+      assert.equal(readyPoster.status, 200, 'a ready poster must not wait for an unrelated media write');
+      await readyPoster.arrayBuffer();
+    } finally { await heldWrite.query('ROLLBACK'); heldWrite.release(); }
+    const storedUpload = (await pool.query('SELECT metadata FROM stimuli WHERE id=$1', [longRow.id])).rows[0];
+    assert.match(storedUpload.metadata.content_path, /^[a-f0-9-]{36}$/);
+    await pool.query("UPDATE stimuli SET metadata = metadata || '{\"contentPath\":\"private-server-alias\"}'::jsonb WHERE id=$1", [longRow.id]);
+    const library = await (await fetch(baseUrl + `/stimuli?project_id=${projectId}`, { headers: owner })).json();
+    const publicRow = library.find(row => row.id === longRow.id);
+    assert.ok(!Object.hasOwn(publicRow.metadata, 'contentPath'));
+    assert.ok(!Object.hasOwn(publicRow.metadata, 'content_path'));
+    assert.equal(publicRow.sha256.length, 64);
+    const diskBefore = await fs.promises.readdir(path.join(config.storage.uploadsRoot, 'stimuli'));
+    const tooManyFields = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`extra${i}`, 'x']));
+    const oversizedMultipart = await uploadFile('/stimuli/upload', owner, png, 'image/png', tooManyFields);
+    assert.equal(oversizedMultipart.status, 422);
+    assert.equal((await oversizedMultipart.json()).code, 'media_transfer_limit');
+    assert.deepEqual(await fs.promises.readdir(path.join(config.storage.uploadsRoot, 'stimuli')), diskBefore);
+    const pageCommands = '0.1 0.5 0.3 rg 20 20 200 100 re f\n';
+    const pdfObjects = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+      ...[3, 4].map(() => '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 180] /Contents 5 0 R /Resources << >> >>'),
+      `<< /Length ${pageCommands.length} >>\nstream\n${pageCommands}endstream`,
+    ];
+    let pdf = '%PDF-1.4\n';
+    const offsets = [0];
+    pdfObjects.forEach((object, i) => { offsets.push(pdf.length); pdf += `${i + 1} 0 obj\n${object}\nendobj\n`; });
+    const xref = pdf.length;
+    pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}`;
+    pdf += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    const convert = (name, originalName) => {
+      const form = new FormData();
+      form.append('project_id', String(projectId));
+      form.append('file', new Blob([pdf], { type: 'application/pdf' }), name);
+      if (originalName) form.append('original_name', originalName);
+      return sendMedia('/stimuli/convert', owner, form);
+    };
+    const converted = await convert('audit-document.pdf', 'Проверка.pdf');
+    assert.equal(converted.status, 201, await converted.clone().text());
+    const slides = await converted.json();
+    assert.equal(slides.stimuli.length, 2);
+    assert.equal(slides.source.name, 'Проверка.pdf');
+    assert.equal(slides.stimuli[0].name, 'Проверка_page_1.jpg');
+    for (const slide of slides.stimuli) {
+      assert.equal(slide.visibility, 'private');
+      assert.equal((await fetch(baseUrl + slide.preview_url, { headers: owner })).status, 200);
+      assert.equal((await fetch(baseUrl + slide.content_url, { headers: peer })).status, 403);
+    }
+    assert.equal((await convert('audit.' + 'x'.repeat(240))).status, 415);
+    const mediaRoot = path.join(config.storage.uploadsRoot, 'stimuli');
+    const visibleFiles = async () => (await fs.promises.readdir(mediaRoot, { recursive: true })).filter(name => !name.startsWith('.')).sort();
+    const beforeFailedConversion = await visibleFiles();
+    await pool.query(`CREATE FUNCTION s2_fail_slide_write() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.name = 'audit-fail_page_2.jpg' THEN RAISE EXCEPTION 'synthetic_failure'; END IF; RETURN NEW; END $$`);
+    await pool.query('CREATE TRIGGER s2_fail_slide_write BEFORE INSERT ON stimuli FOR EACH ROW EXECUTE FUNCTION s2_fail_slide_write()');
+    try {
+      const failedConversion = await convert('audit-fail.pdf');
+      assert.equal(failedConversion.status, 500);
+      for (let i = 0; i < 30 && JSON.stringify(await visibleFiles()) !== JSON.stringify(beforeFailedConversion); i++) {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.deepEqual(await visibleFiles(), beforeFailedConversion, 'rollback removes new originals and posters only');
+      assert.equal((await pool.query("SELECT 1 FROM stimuli WHERE project_id=$1 AND name LIKE 'audit-fail%'", [projectId])).rowCount, 0);
+    } finally {
+      await pool.query('DROP TRIGGER s2_fail_slide_write ON stimuli');
+      await pool.query('DROP FUNCTION s2_fail_slide_write()');
+    }
     const wav = Buffer.alloc(44 + 1600);
     wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
     wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
@@ -697,7 +868,8 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal((await uploadFile(`/stimuli/${stimulus.id}/content`, peer, png)).status, 403);
     assert.equal((await request(`/stimuli/${stimulus.id}`, peer, { visibility: 'project' }, 'PATCH')).status, 403);
 
-    const definition = { version: '1.0.0', blocks: [{ id: 'main', trials: [{ id: 'trial-1', stimulusId: String(stimulus.id) }] }] };
+    const definition = { version: '1.0.0', blocks: [{ id: 'main', type: 'cognitive_task', taskType: 'simple_rt',
+      trials: [{ id: 'trial-1', stimulusId: String(stimulus.id) }] }] };
     const deniedProtocol = await request('/protocols', peer, { project_id: projectId, name: 'Private ID must not publish', definition });
     assert.equal(deniedProtocol.status, 422);
     const saved = await request('/protocols', owner, { project_id: projectId, name: `Pinned ${suffix}`, definition });
@@ -806,6 +978,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     const token = (await admission.json()).token;
     const ingested = await ingest(invitation, sessionId, 'P-PINNED', token, true, {
       gaze_analytics: { schemaVersion: 'gaze_analytics.v1', coordinateSpace: 'stimulus_normalized_0_1',
+        summary: { presentationCountTotal: 1, presentationCountStored: 1, presentationsTruncated: false },
         presentations: [{ blockId: 'main', trialId: 'trial-1', presentationId: 'pinned-presentation',
           stimulusId: String(stimulus.id), stimulusVersion: oldVersion, stimulusType: 'image',
           grid: { width: 2, height: 2, values: [1, 0, 0, 0] }, fixationPoints: [], validObservationDurationMs: 1000 }] },
@@ -829,6 +1002,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     assert.equal(newAdmission.status, 200);
     assert.equal((await ingest(latestInvitation, newSessionId, 'P-PINNED-NEW', (await newAdmission.json()).token, true, {
       gaze_analytics: { schemaVersion: 'gaze_analytics.v1', coordinateSpace: 'stimulus_normalized_0_1',
+        summary: { presentationCountTotal: 1, presentationCountStored: 1, presentationsTruncated: false },
         presentations: [{ blockId: 'main', trialId: 'trial-1', presentationId: 'new-presentation',
           stimulusId: String(stimulus.id), stimulusVersion: latest.current_version_id, stimulusType: 'image',
           grid: { width: 2, height: 2, values: [0, 1, 0, 0] }, fixationPoints: [], validObservationDurationMs: 1000 }] },
@@ -996,9 +1170,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
         const form = new FormData();
         form.append('project_id', String(projectId));
         form.append('file', new Blob([bytes], { type }), name);
-        const uploaded = await fetch(`${baseUrl}/stimuli/upload`, {
-          method: 'POST', headers: { authorization: ownerHeaders.authorization }, body: form
-        });
+        const uploaded = await sendMedia('/stimuli/upload', { authorization: ownerHeaders.authorization }, form);
         assert.equal(uploaded.status, 201, await uploaded.clone().text());
         const row = await uploaded.json();
         try {
@@ -1267,6 +1439,48 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     );
   });
 
+  it('isolates numeric session row ids from colliding text keys', async () => {
+    const foreignProject = (await pool.query(
+      'INSERT INTO projects(organization_id,name,slug) VALUES($1,$2,$2) RETURNING id',
+      [organizationId, `foreign-session-${randomUUID()}`]
+    )).rows[0].id;
+    const user = (await pool.query(
+      "INSERT INTO users(email,password_hash,role) VALUES($1,$2,'researcher') RETURNING id,email,role,token_version",
+      [`collision-${randomUUID()}@example.test`, await bcrypt.hash('synthetic-session-test', 4)]
+    )).rows[0];
+    createdUserIds.push(user.id);
+    await pool.query('INSERT INTO user_organizations(user_id,organization_id) VALUES($1,$2)', [user.id, organizationId]);
+    await pool.query('INSERT INTO user_projects(user_id,project_id) VALUES($1,$2)', [user.id, projectId]);
+    const headers = { Authorization: `Bearer ${issueStaffToken(user)}`, 'Content-Type': 'application/json' };
+    const start = sessionId => fetch(baseUrl + '/sessions/start', {
+      method: 'POST', headers, body: JSON.stringify({ project_id: projectId, session_id: sessionId }),
+    });
+    const stop = sessionId => fetch(baseUrl + '/sessions/stop', {
+      method: 'POST', headers, body: JSON.stringify({ session_id: sessionId }),
+    });
+    const foreign = (await pool.query(
+      'INSERT INTO sessions(session_id,project_id,participant_id) VALUES($1,$2,$3) RETURNING id',
+      [randomUUID(), foreignProject, 'private-fixture']
+    )).rows[0];
+    const created = await start(String(foreign.id));
+    assert.equal(created.status, 201);
+    const own = await created.json();
+    assert.equal((await fetch(baseUrl + '/sessions/' + foreign.id, { headers })).status, 404);
+    const owned = await fetch(baseUrl + '/sessions/' + own.id, { headers });
+    assert.equal(owned.status, 200);
+    assert.equal((await owned.json()).session_id, own.session_id);
+    assert.equal((await fetch(baseUrl + '/sessions/invalid-id', { headers })).status, 400);
+    const colliding = (await pool.query(
+      'INSERT INTO sessions(session_id,project_id) VALUES($1,$2) RETURNING id',
+      [String(own.id), foreignProject]
+    )).rows[0];
+    assert.equal((await start(String(own.id))).status, 409);
+    assert.equal((await stop(String(own.id))).status, 404);
+    assert.equal((await pool.query('SELECT stopped_at FROM sessions WHERE id=$1', [colliding.id])).rows[0].stopped_at, null);
+    assert.equal((await stop(own.session_id)).status, 200);
+    assert.notEqual((await pool.query('SELECT stopped_at FROM sessions WHERE id=$1', [own.id])).rows[0].stopped_at, null);
+  });
+
   it('prevents PI account takeover across mixed tenant memberships', async () => {
     const pi = await pool.query(
       `INSERT INTO users (email, password_hash, role)
@@ -1322,6 +1536,15 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
          VALUES ($1, $2, 'researcher')`,
         [target.rows[0].id, foreignProject.rows[0].id]
       );
+
+      const directory = await fetch(baseUrl + '/auth/users?q=' + encodeURIComponent(target.rows[0].email), {
+        headers: { authorization: `Bearer ${issueStaffToken(pi.rows[0])}` },
+      });
+      assert.equal(directory.status, 200);
+      const [visibleUser] = await directory.json();
+      assert.equal(visibleUser.id, target.rows[0].id);
+      assert.deepEqual(visibleUser.project_ids, [projectId]);
+      assert.deepEqual(visibleUser.organization_ids, [organizationId]);
 
       const response = await fetch(`${baseUrl}/auth/users/${target.rows[0].id}`, {
         method: 'PATCH',
@@ -1525,7 +1748,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
     const enabledInvite = await publish();
     const pinnedSessionId = randomUUID();
     const admitted = await fetch(`${baseUrl}/invitations/by-code/${enabledInvite.code}/ingest-token`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: pinnedSessionId })
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: pinnedSessionId, consent_receipt: fixtureConsentReceipt })
     });
     assert.equal(admitted.status, 200);
     const updated = await fetch(`${baseUrl}/protocols/${protocol.id}`, { method: 'PATCH', headers,
@@ -1609,7 +1832,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
             version: '1.0.0',
             blocks: [{
               id: 'main',
-              title: 'Main',
+              title: 'Main', type: 'cognitive_task', taskType: 'simple_rt',
               trials: [{ id: 'trial-1', stimulusId }],
               blockConfig: {
                 aoiSchemaVersion: '1.2',
@@ -1666,7 +1889,7 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId }),
+          body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt }),
         }
       );
       assert.equal(tokenResponse.status, 200);
@@ -2039,7 +2262,8 @@ describe('S2-01 PostgreSQL integration', { skip: !databaseUrl }, () => {
       name: `Cookie protocol ${randomUUID()}`,
       definition: {
         version: '1.0.0',
-        blocks: [{ id: 'main', blockConfig: {
+        blocks: [{ id: 'main', type: 'cognitive_task', taskType: 'simple_rt',
+          trials: [{ id: 'one', stimulusId: 'std_simple_black_square' }], blockConfig: {
           aoiSchemaVersion: '1.2',
           aoiDefinitions: { cat: [{
             id: 'face', name: 'Face', shape: 'rectangle',

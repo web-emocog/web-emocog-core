@@ -75,12 +75,15 @@ test('uploaded media descriptors follow the analytics schema and never invent a 
   assert.equal(enrichStimulusDescriptor({ id: '9', contentUrl: '/foreign-file' }, new Map()).contentUrl, null);
 });
 
-test('visual protocols reject audio references before admission instead of trying to render them as images', async () => {
+test('audio references need an existing binary and cannot have spatial AOIs', async () => {
   const { inspectProtocolStimuli } = require('../stimuli/protocol-availability');
   const report = await inspectProtocolStimuli({ query: async () => ({ rows: [{ id: 3, name: 'Audio', mime_type: 'audio/wav', metadata: {} }] }) },
     1, { blocks: [{ type: 'cognitive_task', trials: [{ stimulusId: '3' }] }] });
   assert.equal(report.ok, false);
-  assert.equal(report.unavailable[0].code, 'stimulus_media_type_unsupported');
+  assert.equal(report.unavailable[0].code, 'missing_content_path');
+  const withAoi = await inspectProtocolStimuli({ query: async () => ({ rows: [{ id: 3, mime_type: 'audio/wav', metadata: {} }] }) },
+    1, { blocks: [{ type: 'passive', trials: [{ stimulusId: '3' }], blockConfig: { aoiDefinitions: { '3': [{}] } } }] });
+  assert.equal(withAoi.unavailable[0].code, 'audio_spatial_aoi_unsupported');
 });
 
 test('IndexedDB open timeout uses a labelled compact backup; late success closes the abandoned connection', async () => {
@@ -96,7 +99,8 @@ test('IndexedDB open timeout uses a labelled compact backup; late success closes
   assert.deepEqual(restored.sessionData.eyeTracking, []);
   assert.equal(restored.sessionData.storageRecovery.compactCheckpoint, true);
   assert.equal(restored.sessionData.experimentMeta.storageRecovery.signalSeriesIncomplete, true);
-  assert.ok(restored.sessionData.experimentMeta.storageRecovery.omittedSeries.includes('eyeTracking'));
+  assert.ok(restored.sessionData.experimentMeta.storageRecovery.omittedSampleArrays.includes('eyeTracking'));
+  assert.equal(restored.sessionData.experimentMeta.storageRecovery.omittedSeries.eyeTracking.count, 1);
   let closed = false;
   request.result = { close: () => { closed = true; } };
   request.onsuccess();

@@ -210,6 +210,11 @@ const loginSchema = [
 
 router.post(
   '/register',
+  (req, res, next) => {
+    if (process.env.IDENTITY_ENABLED !== 'true') return next();
+    // Do not allow password-first preclaims while email-first signup is enabled.
+    return res.status(410).json({ error: 'Use email-first signup', code: 'legacy_registration_retired', signup_path: '/identity/signup' });
+  },
   registerSchema,
   async (req, res) => {
     try {
@@ -539,9 +544,10 @@ router.get(
              '{}'
            ) AS organization_ids,
            COALESCE(
-             (SELECT ARRAY_AGG(up.project_id ORDER BY up.project_id)
-              FROM user_projects up
-              WHERE up.user_id = u.id),
+             ${platformAdmin
+               ? `(SELECT ARRAY_AGG(up.project_id ORDER BY up.project_id)
+                   FROM user_projects up WHERE up.user_id = u.id)`
+               : 'ARRAY_AGG(DISTINCT scope_project.id ORDER BY scope_project.id)'},
              '{}'
            ) AS project_ids
          FROM users u

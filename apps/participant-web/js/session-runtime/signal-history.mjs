@@ -9,7 +9,12 @@ export function combineSignalSummaries(previous = {}, current = {}) {
         const values = [previous[key], current[key]].filter(Number.isFinite);
         return values.length ? reducer(...values) : null;
     };
+    const respirationMethods = new Set([previous, current]
+        .filter(item => item.validRespSampleCount > 0)
+        .map(item => item.respMethodVersion || 'legacy_summary'));
     return { ...current, sampleCount: count('sampleCount'), validSampleCount: count('validSampleCount'),
+        respMethodVersion: respirationMethods.size > 1 ? 'respiration_luma.mixed_versions'
+            : respirationMethods.values().next().value || current.respMethodVersion || null,
         validRespSampleCount: count('validRespSampleCount'), rejectedSampleCount: count('rejectedSampleCount'),
         bpmMean: weighted('bpmMean', 'validSampleCount'), respRateMean: weighted('respRateMean', 'validRespSampleCount'),
         bpmMin: extreme('bpmMin', Math.min), bpmMax: extreme('bpmMax', Math.max),

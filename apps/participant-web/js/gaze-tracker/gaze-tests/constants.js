@@ -9,6 +9,7 @@ export const TEST_IDS = Object.freeze({
 
 export const TEST_PHASES = Object.freeze({
     HUB: 'test_hub',
+    VPC_PREPARING: 'vpc_preparing',
     VPC_FIXATION: 'vpc_fixation',
     VPC_FAMILIAR: 'vpc_familiarization',
     VPC_PAIR: 'vpc_pair',

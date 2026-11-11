@@ -12,11 +12,13 @@
  * @license Apache-2.0
  */
 import { LANDMARKS, MIN_LANDMARKS, DEFAULTS, FEATURE_METHOD, EXPERIMENTAL_FEATURE_METHOD, CALIBRATION_SAMPLING } from './constants.js?v=20261106-143';
-import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261108-143l';
+import { extractFeatureGroups, extractCornerFeatureGroups, extractAblationFeatureGroups, confidenceFromFeatureGroups } from './features.js?v=20261110-integration1';
 import { ridgeRegression, ridgeRegressionDual, dotProduct } from './ridge.js?v=20261107-143';
 import { EYE_PATCH_LENGTH, EYE_PATCH_METHOD, EYE_PATCH_SPEC, EYE_PATCH_CORE_LENGTH, EYE_PATCH_CORE_METHOD } from './eye-patch-features.mjs?v=20261107-143';
 import { EYE_GRADIENT_METHOD, EYE_GRADIENT_ALL_METHOD, EYE_GRADIENT_LENGTH, EYE_GRADIENT_SPEC } from './eye-gradient-features.mjs?v=20261107-143g';
-import { EYE_TOPHAT_METHOD, EYE_TOPHAT_LENGTH, EYE_TOPHAT_SPEC } from './eye-tophat-features.mjs?v=20261108-143l';
+import { EYE_TOPHAT_METHOD, EYE_TOPHAT_LENGTH, EYE_TOPHAT_SPEC } from './eye-tophat-features.mjs?v=20261110-integration1';
+import { participantDebugErrorOnce as dbgErrorOnce, notifyParticipantCallback,
+    resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import {
     AdaptiveGazeFilter,
     fitDistribution,
@@ -457,7 +459,7 @@ export default class GazeTracker {
             // Low-resolution eye appearance is sensitive too. Release its
             // training rows before a callback can throw or retain this tracker.
             if (this._eyePatch) this._calibrationData = [];
-            this.onCalibrationComplete?.({
+            notifyParticipantCallback(this.onCalibrationComplete, this, [{
                 points: count,
                 timestamp: Date.now(),
                 trainMAE,
@@ -469,10 +471,10 @@ export default class GazeTracker {
                 featureMethod: this._featureMethod,
                 calibrationSampling: CALIBRATION_SAMPLING,
                 targetBlind: true
-            });
+            }], 'gaze', 'calibration:callback-failed');
             return true;
         } catch (error) {
-            console.error('[GazeTracker] Calibration failed:', error);
+            dbgErrorOnce(this, 'gaze', 'calibration:failed');
             return false;
         }
     }
@@ -703,6 +705,7 @@ export default class GazeTracker {
     }
 
     reset() {
+        resetParticipantDiagnostics(this);
         this._isCalibrated = false;
         this.clearCalibrationData();
         this._modelX = null;

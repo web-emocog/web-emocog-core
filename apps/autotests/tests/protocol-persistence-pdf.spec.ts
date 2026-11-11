@@ -1,9 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 const BASE = (process.env.EMOCOG_WEB_ORIGIN || 'http://127.0.0.1:4173') + '/apps/web/researcher.html?analyticsPreview=1';
 
 test.beforeEach(async ({ page }, info) => {
   if (info.title.startsWith('real cookie API ')) return;
+  // Production images deliberately omit preview data; supply it only in this test context.
+  await page.route('**/researcher-analytics-preview-fixture.js*', route => route.fulfill({
+    contentType: 'application/javascript',
+    path: path.resolve(__dirname, '../../web/researcher-analytics-preview-fixture.js'),
+  }));
   // Preview reports are synthetic and must never contact a user's local API.
   await page.route('http://127.0.0.1:3000/**', route => route.fulfill({
     status: route.request().method() === 'OPTIONS' ? 204 : 401,
@@ -61,6 +67,7 @@ test('failed publication retains the old link and edits; retry updates the same 
     document.getElementById('view')!.replaceChildren(w.ExperimentBuilderView({ experimentId: old.id, startStep: 8 }));
   });
   await page.locator('#finishSaveProtocolBtn').click();
+    await page.locator('[data-preflight-continue]').click();
   await expect(page.locator('#protocolSaveStatus')).toContainText(/прежн|previous/);
   await expect(page.locator('#participantLinkInput')).toHaveValue(/previous-code/);
   await expect(page.locator('#copyParticipantLinkBtn')).toBeEnabled();
@@ -68,6 +75,7 @@ test('failed publication retains the old link and edits; retry updates the same 
   expect(pending.pendingSync).toBe(true);
   expect(pending.blocks[0].content.text).toBe('Changed text');
   await page.locator('#finishSaveProtocolBtn').click();
+    await page.locator('[data-preflight-continue]').click();
   await expect(page.locator('#participantLinkInput')).toHaveValue(/new-published-code/);
   const writes = await page.evaluate(() => ({ patches: (window as any).__patches.length, creates: (window as any).__creates }));
   expect(writes).toEqual({ patches: 2, creates: 0 });
@@ -112,8 +120,10 @@ test('a new protocol retries publication without creating another database row',
     document.getElementById('view')!.replaceChildren(w.ExperimentBuilderView({ startStep: 8 }));
   });
   await page.locator('#finishSaveProtocolBtn').click();
+    await page.locator('[data-preflight-continue]').click();
   await expect(page.locator('#protocolSaveStatus')).toContainText('503');
   await page.locator('#finishSaveProtocolBtn').click();
+    await page.locator('[data-preflight-continue]').click();
   await expect(page.locator('#participantLinkInput')).toHaveValue(/published-new/);
   expect(await page.evaluate(() => ({ creates: (window as any).__creates, patches: (window as any).__patches }))).toEqual({ creates: 1, patches: 1 });
 });
@@ -245,8 +255,8 @@ test('real cookie API preserves published links and shares edited drafts with a 
   expect(projectId).toBeTruthy();
   const api = process.env.WECOG_AUDIT_API_BASE || 'http://127.0.0.1:3000';
   const url = BASE.replace('?analyticsPreview=1', '');
-  async function authenticate(context: import('@playwright/test').BrowserContext, email: string) {
-    const response = await context.request.post(`${api}/auth/login`, { headers: { 'X-Auth-Transport': 'cookie' }, data: { email, password: process.env.EMOCOG_RESEARCHER_PASSWORD || 'Researcher2026!' } });
+  async function authenticate(context: import('@playwright/test').BrowserContext, email: string, password = process.env.EMOCOG_RESEARCHER_PASSWORD || 'Researcher2026!') {
+    const response = await context.request.post(`${api}/auth/login`, { headers: { 'X-Auth-Transport': 'cookie' }, data: { email, password } });
     expect(response.ok(), await response.text()).toBe(true);
     const auth = await response.json();
     await context.addInitScript(({ auth, projectId, api }) => {
@@ -271,6 +281,7 @@ test('real cookie API preserves published links and shares edited drafts with a 
   try {
     await page.goto(`${url}#/experiments/builder`);
     await page.locator('#finishSaveProtocolBtn').click();
+    await page.locator('[data-preflight-continue]').click();
     await expect(page.locator('#protocolSaveStatus')).toContainText(/успешно опубликован|published successfully/);
     const entry = await page.evaluate(slug => JSON.parse(localStorage.getItem('emocog_my_experiments')!).find((row: any) => row.protocolId === slug), slug);
     protocolId = entry.apiProtocolId;
@@ -296,7 +307,7 @@ test('real cookie API preserves published links and shares edited drafts with a 
     await page.locator('.proto-field[data-field="title"]').fill('Edited shared instruction');
     await page.locator('#saveDraftGlobalBtn').click();
     await expect(page.locator('.exp-card').filter({ hasText: slug })).toContainText(/Черновик|Draft/);
-    await authenticate(peer, process.env.EMOCOG_PEER_EMAIL || 'local.peer@wecog.test');
+    await authenticate(peer, process.env.EMOCOG_PEER_EMAIL || 'local.peer@wecog.test', process.env.EMOCOG_PEER_PASSWORD);
     const peerPage = await peer.newPage();
     await peerPage.goto(`${url}#/experiments`);
     const peerCard = peerPage.locator('.exp-card').filter({ hasText: slug });
@@ -310,6 +321,7 @@ test('real cookie API preserves published links and shares edited drafts with a 
     expect(definition.builderState).toBeUndefined();
     await peerPage.locator('.bstep[data-step="8"]').click();
     await peerPage.locator('#finishSaveProtocolBtn').click();
+    await peerPage.locator('[data-preflight-continue]').click();
     await expect(peerPage.locator('#protocolSaveStatus')).toContainText(/Версия публикации: 2|Publication version: 2/);
     await expect(peerPage.locator('#participantLinkInput')).toHaveValue(entry.participantLink);
     const republished = await (await page.request.get(`${api}/invitations/by-code/${invitationCode}`)).json();

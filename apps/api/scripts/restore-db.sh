@@ -9,10 +9,7 @@ if [[ "${ALLOW_DB_RESTORE:-}" != "YES" ]]; then
   exit 2
 fi
 
-if [[ "${DATABASE_URL:-}" == "$RESTORE_DATABASE_URL" ]]; then
-  echo "Source and restore database URLs must be different." >&2
-  exit 2
-fi
+node "$(dirname "$0")/../security/restore-target.js"
 
 test -s "$BACKUP_INPUT"
 if [[ -f "${BACKUP_INPUT}.sha256" ]]; then
@@ -28,6 +25,7 @@ pg_restore \
   --no-owner \
   --no-acl \
   --exit-on-error \
+  --single-transaction \
   "$BACKUP_INPUT"
 
 psql --dbname="$RESTORE_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'SELECT COUNT(*) FROM pgmigrations' >/dev/null

@@ -1,18 +1,166 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { syntheticWave } from './helpers/syntheticAudio';
 
 const fixturePath = process.env.LIVE_STIMULUS_FIXTURE;
 const fixture = fixturePath ? JSON.parse(readFileSync(fixturePath, 'utf8')) : null;
 const api = fixture?.apiBase || 'http://127.0.0.1:3000';
 const web = 'http://127.0.0.1:4173';
 
+async function uploadStimulus(request: APIRequestContext, headers: Record<string, string>, name: string,
+  file: { name: string; mimeType: string; buffer: Buffer }) {
+  const key = randomUUID();
+  const admission = await request.post(`${api}/stimuli/operations`, { headers, data: { key, kind: 'upload',
+    project_id: fixture.projectId, name, file: { name: file.name, type: file.mimeType, size: file.buffer.length,
+      sha256: createHash('sha256').update(file.buffer).digest('hex') } } });
+  expect(admission.status(), await admission.text()).toBe(201);
+  return request.post(`${api}/stimuli/upload?operation_key=${key}`, { headers, multipart: {
+    project_id: String(fixture.projectId), name, file,
+  } });
+}
+
 test.describe('Live stimulus workflow on an isolated API and database', () => {
   test.skip(!fixture, 'Set LIVE_STIMULUS_FIXTURE after seeding an isolated test database');
   test.setTimeout(60_000);
+  test('JPEG, GIF, WebP and WebM: native posters, pinned visual AOIs and actual participant decoding', async ({ page, request }) => {
+    const login = await request.post(`${api}/auth/login`, { data: fixture.users.owner });
+    expect(login.status()).toBe(200);
+    const headers = { Authorization: `Bearer ${(await login.json()).token}` };
+    for (const [file, mimeType, kind] of [['synthetic-color.jpg', 'image/jpeg', 'image'],
+      ['synthetic-color.gif', 'image/gif', 'image'], ['synthetic-color.webp', 'image/webp', 'image'],
+      ['passive-video.webm', 'video/webm', 'video']] as const) {
+      const response = await uploadStimulus(request, headers, file, {
+        name: file, mimeType, buffer: readFileSync(path.resolve(__dirname, 'fixtures', file)),
+      });
+      expect(response.status(), await response.text()).toBe(201);
+      const stimulus = await response.json();
+      expect((await request.get(`${api}/stimuli/${stimulus.id}/preview`, { headers })).status()).toBe(200);
+      const definition = { version: 'v2.0_universal', blocks: [{ id: 'visual', type: 'cognitive_task', taskType: 'simple_rt',
+        blockConfig: { useAOI: true, useFixation: false, stimulusDuration: 5000, aoiSchemaVersion: '1.2',
+          aoiDefinitions: { [stimulus.id]: [{ id: 'target', name: 'Target', shape: 'rectangle',
+            points: [{ x: 0.25, y: 0.25 }, { x: 0.75, y: 0.75 }], order: 1, isTarget: true }] } },
+        trials: [{ stimulusId: String(stimulus.id), duration: 5000, action: 'Space' }] }] };
+      const saved = await request.post(`${api}/protocols`, { headers, data: { project_id: fixture.projectId,
+        name: `Visual format ${randomUUID()}`, definition } });
+      expect(saved.status(), await saved.text()).toBe(201);
+      const protocol = await saved.json();
+      const published = await request.post(`${api}/invitations`, { headers, data: { protocol_id: protocol.id } });
+      expect(published.status(), await published.text()).toBe(201);
+      const invitation = await published.json();
+      await page.goto(`${web}/apps/participant-web/mvp_with_precheck_1-updated.html?code=${invitation.code}`);
+      await page.waitForFunction(id => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap?.[id]?.metadata?.url), String(stimulus.id));
+      await page.evaluate(async () => {
+        const shared = (window as any).__WECOG_STATE__;
+        shared.runtime.sessionRuntime.policyShown = true;
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
+        await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
+      });
+      await expect(page.locator('[data-block-media-status]')).toHaveAttribute('data-block-media-status', 'ready');
+      await page.locator('#cogStartBtn').click();
+      const element = page.locator(kind === 'image' ? '#cogImage' : '#cogVideo');
+      await expect(element).toBeVisible();
+      expect(await element.evaluate((element: HTMLImageElement | HTMLVideoElement) => element instanceof HTMLImageElement
+        ? element.naturalWidth * element.naturalHeight : element.videoWidth * element.videoHeight)).toBeGreaterThan(0);
+      if (kind === 'video') await expect.poll(() => element.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0);
+      await page.keyboard.press('Space');
+      await request.delete(`${api}/invitations/${invitation.id}`, { headers });
+      await request.delete(`${api}/protocols/${protocol.id}`, { headers });
+      expect((await request.delete(`${api}/stimuli/${stimulus.id}`, { headers })).status()).toBe(204);
+    }
+  });
+  test('WAV, MP3 and OGG: native validation, private content, pinned publication, playback and result ingest', async ({ page, request }, testInfo) => {
+    const account = fixture.users.owner;
+    const login = await request.post(`${api}/auth/login`, { data: account });
+    expect(login.status()).toBe(200);
+    const headers = { Authorization: `Bearer ${(await login.json()).token}` };
+    for (const [mimeType, name, buffer] of [
+      ['audio/x-wav', 'synthetic.wav', syntheticWave()],
+      ['audio/mpeg', 'synthetic.mp3', readFileSync(path.resolve(__dirname, 'fixtures/synthetic-tone.mp3'))],
+      ['audio/ogg', 'synthetic.ogg', readFileSync(path.resolve(__dirname, 'fixtures/synthetic-tone.ogg'))],
+    ] as const) {
+      const response = await uploadStimulus(request, headers, name, { name, mimeType, buffer });
+      expect(response.status(), await response.text()).toBe(201);
+      const stimulus = await response.json();
+      expect((await request.get(`${api}${stimulus.content_url}`, { headers })).status()).toBe(200);
+      expect((await request.get(`${api}/stimuli/${stimulus.id}/preview`, { headers })).status()).toBe(415);
+      const definition = { version: 'v2.0_universal', blocks: [{ id: 'sound', type: 'cognitive_task', taskType: 'simple_rt',
+        blockConfig: { useAOI: false, useFixation: false, stimulusDuration: 5000 },
+        trials: [{ stimulusId: String(stimulus.id), duration: 5000, action: 'Space' }] }] };
+      const saved = await request.post(`${api}/protocols`, { headers, data: { project_id: fixture.projectId,
+        name: `Audio format ${randomUUID()}`, definition } });
+      expect(saved.status(), await saved.text()).toBe(201);
+      const protocol = await saved.json();
+      const published = await request.post(`${api}/invitations`, { headers, data: { protocol_id: protocol.id } });
+      expect(published.status(), await published.text()).toBe(201);
+      const invitation = await published.json();
+      const manifest = await request.get(`${api}/invitations/by-code/${invitation.code}/stimuli`);
+      expect(manifest.status()).toBe(200);
+      expect((await manifest.json()).find((r: any) => Number(r.id) === stimulus.id).mime_type).toBe(mimeType);
+      await page.goto(`${web}/apps/participant-web/mvp_with_precheck_1-updated.html?code=${invitation.code}`);
+      await page.waitForFunction(id => Boolean((window as any).__WECOG_STATE__?.runtime?.invitationStimuliMap?.[id]?.metadata?.url), String(stimulus.id));
+      await page.evaluate(async () => {
+        const shared = (window as any).__WECOG_STATE__;
+        shared.runtime.sessionRuntime.policyShown = true;
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
+        await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
+      });
+      await expect(page.locator('[data-block-media-status]')).toHaveAttribute('data-block-media-status', 'ready');
+      await page.locator('#cogStartBtn').click();
+      await page.waitForFunction(() => (window as any).__WECOG_STATE__.runtime.currentPhase === 'cognitive_stimulus'
+        || document.querySelector('[data-allow-stimulus-audio]'));
+      const allow = page.locator('[data-allow-stimulus-audio]');
+      if (await allow.isVisible()) await allow.click();
+      await expect.poll(() => page.locator('#cogAudio').evaluate((audio: HTMLAudioElement) => audio.currentTime)).toBeGreaterThan(0);
+      await page.keyboard.press('Space');
+      await expect.poll(() => page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.cognitiveResults.length)).toBe(1);
+      const sessionId = `AUDIO-${testInfo.project.name}-${randomUUID()}`;
+      const admission = await request.post(`${api}/invitations/by-code/${invitation.code}/ingest-token`, { data: {
+        session_id: sessionId, consent_receipt: { informedConsentVersion: 'informed-consent-v1.0', privacyPolicyVersion: 'privacy-policy-v1.0' }
+      } });
+      expect(admission.status(), await admission.text()).toBe(200);
+      const admitted = await admission.json();
+      const data = await page.evaluate(async ({ sessionId, code }) => {
+        const url = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('/js/unified-aggregates-new.js'))!;
+        const { buildAggregatesPayload } = await import(url);
+        const { cognitiveResults } = (window as any).__WECOG_STATE__.sessionData;
+        return { ...buildAggregatesPayload({
+          ids: { session: sessionId, participant: 'SYNTHETIC', invitationCode: code }, startTime: Date.now() - 1000,
+          user: { interfaceLanguage: 'ru' }, events: [], cognitiveResults,
+          lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed',
+            finishAttemptId: `finish-${sessionId}`, completedAt: Date.now() },
+        }, { forIngest: true }), delivery: { schemaVersion: 'session_delivery.v1', sequence: 1, kind: 'final' } };
+      }, { sessionId, code: invitation.code });
+      const ingested = await request.post(`${api}/ingest`, { headers: { Authorization: `Bearer ${admitted.token}`,
+        'Idempotency-Key': `finish-${sessionId}` }, data });
+      expect(ingested.status(), await ingested.text()).toBe(200);
+      expect(await ingested.json()).toMatchObject({ ingested: true, lifecycle_status: 'completed' });
+      const sessions = await request.get(`${api}/sessions?project_id=${fixture.projectId}&protocol_id=${protocol.id}`, { headers });
+      expect(sessions.status()).toBe(200);
+      const recorded = (await sessions.json()).find((row: any) => row.session_id === sessionId);
+      expect(recorded).toMatchObject({ session_status: 'completed' });
+      expect((await request.delete(`${api}/sessions/${recorded.id}`, { headers })).status()).toBe(200);
+      const invalid = structuredClone(definition) as any;
+      invalid.blocks[0].blockConfig.aoiSchemaVersion = '1.2';
+      invalid.blocks[0].blockConfig.aoiDefinitions = { [stimulus.id]: [{ id: 'fake-screen-area', shape: 'rectangle',
+        points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], order: 1 }] };
+      const rejected = await request.post(`${api}/protocols`, { headers, data: { project_id: fixture.projectId,
+        name: `Invalid audio AOI ${randomUUID()}`, definition: invalid } });
+      expect(rejected.status()).toBe(422);
+      await request.delete(`${api}/invitations/${invitation.id}`, { headers });
+      await request.delete(`${api}/protocols/${protocol.id}`, { headers });
+      expect((await request.delete(`${api}/stimuli/${stimulus.id}`, { headers })).status()).toBe(204);
+    }
+  });
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; localStorage.setItem('emocog_api_base', api); }, api);
+    await page.addInitScript(api => {
+      (window as any).WECOG_API_BASE = api;
+      localStorage.setItem('emocog_api_base', api);
+      if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => {
+        throw new Error('Physical capture is forbidden in this fixture');
+      };
+    }, api);
   });
 
   const cases = ([['image', 800, 200], ['image', 200, 800], ['image', 400, 400], ['video', 640, 360]] as const)
@@ -43,10 +191,9 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
           context.fillStyle = '#e49c31'; context.fillRect(width / 2, 0, width / 2, height);
           return canvas.toDataURL('image/png').split(',')[1];
         }, { width, height }), 'base64');
-      const upload = await request.post(`${api}/stimuli/upload`, { headers: owner, multipart: {
-        project_id: String(fixture.projectId), name: `Geometry ${width}x${height}`,
-        file: { name: kind === 'video' ? 'geometry.mp4' : 'geometry.png', mimeType: kind === 'video' ? 'video/mp4' : 'image/png', buffer: bytes },
-      } });
+      const upload = await uploadStimulus(request, owner, `Geometry ${width}x${height}`, {
+        name: kind === 'video' ? 'geometry.mp4' : 'geometry.png', mimeType: kind === 'video' ? 'video/mp4' : 'image/png', buffer: bytes,
+      });
       expect(upload.status(), await upload.text()).toBe(201);
       const stimulus = await upload.json();
       expect(stimulus.visibility).toBe('private');
@@ -80,7 +227,7 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await page.evaluate(async () => {
         const shared = (window as any).__WECOG_STATE__;
         shared.runtime.sessionRuntime.policyShown = true;
-        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-157', location.href).href);
+        const { loadAndStartCognitiveTask } = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
         await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
       });
       await page.locator('#cogStartBtn').click();
@@ -125,24 +272,38 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       await page.evaluate(async () => { if (document.fullscreenElement) await document.exitFullscreen(); });
 
       const sessionId = `LIVE-${testInfo.project.name}-${Date.now()}-${width}-${height}`;
-      const admission = await request.post(`${api}/invitations/by-code/${invitation.code}/ingest-token`, { data: { session_id: sessionId } });
+      const admission = await request.post(`${api}/invitations/by-code/${invitation.code}/ingest-token`, { data: {
+        session_id: sessionId, consent_receipt: { informedConsentVersion: 'informed-consent-v1.0', privacyPolicyVersion: 'privacy-policy-v1.0' }
+      } });
       expect(admission.status(), await admission.text()).toBe(200);
       const admitted = await admission.json();
-      const ingest = await request.post(`${api}/ingest`, { headers: { Authorization: `Bearer ${admitted.token}`, 'Idempotency-Key': `finish-${sessionId}` }, data: {
-        schemaVersion: 'session_feature.v1', ids: { session: sessionId, participant: 'SYNTHETIC', invitationCode: invitation.code },
-        meta: { user: { interfaceLanguage: 'ru' }, tech: {} }, events: [],
-        lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed', finishAttemptId: `finish-${sessionId}`, completedAt: Date.now() },
-        gaze_analytics: { schemaVersion: 'gaze_analytics.v1', coordinateSpace: 'stimulus_normalized_0_1', presentations: [{
-          blockId: 'main', trialId: 'trial-1', presentationId: 'geometry-presentation', stimulusId: String(stimulus.id),
-          stimulusVersion: stimulus.current_version_id, stimulusType: kind,
-          grid: { width: 2, height: 2, values: [1, 0, 0, 0] }, fixationPoints: [{ x: 0.25, y: 0.25, durationMs: 200, signalConfidence: 1 }],
-          validObservationDurationMs: 1000,
-        }] },
-      } });
+      const data = await page.evaluate(async ({ sessionId, code, stimulusId, stimulusVersion, kind }) => {
+        const url = performance.getEntriesByType('resource').map(entry => entry.name)
+          .find(name => name.includes('/js/unified-aggregates-new.js'))!;
+        const { buildAggregatesPayload } = await import(url);
+        const { cognitiveResults } = (window as any).__WECOG_STATE__.sessionData;
+        const observed = cognitiveResults[0];
+        return { ...buildAggregatesPayload({
+          ids: { session: sessionId, participant: 'SYNTHETIC', invitationCode: code },
+          startTime: Date.now() - 1000, user: { interfaceLanguage: 'ru' }, events: [], cognitiveResults,
+          lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed',
+            finishAttemptId: `finish-${sessionId}`, completedAt: Date.now() },
+          heatmaps: { perStimulus: [{
+            blockId: observed.blockId, trialId: observed.trialId, presentationId: observed.presentationId,
+            attempt: observed.attempt, stimulusId,
+            stimulusVersion, stimulusType: kind,
+            grid: { width: 2, height: 2, values: [1, 0, 0, 0] }, fixationPoints: [{ x: 0.25, y: 0.25, durationMs: 200, signalConfidence: 1 }],
+            validObservationDurationMs: 1000
+          }] },
+        }, { forIngest: true }), delivery: { schemaVersion: 'session_delivery.v1', sequence: 1, kind: 'final' } };
+      }, { sessionId, code: invitation.code, stimulusId: String(stimulus.id), stimulusVersion: stimulus.current_version_id, kind });
+      const ingest = await request.post(`${api}/ingest`, { headers: { Authorization: `Bearer ${admitted.token}`, 'Idempotency-Key': `finish-${sessionId}` }, data });
       expect(ingest.status(), await ingest.text()).toBe(200);
       const snapshotResult = await request.post(`${api}/analytics/v1/snapshots`, { headers: owner, data: {
         schemaVersion: '1.0', mode: 'session', analysisLevel: 'level_1', projectId: fixture.projectId, protocolId: protocol.id,
-        protocolVersion: '1.0.0', metricIds: ['viz.heatmap'], filters: { sessionIds: [sessionId], qcMode: 'all', qcChannels: ['task', 'gaze'] },
+        protocolVersion: `publication:${invitation.publication_version}`,
+        metricIds: ['viz.heatmap', 'aoi.target_reached', 'aoi.dwell_time_ms', 'aoi.ttff_ms'],
+        filters: { sessionIds: [sessionId], qcMode: 'all', qcChannels: ['task', 'gaze'] },
       } });
       expect(snapshotResult.status(), await snapshotResult.text()).toBe(201);
       const snapshot = await snapshotResult.json();
@@ -172,17 +333,22 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
         production.store.state.summaryStatus = 'ready';
         production.store.state.status = 'ready';
         production.store.emit();
-        return visual.data.contexts[0].stimulus;
+        return { stimulus: visual.data.contexts[0].stimulus, metrics: visual.data.contexts[0].aoiRows[0].metrics };
       }, { sessionId, snapshot });
-      expect(descriptor).toMatchObject({ intrinsicWidth: width, intrinsicHeight: height, version: stimulus.current_version_id });
-      const background = page.locator('.analytics-stimulus-media').first();
+      expect(descriptor.stimulus).toMatchObject({ intrinsicWidth: width, intrinsicHeight: height, version: stimulus.current_version_id });
+      expect(descriptor.metrics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ metricId: 'aoi.target_reached', status: 'computed', value: true }),
+        expect.objectContaining({ metricId: 'aoi.dwell_time_ms', status: 'computed', value: 200 }),
+        expect.objectContaining({ metricId: 'aoi.ttff_ms', status: 'no_data', reason: 'fixation_onset_missing', value: null })
+      ]));
+      const canvas = page.locator('.analytics-heatmap-canvas').first();
+      await expect(canvas).toBeVisible();
+      const background = canvas.locator('..').locator('.analytics-stimulus-media');
       await expect(background).toBeVisible();
       await expect.poll(() => background.evaluate((element: HTMLImageElement | HTMLVideoElement) => ({
         width: element instanceof HTMLImageElement ? element.naturalWidth : element.videoWidth,
         height: element instanceof HTMLImageElement ? element.naturalHeight : element.videoHeight,
       }))).toEqual({ width, height });
-      const canvas = page.locator('.analytics-heatmap-canvas').first();
-      await expect(canvas).toBeVisible();
       const bounds = await canvas.boundingBox();
       expect(bounds!.width / bounds!.height).toBeCloseTo(width / height, 1);
       const backgroundBounds = await background.boundingBox();
@@ -205,10 +371,9 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       return response.json();
     };
     const owner = { Authorization: `Bearer ${(await login('owner')).token}` };
-    const upload = await request.post(`${api}/stimuli/upload`, { headers: owner, multipart: {
-      project_id: String(fixture.projectId), name: `Private reload ${randomUUID()}`,
-      file: { name: 'private.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') },
-    } });
+    const upload = await uploadStimulus(request, owner, `Private reload ${randomUUID()}`, {
+      name: 'private.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+    });
     expect(upload.status(), await upload.text()).toBe(201);
     const stimulus = await upload.json();
     const auth = await login('owner', true);
@@ -223,7 +388,10 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
     const card = page.locator(`.stimulus-card[data-id="${stimulus.id}"]`);
     const assertLoaded = async () => {
       await expect(card).toBeVisible();
-      await expect.poll(() => card.locator('img').evaluateAll(elements => elements.some(element => (element as HTMLImageElement).naturalWidth > 0))).toBe(true);
+      await expect(async () => {
+        await card.scrollIntoViewIfNeeded();
+        await expect.poll(() => card.locator('img').evaluateAll(elements => elements.some(element => (element as HTMLImageElement).naturalWidth > 0))).toBe(true);
+      }).toPass({ timeout: 5000 });
     };
     await assertLoaded();
     await page.reload();
@@ -262,10 +430,9 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
       data: { email: fixture.users.owner.email, password: fixture.users.owner.password } });
     expect(login.status()).toBe(200);
     const auth = await login.json();
-    const upload = await page.request.post(`${api}/stimuli/upload`, { headers: { 'X-CSRF-Token': auth.csrf_token }, multipart: {
-      project_id: String(fixture.projectId), name: `Bootstrap ${randomUUID()}`,
-      file: { name: 'bootstrap.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') },
-    } });
+    const upload = await uploadStimulus(page.request, { 'X-CSRF-Token': auth.csrf_token }, `Bootstrap ${randomUUID()}`, {
+      name: 'bootstrap.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+    });
     expect(upload.status(), await upload.text()).toBe(201);
     const stimulus = await upload.json();
     await page.addInitScript(({ auth, projectId }) => {
@@ -296,7 +463,10 @@ test.describe('Live stimulus workflow on an isolated API and database', () => {
     await expect.poll(() => page.evaluate(() => (window as any).__liveAuthEvents)).toBe(1);
     const card = page.locator(`.stimulus-card[data-id="${stimulus.id}"]`);
     await expect(card).toBeVisible();
-    await expect.poll(() => card.locator('img').evaluateAll(elements => elements.some(element => (element as HTMLImageElement).naturalWidth > 0))).toBe(true);
+    await expect(async () => {
+      await card.scrollIntoViewIfNeeded();
+      await expect.poll(() => card.locator('img').evaluateAll(elements => elements.some(element => (element as HTMLImageElement).naturalWidth > 0))).toBe(true);
+    }).toPass({ timeout: 5000 });
     expect(errors).toEqual([]);
   });
 });

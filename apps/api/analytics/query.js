@@ -11,6 +11,7 @@ const FILTER_KEYS = new Set([
   'includeIncompleteSessions',
 ]);
 const COMPARISON_KEYS = new Set(['factorIds', 'contrastIds', 'design', 'axis', 'metricId', 'referenceId', 'comparisonId', 'referenceParticipantIds', 'comparisonParticipantIds']);
+const COMPARISON_METRICS = new Set(['task.rt_mean_ms', 'task.rt_median_ms', 'task.accuracy_pct', 'physiology.bpm_mean', 'physiology.respiration_mean']);
 const ID_ARRAY_KEYS = [
   'participantIds', 'sessionIds', 'groupIds', 'conditionIds', 'blockIds',
   'stimulusIds', 'aoiIds', 'deviceClasses',
@@ -176,15 +177,16 @@ function validateAnalyticsQuery(input) {
           : ['design', 'metricId', 'referenceParticipantIds', 'comparisonParticipantIds']);
         if (unknownKeys(spec, allowed).length) errors.push('comparison contains fields for a different design');
         if (!['paired', 'independent'].includes(spec.design)) errors.push('comparison.design is invalid');
-        if (!['task.rt_mean_ms', 'task.rt_median_ms', 'task.accuracy_pct'].includes(spec.metricId)) errors.push('comparison.metricId is unsupported');
+        if (!COMPARISON_METRICS.has(spec.metricId)) errors.push('comparison.metricId is unsupported');
         if (!metricIds.includes(spec.metricId)) errors.push('comparison.metricId must be selected');
         comparison = { design: spec.design, metricId: spec.metricId };
         if (spec.design === 'paired') {
           if (!['block', 'condition'].includes(spec.axis)) errors.push('comparison.axis is invalid');
+          if (typeof spec.metricId === 'string' && spec.metricId.startsWith('physiology.') && spec.axis !== 'block') errors.push('physiology comparison requires recorded block intervals');
           comparison.axis = spec.axis;
           comparison.referenceId = normalizeId(spec.referenceId, 'comparison.referenceId', errors);
           comparison.comparisonId = normalizeId(spec.comparisonId, 'comparison.comparisonId', errors);
-          if (String(spec.referenceId) === String(spec.comparisonId)) errors.push('comparison levels must differ');
+          if (comparison.referenceId === comparison.comparisonId) errors.push('comparison levels must differ');
           comparison.referenceId = String(comparison.referenceId);
           comparison.comparisonId = String(comparison.comparisonId);
         } else {
@@ -229,5 +231,6 @@ module.exports = {
   METRIC_CATALOG,
   METRIC_IDS,
   QC_CHANNELS,
+  COMPARISON_METRICS,
   validateAnalyticsQuery,
 };

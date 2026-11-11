@@ -9,13 +9,17 @@
 
 import { LANDMARKS, EYE_LANDMARK_INDICES } from './constants.js';
 import { createThresholds, HISTORY_SIZE } from './thresholds.js';
+import { createFaceModel } from './face-model.mjs';
 import { analyzeIllumination } from './illumination.js';
 import { parseFaceResults, extractBlendShapes } from './face-parser.js';
 import { analyzePose, checkStability, checkEyesCentering, addToHistory } from './pose-analyzer.js';
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261104-4';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261110-integration1';
+
+import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
+    notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class PrecheckAnalyzer {
     constructor(options = {}) {
@@ -43,6 +47,8 @@ class PrecheckAnalyzer {
         this.initializing = null;
         this.generation = 0;
         this.backend = 'uninitialized';
+        this.initializationFailed = false;
+        this.inferenceFailures = 0;
     }
 
     async initialize() {
@@ -58,11 +64,13 @@ class PrecheckAnalyzer {
             const worker = new VisionWorkerClient('face');
             this.worker = worker;
             try {
-                await worker.start({ thresholds: this.thresholds });
+                const initialized = await worker.start({ thresholds: this.thresholds });
                 if (generation !== this.generation) { worker.dispose(); return false; }
                 this.backend = 'worker';
+                this.inferenceDelegate = initialized?.inferenceDelegate || null;
+                this.cpuFallbackReason = initialized?.delegateFallbackReason || null;
                 this.isInitialized = true;
-                this.onInitialized?.();
+                notifyParticipantCallback(this.onInitialized, this, [], 'face', 'initialization:callback-failed');
                 return true;
             } catch (_) {
                 worker.dispose();
@@ -74,7 +82,7 @@ class PrecheckAnalyzer {
         }
         if (generation !== this.generation) return false;
         try {
-            console.log('[PrecheckAnalyzer] Инициализация v2.1...');
+            dbg('face', 'initialization:start');
             
             if (typeof FilesetResolver === 'undefined' || typeof FaceLandmarker === 'undefined') {
                 throw new Error('MediaPipe Vision не загружен.');
@@ -88,33 +96,33 @@ class PrecheckAnalyzer {
                 import.meta.url
             ).href;
             
-            const landmarker = await FaceLandmarker.createFromOptions(vision, {
+            const initialized = await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options), {
                 baseOptions: {
-                    modelAssetPath: modelPath,
-                    delegate: "GPU"
+                    modelAssetPath: modelPath
                 },
                 runningMode: this.runningMode,
-                numFaces: 1,
-                minFaceDetectionConfidence: 0.5,
-                minFacePresenceConfidence: 0.5,
-                minTrackingConfidence: 0.5,
-                outputFaceBlendshapes: true,
-                outputFacialTransformationMatrixes: true,
                 ...(typeof document === 'undefined' ? { canvas: createAnalysisCanvas() } : {})
-            });
-            if (generation !== this.generation) { landmarker.close(); return false; }
-            this.faceLandmarker = landmarker;
+            }, () => generation === this.generation, Boolean(this.cpuFallbackReason));
+            if (!initialized) return false;
+            this.faceLandmarker = initialized.model;
+            this.inferenceDelegate = initialized.delegate;
+            this.cpuFallbackReason = this.cpuFallbackReason || initialized.fallbackReason;
             this.backend = 'main';
             this.isInitialized = true;
-            console.log('[PrecheckAnalyzer] MediaPipe Face Landmarker готов');
+            this.initializationFailed = false;
+            this.inferenceFailures = 0;
+            dbg('face', 'initialization:ready');
             
-            if (this.onInitialized) this.onInitialized();
+            notifyParticipantCallback(this.onInitialized, this, [], 'face', 'initialization:callback-failed');
             return true;
             
         } catch (error) {
             if (generation !== this.generation) return false;
-            console.error('[PrecheckAnalyzer] Ошибка:', error);
-            if (this.onError) this.onError(error);
+            this.initializationFailed = true;
+            this.inferenceDelegate = null;
+            this.backend = 'failed';
+            dbgErrorOnce(this, 'face', 'initialization:failed');
+            notifyParticipantCallback(this.onError, this, [error], 'face', 'error:callback-failed');
             return false;
         }
     }
@@ -130,7 +138,10 @@ class PrecheckAnalyzer {
     }
 
     async _analyzeFrame(videoElement, capture = {}) {
+        const generation = this.generation;
+        if (!this.isInitialized && this.initializationFailed) return this._createErrorResult('face_model_unavailable');
         if (!this.isInitialized && !await this.initialize()) return this._createErrorResult('Analyzer unavailable');
+        if (generation !== this.generation) return this._createErrorResult('Analysis interrupted');
         if (!videoElement || (videoElement.readyState !== undefined && videoElement.readyState < 2)) {
             return this._createErrorResult('Видео не готово');
         }
@@ -141,6 +152,8 @@ class PrecheckAnalyzer {
             try {
                 const { frame, imageData } = await worker.analyze(videoElement, capture);
                 if (generation !== this.generation) return this._createErrorResult('Analysis interrupted');
+                if (['GPU', 'CPU'].includes(frame.inferenceDelegate)) this.inferenceDelegate = frame.inferenceDelegate;
+                this.cpuFallbackReason = frame.delegateFallbackReason || this.cpuFallbackReason || null;
                 this.lastResult = rememberFramePixels(frame, imageData);
                 return this.lastResult;
             } catch (_) {
@@ -229,11 +242,30 @@ class PrecheckAnalyzer {
                 analysisTime: Math.round(analysisTime)
             };
 
+            this.inferenceFailures = 0;
             return rememberFramePixels(this.lastResult, imageData);
             
         } catch (error) {
-            console.error('[PrecheckAnalyzer] Ошибка:', error);
-            return this._createErrorResult(error.message);
+            if (this.inferenceDelegate === 'GPU' && !this.cpuFallbackReason && generation === this.generation) {
+                // Context loss may happen after a successful warmup. Retry once
+                // on CPU in the same worker, keeping the original capture clocks.
+                this.cpuFallbackReason = 'face_gpu_inference_failed';
+                try { this.faceLandmarker?.close(); } catch (_) {}
+                this.faceLandmarker = null;
+                this.isInitialized = false;
+                // The 2D analysis canvas owns this capture already. A live
+                // video may advance while the CPU model is being initialized.
+                return this._analyzeFrame(this._canvas || videoElement, { ...capture, timestamp, wallTimestamp });
+            }
+            this.inferenceFailures++;
+            if (this.inferenceFailures >= 3) {
+                try { this.faceLandmarker?.close(); } catch (_) {}
+                this.faceLandmarker = null;
+                this.isInitialized = false;
+                this.initializationFailed = true;
+                this.backend = 'failed';
+            }
+            return this._createErrorResult('face_inference_failed');
         }
     }
 
@@ -251,7 +283,11 @@ class PrecheckAnalyzer {
     }
 
     getLastResult() { return this.lastResult; }
-    reset() { this.generation++; this.worker?.reset(); this.lastResult = null; this.poseHistory = []; }
+    reset() {
+        resetParticipantDiagnostics(this);
+        this.generation++; this.worker?.reset(); this.lastResult = null; this.poseHistory = [];
+        this.initializationFailed = false; this.inferenceFailures = 0;
+    }
     dispose() {
         this.worker?.dispose(); this.worker = null;
         if (this.faceLandmarker) { this.faceLandmarker.close(); this.faceLandmarker = null; }

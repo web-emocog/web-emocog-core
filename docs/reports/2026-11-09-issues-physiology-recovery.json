@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "physiology_browser_recovery.v1",
+  "at": "2026-11-09T10:47:54.935Z",
+  "automationVersion": "1.57.0",
+  "physicalSensors": false,
+  "network": "loopback only, isolated randomly named IndexedDB databases",
+  "browsers": [
+    {
+      "engine": "chromium",
+      "version": "143.0.7499.4",
+      "accelerated": [
+        {
+          "minutes": 40,
+          "frames": 72000,
+          "saves": 82,
+          "wallMs": 36.900000005960464,
+          "maxSaveMs": 1.6999999955296516,
+          "reloadReconstructionExact": true,
+          "offlineFinalIdentityExact": true,
+          "baselineParity": true,
+          "intervalBytes": 9552,
+          "retainedMinutes": 40,
+          "retainedAttempts": 17,
+          "storageUsageDeltaBytes": 113658
+        },
+        {
+          "minutes": 125,
+          "frames": 225000,
+          "saves": 252,
+          "wallMs": 124.70000000298023,
+          "maxSaveMs": 1,
+          "reloadReconstructionExact": true,
+          "offlineFinalIdentityExact": true,
+          "baselineParity": true,
+          "intervalBytes": 29407,
+          "retainedMinutes": 125,
+          "retainedAttempts": 51,
+          "storageUsageDeltaBytes": -2589
+        }
+      ],
+      "faults": {
+        "staleWriterRejected": true,
+        "abortedTransactionRolledBack": true,
+        "retryExact": true,
+        "compactFallbackPreservesIntervals": true,
+        "method": "injected_storage_failure_not_actual_disk_exhaustion"
+      }
+    },
+    {
+      "engine": "firefox",
+      "version": "144.0.2",
+      "accelerated": [
+        {
+          "minutes": 40,
+          "frames": 72000,
+          "saves": 82,
+          "wallMs": 264,
+          "maxSaveMs": 102,
+          "reloadReconstructionExact": true,
+          "offlineFinalIdentityExact": true,
+          "baselineParity": true,
+          "intervalBytes": 9552,
+          "retainedMinutes": 40,
+          "retainedAttempts": 17,
+          "storageUsageDeltaBytes": 49152
+        },
+        {
+          "minutes": 125,
+          "frames": 225000,
+          "saves": 252,
+          "wallMs": 380,
+          "maxSaveMs": 107,
+          "reloadReconstructionExact": true,
+          "offlineFinalIdentityExact": true,
+          "baselineParity": true,
+          "intervalBytes": 29407,
+          "retainedMinutes": 125,
+          "retainedAttempts": 51,
+          "storageUsageDeltaBytes": 65536
+        }
+      ],
+      "faults": {
+        "staleWriterRejected": true,
+        "abortedTransactionRolledBack": true,
+        "retryExact": true,
+        "compactFallbackPreservesIntervals": true,
+        "method": "injected_storage_failure_not_actual_disk_exhaustion"
+      }
+    },
+    {
+      "engine": "webkit",
+      "version": "26.0",
+      "accelerated": [
+        {
+          "minutes": 40,
+          "frames": 72000,
+          "saves": 82,
+          "wallMs": 69,
+          "maxSaveMs": 6,
+          "reloadReconstructionExact": true,
+          "offlineFinalIdentityExact": true,
+          "baselineParity": true,
+          "intervalBytes": 9552,
+          "retainedMinutes": 40,
+          "retainedAttempts": 17,
+          "storageUsageDeltaBytes": 522307
+        },
+        {
+          "minutes": 125,
+          "frames": 225000,
+          "saves": 252,
+          "wallMs": 170,
+          "maxSaveMs": 2,
+          "reloadReconstructionExact": true,
+          "offlineFinalIdentityExact": true,
+          "baselineParity": true,
+          "intervalBytes": 29407,
+          "retainedMinutes": 125,
+          "retainedAttempts": 51,
+          "storageUsageDeltaBytes": 3506489
+        }
+      ],
+      "faults": {
+        "staleWriterRejected": true,
+        "abortedTransactionRolledBack": true,
+        "retryExact": true,
+        "compactFallbackPreservesIntervals": true,
+        "method": "injected_storage_failure_not_actual_disk_exhaustion"
+      }
+    }
+  ],
+  "limitations": [
+    "Accelerated estimates, not physical capture or thermal/performance acceptance.",
+    "Store re-instantiation models reload; full process restart is covered separately, not by this harness.",
+    "No API, PostgreSQL, real participant UI or physiological ground truth."
+  ]
+}

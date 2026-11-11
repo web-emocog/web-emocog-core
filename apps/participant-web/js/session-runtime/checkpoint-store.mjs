@@ -1,11 +1,12 @@
+import { CHECKPOINT_SERIES, describeSeries, planSeries, restoreSeries } from './long-session-retention.mjs';
+
 const DB_NAME = 'wecog-participant-runtime';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'session-checkpoints';
 const SAMPLE_STORE_NAME = 'session-sample-chunks';
 const ACTIVE_SESSION_KEY = 'wecog_active_session_id';
 const BACKUP_PREFIX = 'wecog_session_backup:';
 const CHECKPOINT_SCHEMA_VERSION = 3;
-const CHUNKED_ARRAY_KEYS = Object.freeze(['eyeTracking', 'eyeSignals']);
 const OMIT_KEYS = /^(email|e-mail|phone|phoneNumber|ip|ipAddress|userAgent|authorization|accessToken|refreshToken|ingestToken|cookie|fullName|displayName)$/i;
 const EMAIL_VALUE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -44,9 +45,9 @@ export function buildCheckpointSessionData(sessionData) {
     return sanitizeCheckpointValue(sessionData || {});
 }
 
-function openDatabase(indexedDb, timeoutMs) {
+function openDatabase(indexedDb, timeoutMs, databaseName = DB_NAME) {
     return new Promise((resolve, reject) => {
-        const request = indexedDb.open(DB_NAME, DB_VERSION);
+        const request = indexedDb.open(databaseName, DB_VERSION);
         let settled = false;
         const timeout = setTimeout(() => rejectOnce(new Error('IndexedDB open timed out')), timeoutMs);
         const rejectOnce = error => {
@@ -73,6 +74,10 @@ function openDatabase(indexedDb, timeoutMs) {
                     autoIncrement: true
                 });
                 store.createIndex('sessionId', 'sessionId', { unique: false });
+            }
+            const chunks = request.transaction.objectStore(SAMPLE_STORE_NAME);
+            if (!chunks.indexNames.contains('sessionType')) {
+                chunks.createIndex('sessionType', ['sessionId', 'sampleType'], { unique: false });
             }
         };
         request.onsuccess = () => {
@@ -109,251 +114,309 @@ function checkpointTransaction(db, mode, timeoutMs, operation) {
     });
 }
 
+export class CheckpointConflictError extends Error {
+    constructor() { super('Checkpoint changed in another store; reload before saving'); this.name = 'CheckpointConflictError'; }
+}
+
 export class SessionCheckpointStore {
     constructor(options = {}) {
         const storage = name => { try { return globalThis[name] || null; } catch (_) { return null; } };
         this.indexedDb = Object.hasOwn(options, 'indexedDB') ? options.indexedDB : storage('indexedDB');
         this.sessionStorage = Object.hasOwn(options, 'sessionStorage') ? options.sessionStorage : storage('sessionStorage');
+        this.databaseName = options.databaseName || DB_NAME;
         this.memory = new Map();
-        this.persistedSampleCounts = new Map();
-        this.persistedSampleHeads = new Map();
+        this.series = new Map();
+        this.revisions = new Map();
+        this.backupRevisions = new Map();
         this.fallbackSessions = new Set();
+        this.operation = Promise.resolve();
         this.lastPersistenceMode = null;
+        this.stats = { saves: 0, sampleRecordsWritten: 0, chunksWritten: 0, chunksPruned: 0, conflicts: 0, failures: 0 };
         this.operationTimeoutMs = Number.isFinite(options.operationTimeoutMs)
             ? Math.max(10, Math.min(30000, options.operationTimeoutMs)) : 10000;
     }
 
-    getActiveSessionId() {
-        try {
-            return this.sessionStorage?.getItem(ACTIVE_SESSION_KEY) || null;
-        } catch (_) {
-            return null;
-        }
+    // Serialize load/save/clear as well as writes: clear cannot race a late commit.
+    _run(operation) {
+        const pending = this.operation.then(operation);
+        this.operation = pending.catch(() => {});
+        return pending;
     }
 
+    _remember(id, plans, revision) {
+        this.series.delete(id);
+        this.series.set(id, plans);
+        this.revisions.set(id, revision);
+        while (this.series.size > 2) {
+            const oldest = this.series.keys().next().value;
+            this.series.delete(oldest); this.revisions.delete(oldest);
+            this.backupRevisions.delete(oldest);
+            this.memory.delete(oldest); this.fallbackSessions.delete(oldest);
+        }
+        this.lastRetention = Object.fromEntries(Object.entries(plans).map(([key, plan]) => [key,
+            { ...plan.retention, retainedCount: plan.count, firstTimestamp: plan.firstTimestamp ?? null,
+                lastTimestamp: plan.lastTimestamp ?? null }]));
+    }
+
+    getActiveSessionId() {
+        try { return this.sessionStorage?.getItem(ACTIVE_SESSION_KEY) || null; } catch (_) { return null; }
+    }
     setActiveSessionId(sessionId) {
         if (!sessionId) return;
-        try {
-            this.sessionStorage?.setItem(ACTIVE_SESSION_KEY, String(sessionId));
-        } catch (_) {
-            // The caller must check the reference before claiming reload recovery.
-        }
+        try { this.sessionStorage?.setItem(ACTIVE_SESSION_KEY, String(sessionId)); } catch (_) {}
     }
 
     _saveBackup(sessionId, sessionData, machineSnapshot) {
         if (!this.sessionStorage) return false;
+        const id = String(sessionId);
+        let existing;
+        try { existing = JSON.parse(this.sessionStorage.getItem(BACKUP_PREFIX + id) || 'null'); }
+        catch (_) { return false; }
+        if (existing && (!this.backupRevisions.has(id)
+            || (existing.backupRevision || 0) !== this.backupRevisions.get(id))) throw new CheckpointConflictError();
         const compact = { ...sessionData };
-        const omitted = ['eyeTracking', 'eyeSignals', 'trackingTest', 'emotionSamples', 'bodyPoseSamples', 'emotionEvents'];
-        for (const key of omitted) compact[key] = [];
-        compact.storageRecovery = { compactCheckpoint: true, omittedSampleArrays: omitted };
-        const backup = { schemaVersion: CHECKPOINT_SCHEMA_VERSION, sessionId: String(sessionId), savedAt: Date.now(),
+        const recovered = { ...(compact.experimentMeta?.storageRecovery || {}), ...(compact.storageRecovery || {}) };
+        const persisted = { ...(existing?.sessionData?.experimentMeta?.storageRecovery || {}),
+            ...(existing?.sessionData?.storageRecovery || {}) };
+        // Events and accepted results are audit data, not disposable sensor diagnostics.
+        const omittedSamples = CHECKPOINT_SERIES.filter(key => key !== 'events' && (Array.isArray(compact[key])
+            || recovered.omittedSeries?.[key] || persisted.omittedSeries?.[key]
+            || recovered.omittedSampleArrays?.includes(key) || persisted.omittedSampleArrays?.includes(key)));
+        const missingness = Object.fromEntries(omittedSamples.map(key => {
+            const current = describeSeries(Array.isArray(compact[key]) ? compact[key] : []);
+            const baseline = recovered.omittedSeries?.[key];
+            const baselineCount = Number.isSafeInteger(baseline?.count) && baseline.count > 0 ? baseline.count : 0;
+            // Source metadata is the reload baseline; the stored backup already includes
+            // this page's samples and must not be added again on every periodic save.
+            const combined = baselineCount ? {
+                count: baselineCount + current.count,
+                firstTimestamp: baseline.firstTimestamp ?? current.firstTimestamp,
+                lastTimestamp: current.count ? current.lastTimestamp : baseline.lastTimestamp
+            } : current;
+            const previous = persisted.omittedSeries?.[key];
+            return [key, previous?.count > combined.count ? previous : combined];
+        }));
+        for (const key of omittedSamples) compact[key] = [];
+        compact.storageRecovery = { ...persisted, ...recovered, schemaVersion: 'checkpoint_recovery.v1',
+            compactCheckpoint: true, signalSeriesIncomplete: recovered.signalSeriesIncomplete === true
+                || persisted.signalSeriesIncomplete === true || omittedSamples.some(key => missingness[key].count > 0),
+            omittedSampleArrays: omittedSamples, omittedSeries: missingness,
+            aggregatePolicy: 'preserved_without_recomputation' };
+        compact.experimentMeta = { ...(compact.experimentMeta || {}), storageRecovery: compact.storageRecovery };
+        const backupRevision = (this.backupRevisions.get(id) || 0) + 1;
+        const primaryRevision = this.revisions.get(id);
+        const backup = { schemaVersion: CHECKPOINT_SCHEMA_VERSION, sessionId: id, savedAt: Date.now(), backupRevision,
+            primaryRevision: primaryRevision ?? null,
             sessionData: buildCheckpointSessionData(compact), machineSnapshot: sanitizeCheckpointValue(machineSnapshot || {}) };
         try {
             this.sessionStorage.setItem(BACKUP_PREFIX + sessionId, JSON.stringify(backup));
             this.setActiveSessionId(sessionId);
-            this.memory.set(String(sessionId), backup);
+            this._remember(id, this.series.get(id) || {}, primaryRevision);
             this.fallbackSessions.add(String(sessionId));
+            this.backupRevisions.set(id, backupRevision);
             this.lastPersistenceMode = 'session_storage_compact';
+            // No second in-memory copy of an IndexedDB or sessionStorage checkpoint.
             return true;
         } catch (_) { return false; }
     }
 
-    async save(sessionId, sessionData, machineSnapshot) {
-        if (!sessionId) return false;
-        if (this.fallbackSessions.has(String(sessionId))) {
-            if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
-            throw new Error('Session backup storage is unavailable');
-        }
-        try {
-            const saved = await this._savePrimary(sessionId, sessionData, machineSnapshot);
-            if (!this.indexedDb && this.sessionStorage) {
+    save(sessionId, sessionData, machineSnapshot) {
+        return this._run(async () => {
+            if (!sessionId) return false;
+            this.lastPersistenceMode = null;
+            if (this.fallbackSessions.has(String(sessionId))) {
                 if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
                 throw new Error('Session backup storage is unavailable');
             }
-            this.lastPersistenceMode = this.indexedDb ? 'indexeddb' : 'memory';
-            return saved;
-        } catch (error) {
-            if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
-            throw error;
-        }
+            try {
+                return await this._savePrimary(sessionId, sessionData, machineSnapshot);
+            } catch (error) {
+                this.stats.failures++;
+                // A stale tab must never shadow a newer durable checkpoint with a backup.
+                if (error instanceof CheckpointConflictError) { this.stats.conflicts++; throw error; }
+                if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
+                throw error;
+            }
+        });
     }
 
     async _savePrimary(sessionId, sessionData, machineSnapshot) {
-        if (!sessionId) return false;
-        const normalizedSessionId = String(sessionId);
-        const useChunks = Boolean(this.indexedDb);
-        const compactSource = useChunks ? { ...(sessionData || {}) } : (sessionData || {});
-        if (useChunks) {
-            for (const key of CHUNKED_ARRAY_KEYS) delete compactSource[key];
-        }
-        const previousCounts = this.persistedSampleCounts.get(normalizedSessionId) || {};
-        const previousHeads = this.persistedSampleHeads.get(normalizedSessionId) || {};
-        const nextCounts = {};
-        const nextHeads = {};
-        const resetTypes = new Set();
-        const sampleChunks = [];
-        for (const key of CHUNKED_ARRAY_KEYS) {
-            const samples = Array.isArray(sessionData?.[key]) ? sessionData[key] : [];
-            let previousCount = Number.isInteger(previousCounts[key])
-                ? previousCounts[key]
-                : 0;
-            nextHeads[key] = samples.length ? JSON.stringify(samples[0]) : null;
-            // Gaze uses a bounded rolling window. Rebase its chunks atomically
-            // when the retained head moves, rather than treating retention as corruption.
-            if (previousCount > samples.length || (previousCount > 0 && previousHeads[key] !== undefined && previousHeads[key] !== nextHeads[key])) {
-                resetTypes.add(key);
-                previousCount = 0;
+        const id = String(sessionId), useChunks = Boolean(this.indexedDb);
+        if (!useChunks) {
+            if (this.sessionStorage) {
+                if (this._saveBackup(sessionId, sessionData, machineSnapshot)) return true;
+                throw new Error('Session backup storage is unavailable');
             }
-            nextCounts[key] = samples.length;
-            if (useChunks && samples.length > previousCount) {
-                sampleChunks.push({
-                    sessionId: normalizedSessionId,
-                    sampleType: key,
-                    from: previousCount,
-                    to: samples.length,
-                    samples: sanitizeCheckpointValue(samples.slice(previousCount))
-                });
+            if (!this.memory.has(id) && this.memory.size >= 2) {
+                throw new Error('Memory checkpoint capacity reached; durable storage is required for another session');
             }
-        }
-        const checkpoint = {
-            schemaVersion: CHECKPOINT_SCHEMA_VERSION,
-            sessionId: normalizedSessionId,
-            savedAt: Date.now(),
-            sessionData: buildCheckpointSessionData(compactSource),
-            machineSnapshot: sanitizeCheckpointValue(machineSnapshot || {}),
-            sampleCounts: nextCounts
-        };
-        if (useChunks) {
-            for (const key of CHUNKED_ARRAY_KEYS) checkpoint.sessionData[key] = [];
-        }
-        this.memory.set(checkpoint.sessionId, checkpoint);
-        this.setActiveSessionId(checkpoint.sessionId);
-
-        if (!this.indexedDb) {
-            this.persistedSampleCounts.set(normalizedSessionId, nextCounts);
+            const checkpoint = { schemaVersion: 3, sessionId: id, savedAt: Date.now(),
+                sessionData: buildCheckpointSessionData(sessionData), machineSnapshot: sanitizeCheckpointValue(machineSnapshot || {}) };
+            this._remember(id, {}, 0);
+            this.memory.set(id, checkpoint);
+            this.lastPersistenceMode = 'memory';
+            this.setActiveSessionId(id);
             return true;
         }
-        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs);
+        const source = { ...(sessionData || {}) }, plans = {}, sampleChunks = [];
+        const previous = this.series.get(id);
+        for (const key of CHECKPOINT_SERIES) {
+            const samples = Array.isArray(source[key]) ? source[key] : [];
+            const plan = planSeries(samples, previous?.[key], {
+                fingerprint: value => value === undefined ? null : JSON.stringify(sanitizeCheckpointValue(value)) });
+            plan.firstTimestamp = describeSeries(samples).firstTimestamp;
+            sampleChunks.push(...plan.chunks.map(chunk => ({ sessionId: id, sampleType: key,
+                ...chunk, samples: sanitizeCheckpointValue(chunk.samples) })));
+            delete plan.chunks;
+            plans[key] = plan;
+            if (Array.isArray(source[key])) source[key] = [];
+        }
+        const retention = Object.fromEntries(Object.entries(plans).map(([key, plan]) => [key,
+            { ...plan.retention, retainedCount: plan.count, firstTimestamp: plan.firstTimestamp, lastTimestamp: plan.lastTimestamp }]));
+        source.experimentMeta = { ...(source.experimentMeta || {}), checkpointRetention: retention };
+        const revision = (this.revisions.get(id) || 0) + 1;
+        const checkpoint = { schemaVersion: 4, sessionId: id, savedAt: Date.now(), revision,
+            sessionData: buildCheckpointSessionData(source), machineSnapshot: sanitizeCheckpointValue(machineSnapshot || {}),
+            sampleRanges: plans };
+        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs, this.databaseName);
+        let conflict = false, pruned = 0, transactionFailure = null;
         try {
             await checkpointTransaction(db, 'readwrite', this.operationTimeoutMs, transaction => {
-                transaction.objectStore(STORE_NAME).put(checkpoint);
-                const chunkStore = transaction.objectStore(SAMPLE_STORE_NAME);
-                const appendChunks = () => { for (const chunk of sampleChunks) chunkStore.add(chunk); };
-                if (resetTypes.size) {
-                    const cursorRequest = chunkStore.index('sessionId').openCursor(normalizedSessionId);
-                    cursorRequest.onsuccess = () => {
-                        const cursor = cursorRequest.result;
-                        if (!cursor) { appendChunks(); return; }
-                        if (resetTypes.has(cursor.value.sampleType)) cursor.delete();
-                        cursor.continue();
-                    };
-                } else appendChunks();
+                const guard = operation => () => {
+                    try { operation(); } catch (error) { transactionFailure = error; transaction.abort(); }
+                };
+                const snapshots = transaction.objectStore(STORE_NAME);
+                const read = snapshots.get(id);
+                read.onsuccess = guard(() => {
+                    const expected = this.revisions.get(id);
+                    if ((read.result && expected === undefined) || (read.result?.revision || 0) !== (expected || 0)) {
+                        conflict = true; transaction.abort(); return;
+                    }
+                    snapshots.put(checkpoint);
+                    const chunks = transaction.objectStore(SAMPLE_STORE_NAME);
+                    // Each cursor visits only deleted prefix chunks and one retained boundary.
+                    const pruning = Object.entries(plans).filter(([key, plan]) => plan.reset || plan.from !== previous?.[key]?.from);
+                    let remaining = pruning.length;
+                    const append = () => { for (const chunk of sampleChunks) chunks.add(chunk); };
+                    if (!remaining) append();
+                    const done = () => { if (--remaining === 0) append(); };
+                    for (const [key, plan] of pruning) {
+                        const request = chunks.index('sessionType').openCursor([id, key]);
+                        request.onsuccess = guard(() => {
+                            const cursor = request.result;
+                            if (!cursor) { done(); return; }
+                            if (plan.reset || cursor.value.to <= plan.from) {
+                                cursor.delete(); pruned++; cursor.continue();
+                            } else done();
+                        });
+                    }
+                });
             });
-            this.persistedSampleCounts.set(normalizedSessionId, nextCounts);
-            this.persistedSampleHeads.set(normalizedSessionId, nextHeads);
-        } finally {
-            db.close();
-        }
-        return true;
+            this._remember(id, plans, revision);
+            this.stats.saves++;
+            this.stats.chunksPruned += pruned;
+            this.stats.chunksWritten += sampleChunks.length;
+            this.stats.sampleRecordsWritten += sampleChunks.reduce((sum, chunk) => sum + chunk.samples.length, 0);
+            this.setActiveSessionId(id);
+            this.lastPersistenceMode = 'indexeddb';
+            return true;
+        } catch (error) { if (conflict) throw new CheckpointConflictError(); throw transactionFailure || error; }
+        finally { db.close(); }
     }
 
-    async load(sessionId = this.getActiveSessionId()) {
+    load(sessionId = this.getActiveSessionId()) { return this._run(() => this._load(sessionId)); }
+    async _load(sessionId) {
         if (!sessionId) return null;
-        const normalizedSessionId = String(sessionId);
+        const id = String(sessionId);
         try {
-            const backup = JSON.parse(this.sessionStorage?.getItem(BACKUP_PREFIX + normalizedSessionId) || 'null');
-            if (backup?.sessionId === normalizedSessionId && backup.sessionData?.ids?.session === normalizedSessionId) {
+            const backup = JSON.parse(this.sessionStorage?.getItem(BACKUP_PREFIX + id) || 'null');
+            if (backup?.sessionId === id && backup.sessionData?.ids?.session === id) {
+                if (![1, 2, 3, 4].includes(backup.schemaVersion)) throw new Error('Unsupported backup schema; explicit recovery required');
+                // Legacy v3 compact backups did not carry counts; preserve explicit unknown coverage.
                 if (!backup.sessionData.pendingFinalUpload?.payload && !backup.sessionData.finalizedPayload) {
                     backup.sessionData.experimentMeta = { ...(backup.sessionData.experimentMeta || {}),
-                        storageRecovery: { method: 'session_storage_compact', signalSeriesIncomplete: true,
-                            omittedSeries: ['eyeTracking', 'eyeSignals', 'trackingTest', 'emotionSamples', 'bodyPoseSamples', 'emotionEvents'] } };
+                        storageRecovery: backup.sessionData.storageRecovery || backup.sessionData.experimentMeta?.storageRecovery
+                            || { method: 'session_storage_compact',
+                            signalSeriesIncomplete: true, schemaVersion: 'checkpoint_recovery.legacy' } };
                 }
-                this.fallbackSessions.add(normalizedSessionId);
+                this.fallbackSessions.add(id);
+                // Missing legacy fences stay unknown, never adopt the current primary.
+                this._remember(id, {}, Number.isSafeInteger(backup.primaryRevision) && backup.primaryRevision >= 0
+                    ? backup.primaryRevision : undefined);
+                this.backupRevisions.set(id, backup.backupRevision || 0);
                 this.lastPersistenceMode = 'session_storage_compact';
-                this.memory.set(normalizedSessionId, backup);
                 return backup;
             }
-        } catch (_) { /* The primary checkpoint remains independently readable. */ }
-        if (!this.indexedDb) return this.memory.get(normalizedSessionId) || null;
-        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs);
+        } catch (error) { if (error.message === 'Unsupported backup schema; explicit recovery required') throw error; }
+        if (!this.indexedDb) return this.memory.get(id) || null;
+        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs, this.databaseName);
         try {
-            let checkpointRequest, chunksRequest;
+            let read, chunksRead;
             await checkpointTransaction(db, 'readonly', this.operationTimeoutMs, transaction => {
-                checkpointRequest = transaction
-                    .objectStore(STORE_NAME)
-                    .get(normalizedSessionId);
-                chunksRequest = transaction
-                    .objectStore(SAMPLE_STORE_NAME)
-                    .index('sessionId')
-                    .getAll(normalizedSessionId);
+                read = transaction.objectStore(STORE_NAME).get(id);
+                chunksRead = transaction.objectStore(SAMPLE_STORE_NAME).index('sessionId').getAll(id);
             });
-            const checkpoint = checkpointRequest.result || null, chunks = chunksRequest.result || [];
+            const checkpoint = read.result || null;
             if (!checkpoint) return null;
-            if (checkpoint.schemaVersion >= 3) {
-                const orderedChunks = [...chunks].sort((a, b) => a.id - b.id);
-                for (const key of CHUNKED_ARRAY_KEYS) {
-                    const samples = orderedChunks
-                        .filter(chunk => chunk.sampleType === key)
-                        .flatMap(chunk => Array.isArray(chunk.samples) ? chunk.samples : []);
-                    const expected = Number(checkpoint.sampleCounts?.[key] || 0);
-                    if (samples.length !== expected) {
-                        throw new Error(`Checkpoint sample chunks incomplete for ${key}`);
-                    }
-                    checkpoint.sessionData[key] = samples;
+            if (![1, 2, 3, 4].includes(checkpoint.schemaVersion)) throw new Error('Unsupported checkpoint schema; explicit recovery required');
+            const chunks = chunksRead.result || [];
+            const plans = {};
+            if (checkpoint.schemaVersion === 4) {
+                for (const key of CHECKPOINT_SERIES) {
+                    checkpoint.sessionData[key] = restoreSeries(chunks, checkpoint.sampleRanges[key], key);
+                    plans[key] = { ...checkpoint.sampleRanges[key], reset: false };
+                }
+            } else if (checkpoint.schemaVersion === 3) {
+                for (const key of ['eyeTracking', 'eyeSignals']) {
+                    const expected = checkpoint.sampleCounts?.[key];
+                    // Memory/legacy inline v3 snapshots have no chunk manifest.
+                    if (expected === undefined) continue;
+                    checkpoint.sessionData[key] = restoreSeries(chunks, { from: 0, to: expected }, key);
                 }
             }
-            this.persistedSampleCounts.set(
-                normalizedSessionId,
-                Object.fromEntries(
-                    CHUNKED_ARRAY_KEYS.map(key => [
-                        key,
-                        Array.isArray(checkpoint.sessionData?.[key])
-                            ? checkpoint.sessionData[key].length
-                            : 0
-                    ])
-                )
-            );
-            this.persistedSampleHeads.set(normalizedSessionId, Object.fromEntries(CHUNKED_ARRAY_KEYS.map(key => [
-                key, checkpoint.sessionData?.[key]?.length ? JSON.stringify(checkpoint.sessionData[key][0]) : null
-            ])));
+            // Old schemas rebase once on their next write, in the same transaction as v4.
+            this._remember(id, plans, checkpoint.revision || 0);
+            this.lastPersistenceMode = 'indexeddb';
             return checkpoint;
-        } finally {
-            db.close();
-        }
+        } finally { db.close(); }
     }
 
-    async clear(sessionId = this.getActiveSessionId()) {
-        if (!sessionId) return;
-        const normalizedSessionId = String(sessionId);
-        this.memory.delete(normalizedSessionId);
-        this.persistedSampleCounts.delete(normalizedSessionId);
-        this.persistedSampleHeads.delete(normalizedSessionId);
-        this.fallbackSessions.delete(normalizedSessionId);
-        try {
-            this.sessionStorage?.removeItem(BACKUP_PREFIX + normalizedSessionId);
-            if (this.sessionStorage?.getItem(ACTIVE_SESSION_KEY) === normalizedSessionId) {
-                this.sessionStorage.removeItem(ACTIVE_SESSION_KEY);
+    clear(sessionId = this.getActiveSessionId()) {
+        return this._run(async () => {
+            if (!sessionId) return;
+            const id = String(sessionId);
+            let backup;
+            try { backup = JSON.parse(this.sessionStorage?.getItem(BACKUP_PREFIX + id) || 'null'); } catch (_) {}
+            if (backup && (!this.backupRevisions.has(id)
+                || (backup.backupRevision || 0) !== this.backupRevisions.get(id))) throw new CheckpointConflictError();
+            if (this.indexedDb) {
+                const db = await openDatabase(this.indexedDb, this.operationTimeoutMs, this.databaseName);
+                let conflict = false;
+                try {
+                    await checkpointTransaction(db, 'readwrite', this.operationTimeoutMs, transaction => {
+                        const snapshots = transaction.objectStore(STORE_NAME), read = snapshots.get(id);
+                        read.onsuccess = () => {
+                            const expected = this.revisions.get(id);
+                            if (read.result && (expected === undefined || (read.result.revision || 0) !== expected)) {
+                                conflict = true; transaction.abort(); return;
+                            }
+                            snapshots.delete(id);
+                            const request = transaction.objectStore(SAMPLE_STORE_NAME).index('sessionId').openCursor(id);
+                            request.onsuccess = () => {
+                                const cursor = request.result;
+                                if (cursor) { cursor.delete(); cursor.continue(); }
+                            };
+                        };
+                    });
+                } catch (error) { if (conflict) throw new CheckpointConflictError(); throw error; }
+                finally { db.close(); }
             }
-        } catch (_) {}
-
-        if (!this.indexedDb) return;
-        const db = await openDatabase(this.indexedDb, this.operationTimeoutMs);
-        try {
-            await checkpointTransaction(db, 'readwrite', this.operationTimeoutMs, transaction => {
-                transaction.objectStore(STORE_NAME).delete(normalizedSessionId);
-                const cursorRequest = transaction
-                    .objectStore(SAMPLE_STORE_NAME)
-                    .index('sessionId')
-                    .openCursor(normalizedSessionId);
-                cursorRequest.onsuccess = () => {
-                    const cursor = cursorRequest.result;
-                    if (!cursor) return;
-                    cursor.delete();
-                    cursor.continue();
-                };
-            });
-        } finally {
-            db.close();
-        }
+            this.memory.delete(id); this.series.delete(id); this.revisions.delete(id); this.fallbackSessions.delete(id);
+            this.backupRevisions.delete(id);
+            try {
+                this.sessionStorage?.removeItem(BACKUP_PREFIX + id);
+                if (this.getActiveSessionId() === id) this.sessionStorage.removeItem(ACTIVE_SESSION_KEY);
+            } catch (_) {}
+        });
     }
 }

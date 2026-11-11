@@ -1,5 +1,17 @@
 # syntax=docker/dockerfile:1.7
 
+FROM node:22-alpine AS public-files
+WORKDIR /source
+COPY docker/web/public-files.json docker/web/stage-public.mjs ./docker/web/
+COPY index.html ./index.html
+COPY apps/participant-web ./apps/participant-web
+COPY apps/shared ./apps/shared
+COPY apps/web ./apps/web
+COPY Audio_detection/browser/*.mjs ./Audio_detection/browser/
+COPY packages/shared/multimodal/*.mjs ./packages/shared/multimodal/
+COPY lib ./lib
+RUN node docker/web/stage-public.mjs /source /public
+
 FROM nginx:1.29-alpine
 
 ARG VCS_REF=unknown
@@ -12,14 +24,7 @@ RUN rm -rf /usr/share/nginx/html/* && \
     chown -R nginx:nginx /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi
 
 COPY docker/web/nginx.conf /etc/nginx/nginx.conf
-COPY index.html /usr/share/nginx/html/index.html
-COPY apps/participant-web /usr/share/nginx/html/apps/participant-web
-COPY apps/researcher-web /usr/share/nginx/html/apps/researcher-web
-COPY apps/shared /usr/share/nginx/html/apps/shared
-COPY apps/web /usr/share/nginx/html/apps/web
-COPY Audio_detection/browser/*.mjs /usr/share/nginx/html/Audio_detection/browser/
-COPY packages/shared/multimodal/*.mjs /usr/share/nginx/html/packages/shared/multimodal/
-COPY lib /usr/share/nginx/html/lib
+COPY --from=public-files /public/ /usr/share/nginx/html/
 
 RUN chown -R nginx:nginx /usr/share/nginx/html
 

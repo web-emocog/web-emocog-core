@@ -148,14 +148,14 @@ function refreshOverviewProjects(root = document.getElementById('view')?.firstEl
           const ini = words.slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'P';
           const d = new Date(p.createdAt);
           const dateStr = isNaN(d) ? '' : d.toLocaleDateString(isEn2?'en-US':'ru-RU',{day:'numeric',month:'short',year:'numeric'});
-          return `<div class="ov-proj-card" data-proj="${escapeUiHtml(p.name)}" style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;border:1.5px solid rgba(92,102,189,.20);background:rgba(255,255,255,.52);cursor:pointer;transition:all .12s;min-width:200px;flex:1;max-width:280px;">
-            <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#5C66BD,#77A9E8);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;flex-shrink:0;">${escapeUiHtml(ini)}</div>
-            <div style="flex:1;min-width:0;">
-              <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeUiHtml(p.name)}</div>
-              ${dateStr ? `<div style="font-size:11px;color:var(--muted2);">${escapeUiHtml(dateStr)}</div>` : ''}
-            </div>
-            <svg fill="none" stroke="var(--muted2)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;opacity:.5;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-          </div>`;
+          return `<button type="button" class="ov-proj-card" data-project-id="${escapeUiHtml(p.id)}" style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;border:1.5px solid rgba(92,102,189,.20);background:rgba(255,255,255,.52);cursor:pointer;transition:all .12s;min-width:200px;flex:1;max-width:280px;text-align:start;">
+            <span aria-hidden="true" style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#5C66BD,#77A9E8);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;flex-shrink:0;">${escapeUiHtml(ini)}</span>
+            <span style="flex:1;min-width:0;">
+              <span style="display:block;font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeUiHtml(p.name)}</span>
+              ${dateStr ? `<span style="display:block;font-size:11px;color:var(--muted2);">${escapeUiHtml(dateStr)}</span>` : ''}
+            </span>
+            <svg aria-hidden="true" fill="none" stroke="var(--muted2)" stroke-width="2" viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;opacity:.5;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>`;
         }).join('')}
       </div>
     `;
@@ -163,9 +163,17 @@ function refreshOverviewProjects(root = document.getElementById('view')?.firstEl
       card.addEventListener('mouseenter', () => { card.style.borderColor='rgba(92,102,189,.40)'; card.style.background='rgba(255,255,255,.75)'; card.style.transform='translateY(-1px)'; });
       card.addEventListener('mouseleave', () => { card.style.borderColor=''; card.style.background=''; card.style.transform=''; });
       card.addEventListener('click', () => {
-        if(typeof state !== 'undefined') state.project = card.dataset.proj;
         const sel = document.getElementById('projectSelect');
-        if(sel) { for(let i=0;i<sel.options.length;i++){ if(sel.options[i].textContent.trim()===card.dataset.proj){sel.selectedIndex=i;break;} } }
+        const id = card.dataset.projectId;
+        if (!id || !sel || !Array.from(sel.options).some(option => option.value === id)) {
+          toast(isEn2 ? 'This project is no longer available. Refresh the workspace.' : 'Проект недоступен. Обновите рабочую область.');
+          return;
+        }
+        if (sel.value !== id || localStorage.getItem('emocog_selected_project_id') !== id) {
+          sel.value = id;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (localStorage.getItem('emocog_selected_project_id') !== id) return;
         navigate('#/experiments');
       });
     });
@@ -180,6 +188,9 @@ function ExperimentsListView() {
 
   setChips([]);
   let serverSyncComplete = false;
+  let listRequest = null;
+  let syncState = 'idle';
+  const viewLifetime = new AbortController();
 
   function selectedProjectId() {
     const value = parseInt(localStorage.getItem('emocog_selected_project_id') || '', 10);
@@ -229,6 +240,7 @@ function ExperimentsListView() {
       },
       blocks: Array.isArray(builder.blocks) ? builder.blocks : (Array.isArray(definition.blocks) ? definition.blocks : (local?.blocks || [])),
       sessionFeatureFlags: builder.sessionFeatureFlags || definition.settings?.featureFlags || {},
+      signalProfileId: definition.settings?.signalProfileId || builder.signalProfileId,
       qcThresholds: builder.qcThresholds || definition.settings?.qualityControl?.rules || local?.qcThresholds,
       persistenceSettings: definition.settings?.persistence || builder.persistenceSettings || local?.persistenceSettings,
       analyticsPlan: builder.analyticsPlan || definition.analyticsPlan,
@@ -269,9 +281,20 @@ function ExperimentsListView() {
     if (typeof apiGet !== 'function' || (typeof hasResearcherApiToken === 'function' && !hasResearcherApiToken())) return;
     const projectId = selectedProjectId();
     if (!projectId) return;
+    cancelListRequest();
+    const request = new AbortController();
+    listRequest = request;
+    const isCurrent = () => listRequest === request && root.isConnected && selectedProjectId() === projectId;
+    serverSyncComplete = false;
+    syncState = 'loading';
+    renderActiveTab();
     try {
-      const protocols = await apiGet('/protocols?project_id=' + encodeURIComponent(String(projectId)));
-      const serverRows = Array.isArray(protocols) ? protocols : [];
+      const serverRows = await apiGet('/protocols?project_id=' + encodeURIComponent(String(projectId)), { signal: request.signal });
+      if (!isCurrent()) return;
+      if (!Array.isArray(serverRows) || serverRows.some(protocol => Number(protocol?.project_id) !== projectId
+        || !Number.isSafeInteger(Number(protocol.id)) || Number(protocol.id) <= 0)) {
+        throw new Error('Invalid protocol list for the selected project');
+      }
       const localRows = readLocalExperiments();
       const localByApiId = new Map();
       localRows.forEach(function (entry) {
@@ -283,7 +306,6 @@ function ExperimentsListView() {
       const selectedEntries = serverRows.map(function (protocol) {
         return serverExperiment(protocol, localByApiId.get(Number(protocol.id)) || null);
       });
-      const serverIds = new Set(serverRows.map(function (protocol) { return Number(protocol.id); }));
       localRows.forEach(function (entry) {
         const entryProjectId = localProjectId(entry);
         if (entryProjectId && entryProjectId !== projectId) return;
@@ -296,19 +318,21 @@ function ExperimentsListView() {
         delete localDraft.participantLink;
         selectedEntries.push(localDraft);
       });
-      const otherProjectEntries = localRows.filter(function (entry) {
+      const otherProjectEntries = localRows.filter(entry => {
         const entryProjectId = localProjectId(entry);
-        if (!entryProjectId || entryProjectId === projectId) return false;
-        const apiState = typeof loadBuilderApiState === 'function' ? loadBuilderApiState(entry?.id || 'draft') : {};
-        const apiId = parseInt(entry?.apiProtocolId || apiState.apiProtocolId || '', 10);
-        return !Number.isInteger(apiId) || !serverIds.has(apiId) || entryProjectId !== projectId;
+        return entryProjectId && entryProjectId !== projectId;
       });
       localStorage.setItem('emocog_my_experiments', JSON.stringify(otherProjectEntries.concat(selectedEntries)));
       serverSyncComplete = true;
-      if (root.isConnected) renderActiveTab();
+      syncState = 'loaded';
+      renderActiveTab();
     } catch (_) {
+      if (!isCurrent()) return;
       serverSyncComplete = false;
-      if (root.isConnected) renderActiveTab();
+      syncState = 'failed';
+      renderActiveTab();
+    } finally {
+      if (listRequest === request) listRequest = null;
     }
   }
 
@@ -327,6 +351,15 @@ function ExperimentsListView() {
   }
 
   const root = document.createElement('div');
+  function cancelListRequest() {
+    const request = listRequest;
+    listRequest = null;
+    request?.abort();
+  }
+  root.disposeExperimentList = () => {
+    viewLifetime.abort();
+    cancelListRequest();
+  };
   root.style.cssText = 'display:flex; flex-direction:column; height:calc(100% + 40px); min-height:0; margin:-20px; padding:0;';
 
   const content = document.createElement('div');
@@ -365,7 +398,35 @@ function ExperimentsListView() {
       return !projectId || !entryProjectId || entryProjectId === projectId;
     });
 
+    const en = CURRENT_LANG === 'en';
+    function addSyncStatus() {
+      if (!['loading', 'failed'].includes(syncState)) return;
+      const banner = document.createElement('div');
+      banner.id = 'experimentListSyncStatus';
+      banner.className = 'card';
+      banner.style.cssText = 'margin:0 auto 16px;max-width:1200px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
+      const message = document.createElement('span');
+      message.setAttribute('role', 'status');
+      message.textContent = syncState === 'loading'
+        ? (en ? 'Loading protocols…' : 'Загружаем протоколы…')
+        : (en ? 'Could not refresh protocols. The list may be incomplete.' : 'Не удалось обновить протоколы. Список может быть неполным.');
+      banner.appendChild(message);
+      if (syncState === 'failed') {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'quick-btn';
+        retry.textContent = en ? 'Retry' : 'Повторить загрузку';
+        retry.addEventListener('click', syncExperimentsFromApi);
+        banner.appendChild(retry);
+      }
+      content.prepend(banner);
+    }
     if (experiments.length === 0) {
+      if (['loading', 'failed'].includes(syncState)) {
+        content.replaceChildren();
+        addSyncStatus();
+        return;
+      }
       content.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;">
           <div style="font-size:15px;margin-bottom:8px;">${t('noExperiments')}</div>
@@ -393,7 +454,9 @@ function ExperimentsListView() {
             <div style="display:flex;gap:8px;border-top:1px solid var(--stroke);padding-top:12px;flex-wrap:wrap;">
               <button class="quick-btn edit-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="flex:1;justify-content:center;font-size:12px;">${t('editExperiment')}</button>
               <button class="quick-btn copy-exp-link-btn" data-link="${escapeUiHtml(participantLink)}" style="flex:1;justify-content:center;font-size:12px;background:rgba(92,102,189,.08);border-color:rgba(92,102,189,.24);color:${participantLink ? 'var(--accent)' : 'var(--muted)'};font-weight:700;" ${participantLink ? '' : 'disabled'}>
-                ${participantLink ? autoTranslateString('Скопировать ссылку', CURRENT_LANG) : (CURRENT_LANG === 'en' ? 'Publish first' : 'Сначала опубликуйте')}
+                ${participantLink ? autoTranslateString('Скопировать ссылку', CURRENT_LANG) : (!serverSyncComplete && exp.invitationCode
+                  ? (en ? 'Link not verified' : 'Ссылка не проверена')
+                  : (en ? 'Publish first' : 'Сначала опубликуйте'))}
               </button>
               <button class="quick-btn del-exp-btn" data-id="${escapeUiHtml(exp.id)}" style="padding:8px;color:var(--bad);border-color:rgba(239,68,68,.2);"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
       </div>
@@ -401,6 +464,7 @@ function ExperimentsListView() {
         `; }).join('')}
     </div>
   `;
+    addSyncStatus();
 
     content.querySelectorAll('.edit-exp-btn').forEach(btn => {
       btn.addEventListener('click', (e) => { e.stopPropagation(); navigate(`#/experiments/edit/${btn.dataset.id}`); });
@@ -416,8 +480,13 @@ function ExperimentsListView() {
           temp.value = link;
           document.body.appendChild(temp);
           temp.select();
-          document.execCommand('copy');
-          document.body.removeChild(temp);
+          let copied = false;
+          try { copied = document.execCommand('copy'); } catch (_) { /* Clipboard access was denied. */ }
+          finally { temp.remove(); btn.focus(); }
+          if (!copied) {
+            toast(en ? 'Could not copy the participant link' : 'Не удалось скопировать ссылку участника');
+            return;
+          }
         }
         toast(CURRENT_LANG === 'en' ? 'Participant link copied' : 'Ссылка для участника скопирована');
       });
@@ -435,7 +504,10 @@ function ExperimentsListView() {
           const current = readLocalExperiments().filter(ex => ex.id !== btn.dataset.id);
           localStorage.setItem('emocog_my_experiments', JSON.stringify(current));
           if (typeof builderApiStateKey === 'function') localStorage.removeItem(builderApiStateKey(btn.dataset.id));
-          renderActiveTab();
+          if (root.isConnected) {
+            if (listRequest) syncExperimentsFromApi();
+            else renderActiveTab();
+          }
           toast(t('deleteExperiment') + ' ✓');
         } catch (error) {
           btn.disabled = false;
@@ -457,7 +529,11 @@ function ExperimentsListView() {
   setExperimentsActiveMode(true);
   setExperimentsConstructorMode(false);
   renderActiveTab();
-  syncExperimentsFromApi();
+  const refreshMountedList = () => queueMicrotask(() => {
+    if (root.isConnected && !viewLifetime.signal.aborted) syncExperimentsFromApi();
+  });
+  window.addEventListener('wecog:projectchange', refreshMountedList, { signal: viewLifetime.signal });
+  refreshMountedList();
 
   return root;
 }

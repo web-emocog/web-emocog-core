@@ -9,7 +9,7 @@
  */
 
 import { EMOTION_CONFIG }  from './emotion-config.js';
-import { EmotionAnalyzer } from './emotion-analyzer.js';
+import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261110-integration1';
 
 /**
  * Singleton — один экземпляр на всё приложение.
@@ -26,7 +26,7 @@ export const _analyzer = analyzer;   // алиас для обратной со�
  *
  * Три пути деградации:
  *   1. landmarks (≥468) → полный FACS-анализ, динамический confidence
- *   2. precheckResult без landmarks → эвристика по мета-данным
+ *   2. precheckResult без landmarks → только сведения о качестве, без вывода о мимике
  *   3. нет данных → missingData
  *
  * @param {Object} [precheckResult]
@@ -38,6 +38,9 @@ export function getEmotionSample(precheckResult) {
     // ── Путь 1: landmarks → FACS ────────────────────────────────────────
     if (Array.isArray(precheckResult?.landmarks) && precheckResult.landmarks.length >= C.minLandmarks) {
         const result = analyzer.analyzeLandmarks(precheckResult.landmarks);
+        if (result.missingData === true) {
+            return { ...result, dataQuality: 'missing', dataSource: 'landmarks', degraded: true };
+        }
         const valence = Number.isFinite(result.valence) ? result.valence : 0;
         const arousal = Number.isFinite(result.arousal) ? result.arousal : 0;
         return {

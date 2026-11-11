@@ -1,27 +1,12 @@
-/**
- * PreCheck Analyzer Module v2.1 — Browser Wrapper / Loader
- *
- * Стратегия загрузки идентична qc-metrics.js / face-segmenter.js:
- *   1) Inline-класс PrecheckAnalyzerInline сразу публикуется как
- *      window.PrecheckAnalyzer (через прокси с warn о sync use).
- *   2) Параллельно динамически импортируется ./precheck-analyzer/index.js.
- *      При успехе window.PrecheckAnalyzer переписывается на модульную версию,
- *      которая включает полную stability/history-логику pose-анализа.
- *   3) При ошибке импорта остаёмся на inline-классе (console.error).
- *   4) window.PrecheckAnalyzerReady — Promise (резолвится в 'module' | 'inline').
- *
- * Inline и модульная версии имеют идентичный публичный API; модульная даёт
- * расширенный режим (pose stability через poseHistory, дополнительные модули
- * recommendations / iris-gaze-direction для будущих сценариев).
- *
- * @version 2.1.0
- * @requires @mediapipe/tasks-vision
- */
+// Classic loader; consumers await the canonical module before constructing the model.
+let faceInlineDiagnostic;
 
-// Встроенный класс — fallback при сбое загрузки папки.
 class PrecheckAnalyzerInline {
     constructor(options = {}) {
         this.isInitialized = false;
+        this.initializationFailed = false;
+        this.initializing = null;
+        this.generation = 0;
         this.faceLandmarker = null;
         this.poseHistory = [];
         this.HISTORY_SIZE = 15;
@@ -57,13 +42,21 @@ class PrecheckAnalyzerInline {
 
     async initialize() {
         if (this.isInitialized) return true;
+        if (this.initializing) return this.initializing;
+        const attempt = this._initialize(this.generation);
+        this.initializing = attempt;
+        try { return await attempt; }
+        finally { if (this.initializing === attempt) this.initializing = null; }
+    }
+
+    async _initialize(generation) {
         try {
-            console.log('[PrecheckAnalyzer] Инициализация v2.1...');
             if (typeof FilesetResolver === 'undefined' || typeof FaceLandmarker === 'undefined') {
                 throw new Error('MediaPipe Vision не загружен.');
             }
             const vision = await FilesetResolver.forVisionTasks("js/vendor/mediapipe/wasm");
-            this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+            if (generation !== this.generation) return false;
+            const model = await FaceLandmarker.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: "js/vendor/mediapipe/models/face_landmarker.task",
                     delegate: "GPU"
@@ -76,19 +69,34 @@ class PrecheckAnalyzerInline {
                 outputFaceBlendshapes: true,
                 outputFacialTransformationMatrixes: true
             });
+            if (generation !== this.generation) { model.close(); return false; }
+            this.faceLandmarker = model;
             this.isInitialized = true;
-            console.log('[PrecheckAnalyzer] Готов');
-            if (this.onInitialized) this.onInitialized();
+            this.initializationFailed = false;
+            this._notify(this.onInitialized, [], 'initialization:callback-failed');
             return true;
         } catch (error) {
-            console.error('[PrecheckAnalyzer] Ошибка:', error);
-            if (this.onError) this.onError(error);
+            if (generation !== this.generation) return false;
+            this.initializationFailed = true;
+            faceInlineDiagnostic?.participantDebugErrorOnce(this, 'face', 'initialization:failed');
+            this._notify(this.onError, [error], 'error:callback-failed');
             return false;
         }
     }
 
+    _notify(callback, args, event) {
+        if (typeof callback !== 'function') return;
+        void Promise.resolve().then(() => callback.apply(this, args)).catch(() => {
+            faceInlineDiagnostic?.participantDebugErrorOnce(this, 'face', event);
+        });
+    }
+
     async analyzeFrame(videoElement, capture = {}) {
-        if (!this.isInitialized) await this.initialize();
+        const generation = this.generation;
+        if (!this.isInitialized && (this.initializationFailed || !await this.initialize())) {
+            return this._createErrorResult('face_model_unavailable');
+        }
+        if (generation !== this.generation) return this._createErrorResult('face_analysis_interrupted');
         if (!videoElement || videoElement.readyState < 2) {
             return this._createErrorResult('Видео не готово');
         }
@@ -144,8 +152,9 @@ class PrecheckAnalyzerInline {
                 frameSize: { width, height }
             };
             return this.lastResult;
-        } catch (error) {
-            return this._createErrorResult(error.message);
+        } catch (_) {
+            faceInlineDiagnostic?.participantDebugErrorOnce(this, 'face', 'inference:failed');
+            return this._createErrorResult('face_inference_failed');
         }
     }
 
@@ -363,7 +372,14 @@ class PrecheckAnalyzerInline {
     }
 
     getLastResult() { return this.lastResult; }
-    reset() { this.lastResult = null; this.poseHistory = []; }
+    reset() {
+        this.generation++;
+        this.initializing = null;
+        this.initializationFailed = false;
+        this.lastResult = null;
+        this.poseHistory = [];
+        faceInlineDiagnostic?.resetParticipantDiagnostics(this);
+    }
     dispose() {
         if (this.faceLandmarker) { this.faceLandmarker.close(); this.faceLandmarker = null; }
         this._canvas = null; this._ctx = null;
@@ -376,39 +392,23 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = PrecheckAnalyzerInline;
 }
 
-// Browser: loader-паттерн.
 if (typeof window !== 'undefined') {
-    let _precheckAnalyzerResolvedKind = null; // 'module' | 'inline' | null
-
-    function PrecheckAnalyzerProxy(...args) {
-        if (_precheckAnalyzerResolvedKind === null) {
-            console.warn(
-                '[PrecheckAnalyzer] sync use before Ready — using inline fallback. ' +
-                'Update the consumer to `await window.PrecheckAnalyzerReady` before `new PrecheckAnalyzer()`.'
-            );
-        }
-        return new PrecheckAnalyzerInline(...args);
-    }
-    PrecheckAnalyzerProxy.prototype = PrecheckAnalyzerInline.prototype;
-
-    window.PrecheckAnalyzer = PrecheckAnalyzerProxy;
-
-    window.PrecheckAnalyzerReady = (async () => {
-        try {
-            const mod = await import('./precheck-analyzer/index.js?v=20261104-4');
-            const Cls = mod && (mod.PrecheckAnalyzer || mod.default);
-            if (typeof Cls !== 'function') {
-                throw new Error('module did not export PrecheckAnalyzer class');
-            }
-            window.PrecheckAnalyzer = Cls;
-            _precheckAnalyzerResolvedKind = 'module';
-            console.info('[PrecheckAnalyzer] folder version loaded');
+    window.PrecheckAnalyzer = PrecheckAnalyzerInline;
+    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261110-integration1')
+        .then(module => {
+            const Model = module.PrecheckAnalyzer || module.default;
+            if (typeof Model !== 'function') throw new Error('face_export_missing');
+            window.PrecheckAnalyzer = Model;
             return 'module';
-        } catch (e) {
-            window.PrecheckAnalyzer = PrecheckAnalyzerInline;
-            _precheckAnalyzerResolvedKind = 'inline';
-            console.error('[PrecheckAnalyzer] folder load failed, using inline fallback', e);
+        })
+        .catch(() => {
+            void import('./session-runtime/participant-diagnostic.mjs?v=20261110-integration1').then(
+                diagnostic => {
+                    faceInlineDiagnostic = diagnostic;
+                    diagnostic.participantDebugError('face', 'module:inline-fallback');
+                },
+                () => { /* Diagnostics are optional. */ }
+            );
             return 'inline';
-        }
-    })();
+        });
 }

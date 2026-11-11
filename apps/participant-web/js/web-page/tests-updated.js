@@ -1,3 +1,4 @@
+import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import {
     state,
     setSessionPhase,
@@ -5,11 +6,12 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261025-1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261110-157';
-import { stopPreCheck } from './precheck-updated.js?v=20261104-4';
+import { translations } from '../../translations.js?v=20261110-integration1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261110-integration1';
+import { stopPreCheck } from './precheck-updated.js?v=20261110-integration1';
+import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261110-157';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261110-integration1';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -19,13 +21,15 @@ import { buildSessionHeatmaps } from '../session-runtime/gaze-history.mjs?v=2026
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261025-2';
 import {
     runProtocolTestSequence,
-    startTestHub
-} from '../gaze-tracker/gaze-tests/index.js?v=20261110-157';
+    startTestHub,
+    stopHubEmotionPreview
+} from '../gaze-tracker/gaze-tests/index.js?v=20261110-integration1';
+import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261110-integration1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
     CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
-} from '../gaze-tracker/calibration-capture.mjs?v=20261110-160';
-import { calibrationFeedback } from '../gaze-tracker/calibration-feedback.mjs?v=20261110-157';
+} from '../gaze-tracker/calibration-capture.mjs?v=20261110-integration1';
+import { calibrationFeedback } from '../gaze-tracker/calibration-feedback.mjs?v=20261110-integration1';
 import { calculateValidationMetrics as sharedValidationMetrics,
     fitValidationCorrection, assessCorrectionBenchmark } from '../gaze-tracker/validation-metrics.mjs';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../gaze-tracker/validation-sampling.mjs';
@@ -33,10 +37,10 @@ import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261104-4';
-import { sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261025-1';
-import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261025-1';
+import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js?v=20261110-integration1';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261110-integration1';
+import { recordedConsentReceipt, sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261110-integration1';
+import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261110-integration1';
 import {
     getContentViewport,
     targetCenterInContentViewport
@@ -45,7 +49,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261110-157';
+} from '../session-runtime/index.js?v=20261110-integration1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -59,20 +63,6 @@ function participantMessage(key, replacements = {}) {
         value = value.replaceAll(`{${name}}`, String(replacement));
     });
     return value;
-}
-
-function dbg(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.log(scope, event, data);
-    } catch (_) { /* ignore */ }
-}
-
-function dbgErr(scope, event, data) {
-    try {
-        const d = window.WECOG_DEBUG;
-        if (d && d.enabled) d.error(scope, event, data);
-    } catch (_) { /* ignore */ }
 }
 
 let _qcOverlayLogN = 0;
@@ -150,8 +140,12 @@ function ensureUploadRetryButton() {
     button.style.display = 'none';
     button.textContent = participantMessage('runtime_upload_retry_action');
     button.addEventListener('click', () => {
+        if (button.disabled) return;
         button.disabled = true;
-        finishSession().finally(() => {
+        void finishSession().catch(() => {
+            dbgErr('delivery', 'upload:retry-failed');
+            setUploadStatus(participantMessage('runtime_upload_prepare_failure'), 'error');
+        }).finally(() => {
             button.disabled = false;
         });
     });
@@ -178,6 +172,7 @@ function setUploadStatus(message, tone) {
 async function uploadAggregatesWithRetry(payload, options = {}) {
     return sendSessionFeature(payload, {
         ...options,
+        consentReceipt: recordedConsentReceipt(state.sessionData, payload.ids?.session),
         onAttempt: ({ attempt, retries }) => {
             setUploadStatus(participantMessage('runtime_upload_attempt', { attempt, retries }), 'info');
             recordSessionEvent('upload_attempt', { attempt, retries, endpoint: '/ingest' });
@@ -197,13 +192,11 @@ async function uploadAggregatesWithRetry(payload, options = {}) {
             setUploadStatus(participantMessage('runtime_upload_success'), 'success');
         },
         onFailure: error => {
-            recordSessionEvent('upload_failed', { errorCode: persistenceErrorCode(error), httpStatus: error?.httpStatus || null });
-            console.error('[Final upload]', {
-                message: error?.message || String(error),
-                status: error?.httpStatus || null,
-                payload: error?.payload || null
-            });
-            setUploadStatus(persistenceMessage(persistenceErrorCode(error), state.currentLang), 'error');
+            const errorCode = persistenceErrorCode(error);
+            const httpStatus = Number.isInteger(error?.httpStatus) ? error.httpStatus : null;
+            recordSessionEvent('upload_failed', { errorCode, httpStatus });
+            dbgErr('delivery', 'upload:failed', { category: errorCode, httpStatus });
+            setUploadStatus(persistenceMessage(errorCode, state.currentLang), 'error');
         }
     });
 }
@@ -247,18 +240,34 @@ function buildTestHubHandlers() {
 }
 
 export async function continueInvitationSessionAfterShell() {
+    try {
+        return await startInvitationSessionAfterShell();
+    } catch (_) {
+        handleInvitationStartFailure();
+        return false;
+    }
+}
+
+function handleInvitationStartFailure() {
+    dbgErr('app', 'invitation:start-failed');
+    state.runtime.handlePreparationFailure?.();
+}
+
+async function startInvitationSessionAfterShell() {
+    if (state.runtime.participantPageExited) return false;
     const inviteDef = state.runtime?.invitationProtocolDefinition;
     const invitationCode = state.sessionData?.ids?.invitationCode
         || state.runtime?.invitationProtocolMeta?.code;
     state.flags.isRecording = true;
     const continuousStarted = await getSessionRuntime()?.startContinuousModules();
+    if (state.runtime.participantPageExited) return false;
     if (continuousStarted !== true) {
         returnToMandatoryPreparation();
         return false;
     }
 
     if (!invitationCode && !inviteDef) {
-        startTestHub(buildTestHubHandlers());
+        await startTestHub(buildTestHubHandlers());
         return true;
     }
 
@@ -268,7 +277,7 @@ export async function continueInvitationSessionAfterShell() {
             severity: 'error',
             invitationCode
         });
-        loadAndStartCognitiveTask({
+        await loadAndStartCognitiveTask({
             protocol: {
                 version: 'invalid-invitation',
                 title: participantMessage('runtime_generic_technical'),
@@ -302,18 +311,18 @@ export async function continueInvitationSessionAfterShell() {
             protocolId: state.runtime?.invitationProtocolMeta?.protocolId || null,
             hasHub: plan.hasHub
         });
-        loadAndStartCognitiveTask({
+        await loadAndStartCognitiveTask({
             protocol: definitionForCognitiveRunner(inviteDef),
             autoFinishSession: !plan.hasHub,
             onComplete: plan.hasHub
-                ? () => runProtocolTestSequence(plan.hubMetrics, hubHandlers)
+                ? () => { void runProtocolTestSequence(plan.hubMetrics, hubHandlers).catch(handleInvitationStartFailure); }
                 : undefined
         });
         return;
     }
 
     if (plan.hasHub) {
-        runProtocolTestSequence(plan.hubMetrics, hubHandlers);
+        await runProtocolTestSequence(plan.hubMetrics, hubHandlers);
         return;
     }
 
@@ -322,7 +331,7 @@ export async function continueInvitationSessionAfterShell() {
         severity: 'error',
         invitationCode
     });
-    loadAndStartCognitiveTask({
+    await loadAndStartCognitiveTask({
         protocol: definitionForCognitiveRunner(inviteDef),
         autoFinishSession: false
     });
@@ -356,7 +365,7 @@ function waitForCalibrationIntroduction(options = {}) {
     const title = document.getElementById('calibrationIntroTitle');
     const text = document.getElementById('calibrationIntroText');
     const button = document.getElementById('calibrationIntroStartBtn');
-    if (!intro || !button) return Promise.resolve();
+    if (!intro || !button) return Promise.resolve(true);
 
     const t = translations[state.currentLang] || translations.en;
     if (kicker) kicker.textContent = t.calib_progress;
@@ -371,17 +380,19 @@ function waitForCalibrationIntroduction(options = {}) {
     }
     button.textContent = targeted || options.viewportChanged ? t.runtime_recalibrate : t.runtime_instruction_action;
     intro.hidden = false;
-    requestAnimationFrame(() => button.focus());
+    const focusFrame = requestAnimationFrame(() => button.focus());
 
     return new Promise((resolve) => {
-        button.onclick = () => {
+        const finish = accepted => {
+            cancelAnimationFrame(focusFrame);
             button.onclick = null;
             intro.hidden = true;
-            recordSessionEvent('calibration_instruction_acknowledged', {
-                category: 'block'
-            });
-            resolve();
+            state.runtime.cancelCalibrationIntro = null;
+            if (accepted) recordSessionEvent('calibration_instruction_acknowledged', { category: 'block' });
+            resolve(accepted);
         };
+        state.runtime.cancelCalibrationIntro = () => finish(false);
+        button.onclick = () => finish(true);
     });
 }
 
@@ -448,24 +459,30 @@ export function startCalibration(options = {}) {
 }
 
 async function prepareCalibration(options) {
+    if (state.runtime.participantPageExited) return;
     const generation = ++calibrationGeneration;
     calibrationGeometryWatch?.abort();
     const targetedPositions = normalizeCalibrationTargets(options.targetedPositions);
     const targeted = targetedPositions.length > 0
         && state.runtime?.gazeTracker?.isCalibrated?.() === true;
     const shell = state.runtime?.invitationParticipantShell;
-    if (shell && shell.calibration === false) {
-        continueInvitationSessionAfterShell();
-        return;
+    const profile = resolveSignalProfile(state.runtime.invitationProtocolDefinition);
+    if (!targeted && shell?.precheck !== false && !getSessionRuntime()?.isAnalysisRunning?.()
+        && profile.precheck.method === 'recent-window.v2'
+        && state.runtime.precheckGate?.snapshot(performance.now()).passed !== true) {
+        state.sessionData.precheck = { ...(state.sessionData.precheck || {}), pass_fail: false, fail_reason: 'fresh_precheck_required' };
     }
     // Фаза 1.1: gate — не запускать калибровку, если pre-check не пройден
     if (state.sessionData.precheck && state.sessionData.precheck.pass_fail === false) {
-        console.warn('[Phase1] Calibration blocked: precheck pass_fail is false');
+        dbgErr('gaze', 'calibration:precheck-not-passed');
         const msg = (translations[state.currentLang] && translations[state.currentLang].precheck_must_pass) || 'Complete pre-check successfully first.';
         if (typeof alert !== 'undefined') alert(msg);
         return;
     }
-    console.log('Запуск калибровки на основе MediaPipe Face Landmarker...');
+    if (shell && shell.calibration === false) {
+        await continueInvitationSessionAfterShell();
+        return;
+    }
     setSessionPhase('calibration', { source: 'startCalibration' });
     recordSessionEvent(targeted ? 'calibration_targeted_start' : 'calibration_start', {
         targetCount: targeted ? targetedPositions.length : 25,
@@ -489,6 +506,7 @@ async function prepareCalibration(options) {
     // window.QCMetrics будет реальным модульным классом; иначе остаётся inline-fallback.
     if (window.QCMetricsReady) {
         await window.QCMetricsReady;
+        if (state.runtime.participantPageExited) return;
         dbg('qc', 'module:ready:QCMetrics', { resolved: true });
     }
     if (!targeted) {
@@ -496,13 +514,13 @@ async function prepareCalibration(options) {
         state.runtime.qcMetrics = new QCMetrics();
         state.runtime.qcMetrics.start();
         state.runtime.sessionStartTime = Date.now();
-        console.log('[QC] QCMetrics инициализирован и запущен');
         dbg('qc', 'QCMetrics:instance:created', {});
     }
 
     // === ИНИЦИАЛИЗАЦИЯ GAZE TRACKER ===
     if (window.GazeTrackerReady) {
         await window.GazeTrackerReady;
+        if (state.runtime.participantPageExited) return;
         dbg('gaze', 'module:ready:GazeTracker', { resolved: true });
     }
     if (!targeted) {
@@ -513,7 +531,6 @@ async function prepareCalibration(options) {
                 }
             }
         });
-        console.log('[GazeTracker] Инициализирован');
         dbg('gaze', 'GazeTracker:instance:created', {});
     } else {
         state.runtime.gazeTracker.clearPostCalibrationCorrection?.();
@@ -532,6 +549,7 @@ async function prepareCalibration(options) {
     // без параллельных analyzeFrame loops. До камеры/пречека измерений нет.
     state.flags.isRecording = true;
     const continuousStarted = await getSessionRuntime()?.startContinuousModules();
+    if (state.runtime.participantPageExited) return;
     if (continuousStarted !== true) {
         returnToMandatoryPreparation();
         return;
@@ -570,9 +588,9 @@ async function prepareCalibration(options) {
     showCalibrationHeadPoseGuide(true);
     const instructionPanel = instructionText?.closest('.calib-instruction');
     if (instructionPanel) instructionPanel.style.display = 'none';
-    await waitForCalibrationIntroduction({ targeted, viewportChanged: options.viewportChanged === true });
-    if (generation !== calibrationGeneration || state.runtime.currentPhase !== 'calibration'
-        || !calibScreen.classList.contains('active')) return;
+    const acknowledged = await waitForCalibrationIntroduction({ targeted, viewportChanged: options.viewportChanged === true });
+    if (!acknowledged || state.runtime.participantPageExited || generation !== calibrationGeneration
+        || state.runtime.currentPhase !== 'calibration' || !calibScreen.classList.contains('active')) return;
     if (instructionPanel) instructionPanel.style.display = '';
     point.style.display = 'block';
     point.style.opacity = '1';
@@ -584,7 +602,7 @@ async function prepareCalibration(options) {
     calibScreen.getBoundingClientRect();
     const contentViewport = calibrationGeometry();
     const ownerTracker = state.runtime.gazeTracker;
-    const ownsCalibration = () => state.runtime.gazeTracker === ownerTracker
+    const ownsCalibration = () => !state.runtime.participantPageExited && state.runtime.gazeTracker === ownerTracker
         && generation === calibrationGeneration && state.runtime.currentPhase === 'calibration'
         && calibScreen.classList.contains('active');
     const geometryMatches = () => {
@@ -613,8 +631,8 @@ async function prepareCalibration(options) {
         if (ownsCalibration() && !geometryMatches()) restartForViewport();
     };
     window.addEventListener('resize', onGeometryChange, listenerOptions);
-    window.visualViewport?.addEventListener('resize', onGeometryChange, listenerOptions);
-    window.visualViewport?.addEventListener('scroll', onGeometryChange, listenerOptions);
+    window.visualViewport?.addEventListener?.('resize', onGeometryChange, listenerOptions);
+    window.visualViewport?.addEventListener?.('scroll', onGeometryChange, listenerOptions);
     window.matchMedia(`(resolution: ${contentViewport.dpr}dppx)`).addEventListener('change', onGeometryChange, listenerOptions);
     window.addEventListener('wecog:session-phase-change', ({ detail }) => {
         if (detail?.phase !== 'calibration') geometryWatch.abort();
@@ -647,11 +665,47 @@ async function prepareCalibration(options) {
         points: positions.length,
         clicksPerPoint: CLICKS_PER_POINT
     };
-    console.info(
-        `[GazeTracker] Calibration build=${calibrationBuildTag}, module=${import.meta.url}, ` +
-        `points=${positions.length}, clicksPerPoint=${CLICKS_PER_POINT}`
-    );
+    dbg('gaze', 'calibration:plan', { build: calibrationBuildTag, points: positions.length, clicksPerPoint: CLICKS_PER_POINT });
     let clicksOnCurrentPoint = 0;
+    const captureStatus = document.getElementById('calibrationCaptureStatus');
+    const captureStatusText = document.getElementById('calibrationCaptureStatusText');
+    const recoveryButton = document.getElementById('calibrationRecoveryBtn');
+    if (captureStatus) captureStatus.hidden = true;
+    if (recoveryButton) { recoveryButton.hidden = true; recoveryButton.onclick = null; }
+    const showCaptureStatus = (message, recoverable = false) => {
+        instructionText.textContent = message;
+        if (captureStatus && captureStatusText) {
+            captureStatusText.textContent = message;
+            // Keep feedback in the opposite half, never on top of the target.
+            captureStatus.style.top = positions[i].y >= 50 ? '12px' : 'auto';
+            captureStatus.style.bottom = positions[i].y >= 50 ? 'auto' : '12px';
+            captureStatus.hidden = false;
+        }
+        if (recoveryButton) {
+            recoveryButton.hidden = !recoverable;
+            recoveryButton.style.display = recoverable ? 'inline-flex' : 'none';
+        }
+    };
+    const showCaptureRecovery = message => {
+        showCaptureStatus(message, true);
+        if (recoveryButton) {
+            let recoveryGeneration = generation;
+            recoveryButton.textContent = participantMessage('calibration_camera_action');
+            recoveryButton.onclick = async () => {
+                if (recoveryGeneration === calibrationGeneration && !state.runtime.participantPageExited) {
+                    recoveryGeneration = ++calibrationGeneration;
+                    point.onclick = null;
+                    recoveryButton.disabled = true;
+                    try {
+                        await getSessionRuntime()?.stopContinuousModules('calibration_recovery');
+                        if (calibrationGeneration === recoveryGeneration && !state.runtime.participantPageExited) returnToMandatoryPreparation();
+                    } catch (_) {
+                        if (!state.runtime.participantPageExited) showCaptureStatus(participantMessage('runtime_generic_technical'), true);
+                    } finally { recoveryButton.disabled = false; }
+                }
+            };
+        }
+    };
     const captureIsActive = () => ownsCalibration() && !geometryWatch.signal.aborted && !document.hidden
         && isContinuousSessionAnalysisRunning() && geometryMatches();
     const recoverFromInactiveCapture = () => {
@@ -679,12 +733,15 @@ async function prepareCalibration(options) {
     // Обработчик клика на точку для калибровки
     // Два клика на точку; свежая серия открытых глаз с прежними pose limits.
     const handleCalibClick = async () => {
+        if (state.runtime.participantPageExited) return;
         if (clickPending || document.hidden || !ownsCalibration() || geometryWatch.signal.aborted) return;
         if (!captureIsActive()) { recoverFromInactiveCapture(); return; }
         clickPending = true;
         // Prevent double-clicks while collecting frames
         point.onclick = null;
         point.style.opacity = '0.5';
+        point.setAttribute('aria-busy', 'true');
+        showCaptureStatus(participantMessage('calibration_collecting'));
         try {
             // === GAZE CALIBRATION: собираем iris features с усреднением ===
             if (!ownerTracker || !state.runtime.localAnalyzer || !video) throw new Error('Calibration is not ready');
@@ -719,34 +776,30 @@ async function prepareCalibration(options) {
 
                 if (!accepted) {
                     pointFailureCounts[i] = failedClicksForPoint + 1;
-                    console.warn(
-                        `[GazeTracker] Недостаточно стабильных кадров (${capture.summary.usableFrames}/${policy.minFrames}), ` +
-                        `повторяем точку ${i + 1}, неудачных кликов подряд: ${pointFailureCounts[i]}`
-                    );
-                    instructionText.innerText = calibrationFeedback(state.currentLang, 'insufficient_frames');
+                    dbg('gaze', 'calibration:point-retry', { point: i + 1, frames: capture.summary.usableFrames, failures: pointFailureCounts[i] });
+                    showCaptureRecovery(calibrationFeedback(state.currentLang, 'insufficient_frames'));
                     point.style.opacity = '1';
                     point.onclick = handleCalibClick;
                     return;
                 }
             }
-        } catch (e) {
+        } catch (_) {
             if (!captureIsActive()) { recoverFromInactiveCapture(); return; }
-            console.error('[GazeTracker] Ошибка калибровки точки:', e);
-            instructionText.innerText = `${participantMessage('runtime_generic_technical')} ${translations[state.currentLang].calib_click_instruction}`;
-            setTimeout(() => {
-                if (captureIsActive() && i < positions.length) {
-                    instructionText.innerText = translations[state.currentLang].calib_click_instruction;
-                }
-            }, 1200);
+            dbgErr('gaze', 'calibration:point-failed');
+            showCaptureRecovery(`${participantMessage('runtime_generic_technical')} ${participantMessage('calibration_capture_retry')}`);
             point.style.opacity = '1';
             point.onclick = handleCalibClick;
             return;
         } finally {
             clickPending = false;
+            point.removeAttribute('aria-busy');
         }
         
-        instructionText.innerText = translations[state.currentLang].calib_click_instruction;
+        if (state.runtime.participantPageExited) return;
         clicksOnCurrentPoint++;
+        if (captureStatus) captureStatus.hidden = true;
+        if (recoveryButton) recoveryButton.hidden = true;
+        instructionText.innerText = translations[state.currentLang].calib_click_instruction;
         
         if (clicksOnCurrentPoint >= CLICKS_PER_POINT) {
             // Все клики на текущей точке собраны — переходим к следующей
@@ -765,11 +818,7 @@ async function prepareCalibration(options) {
             // === GAZE: Обучаем модель ===
             if (state.runtime.gazeTracker) {
                 const calibrated = state.runtime.gazeTracker.calibrate();
-                if (calibrated) {
-                    console.log('[GazeTracker] Модель обучена, статус:', state.runtime.gazeTracker.getStatus());
-                } else {
-                    console.warn('[GazeTracker] Калибровка не удалась');
-                }
+                dbg('gaze', 'calibration:completed', { calibrated: !!calibrated });
             }
             
             instructionText.innerText = translations[state.currentLang].calib_complete;
@@ -805,6 +854,7 @@ async function prepareCalibration(options) {
  * Показывает 9 точек, собирает данные взгляда, вычисляет accuracy/precision
  */
 export function startGazeValidation() {
+    if (state.runtime.participantPageExited) return;
     setSessionPhase('validation', { source: 'startGazeValidation' });
     setHeadPoseGuideMode('validation');
     const calibScreen = document.getElementById('fullscreenCalibration');
@@ -889,6 +939,17 @@ export function startGazeValidation() {
         }
     }
 
+    function stopValidationSampling() {
+        state.flags.isValidating = false;
+        clearInterval(samplingInterval);
+        clearTimeout(samplingDelayTimeout);
+        state.runtime.validationSamplingInterval = null;
+        samplingInterval = samplingDelayTimeout = null;
+        stopValidationPredictionLoop();
+        state.runtime.stopValidationSampling = null;
+    }
+    state.runtime.stopValidationSampling = stopValidationSampling;
+
     function scheduleValidationPrediction(delayMs = 0) {
         if (!state.runtime._validationLoopActive) return;
         state.runtime._validationGazeInterval = setTimeout(runValidationPredictionTick, delayMs);
@@ -907,6 +968,7 @@ export function startGazeValidation() {
             validationLoopLastVideoTime = videoTime;
 
             const result = await state.runtime.localAnalyzer.analyzeFrame(video);
+            if (!state.runtime._validationLoopActive) return;
             if (result) {
                 // Сохраняем pose данные (как в startTrackingTest)
                 if (result.pose) {
@@ -940,7 +1002,6 @@ export function startGazeValidation() {
         && state.runtime.localAnalyzer && video && video.srcObject) {
         state.runtime._validationLoopActive = true;
         scheduleValidationPrediction(0);
-        console.log('[Validation] Gaze prediction запущен');
     }
     
     function showNextPoint() {
@@ -1117,16 +1178,7 @@ export function startGazeValidation() {
         try {
             finishValidation();
         } catch (error) {
-            state.flags.isValidating = false;
-            if (state.runtime.validationSamplingInterval) {
-                clearInterval(state.runtime.validationSamplingInterval);
-                state.runtime.validationSamplingInterval = null;
-            }
-            if (samplingDelayTimeout) {
-                clearTimeout(samplingDelayTimeout);
-                samplingDelayTimeout = null;
-            }
-            stopValidationPredictionLoop();
+            stopValidationSampling();
             state.runtime.gazeTracker?.clearPostCalibrationCorrection?.();
 
             const technicalError = error?.message || String(error);
@@ -1185,17 +1237,7 @@ export function startGazeValidation() {
     }
 
     function finishValidation() {
-        state.flags.isValidating = false;
-        if (state.runtime.validationSamplingInterval) {
-            clearInterval(state.runtime.validationSamplingInterval);
-            state.runtime.validationSamplingInterval = null;
-        }
-        if (samplingDelayTimeout) {
-            clearTimeout(samplingDelayTimeout);
-            samplingDelayTimeout = null;
-        }
-        stopValidationPredictionLoop();
-        state.runtime._validationGazeInterval = null;
+        stopValidationSampling();
 
         const benchmarkPoints = state.runtime.validationBenchmarkPoints;
         const { filteredBenchmark, correctedCandidatePoints, baselinePoints, rawMetrics,
@@ -1288,7 +1330,6 @@ export function startGazeValidation() {
             correctionApplied: postCalibrationCorrection.applied
         });
         
-        console.log('[Validation] Результаты:', metrics);
         dbg('gaze', 'validation:end', {
             accuracyPct: metrics?.accuracyPct,
             precisionPct: metrics?.precisionPct,
@@ -1447,6 +1488,7 @@ function generateCorrectionId() {
 
 // --- ТЕСТ СЛЕЖЕНИЯ ЗА ФИГУРАМИ ---
 export function startTrackingTest(options = {}) {
+    if (state.runtime.participantPageExited) return;
     trackingTestOptions = options || {};
     setSessionPhase('tracking_test', { source: 'startTrackingTest' });
     recordSessionEvent('tracking_test_start');
@@ -1505,7 +1547,6 @@ export function startTrackingTest(options = {}) {
     // === CAMERA FPS MONITOR ===
     if (!isContinuousSessionAnalysisRunning() && video && video.srcObject) {
         startCameraFpsMonitor(video);
-        console.log('[TrackingTest] CameraFPSMonitor запущен');
     }
     
     // === SINGLE-FLIGHT ЦИКЛ АНАЛИЗА ===
@@ -1544,6 +1585,7 @@ export function startTrackingTest(options = {}) {
 
             // 1) analyzeFrame — один раз на новый кадр
             const precheckResult = await state.runtime.localAnalyzer.analyzeFrame(video);
+            if (!state.runtime._analysisLoopActive) return;
             state.runtime.lastPrecheckResult = precheckResult;
 
             // 2) Pose данные для QC gaze inference
@@ -1582,8 +1624,8 @@ export function startTrackingTest(options = {}) {
                         .then((segmenterResult) => {
                             lastSegmenterResult = segmenterResult;
                         })
-                        .catch((segmenterError) => {
-                            console.warn('[TrackingTest] Ошибка сегментации:', segmenterError);
+                        .catch(() => {
+                            dbgErr('tracking', 'segmentation:failed');
                         })
                         .finally(() => {
                             segmenterInFlight = false;
@@ -1621,8 +1663,8 @@ export function startTrackingTest(options = {}) {
             appendEmotionSample(state, emotionSample, Date.now(), getRelativeSessionTimeMs());
             const trackHud = document.getElementById('trackingEmotionHud');
             if (trackHud) trackHud.textContent = formatEmotionHudLine(emotionSample);
-        } catch (e) {
-            console.warn('[TrackingTest] Ошибка анализа:', e);
+        } catch (_) {
+            dbgErr('tracking', 'frame:analysis-failed');
         }
 
         const elapsed = performance.now() - tickStart;
@@ -1635,10 +1677,10 @@ export function startTrackingTest(options = {}) {
         const trackHud = document.getElementById('trackingEmotionHud');
         if (trackHud) trackHud.textContent = '';
         scheduleTrackingAnalysisTick(0);
-        console.log('[TrackingTest] Single-flight цикл анализа запущен (gaze + QC)');
     }
     
     function runTrajectory() {
+        if (state.runtime.participantPageExited) return;
         if (currentTrajectory >= trajectories.length) {
             // Останавливаем анализ
             stopTrackingAnalysisLoop();
@@ -1678,10 +1720,10 @@ export function startTrackingTest(options = {}) {
             progressFill.style.width = totalProgress + '%';
             
             if (t < 1) {
-                requestAnimationFrame(animate);
+                state.runtime.trackingMotionRaf = requestAnimationFrame(animate);
             } else {
                 currentTrajectory++;
-                setTimeout(runTrajectory, 500);
+                state.runtime.trackingMotionTimer = setTimeout(runTrajectory, 500);
             }
         }
         
@@ -1697,7 +1739,6 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     if (state.runtime.analysisInterval) {
         clearTimeout(state.runtime.analysisInterval);
         state.runtime.analysisInterval = null;
-        console.log('[TrackingTest] Analysis interval остановлен');
     }
     
     // === Останавливаем CameraFPSMonitor (если ещё работает) ===
@@ -1724,7 +1765,8 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
     
     progressText.innerText = translations[state.currentLang].test_complete;
     
-    setTimeout(() => {
+    state.runtime.trackingMotionTimer = setTimeout(() => {
+        if (state.runtime.participantPageExited) return;
         testArea.classList.remove('active');
 
         document.querySelector('.container').style.display = 'block'; 
@@ -1756,7 +1798,26 @@ export function finishTrackingTest(options = trackingTestOptions || {}) {
 
 let finishSessionPromise = null;
 
-function stopSessionMediaResources() {
+export function stopParticipantTestLoops() {
+    calibrationGeneration++;
+    state.runtime.cancelCalibrationIntro?.();
+    state.runtime.cancelVisuospatialTest?.();
+    state.runtime.stopValidationSampling?.();
+    stopGazeTestsAnalysisLoop();
+    stopHubEmotionPreview();
+    state.runtime._analysisLoopActive = false;
+    state.runtime._cognitiveLoopActive = false;
+    state.runtime._gazeTestsLoopActive = false;
+    cancelAnimationFrame(state.runtime.trackingMotionRaf);
+    state.runtime.trackingMotionRaf = null;
+    for (const key of ['analysisInterval', 'cognitiveAnalysisInterval', 'gazeTestsAnalysisInterval', 'trackingMotionTimer']) {
+        clearTimeout(state.runtime[key]);
+        state.runtime[key] = null;
+    }
+    stopCameraFpsMonitor();
+}
+
+export function stopSessionMediaResources() {
     const stream = state.runtime.cameraStream;
     state.runtime.cameraStream = null;
     for (const track of stream?.getTracks?.() || []) {
@@ -1792,17 +1853,13 @@ export function finishSession() {
         finishSessionPromise = finishSessionOnce();
     }
     finishSessionPromise = finishSessionPromise
-        .then(result => {
-            // Keep only in-flight calls deduplicated. Later calls must execute the
-            // explicit completed/idempotent branch without another network write.
-            finishSessionPromise = null;
-            return result;
-        })
         .catch(error => {
             stopSessionMediaResources();
             runtime?.failFinish(error);
-            finishSessionPromise = null;
             throw error;
+        }).finally(() => {
+            // Later calls must take the explicit completed/idempotent branch.
+            finishSessionPromise = null;
         });
     return finishSessionPromise;
 }
@@ -1851,11 +1908,13 @@ async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
     const uploadResult = await uploadAggregatesWithRetry(uploadPayload, {
         idempotencyKey: finishAttemptId
     });
+    // Server error bodies are untrusted and must not enter exported state.
+    const deliveryError = uploadResult.ok ? null : persistenceErrorCode({ status: uploadResult.status });
     state.sessionData.upload = {
         ...(state.sessionData.upload || {}),
         ok: uploadResult.ok,
         attempt: uploadResult.attempt || null,
-        error: uploadResult.error || null,
+        error: deliveryError,
         qcValidity: uploadResult.result?.qc_validity || null,
         proxyReady: uploadResult.result?.proxy_ready === true,
         updatedAt: Date.now()
@@ -1870,13 +1929,13 @@ async function uploadFinalPayload(runtime, finishAttemptId, completedAt) {
         severity: uploadResult.ok ? 'info' : 'error',
         finishAttemptId,
         attempt: uploadResult.attempt || null,
-        error: uploadResult.error || null
+        error: deliveryError
     });
     if (uploadResult.ok) {
         state.sessionData.finalizedPayload = uploadPayload;
         delete state.sessionData.pendingFinalUpload;
         try { await runtime?.clearCompletedCheckpoint(); }
-        catch (error) { console.warn('[finishSession] accepted result checkpoint cleanup failed:', error); }
+        catch (_) { dbgErr('delivery', 'checkpoint:cleanup-failed'); }
     } else {
         await runtime?.persistCompletedCheckpoint();
     }
@@ -1921,9 +1980,12 @@ async function finishSessionOnce() {
     });
     state.flags.isRecording = false;
     try {
-        await runtime?.stopContinuousModules('session_finish');
-    } catch (error) {
-        console.warn('[finishSession] module shutdown failed:', error);
+        const shutdown = runtime?.stopContinuousModules('session_finish');
+        // The camera is no longer needed while queued analysis finishes.
+        stopSessionMediaResources();
+        await shutdown;
+    } catch (_) {
+        dbgErr('app', 'session:shutdown-failed');
     } finally {
         // Teardown does not depend on analytics or final-screen DOM succeeding.
         stopSessionMediaResources();
@@ -1934,35 +1996,7 @@ async function finishSessionOnce() {
         customDot.style.display = 'none';
     }
     
-    // === Очищаем validation gaze interval (если ещё работает) ===
-    state.runtime._validationLoopActive = false;
-    if (state.runtime._validationGazeInterval) {
-        clearTimeout(state.runtime._validationGazeInterval);
-        state.runtime._validationGazeInterval = null;
-    }
-    if (state.runtime.validationSamplingInterval) {
-        clearInterval(state.runtime.validationSamplingInterval);
-        state.runtime.validationSamplingInterval = null;
-    }
-
-    // === Очищаем single-flight analysis loop (если ещё работает) ===
-    state.runtime._analysisLoopActive = false;
-    if (state.runtime.analysisInterval) {
-        clearTimeout(state.runtime.analysisInterval);
-        state.runtime.analysisInterval = null;
-    }
-
-    // === Очищаем cognitive single-flight loop (если ещё работает) ===
-    state.runtime._cognitiveLoopActive = false;
-    if (state.runtime.cognitiveAnalysisInterval) {
-        clearTimeout(state.runtime.cognitiveAnalysisInterval);
-        state.runtime.cognitiveAnalysisInterval = null;
-    }
-    state.runtime._gazeTestsLoopActive = false;
-    if (state.runtime.gazeTestsAnalysisInterval) {
-        clearTimeout(state.runtime.gazeTestsAnalysisInterval);
-        state.runtime.gazeTestsAnalysisInterval = null;
-    }
+    stopParticipantTestLoops();
 
     resetEmotionWiringState();
 
@@ -1985,8 +2019,8 @@ async function finishSessionOnce() {
             sessionSampleCount: heatmaps?.session?.totalSamples ?? null,
             onScreenSamples: heatmaps?.session?.onScreenSamples ?? null
         });
-    } catch (e) {
-        console.warn('[finishSession] Ошибка расчёта heatmaps:', e);
+    } catch (_) {
+        dbgErr('gaze', 'heatmap:calculation-failed');
         state.sessionData.heatmaps = null;
     }
 
@@ -1996,8 +2030,8 @@ async function finishSessionOnce() {
             state.sessionData.attentionMetrics?.global?.blinkDynamics || null;
         state.sessionData.perclosSummary =
             state.sessionData.attentionMetrics?.global?.perclos || null;
-    } catch (e) {
-        console.warn('[finishSession] Ошибка расчёта attention metrics:', e);
+    } catch (_) {
+        dbgErr('gaze', 'attention:calculation-failed');
         state.sessionData.attentionMetrics = null;
         state.sessionData.blinkSummary = null;
         state.sessionData.perclosSummary = null;
@@ -2006,7 +2040,6 @@ async function finishSessionOnce() {
     // === GAZE TRACKER: сброс ===
     if (state.runtime.gazeTracker) {
         state.runtime.gazeTracker.reset();
-        console.log('[GazeTracker] Сброшен');
     }
     
     // === Сброс данных позы ===
@@ -2025,20 +2058,18 @@ async function finishSessionOnce() {
             if (state.sessionData.qcSummary.protocolQc?.failed.length || state.sessionData.qcSummary.protocolQc?.missing.length
                 || state.sessionData.experimentMeta?.protocolTermination) state.sessionData.qcSummary.overallPass = false;
             finalQcSummary = state.sessionData.qcSummary;
-            console.log('[QC] Summary:', qcSummary);
-            dbg('respiration', 'respiration:summary', summarizeRespirationForDebug(state.sessionData));
+            dbg('respiration', 'respiration:summary', () => summarizeRespirationForDebug(state.sessionData));
 
             // Останавливаем QCMetrics
             state.runtime.qcMetrics.stop();
-            console.log('[QC] QCMetrics остановлен');
-        } catch (e) {
-            console.warn('[finishSession] Ошибка QC metrics:', e);
+        } catch (_) {
+            dbgErr('qc', 'summary:calculation-failed');
         }
     }
     // The aggregate cards (blinks, PERCLOS, emotion, body pose) do not depend
     // on QCMetrics and must be rendered for every completed session.
     try { updateFinalStepWithQC(finalQcSummary); }
-    catch (error) { console.warn('[finishSession] final summary rendering failed:', error); }
+    catch (_) { dbgErr('ui', 'summary:render-failed'); }
     hideQcOverlay();
     
     // Убираем класс active со step5 до вызова nextStep,
@@ -2085,6 +2116,5 @@ async function finishSessionOnce() {
         await runtime?.persistCompletedCheckpoint();
     }
 
-    console.log('[finishSession] Сессия завершена, показан step7, upload flow выполнен');
     return state.sessionData.upload || { ok: false };
 }

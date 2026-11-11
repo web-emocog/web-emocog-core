@@ -1,13 +1,13 @@
 // Explicit diagnostic mount only; never called by the participant flow.
 // The local harness and authenticated developer page share this implementation.
 import { createMatchedWindow, observeMatchedWindow, finishMatchedWindow } from './gaze-benchmark-summary.mjs?v=20261108-143m';
-import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-report.mjs?v=20261110-160';
+import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-report.mjs?v=20261110-integration1';
 import { createValidationAttemptRecorder, collectValidationTargets, calibrationRejection, countCalibrationRejection,
-  recordMaskedCalibrationClick, summarizeLidSupportClick } from './gaze-benchmark-coverage.mjs?v=20261110-143s';
+  recordMaskedCalibrationClick, summarizeLidSupportClick } from './gaze-benchmark-coverage.mjs?v=20261110-integration1';
 import { DiagnosticRun, SerialDiagnosticStage } from './diagnostic-run.mjs?v=20261104-4';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS, CORRECTION_POSITIONS,
   BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick, compareCalibrationClicks, assessCalibrationFrame
-} from '../../participant-web/js/gaze-tracker/calibration-capture.mjs?v=20261110-160';
+} from '../../participant-web/js/gaze-tracker/calibration-capture.mjs?v=20261110-integration1';
 import { createValidationSamplingWindow, validationTargetCoverage } from '../../participant-web/js/gaze-tracker/validation-sampling.mjs';
 import { fitValidationCorrection, assessCorrectionBenchmark } from '../../participant-web/js/gaze-tracker/validation-metrics.mjs';
 import { getContentViewport, targetCenterInContentViewport } from '../../participant-web/js/gaze-tracker/viewport-coordinates.mjs';
@@ -15,7 +15,7 @@ import { createModelComparison, commonAppearanceCalibrationFrames, commonGradien
   commonMaskedCalibrationFrames, commonNuisanceCalibrationFrames, comparisonSignals, comparisonSignalKeys, comparisonPairs } from './gaze-benchmark-models.mjs?v=20261110-143v';
 import { eyePatchFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-patch-features.mjs?v=20261107-143';
 import { eyeGradientFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-gradient-features.mjs?v=20261107-143g';
-import { eyeTophatFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-tophat-features.mjs?v=20261108-143l';
+import { eyeTophatFeaturesForFrame } from '../../participant-web/js/gaze-tracker/eye-tophat-features.mjs?v=20261110-integration1';
 export function mountGazeBenchmark({ mode: requestedMode = null, pose = false, temporal = false,
   cohort = false, canStart = () => false, authorize = null } = {}) {
 if (cohort && (!['tophat', 'aoi-continuous', 'eye-gate'].includes(requestedMode) || typeof authorize !== 'function')) {
@@ -250,16 +250,16 @@ async function start() {
       import('../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261104-4'),
       import('../../participant-web/js/session-runtime/video-frames.mjs?v=20261104-4'),
       import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs'),
-      import('../../participant-web/js/gaze-tracker/features.js?v=20261108-143l'),
+      import('../../participant-web/js/gaze-tracker/features.js?v=20261110-integration1'),
       maskedMode || lidSupportProbe ? import('./gaze-eye-masked.mjs?v=20261110-143r') : null,
-      nuisanceMode ? import('./gaze-eye-patch-rows.mjs?v=20261110-143s') : null,
-      nuisanceMode ? import('./gaze-eye-patch-nuisance.mjs?v=20261110-143s') : null,
+      nuisanceMode ? import('./gaze-eye-patch-rows.mjs?v=20261110-integration1') : null,
+      nuisanceMode ? import('./gaze-eye-patch-nuisance.mjs?v=20261110-integration1') : null,
       nuisanceGateMode ? import('./gaze-eye-patch-gate.mjs?v=20261110-143u') : null,
       geometryGateMode ? import('./gaze-eye-patch-geometry-gate.mjs?v=20261110-143u') : null,
       aoiMode ? Promise.all([import('./gaze-continuous-aoi.mjs?v=20261110-143v'),
         import('../../participant-web/js/web-page/heatmap.js?v=20261102-1')])
         .then(([aoi, heatmap]) => ({ ...aoi, createHeatmapAccumulator: heatmap.createHeatmapAccumulator })) : null,
-      eyeGateMode ? import('./gaze-eye-gate-probe.mjs?v=20261110-160') : null,
+      eyeGateMode ? import('./gaze-eye-gate-probe.mjs?v=20261110-integration1') : null,
     ]), 45000, owned);
     if (run !== owned) return;
     globalThis.FilesetResolver = vision.FilesetResolver; globalThis.FaceLandmarker = vision.FaceLandmarker;

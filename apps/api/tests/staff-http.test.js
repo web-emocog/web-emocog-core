@@ -76,6 +76,16 @@ test('HTTP errors preserve status/code, including rate limits, and never cause a
   }
 });
 
+test('login backoff reads the body when Retry-After is hidden and prefers the header when present', async () => {
+  for (const [headers, expected] of [[{}, 2000], [{ 'Retry-After': '5' }, 5000]]) {
+    const client = createHttpClient({ fetch: async () => Response.json({
+      code: 'rate_limit_exceeded', retry_after_seconds: 2,
+    }, { status: 429, headers }) });
+    await assert.rejects(client.json('https://api.test/auth/login', { method: 'POST' }),
+      { status: 429, code: 'rate_limit_exceeded', retryAfterMs: expected });
+  }
+});
+
 test('offline mutations have an uncertain outcome without exposing credentials, URLs or payloads', async () => {
   const secret = 'synthetic-private-password'; let calls = 0;
   const client = createHttpClient({ fetch: async () => { calls++; throw new TypeError(secret); } });

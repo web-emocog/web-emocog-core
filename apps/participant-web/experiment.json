@@ -1,5 +1,5 @@
 {
-  "title": "Go_NoGo",
+  "title": "Go / No-Go demo",
   "version": "v2.0_universal",
   "settings": {
     "backgroundColor": "#1a1a2e",
@@ -27,13 +27,16 @@
       "type": "instruction",
       "content": {
         "title": "Инструкция",
-        "text": "Привет! пупу",
+        "text": "Нажимайте пробел, когда видите зелёный круг. На красный круг не отвечайте.",
+        "titleEn": "Go / No-Go demo",
+        "textEn": "Press Space for a green circle. Do not respond to a red circle.",
         "buttonText": "Далее"
       }
     },
     {
       "id": "cognitive_task_1772186337855",
       "type": "cognitive_task",
+      "taskType": "go_nogo",
       "blockConfig": {
         "showFeedback": true,
         "feedbackConfig": {
@@ -43,12 +46,11 @@
         "useRT": true,
         "stimulusDuration": 1000,
         "rtWindow": 1000,
-        "responseType": "keys",
+        "responseMode": "keypress",
         "omissionRule": "flag",
         "commissionRule": "flag",
         "targetAOI": "",
-        "stimuliSource": "folder",
-        "stimuliFolder": "folder_1772186289895",
+        "stimuliSource": "library",
         "randomize": true,
         "fixation": {
           "content": "+",
@@ -57,14 +59,14 @@
       },
       "trials": [
         {
-          "stimulusId": "1772186298189.0808",
+          "stimulusId": "std_nogo_red_circle",
           "condition": "nogo",
           "correctResponse": "",
           "duration": 1000,
           "repetitions": 4
         },
         {
-          "stimulusId": "1772186298190.3623",
+          "stimulusId": "std_go_green_circle",
           "condition": "go",
           "correctResponse": "Space",
           "duration": 1000,

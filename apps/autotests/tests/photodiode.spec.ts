@@ -19,7 +19,7 @@ async function loadTask(page: Page, fixation = false, media = false) {
     if (media) {
       shared.runtime.invitationStimuliMap = { '42': {
         id: '42', name: 'Photodiode retry fixture', mime_type: 'image/png',
-        metadata: { url: new URL('photodiode-fixture.png', location.href).href },
+        metadata: { source_url: new URL('photodiode-fixture.png', location.href).href },
       } };
     }
     const pd = (window as any).Photodiode;
@@ -32,7 +32,7 @@ async function loadTask(page: Page, fixation = false, media = false) {
         fixationDisplay: document.getElementById('cogFixation')?.style.display });
       return signal(kind);
     };
-    const task = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-157', location.href).href);
+    const task = await import(new URL('js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
     await task.loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
       version: 'v2-photodiode-regression', blocks: [{ id: 'photodiode-task', type: 'cognitive_task', taskType: 'simple_rt',
         blockConfig: { useFixation: fixation, fixation: { duration: 650 }, stimulusDuration: 5000, responseMode: 'keypress' },
@@ -111,12 +111,14 @@ test('failed media emits no stimulus marker and retry marks only the loaded imag
   });
   await page.goto(`${participant}?photodiode=1`);
   await loadTask(page, false, true);
-  await page.locator('#cogStartBtn').click();
-  const retry = page.getByRole('button', { name: /Повторить загрузку|Retry loading/ });
+  await expect(page.locator('[data-block-media-status]')).toHaveAttribute('data-block-media-status', 'unavailable');
+  const retry = page.getByRole('button', { name: /Повторить подготовку|Retry preparation/ });
   await expect(retry).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pdCalls.filter((call: any) => call.kind === 'stimulus').length)).toBe(0);
   available = true;
   await retry.click();
+  await expect(page.locator('[data-block-media-status]')).toHaveAttribute('data-block-media-status', 'ready');
+  await page.locator('#cogStartBtn').click();
   await expect(page.locator('#cogImage')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__pdCalls.filter((call: any) => call.kind === 'stimulus').length)).toBe(1);
   await page.keyboard.press('KeyZ');

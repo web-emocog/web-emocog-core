@@ -4,13 +4,18 @@
  * previously produced different smoothing and calibration semantics.
  */
 (function loadCanonicalGazeTracker() {
-    const loading = import('./gaze-tracker/index.js?v=20261110-143s')
+    const loading = import('./gaze-tracker/index.js?v=20261110-integration1')
         .then(module => {
-            window.GazeTracker = module.GazeTracker || module.default;
+            const Tracker = module.GazeTracker || module.default;
+            if (typeof Tracker !== 'function') throw new Error('gaze_export_missing');
+            window.GazeTracker = Tracker;
             return 'module';
         })
-        .catch(error => {
-            console.error('[GazeTracker] Canonical module failed to load:', error);
+        .catch(() => {
+            void import('./session-runtime/participant-diagnostic.mjs?v=20261110-integration1').then(
+                diagnostic => diagnostic.participantDebugError('gaze', 'module:unavailable'),
+                () => { /* Diagnostics are optional. */ }
+            );
             window.GazeTracker = class UnavailableGazeTracker {
                 constructor() {
                     throw new Error('GazeTracker module is unavailable');

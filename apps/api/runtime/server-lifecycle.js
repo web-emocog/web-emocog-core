@@ -1,3 +1,5 @@
+const { errorRecord } = require('../security/error-log');
+
 function writeLog(logger, level, event, details = {}) {
   const method = typeof logger?.[level] === 'function' ? logger[level] : logger?.log;
   if (typeof method !== 'function') return;
@@ -61,17 +63,25 @@ function createShutdownController({
         closeError = error;
         processRef.exitCode = 1;
         writeLog(logger, 'error', 'api_http_close_failed', {
-          code: error?.code || 'unknown',
+          code: errorRecord(error, 'lifecycle').code,
         });
       }
 
       try {
+        for (const closeService of app.locals.shutdownHooks || []) {
+          try { await closeService(); }
+          catch (error) {
+            closeError ||= error;
+            processRef.exitCode = 1;
+            writeLog(logger, 'error', 'api_service_close_failed', { code: errorRecord(error, 'lifecycle').code });
+          }
+        }
         await pool.end();
       } catch (error) {
         closeError ||= error;
         processRef.exitCode = 1;
         writeLog(logger, 'error', 'api_db_close_failed', {
-          code: error?.code || 'unknown',
+          code: errorRecord(error, 'lifecycle').code,
         });
       } finally {
         if (forceTimer) clearTimer(forceTimer);
@@ -93,9 +103,9 @@ function createShutdownController({
 function installProcessHandlers({ processRef = process, shutdown, logger = console }) {
   const onSignal = signal => void shutdown(signal, 0).catch(() => {});
   const onFatal = (event, error) => {
+    const { event: _diagnosticEvent, ...diagnostic } = errorRecord(error, 'lifecycle');
     writeLog(logger, 'error', event, {
-      name: error?.name || 'Error',
-      code: error?.code || 'unknown',
+      ...diagnostic,
     });
     void shutdown(event, 1).catch(() => {});
   };

@@ -1,5 +1,5 @@
 // Diagnostic comparisons only: no factory is called by participant production flow.
-import Tracker from '../../participant-web/js/gaze-tracker/GazeTracker.js?v=20261110-143s';
+import Tracker from '../../participant-web/js/gaze-tracker/GazeTracker.js?v=20261110-integration1';
 import { DEFAULTS } from '../../participant-web/js/gaze-tracker/constants.js?v=20261106-143';
 
 // All compared regressions must average exactly the same calibration captures.

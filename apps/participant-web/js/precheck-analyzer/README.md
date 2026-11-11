@@ -34,22 +34,25 @@ js/
 
 ## Зависимости
 
-```html
-<!-- MediaPipe Tasks Vision -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
-```
+В продукте используются закреплённые локальные MediaPipe, WASM и модель из
+`js/vendor/mediapipe/`, а не CDN или `latest`. Канонический запуск и общий
+цикл кадров находятся на странице участника; отдельный цикл ниже не следует
+добавлять поверх `session-runtime/frame-pipeline.js`.
 
 ## Быстрый старт
 
 ### Browser (без сборщика)
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
-<script src="js/precheck-analyzer.js"></script>
-<script>
+<p id="modelStatus" role="status"></p>
+<script type="module">
+    import { FilesetResolver, FaceLandmarker } from './js/vendor/mediapipe/vision_bundle.mjs';
+    import { PrecheckAnalyzer } from './js/precheck-analyzer/index.js?v=20261109-media1';
+    Object.assign(window, { FilesetResolver, FaceLandmarker });
+    const status = document.getElementById('modelStatus');
     const analyzer = new PrecheckAnalyzer({
-        onInitialized: () => console.log('Ready!'),
-        onError: (err) => console.error(err)
+        onInitialized: () => { status.textContent = 'Модель готова'; },
+        onError: () => { status.textContent = 'Модель недоступна. Повторите подготовку.'; }
     });
     
     await analyzer.initialize();
@@ -57,9 +60,7 @@ js/
     // В цикле анализа:
     const result = await analyzer.analyzeFrame(videoElement);
     
-    console.log('Лицо:', result.face.detected);
-    console.log('Поза:', result.pose.status);
-    console.log('Глаза:', result.eyes.bothOpen);
+    // Передавайте result в согласованный контур анализа, не в прямой console.
 </script>
 ```
 
@@ -71,6 +72,14 @@ import { PrecheckAnalyzer } from './precheck-analyzer/index.js';
 const analyzer = new PrecheckAnalyzer();
 await analyzer.initialize();
 ```
+
+`onInitialized` и `onError` — уведомления, а не подтверждение готовности:
+используйте результат `await initialize()`. Их исключения и отклонённые
+Promise не меняют готовность модели и не запускают второй backend.
+`onError` сохраняет исходный объект ошибки для совместимости, но не следует
+целиком писать его в консоль или выгрузку.
+Диагностика через `session-runtime/participant-diagnostic.mjs` выключена по
+умолчанию; повторные коды ошибки ограничены до `reset()`.
 
 ## API
 
