@@ -198,7 +198,7 @@ test.describe('Durable participant backup through real API', () => {
     expect((await read()).payload.cognitiveResults[0].rt).toBe(410);
     await page.route(`${api}/ingest`, route => route.fulfill({ status: 403, headers: { 'Access-Control-Allow-Origin': '*' }, json: { error: 'test denial' } }));
     await page.evaluate(async () => {
-      const { finishSession } = await import(new URL('js/web-page/tests-updated.js?v=20261110-integration1', location.href).href);
+      const { finishSession } = await import(new URL('js/web-page/tests-updated.js?v=20261112-emotion1', location.href).href);
       await finishSession();
     });
     await expect(page.locator('#retryUploadBtn')).toBeVisible();
@@ -237,7 +237,7 @@ test.describe('Durable participant backup through real API', () => {
     const sessionId = await page.evaluate(async () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.sessionData.cognitiveResults = [{ blockId: 'retained', rt: 388, correct: true }];
-      const { finishSession } = await import(new URL('js/web-page/tests-updated.js?v=20261110-integration1', location.href).href);
+      const { finishSession } = await import(new URL('js/web-page/tests-updated.js?v=20261112-emotion1', location.href).href);
       await finishSession();
       return shared.sessionData.ids.session;
     });
@@ -270,7 +270,7 @@ test.describe('Durable participant backup through real API', () => {
     await page.evaluate(async () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.sessionData.cognitiveResults = [{ rt: 432, correct: true, blockId: 'retained' }];
-      const { finishSession } = await import(new URL('js/web-page/tests-updated.js?v=20261110-integration1', location.href).href);
+      const { finishSession } = await import(new URL('js/web-page/tests-updated.js?v=20261112-emotion1', location.href).href);
       (window as any).__offlineFinish = finishSession();
     });
     await expect(page.locator('#retryUploadBtn')).toBeVisible({ timeout: 20000 });

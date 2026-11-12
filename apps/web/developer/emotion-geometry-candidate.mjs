@@ -1,5 +1,5 @@
-import { EmotionAnalyzer } from '../../participant-web/js/emotion/emotion-analyzer.js?v=20261110-integration1';
-import { extractActionUnits } from '../../participant-web/js/emotion/au-extractor.js';
+import { EmotionAnalyzer } from '../../participant-web/js/emotion/emotion-analyzer.js?v=20261112-emotion1';
+import { extractActionUnits } from '../../participant-web/js/emotion/au-extractor.js?v=20261112-emotion1';
 import { EMOTION_CONFIG } from '../../participant-web/js/emotion/emotion-config.js';
 
 export const GEOMETRY_METHOD = 'neutral_geometry.experimental.v1';

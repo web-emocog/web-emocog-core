@@ -1,6 +1,6 @@
-import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261110-integration1';
+import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261112-emotion1';
 import { PROTOCOL_PROFILE_ID, NEW_PROTOCOL_PROFILE_ID, resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
-import { expressionNames } from './emotion-comparison.mjs';
+import { expressionNames } from './emotion-comparison.mjs?v=20261112-emotion1';
 
 const fmt = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : '\u2014';
 const fpsLabel = measurement => measurement?.status === 'measured'
@@ -181,8 +181,10 @@ export function mountProtocolDiagnostic(channel) {
             const select=document.getElementById('emotionTrialLabel'); if(select) select.disabled=!!active;
             const trials=diagnostics?.trials ?? [];
             const last = trials.at(-1);
+            const result = last?.status === 'insufficient_data'
+                ? 'Недостаточно данных. Повторите пробу.' : last?.status;
             write('emotionTrialStatus',active ? `Запись «${expressionNames.get(active.expression) ?? active.expected}»: осталось ${fmt(active.remainingMs/1000,1)} с.`
-                : last ? `Сохранено проб: ${trials.length}. Последняя: «${expressionNames.get(last.expression) ?? last.expected}», ${last.status}, общих валидных измерений: ${last.commonValid}.` : 'Пробы ещё не записаны');
+                : last ? `Сохранено проб: ${trials.length}. Последняя: «${expressionNames.get(last.expression) ?? last.expected}», общих валидных измерений: ${last.commonValid}. ${result}` : 'Пробы ещё не записаны');
             write('emotionCalibrationStatus', calibration?.ready
                 ? `Калибровка завершена: ${calibration.frames}/${calibration.requiredFrames}. Можно выполнять выражения лица.`
                 : `Калибровка: ${calibration?.frames ?? 0}/${calibration?.requiredFrames ?? '-'}. Сохраняйте нейтральное лицо.`);

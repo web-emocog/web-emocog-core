@@ -1,4 +1,4 @@
-import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js';
+import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js?v=20261112-emotion1';
 
 export function medianBaseline(samples) {
     return Object.fromEntries(Object.keys(samples[0]).map(key => {

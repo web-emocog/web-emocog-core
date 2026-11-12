@@ -145,3 +145,31 @@ test('paired trial summaries count shared frames, missingness and interruptions 
         assert.equal(trial.expected, 'happiness');
     }
 });
+
+test('an expired trial with no common valid frames is saved as insufficient data', () => {
+    let now = 0;
+    const comparison = new Comparison(() => now);
+    const legacy = calibrated(Legacy);
+    const record = landmarks => comparison.record(
+        legacy.analyzeLandmarks(landmarks), legacy.getCalibrationDiagnostics(), landmarks);
+    for (let i = 0; i < 18; i++) record(face());
+    assert.equal(comparison.beginTrial('neutral'), true);
+    now += 5000;
+    const [empty] = comparison.snapshot().trials;
+    assert.equal(empty.attempts, 0);
+    assert.equal(empty.commonValid, 0);
+    assert.equal(empty.status, 'insufficient_data');
+    assert.equal(empty.baselineMatchFraction, null);
+    assert.equal(empty.candidateMatchFraction, null);
+
+    record(face());
+    assert.equal(comparison.beginTrial('neutral'), true);
+    const broken = face();
+    broken[61].x = NaN;
+    record(broken);
+    now += 5000;
+    const [, missing] = comparison.snapshot().trials;
+    assert.equal(missing.attempts, 1);
+    assert.equal(missing.commonValid, 0);
+    assert.equal(missing.status, 'insufficient_data');
+});

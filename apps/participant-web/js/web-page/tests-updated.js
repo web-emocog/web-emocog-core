@@ -7,11 +7,11 @@ import {
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261110-integration1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261110-integration1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261112-emotion1';
 import { stopPreCheck } from './precheck-updated.js?v=20261110-integration1';
 import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261110-integration1';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261112-emotion1';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -23,8 +23,8 @@ import {
     runProtocolTestSequence,
     startTestHub,
     stopHubEmotionPreview
-} from '../gaze-tracker/gaze-tests/index.js?v=20261110-integration1';
-import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261110-integration1';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261112-emotion1';
+import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261112-emotion1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
     CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
@@ -37,8 +37,8 @@ import { extractEyeSignalSample } from './eye-signal.js';
 import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { hide as hideQcOverlay, resetFaceLostTimer } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { setAutoPauseStimulus, getConfig as getQcPauseConfig } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js?v=20261110-integration1';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261110-integration1';
+import { getEmotionSample, appendEmotionSample, resetEmotionWiringState } from '../emotion-stub-new.js?v=20261112-emotion1';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261112-emotion1';
 import { recordedConsentReceipt, sendSessionFeature } from '../session-runtime/ingest-transport.mjs?v=20261110-integration1';
 import { persistenceErrorCode, persistenceMessage } from '../session-runtime/persistence-ui.mjs?v=20261110-integration1';
 import {
@@ -49,7 +49,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261110-integration1';
+} from '../session-runtime/index.js?v=20261112-emotion1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,

@@ -9,7 +9,7 @@
  */
 
 import { EMOTION_CONFIG }                        from './emotion-config.js';
-import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js';
+import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js?v=20261112-emotion1';
 import { classifyFACS, calcAffective }           from './facs-classifier.js';
 import { computeAggregatedMetrics }              from './emotion-aggregator.js';
 import { participantDebugError } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';

@@ -1,6 +1,6 @@
-import { medianBaseline } from '../../participant-web/js/emotion/neutral-calibration.mjs';
-import { EmotionDiagnostics } from './emotion-diagnostics.mjs';
-import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-candidate.mjs';
+import { medianBaseline } from '../../participant-web/js/emotion/neutral-calibration.mjs?v=20261112-emotion1';
+import { EmotionDiagnostics } from './emotion-diagnostics.mjs?v=20261112-emotion1';
+import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-candidate.mjs?v=20261112-emotion1';
 
 const labels=['neutral','happiness','sadness','anger','fear','surprise','disgust'];
 export const expressionNames = new Map([
@@ -105,7 +105,7 @@ export class EmotionComparison extends EmotionDiagnostics {
         this.activeTrial=null;
         t.elapsedMs=this.now()-t.startedAtMs;
         delete t.startedAtMs;
-        t.status=status;
+        t.status=status==='completed' && t.commonValid===0 ? 'insufficient_data' : status;
         t.baselineMatchFraction=t.commonValid ? t.baselineMatches/t.commonValid : null;
         t.candidateMatchFraction=t.commonValid ? t.candidateMatches/t.commonValid : null;
         t.baselineFalsePositiveFraction=t.expected==='neutral'&&t.commonValid ? 1-t.baselineMatchFraction : null;

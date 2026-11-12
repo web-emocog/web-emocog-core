@@ -10,8 +10,8 @@ import {
     getEmotionSummary,
     setExplicitNeutralBaseline,
     startEmotionSession
-} from '../emotion-stub-new.js?v=20261110-integration1';
-import { NeutralCalibration } from '../emotion/neutral-calibration.mjs';
+} from '../emotion-stub-new.js?v=20261112-emotion1';
+import { NeutralCalibration } from '../emotion/neutral-calibration.mjs?v=20261112-emotion1';
 import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261110-integration1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
