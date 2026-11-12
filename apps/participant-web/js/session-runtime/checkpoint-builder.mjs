@@ -39,7 +39,7 @@ export class CheckpointBuilder {
                 const request = createCheckpointRequest(source);
                 if (!isCheckpointRequest(request)) throw new Error('checkpoint_worker_invalid_request');
                 const packet = await new Promise((resolve, reject) => {
-                    this.worker = new Worker(new URL('./aggregate-worker.mjs?v=20261112-emotion1', import.meta.url), { type: 'module' });
+                    this.worker = new Worker(new URL('./aggregate-worker.mjs?v=20261112-emotion2', import.meta.url), { type: 'module' });
                     const timer = setTimeout(() => reject(new Error('checkpoint_worker_timeout')), this.timeoutMs);
                     this.cancel = () => { clearTimeout(timer); reject(new Error('checkpoint_worker_cancelled')); };
                     this.worker.onmessage = event => {
@@ -62,7 +62,7 @@ export class CheckpointBuilder {
         }
         // Unsupported workers must not run full gaze/alignment calculations
         // on the active RT thread or fabricate empty-signal measurements.
-        const { buildAggregatesPayload } = await import('../unified-aggregates-new.js?v=20261112-emotion1');
+        const { buildAggregatesPayload } = await import('../unified-aggregates-new.js?v=20261112-emotion2');
         if (source.heatmapState) {
             const { buildCheckpointHeatmaps } = await import('./gaze-history.mjs?v=20261102-1');
             source.heatmaps = buildCheckpointHeatmaps(source);

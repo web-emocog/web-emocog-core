@@ -405,15 +405,19 @@ export class EmotionAnalyzer {
         return { ready: true, actionUnits: adjusted };
     }
 
-    _unavailableResult(status) {
+    // A missing observation breaks temporal continuity, not personal calibration.
+    resetExpressionHistory() {
         this.currentFaceMask = null;
         this.affectiveDimensions = { valence: null, arousal: null };
-        // Do not carry a pre-gap candidate into a later expression.
         this.smoothingBuffer = [];
         this.temporalBuffer = [];
         this._stableDominant = 'neutral';
         this._dominantCandidate = 'neutral';
         this._dominantCandidateFrames = 0;
+    }
+
+    _unavailableResult(status) {
+        this.resetExpressionHistory();
         return {
             status,
             scores: Object.fromEntries(this.emotionLabels.map(label => [label, 0])),

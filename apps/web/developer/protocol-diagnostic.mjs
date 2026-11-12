@@ -1,7 +1,7 @@
 import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1';
 import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261110-integration1';
 import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261110-integration1';
-import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261112-emotion1';
+import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261112-emotion2';
 import { MultimodalSessionCollector } from '../../participant-web/js/multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';
 import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
@@ -12,8 +12,8 @@ import { getContentViewport } from '../../participant-web/js/gaze-tracker/viewpo
 import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './diagnostic-run.mjs?v=20261028-1';
 
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
-import { observeEmotionSamples } from '../../participant-web/js/emotion/public-api.js?v=20261112-emotion1';
-import { EmotionComparison } from './emotion-comparison.mjs?v=20261112-emotion1';
+import { observeEmotionSamples } from '../../participant-web/js/emotion/public-api.js?v=20261112-emotion2';
+import { EmotionComparison } from './emotion-comparison.mjs?v=20261112-emotion2';
 import { hide as hideQcOverlay } from '../../participant-web/js/qc-pause-overlay-new.js?v=20261103-1';
 
 export class ProtocolDiagnostic {

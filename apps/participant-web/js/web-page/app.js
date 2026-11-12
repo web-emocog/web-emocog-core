@@ -25,7 +25,7 @@ import {
 import { 
     startCalibration, 
     finishSession 
-} from './tests.js?v=20261112-emotion1';
+} from './tests.js?v=20261112-emotion2';
 
 // Функции доступные для HTML
 window.setLanguage = setLanguage;

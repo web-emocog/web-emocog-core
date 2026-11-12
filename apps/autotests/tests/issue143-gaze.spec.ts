@@ -27,7 +27,7 @@ async function openProductionCalibration(page: Page, beforeStart?: () => Promise
       state.runtime.lastPrecheckResult = { timestamp: performance.now(), landmarks,
         eyes: { bothOpen: !(window as any).rejectCalibrationFrames }, pose: { status: 'stable', yaw: 0, pitch: 0, roll: 0 } };
     }, 33);
-    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261112-emotion1';
+    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261112-emotion2';
     const module = await import(moduleUrl);
     (window as any).calibrationPrepared = module.startCalibration();
   }, landmarksForGaze(0, 0));

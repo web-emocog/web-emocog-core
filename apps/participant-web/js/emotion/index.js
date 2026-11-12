@@ -17,7 +17,7 @@ export { classifyFACS, calcAffective }           from './facs-classifier.js';
 export { computeAggregatedMetrics }              from './emotion-aggregator.js';
 
 // ── Класс анализатора ────────────────────────────────────────────────────────
-export { EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion1';
+export { EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion2';
 
 // ── Публичный API (singleton + функции) ──────────────────────────────────────
 export {
@@ -25,13 +25,13 @@ export {
     getEmotionSample,
     getEmotionSummary,
     appendEmotionSample,
-} from './public-api.js?v=20261112-emotion1';
+} from './public-api.js?v=20261112-emotion2';
 
 // ── Регистрация на window (обратная совместимость) ────────────────────────────
 // [FIX] Используем отдельные side-effect импорты только для window-регистрации,
 // чтобы не дублировать реэкспортированные имена выше.
-import { EmotionAnalyzer as _EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion1';
-import { _analyzer as _singletonAnalyzer }     from './public-api.js?v=20261112-emotion1';
+import { EmotionAnalyzer as _EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion2';
+import { _analyzer as _singletonAnalyzer }     from './public-api.js?v=20261112-emotion2';
 
 window.EmotionAnalyzer = _EmotionAnalyzer;
 window.emotionAnalyzer = _singletonAnalyzer;

@@ -1,4 +1,4 @@
-import { EmotionAnalyzer } from '../../participant-web/js/emotion/emotion-analyzer.js?v=20261112-emotion1';
+import { EmotionAnalyzer } from '../../participant-web/js/emotion/emotion-analyzer.js?v=20261112-emotion2';
 import { extractActionUnits } from '../../participant-web/js/emotion/au-extractor.js?v=20261112-emotion1';
 import { EMOTION_CONFIG } from '../../participant-web/js/emotion/emotion-config.js';
 
