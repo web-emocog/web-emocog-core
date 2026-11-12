@@ -33,11 +33,17 @@ describe('Invitation media rate-limit regression', () => {
       ['/invitations/by-code/test/ingest-token', 'POST', 'ingest'],
       ['/ingest', 'POST', 'ingest'],
       ['/auth/login', 'POST', 'auth'],
-      ['/stimuli/42/content', 'GET', 'default'],
+      ['/stimuli/42/content', 'GET', 'media'],
+      ['/stimuli/42/preview', 'HEAD', 'media'],
+      ['/stimuli/42/content', 'POST', 'default'],
+      ['/stimuli/operations', 'POST', 'default'],
+      ['/stimuli/42/content/extra', 'GET', 'default'],
+      ['/stimuli/not-a-number/content', 'GET', 'default'],
+      ['/protocols/39', 'PATCH', 'default'],
       ['/invitations/by-code/test/stimuli/not-a-number/content', 'GET', 'ingest'],
     ]) assert.equal(classifyRateLimitRoute({ path: route, method }), profile);
     assert.equal(config.http.rateLimits.media, Number(process.env.MEDIA_RATE_LIMIT_PER_MINUTE) > 0
-      ? Number(process.env.MEDIA_RATE_LIMIT_PER_MINUTE) : 300);
+      ? Number(process.env.MEDIA_RATE_LIMIT_PER_MINUTE) : 1200);
   });
 
   it('loads 63 images without spending invitation/admission/ingest capacity', async () => {
@@ -66,6 +72,21 @@ describe('Invitation media rate-limit regression', () => {
     assert.equal((await runLimiter(limiter, '/ingest', 'POST')).status, 200);
     assert.equal((await runLimiter(limiter, '/auth/login', 'POST')).status, 200);
     assert.equal((await runLimiter(limiter, '/auth/login', 'POST')).status, 429);
+  });
+
+  it('large staff galleries cannot exhaust protocol-save capacity and still have a finite media budget', async () => {
+    const limiter = createRouteRateLimiter({ auth: 2, ingest: 2, media: 300, default: 2 }, { validate: false });
+    for (let id = 1; id <= 300; id++) {
+      assert.equal((await runLimiter(limiter, `/stimuli/${id}/${id % 2 ? 'content' : 'preview'}`)).status, 200);
+    }
+    const blocked = await runLimiter(limiter, '/stimuli/301/content');
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.body.route_profile, 'media');
+    assert.ok(Number(blocked.headers['Retry-After']) > 0);
+    assert.equal((await runLimiter(limiter, '/protocols/39', 'PATCH')).status, 200);
+    assert.equal((await runLimiter(limiter, '/invitations', 'POST')).status, 200);
+    assert.equal((await runLimiter(limiter, '/protocols/39', 'PATCH')).status, 429);
+    assert.equal((await runLimiter(limiter, '/stimuli/42/content', 'GET', '192.0.2.21')).status, 200);
   });
 });
 

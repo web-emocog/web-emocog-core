@@ -53,10 +53,10 @@ jobs:
 
       - name: Validate deployment shell scripts
         run: |
-          bash -n \
-            deploy/production/*.sh \
-            deploy/production/wecog-release \
-            deploy/production/wecog-monitoring
+          for script in deploy/production/*.sh deploy/production/wecog-release \
+            deploy/production/wecog-monitoring scripts/start-ci-postgres.sh; do
+            bash -n "$script"
+          done
 
       - name: Set up Docker Buildx
         uses: ./.github/actions/setup-container-builder

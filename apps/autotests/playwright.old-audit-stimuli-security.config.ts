@@ -5,7 +5,7 @@ export default defineConfig({
   testDir: './tests',
   testMatch: /(?:old-audit-stimuli-security|stimulus-sharing-preview|stimulus-lifecycle|stimulus-mutation-scope)\.spec\.ts/,
   timeout: 30_000, workers: 1, retries: 0, reporter: 'list',
-  outputDir: '/tmp/emocog-old-audit-stimuli-security-results',
+  outputDir: 'test-results/old-audit-stimuli-security',
   use: { baseURL: process.env.EMOCOG_WEB_ORIGIN, headless: true,
     trace: 'off', screenshot: 'off', video: 'off', permissions: [] },
   webServer: { command: 'node tests/old-audit-stimuli-security-server.mjs',

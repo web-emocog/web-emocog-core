@@ -20,7 +20,7 @@ jobs:
   frame-pipeline-webkit:
     name: Frame pipeline and FPS diagnostics (macos-15)
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/autotests
@@ -52,6 +52,8 @@ jobs:
           npm run test:staff-regression -- --project=webkit
       - name: Verify corrected VPC metrics and real stimulus presentation
         run: npx playwright test -c playwright.metrics.config.ts --project=webkit
+      - name: Verify gaze calibration and developer diagnostics
+        run: npx playwright test -c playwright.issue143.config.ts --project=webkit
       - name: Verify audit data boundaries and cancelled protocol loads
         run: |
           npx playwright test -c playwright.old-audit-builder.config.ts --project=webkit

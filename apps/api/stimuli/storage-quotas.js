@@ -27,8 +27,14 @@ async function usage(client, organizationId, excludeOperation = null) {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)]));
 }
 
-async function assertQuota(client, organizationId, extraBytes = 0, policy = readStoragePolicy()) {
-  const totals = await usage(client, organizationId, operationClients.get(client)?.id);
+async function assertQuota(client, organizationId, extraBytes = 0, policy = readStoragePolicy(), uploadsRoot) {
+  let totals = await usage(client, organizationId, operationClients.get(client)?.id);
+  if (totals.unmeasured && uploadsRoot) {
+    // Publication can be the first write after migrating an existing library.
+    // Measure legacy objects under the caller's organization lock, never as zero.
+    await measureUnmeasured(client, organizationId, uploadsRoot);
+    totals = await usage(client, organizationId, operationClients.get(client)?.id);
+  }
   if (totals.unmeasured) throw new HttpError(503, 'Media inventory needs validation before uploading', 'media_inventory_unmeasured');
   if (totals.retained_bytes + totals.reserved_bytes + extraBytes > policy.organizationBytes) {
     throw new HttpError(413, 'Organization media storage quota exceeded; retained historical versions count toward storage', 'media_quota_exceeded');
@@ -63,16 +69,16 @@ async function assertDiskSpace(client, root, additionalBytes = 0, policy = readS
   }
 }
 
-async function previewBudget(client, version, policy = readStoragePolicy()) {
+async function previewBudget(client, version, policy = readStoragePolicy(), uploadsRoot) {
   const row = (await client.query('SELECT project_id FROM stimuli WHERE id=$1', [version.stimulus_id])).rows[0];
   if (!row) throw new HttpError(409, 'Stimulus version is no longer available', 'stimulus_version_changed');
   const organizationId = await organizationForProject(client, row.project_id);
   await lockOrganization(client, organizationId);
-  await assertQuota(client, organizationId, policy.previewBytes, policy);
+  await assertQuota(client, organizationId, policy.previewBytes, policy, uploadsRoot);
   return organizationId;
 }
 
-async function accountObject(client, organizationId, relativePath, bytes, policy = readStoragePolicy()) {
+async function accountObject(client, organizationId, relativePath, bytes, policy = readStoragePolicy(), uploadsRoot) {
   await lockOrganization(client, organizationId);
   const previous = (await client.query('SELECT size_bytes FROM media_storage_objects WHERE organization_id=$1 AND content_path=$2',
     [organizationId, relativePath])).rows[0];
@@ -81,7 +87,7 @@ async function accountObject(client, organizationId, relativePath, bytes, policy
   }
   await client.query(`INSERT INTO media_storage_objects(organization_id,content_path,size_bytes) VALUES($1,$2,$3)
     ON CONFLICT(organization_id,content_path) DO UPDATE SET size_bytes=EXCLUDED.size_bytes`, [organizationId, relativePath, bytes]);
-  await assertQuota(client, organizationId, 0, policy);
+  await assertQuota(client, organizationId, 0, policy, uploadsRoot);
 }
 
 module.exports = { ACTIVE, ADMISSION_LOCK, operationClients, lockOrganization, organizationForProject,

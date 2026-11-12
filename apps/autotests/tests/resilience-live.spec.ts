@@ -54,7 +54,7 @@ test.describe('Durable participant backup through real API', () => {
       const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
-      await page.goto(`http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
+      await page.goto(`/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
       await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
       await page.locator('#btnStartIntro').click();
       await page.locator('#consentCheck').check();
@@ -137,7 +137,7 @@ test.describe('Durable participant backup through real API', () => {
     await pool.query('INSERT INTO invitations(protocol_id,code,protocol_definition,max_runs) VALUES($1,$2,$3::jsonb,1)',
       [protocol.id, code, JSON.stringify(definition)]);
     await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
-    await page.goto(`http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
+    await page.goto(`/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
     await page.locator('#btnStartIntro').click();
     await page.locator('#consentCheck').check();
@@ -180,7 +180,7 @@ test.describe('Durable participant backup through real API', () => {
     const code = 'live-' + randomUUID();
     await pool.query('INSERT INTO invitations(protocol_id,code,protocol_definition) VALUES($1,$2,$3::jsonb)', [protocol.id, code, JSON.stringify(definition)]);
     await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
-    await page.goto(`http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
+    await page.goto(`/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
     await page.locator('#btnStartIntro').click();
     await page.locator('#consentCheck').check();
@@ -221,7 +221,7 @@ test.describe('Durable participant backup through real API', () => {
     await pool.query('INSERT INTO invitations(protocol_id,code,protocol_definition,max_runs) VALUES($1,$2,$3::jsonb,1)',
       [protocol.id, code, JSON.stringify(definition)]);
     await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
-    await page.goto(`http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
+    await page.goto(`/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
     await page.locator('#btnStartIntro').click(); await page.locator('#consentCheck').check(); await page.locator('#consentBtn').click();
     await expect(page.locator('#step3')).toHaveClass(/active/);
@@ -257,7 +257,7 @@ test.describe('Durable participant backup through real API', () => {
     await pool.query('INSERT INTO invitations(protocol_id,code,protocol_definition,max_runs) VALUES($1,$2,$3::jsonb,1)',
       [protocol.id, code, JSON.stringify(definition)]);
     await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
-    await page.goto(`http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
+    await page.goto(`/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
     await page.locator('#btnStartIntro').click(); await page.locator('#consentCheck').check(); await page.locator('#consentBtn').click();
     await expect(page.locator('#step3')).toHaveClass(/active/);
@@ -316,7 +316,7 @@ test.describe('Durable participant backup through real API', () => {
     await pool.query(`INSERT INTO protocol_publications(protocol_id,code,invitation_id,version)
       SELECT protocol_id,$1,id,2 FROM invitations WHERE code=$2`, [stableCode, secondCode]);
     await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
-    await page.goto(`http://127.0.0.1:4173/apps/participant-web/run_new.html?code=${stableCode}`);
+    await page.goto(`/apps/participant-web/run_new.html?code=${stableCode}`);
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
     await page.locator('#btnStartIntro').click();
     expect(await page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.ids.invitationCode)).toBe(secondCode);

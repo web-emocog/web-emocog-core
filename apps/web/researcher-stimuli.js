@@ -96,6 +96,9 @@ async function hydrateApiStimulusPreview(stimulus) {
   if (!url) return stimulus;
   stimulus._previewHydrating = true;
   stimulus._previewHydrationPromise = (async () => {
+    await takeThumbnailSlot();
+    try {
+    if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed during loading');
     const blob = await WecogHttp.blob(url, { headers: typeof authHeaders === 'function' ? authHeaders() : {}, credentials: 'include', redirect: 'error' }, { scope: 'workspace', transfer: true });
     if (stimulus._previewRetired || scope !== stimulusLibraryScope() || generation !== stimulusLibraryGeneration) throw new Error('Stimulus library changed during loading');
     if (!blob.size) throw new Error(CURRENT_LANG === 'en' ? 'Stimulus file is empty' : 'Файл стимула пуст');
@@ -108,6 +111,7 @@ async function hydrateApiStimulusPreview(stimulus) {
     delete stimulus.contentError;
     delete stimulus.previewError;
     return stimulus;
+    } finally { releaseThumbnailSlot(); }
   })();
   try {
     return await stimulus._previewHydrationPromise;
@@ -125,6 +129,7 @@ function stimulusPreviewSource(stimulus) {
     || (!stimulus?.apiContentUrl ? safeStimulusMediaUrl(stimulus?.url || stimulus?.src) : '');
 }
 
+// Gallery thumbnails and explicit full previews share the same bounded queue.
 let thumbnailFetches = 0;
 const thumbnailWaiters = [];
 async function takeThumbnailSlot() {
