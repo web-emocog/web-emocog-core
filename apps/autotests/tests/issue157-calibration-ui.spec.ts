@@ -32,7 +32,7 @@ async function prepare(page: Page, fps: number) {
       s.runtime.lastPrecheckResult = { timestamp: performance.now(), landmarks,
         eyes: { bothOpen: true }, pose: { status: 'stable', yaw: 0, pitch: 0, roll: 0 } };
     }, 1000 / fps);
-    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261110-integration1';
+    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261112-emotion1';
     const module = await import(moduleUrl);
     w.calibrationPrepared = module.startCalibration();
   }, { landmarks: landmarksForGaze(0, 0), fps });

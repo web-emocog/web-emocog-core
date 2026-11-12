@@ -9,12 +9,19 @@
  */
 
 import { EMOTION_CONFIG }                        from './emotion-config.js';
-import { buildInternalMask, extractActionUnits } from './au-extractor.js';
+import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js?v=20261112-emotion1';
 import { classifyFACS, calcAffective }           from './facs-classifier.js';
 import { computeAggregatedMetrics }              from './emotion-aggregator.js';
 import { participantDebugError } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+function requireUnitValues(values, keys = Object.keys(values || {})) {
+    if (!values || !keys.length
+        || !keys.every(key => Number.isFinite(values[key]) && values[key] >= 0 && values[key] <= 1)) {
+        throw new Error('Invalid emotion calculation');
+    }
+}
 
 export class EmotionAnalyzer {
     constructor() {
@@ -77,6 +84,7 @@ export class EmotionAnalyzer {
     startSession(sessionId = null, options = {}) {
         this.clear();
         this.requireExplicitBaseline = options.explicitNeutral === true;
+        this.requiredNeutralFrames = options.requiredNeutralFrames;
         this.sessionId    = sessionId ?? `session_${Date.now()}`;
         this.sessionStart = Date.now();
         this.isRunning    = true;
@@ -107,55 +115,14 @@ export class EmotionAnalyzer {
      */
     processLandmarks(landmarks) {
         if (!this.isRunning) return;
-
-        const isValid = this._validateLandmarks(landmarks);
-        this._trackFrameValidity(isValid);
-
-        if (!isValid) {
-            this._recordEvent(null, 'no_landmarks');
-            return;
-        }
-
-        try {
-            const mask      = this._getMask(landmarks);
-            this.currentFaceMask = mask;
-
-            const rawActionUnits = extractActionUnits(landmarks, mask.geometry);
-            const auState = this._calibrateActionUnits(rawActionUnits);
-            const au = auState.actionUnits;
-            const rawScores = classifyFACS(au);
-            this._pushTemporalBuffer(rawScores);
-            const modelScores = this._smoothScores(rawScores);
-            const dominant = this._dominant(modelScores);
-            const smoothed = this._publishScores(modelScores, dominant);
-            const affective = calcAffective(smoothed);
-            this.affectiveDimensions = affective;
-
-            this._updateCategoryCount(dominant);
-
-            // [FIX] confidence вычисляется здесь и сохраняется в событие
-            const confidence = this._calcLandmarksConfidence(landmarks);
-
-            this._recordEvent({
-                scores:     smoothed,
-                modelScores,
-                rawScores,
-                actionUnits: au,
-                rawActionUnits,
-                baselineReady: auState.ready,
-                affective,
-                dominant,
-                confidence,
-                faceMask: {
-                    symmetry:   mask.symmetry,
-                    zonesCount: Object.keys(mask.zones || {}).length,
-                },
-            }, 'success');
-
-        } catch (_) {
-            participantDebugError('expression', 'landmarks:process-failed');
-            this._recordEvent(null, 'error');
-        }
+        const result = this.analyzeLandmarks(landmarks);
+        // The event aggregator only accepts success. Calibration and failures
+        // remain visible in the event history without becoming neutral samples.
+        this._recordEvent({
+            ...result,
+            baselineReady: result.calibrationReady,
+            affective: { valence: result.valence, arousal: result.arousal },
+        }, result.status);
     }
 
     /**
@@ -164,40 +131,95 @@ export class EmotionAnalyzer {
      * @returns {{ scores, valence, arousal, dominant, confidence }}
      */
     analyzeLandmarks(landmarks) {
-        if (!this._validateLandmarks(landmarks)) return this._missingResult();
+        if (!this._validateLandmarks(landmarks)) {
+            this._trackFrameValidity(false);
+            return this._unavailableResult('invalid_landmarks');
+        }
+
+        // A failed calculation must not advance or contaminate the baseline.
+        const baseline = this._auBaseline && { ...this._auBaseline };
+        const baselineFrames = this._auBaselineFrames;
+        const baselineReady = this._auBaselineReady;
 
         try {
             const mask      = this._getMask(landmarks);
-            const rawActionUnits = extractActionUnits(landmarks, mask.geometry);
+            const geometry = mask?.geometry;
+            if (!Number.isFinite(geometry?.faceWidth) || geometry.faceWidth <= 0
+                || !Number.isFinite(geometry?.faceHeight) || geometry.faceHeight <= 0
+                || !Number.isFinite(Math.sqrt(geometry.faceWidth ** 2 + geometry.faceHeight ** 2))) {
+                throw new Error('Invalid face geometry');
+            }
+            const rawActionUnits = this._extractActionUnits(landmarks, mask.geometry);
+            this._validateRawActionUnits(rawActionUnits);
             const auState = this._calibrateActionUnits(rawActionUnits);
+            requireUnitValues(auState.actionUnits);
+            if (!auState.ready) {
+                this._trackFrameValidity(true);
+                return { ...this._unavailableResult('calibrating'), rawActionUnits,
+                    actionUnits: auState.actionUnits, geometry: { ...geometry }, ...this._featureDiagnostics() };
+            }
             const raw = classifyFACS(auState.actionUnits);
+            requireUnitValues(raw, this.emotionLabels);
             this._pushTemporalBuffer(raw);
             const modelScores = this._smoothScores(raw);
+            requireUnitValues(modelScores, this.emotionLabels);
             const dominant = this._dominant(modelScores);
             const smoothed = this._publishScores(modelScores, dominant);
+            requireUnitValues(smoothed, this.emotionLabels);
             const affective = calcAffective(smoothed);
+            if (!Number.isFinite(affective.valence) || !Number.isFinite(affective.arousal)) {
+                throw new Error('Invalid affective calculation');
+            }
+            const confidence = this._calcLandmarksConfidence(landmarks);
+            if (!Number.isFinite(confidence) || confidence <= 0 || confidence > 1) {
+                throw new Error('Invalid emotion confidence');
+            }
+            const faceMask = {
+                symmetry: mask.symmetry,
+                zonesCount: Object.keys(mask.zones || {}).length,
+            };
 
             this.affectiveDimensions = affective;
+            this.currentFaceMask = mask;
             this._updateCategoryCount(dominant);
             this._trackFrameValidity(true);
 
             return {
+                status: 'success',
+                degraded: false,
                 scores:     smoothed,
                 modelScores,
+                rawScores: raw,
+                rawActionUnits,
+                geometry: { ...geometry },
+                actionUnits: auState.actionUnits,
                 valence:    affective.valence,
                 arousal:    affective.arousal,
                 dominant,
-                confidence: this._calcLandmarksConfidence(landmarks),
+                confidence,
                 calibrationReady: auState.ready,
                 calibrationFrames: this._auBaselineFrames,
+                faceMask,
+                ...this._featureDiagnostics(),
             };
         } catch (_) {
             participantDebugError('expression', 'landmarks:analysis-failed');
-            return this._missingResult();
+            this._auBaseline = baseline;
+            this._auBaselineFrames = baselineFrames;
+            this._auBaselineReady = baselineReady;
+            this._trackFrameValidity(false);
+            return this._unavailableResult('analysis_error');
         }
     }
 
     // ── Публичные геттеры ──────────────────────────────────────────────────
+
+    getCalibrationDiagnostics() {
+        return { ready: this._auBaselineReady, frames: this._auBaselineFrames,
+            requiredFrames: this.requiredNeutralFrames ?? this.config.baseline.minFrames,
+            baseline: this._auBaseline ? { ...this._auBaseline } : null,
+            deadzone: this.config.baseline.deadzone, gain: this.config.baseline.gain };
+    }
 
     getEmotionCategoryStats() {
         const { positive, neutral, negative, total } = this.emotionCategoryCounts;
@@ -238,6 +260,7 @@ export class EmotionAnalyzer {
 
     /** Полный сброс состояния (вызывается автоматически в startSession) */
     clear() {
+        this.requiredNeutralFrames = null;
         this.requireExplicitBaseline = false;
         this.emotionEvents       = [];
         this.smoothingBuffer     = [];
@@ -256,6 +279,11 @@ export class EmotionAnalyzer {
 
     // ── Приватные методы ───────────────────────────────────────────────────
 
+    // Developer experiments override extraction only; the default stays unchanged.
+    _extractActionUnits(landmarks, geometry) { return extractActionUnits(landmarks, geometry); }
+    _validateRawActionUnits(values) { requireUnitValues(values); }
+    _featureDiagnostics() { return {}; }
+
     _getMask(landmarks) {
         return this.faceMaskCollector
             ? this.faceMaskCollector.generateMask(landmarks)
@@ -263,13 +291,7 @@ export class EmotionAnalyzer {
     }
 
     _validateLandmarks(lm) {
-        if (!Array.isArray(lm) || lm.length < this.config.minLandmarks) return false;
-        for (let i = 0; i < lm.length; i++) {
-            const point = lm[i];
-            if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)
-                || (point.z !== undefined && !Number.isFinite(point.z))) return false;
-        }
-        return true;
+        return validEmotionLandmarks(lm, this.config.minLandmarks);
     }
 
     _dominant(scores) {
@@ -333,9 +355,10 @@ export class EmotionAnalyzer {
     setNeutralBaseline(baseline, count) {
         const entries = Object.entries(baseline || {});
         if (!this.requireExplicitBaseline || !Number.isInteger(count) || count < 1 || entries.length !== 16
-            || !entries.every(([key, value]) => /^AU\d+$/.test(key) && Number.isFinite(value) && value >= 0 && value <= 1)) {
+            || !entries.every(([key, value]) => /^AU\d+$/.test(key) && Number.isFinite(value))) {
             throw new Error('Invalid neutral baseline');
         }
+        this._validateRawActionUnits(baseline);
         this._auBaseline = { ...baseline };
         this._auBaselineFrames = count;
         this._auBaselineReady = true;
@@ -382,11 +405,22 @@ export class EmotionAnalyzer {
         return { ready: true, actionUnits: adjusted };
     }
 
-    _missingResult() {
+    _unavailableResult(status) {
+        this.currentFaceMask = null;
+        this.affectiveDimensions = { valence: null, arousal: null };
+        // Do not carry a pre-gap candidate into a later expression.
+        this.smoothingBuffer = [];
+        this.temporalBuffer = [];
+        this._stableDominant = 'neutral';
+        this._dominantCandidate = 'neutral';
+        this._dominantCandidateFrames = 0;
         return {
-            scores: { neutral: 0, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
+            status,
+            scores: Object.fromEntries(this.emotionLabels.map(label => [label, 0])),
             valence: null, arousal: null, dominant: 'unknown', confidence: 0,
-            calibrationReady: false, missingData: true, emotionInferred: false, degraded: true,
+            calibrationReady: this._auBaselineReady,
+            calibrationFrames: this._auBaselineFrames,
+            missingData: true, emotionInferred: false, degraded: true,
         };
     }
 

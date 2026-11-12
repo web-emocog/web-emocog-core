@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 
 const participant = `${process.env.WECOG_TEST_BASE_URL || 'http://127.0.0.1:4173'}/apps/participant-web/mvp_with_precheck_1-updated.html`;
-const moduleVersion = '20261110-integration1';
+const moduleVersion = '20261112-emotion1';
 const code = 'recovery-invitation';
 const definition = { version: 'v2.0_universal', participantShell: { consent: true, questionnaire: true, precheck: true, calibration: true },
   blocks: [
@@ -667,10 +667,10 @@ test('late camera permission after page exit stops the track without reactivatin
   await mockInvitation(page);
   await page.goto(participant);
   await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
-  const outcome = await page.evaluate(async moduleVersion => {
+  const outcome = await page.evaluate(async () => {
     const w = window as any;
     w.nextStep(5);
-    const { startPreCheck } = await import(new URL(`js/web-page/precheck-updated.js?v=${moduleVersion}`, location.href).href);
+    const { startPreCheck } = await import(new URL('js/web-page/precheck-updated.js?v=20261110-integration1', location.href).href);
     let resolvePermission: (stream: any) => void = () => {};
     let requests = 0, stops = 0;
     navigator.mediaDevices.getUserMedia = () => {
@@ -683,14 +683,14 @@ test('late camera permission after page exit stops the track without reactivatin
     const started = await starting;
     return { requests, stops, started, active: w.__WECOG_STATE__.flags.isPrecheckRunning,
       camera: w.__WECOG_STATE__.runtime.cameraStream };
-  }, moduleVersion);
+  });
   expect(outcome).toEqual({ requests: 1, stops: 1, started: false, active: false, camera: null });
 });
 
 test('microphone tracks stop before queued analysis resolves, without losing accepted windows', async ({ page }) => {
   await page.goto(participant);
-  const outcome = await page.evaluate(async moduleVersion => {
-    const { SessionAudioCollector } = await import(new URL(`js/audio/session-audio.js?v=${moduleVersion}`, location.href).href);
+  const outcome = await page.evaluate(async () => {
+    const { SessionAudioCollector } = await import(new URL('js/audio/session-audio.js?v=20261110-integration1', location.href).href);
     const shared = { sessionData: { audioConsent: { granted: true } }, runtime: {} };
     const collector = new SessionAudioCollector({ state: shared, enabled: true, WorkerCtor: null });
     let stops = 0, complete = false, release: () => void = () => {};
@@ -710,7 +710,7 @@ test('microphone tracks stop before queued analysis resolves, without losing acc
     const summary = await stopping;
     await collector.stop();
     return { immediate, totalStops: stops, windowCount: summary.windowCount };
-  }, moduleVersion);
+  });
   expect(outcome).toEqual({ immediate: { stops: 1, complete: false, capturing: false }, totalStops: 1, windowCount: 1 });
 });
 
@@ -721,14 +721,14 @@ for (const phase of ['instruction', 'drawing', 'complete'] as const) {
     await mockInvitation(page);
     await page.goto(participant);
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
-    await page.evaluate(async moduleVersion => {
+    await page.evaluate(async () => {
       const w = window as any;
       w.nextStep(6);
-      const { runVisuospatialDrawingTest } = await import(new URL(`js/gaze-tracker/gaze-tests/visuospatial/runner.js?v=${moduleVersion}`, location.href).href);
+      const { runVisuospatialDrawingTest } = await import(new URL('js/gaze-tracker/gaze-tests/visuospatial/runner.js?v=20261110-integration1', location.href).href);
       w.__drawingStarts = 0;
       w.__WECOG_STATE__.runtime.currentGaze = { x: 100, y: 150 };
       w.__drawing = runVisuospatialDrawingTest({ onStart: () => { w.__drawingStarts++; } });
-    }, moduleVersion);
+    });
     if (phase !== 'instruction') {
       await page.locator('#visuospatialStartBtn').click();
       await expect(page.locator('#visuospatialDrawingOverlay')).toBeVisible();

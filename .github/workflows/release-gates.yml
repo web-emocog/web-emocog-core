@@ -241,6 +241,17 @@ jobs:
       - name: Typecheck browser contracts
         working-directory: apps/autotests
         run: npm run typecheck
+      - name: Verify startup after updating with a warm browser cache
+        if: matrix.browser == 'chromium'
+        timeout-minutes: 3
+        env:
+          CACHE_UPGRADE_FROM: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before) || 'refs/heads/main' }}
+        run: |
+          if [[ "$CACHE_UPGRADE_FROM" == 0000000000000000000000000000000000000000 ]]; then
+            CACHE_UPGRADE_FROM=refs/heads/main
+          fi
+          git fetch --no-tags --depth=1 origin "$CACHE_UPGRADE_FROM"
+          node apps/autotests/scripts/check-emotion-cache-upgrade.mjs FETCH_HEAD
       - name: Provide a local audio output for native media tests
         timeout-minutes: 4
         run: |
