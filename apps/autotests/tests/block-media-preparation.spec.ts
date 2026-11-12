@@ -51,7 +51,7 @@ async function startRunner(page: Page) {
   await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
-    const runner = await import(new URL('js/web-page/experimental_task-updated.js?v=20261112-emotion1', location.href).href);
+    const runner = await import(new URL('js/web-page/experimental_task-updated.js?v=20261112-emotion2', location.href).href);
     await runner.loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition, autoFinishSession: false });
   });
 }

@@ -1,6 +1,6 @@
 import { medianBaseline } from '../../participant-web/js/emotion/neutral-calibration.mjs?v=20261112-emotion1';
 import { EmotionDiagnostics } from './emotion-diagnostics.mjs?v=20261112-emotion1';
-import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-candidate.mjs?v=20261112-emotion1';
+import { GeometryEmotionAnalyzer, GEOMETRY_METHOD } from './emotion-geometry-candidate.mjs?v=20261112-emotion2';
 
 const labels=['neutral','happiness','sadness','anger','fear','surprise','disgust'];
 export const expressionNames = new Map([
@@ -47,7 +47,9 @@ export class EmotionComparison extends EmotionDiagnostics {
     record(sample, calibration, landmarks) {
         super.record(sample,calibration);
         const start=this.now();
-        const candidate=landmarks == null ? {status:'missing_landmarks',degraded:true}
+        const missingLandmarks = landmarks == null;
+        if (missingLandmarks) this.candidate.resetExpressionHistory();
+        const candidate=missingLandmarks ? {status:'missing_landmarks',degraded:true}
             : this.candidate.analyzeLandmarks(landmarks);
         const elapsed=this.now()-start;
         this.candidateDiagnostics.record(candidate,this.candidate.getCalibrationDiagnostics());

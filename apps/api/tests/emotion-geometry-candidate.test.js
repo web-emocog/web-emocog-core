@@ -173,3 +173,56 @@ test('an expired trial with no common valid frames is saved as insufficient data
     assert.equal(missing.commonValid, 0);
     assert.equal(missing.status, 'insufficient_data');
 });
+
+for (const explicitNeutral of [false, true]) {
+    test(`losing the face clears both expression histories without losing ${explicitNeutral ? 'explicit' : 'automatic'} calibration`, async () => {
+        const api = await import('../../participant-web/js/emotion/public-api.js');
+        const comparison = new Comparison();
+        const neutral = face();
+        const smile = face({61:[.35,.59],291:[.65,.59]});
+        const options = { explicitNeutral, requiredNeutralFrames: 25 };
+        api.analyzer.startSession('face-loss-regression', options);
+        comparison.candidate.startSession(null, options);
+        if (explicitNeutral) {
+            api.analyzer.setNeutralBaseline(extract(neutral), 25);
+            const raw = comparison.candidate.analyzeLandmarks(neutral).rawActionUnits;
+            comparison.candidate.setNeutralBaseline(raw, 25);
+        }
+        const unsubscribe = api.observeEmotionSamples((...args) => comparison.record(...args));
+        const sample = landmarks => api.getEmotionSample({ face: { detected: true }, landmarks });
+        try {
+            for (let i = 0; i < 20; i++) sample(neutral);
+            for (const [input, status] of [[{ face: { detected: false }, landmarks: null }, 'missing_landmarks'],
+                [undefined, 'missing_data']]) {
+                let smiling;
+                for (let i = 0; i < 20; i++) smiling = sample(smile);
+                assert.equal(smiling.dominant, 'happiness');
+                assert.equal(comparison.snapshot().candidate.latest.dominant, 'happiness');
+                const baseline = api.analyzer.getCalibrationDiagnostics();
+                const candidateBaseline = comparison.candidate.getCalibrationDiagnostics();
+                const commonBeforeGap = comparison.paired.commonValid;
+
+                const gap = api.getEmotionSample(input);
+                assert.equal(gap.status, status);
+                assert.equal(gap.valence, null);
+                assert.equal(comparison.snapshot().candidate.latest.status, 'missing_landmarks');
+                assert.equal(comparison.paired.commonValid, commonBeforeGap);
+                assert.deepEqual(api.analyzer.getCalibrationDiagnostics(), baseline);
+                assert.deepEqual(comparison.candidate.getCalibrationDiagnostics(), candidateBaseline);
+
+                const recovered = sample(neutral);
+                assert.equal(recovered.status, 'success');
+                assert.equal(recovered.scores.happiness, 0);
+                assert.equal(recovered.valence, 0);
+                const candidate = comparison.snapshot().candidate.latest;
+                assert.equal(candidate.status, 'success');
+                assert.equal(candidate.smoothedScores.happiness, 0);
+                assert.equal(candidate.valence, 0);
+                assert.equal(comparison.paired.commonValid, commonBeforeGap + 1);
+            }
+        } finally {
+            unsubscribe();
+            api.resetEmotionAnalyzerState();
+        }
+    });
+}

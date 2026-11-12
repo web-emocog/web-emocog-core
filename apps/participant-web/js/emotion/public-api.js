@@ -9,7 +9,7 @@
  */
 
 import { EMOTION_CONFIG }  from './emotion-config.js';
-import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion1';
+import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion2';
 
 /**
  * Singleton — один экземпляр на всё приложение.
@@ -99,6 +99,8 @@ function calculateEmotionSample(precheckResult) {
         };
     }
 
+    // Both missing-input paths skip analyzeLandmarks, which normally clears this history.
+    analyzer.resetExpressionHistory();
     // ── Путь 2: нет объекта → missing ──────────────────────────────────
     if (!precheckResult || typeof precheckResult !== 'object') {
         return unavailableSample('missing_data', 'none');
