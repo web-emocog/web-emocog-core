@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22-alpine AS public-files
+FROM node:25-alpine AS public-files
 WORKDIR /source
 COPY docker/web/public-files.json docker/web/stage-public.mjs ./docker/web/
 COPY index.html ./index.html
