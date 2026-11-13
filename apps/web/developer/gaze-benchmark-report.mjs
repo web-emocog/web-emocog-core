@@ -1,4 +1,4 @@
-export const GAZE_BENCHMARK_REVISION = '20261110-integration1';
+export const GAZE_BENCHMARK_REVISION = '20261113-gaze1';
 export const GAZE_BENCHMARK_PROTOCOLS = Object.freeze(['spatial.v1', 'posture.v1', 'temporal.v1', 'aoi-continuous.v1', 'eye-gate.v1']);
 const phases = ['setup', 'access', 'camera_permission', 'model_initialization', 'ready', 'calibration', 'correction', 'independent', 'spatial_before', 'interval',
   'spatial_after', 'pose_natural', 'pose_lowered', 'pose_returned', 'nuisance_reference', 'nuisance_alternate', 'nuisance_return',

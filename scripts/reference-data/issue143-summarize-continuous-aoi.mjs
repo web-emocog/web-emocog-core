@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { AOI_PRESENTATIONS, AOI_PRESENTATION_MS, AOI_TRANSITION_MS, AOI_MAX_OVERRUN_MS, AOI_SIGNAL_KEYS,
-  summarizeAoiBlock } from '../../apps/web/developer/gaze-continuous-aoi.mjs';
+  summarizeAoiBlock, validAoiFixationDiagnostics } from '../../apps/web/developer/gaze-continuous-aoi.mjs';
 
 const count = n => Number.isSafeInteger(n) && n >= 0;
 const nonnegative = n => Number.isFinite(n) && n >= 0;
@@ -45,7 +45,10 @@ export function summarizeContinuousAoiReport(report) {
         || !nonnegative(f.validObservationMs) || f.validObservationMs > row.presentedMs
         || (f.truncated === true ? !dwell.every(d => d === null) || f.reachedTarget !== null
           : f.truncated !== false || !dwell.every(nonnegative) || sum(dwell) > f.validObservationMs + 1
-            || typeof f.reachedTarget !== 'boolean' || f.reachedTarget !== (dwell[0] > 0))) throw new Error('invalid_aoi_signal');
+            || typeof f.reachedTarget !== 'boolean' || f.reachedTarget !== (dwell[0] > 0))
+        || !validAoiFixationDiagnostics(row.signals[signal].fixationDiagnostics, frames, f, row.presentedMs)) {
+        throw new Error('invalid_aoi_signal');
+      }
     }
     for (const type of ['raw', 'corrected']) {
       const p = row.pairs?.[type], values = paired.map(key => p?.[key]);
@@ -95,6 +98,8 @@ function summarizeReplicate(report) {
       baselineTargetDwell: baseline.targetDwellFractionOfValidObservation, patchTargetDwell: patch.targetDwellFractionOfValidObservation,
       baselineValidObservationMs: baseline.validObservationMs, patchValidObservationMs: patch.validObservationMs,
       baselineOtherDwellMs: baseline.otherDwellMs, patchOtherDwellMs: patch.otherDwellMs,
+      ...(baseline.fixationDiagnostics ? { baselineFixationDiagnostics: baseline.fixationDiagnostics } : {}),
+      ...(patch.fixationDiagnostics ? { patchFixationDiagnostics: patch.fixationDiagnostics } : {}),
     }];
   }));
   const pairedWindows = rows.map(correctedWindow);
