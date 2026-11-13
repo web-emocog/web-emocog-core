@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test('invalid face coordinates cannot become neutral-expression measurements in the browser', async ({ page }) => {
   await page.goto('/apps/participant-web/documents/privacy-policy-v1.0.html');
   const result = await page.evaluate(async () => {
-    const source = '/apps/participant-web/js/emotion/public-api.js?v=20261110-integration1';
+    const source = '/apps/participant-web/js/emotion/public-api.js?v=20261112-emotion2';
     const { analyzer, getEmotionSample, appendEmotionSample, getEmotionSummary } = await import(source);
     analyzer.startSession('synthetic-invalid-face');
     const sample = getEmotionSample({ landmarks: Array.from({ length: 478 }, () => ({ x: NaN, y: 0, z: 0 })) });

@@ -33,7 +33,7 @@ async function startLoadedTask(page: Page) {
     shared.runtime.sessionRuntime.policyShown = true;
     shared.runtime.sessionRuntime.notifyBlockComplete = async () => true;
     const { loadAndStartCognitiveTask } = await import(new URL(
-      'js/web-page/experimental_task-updated.js?v=20261110-integration1', location.href).href);
+      'js/web-page/experimental_task-updated.js?v=20261112-emotion2', location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false });
   });
   await page.locator('#cogStartBtn').click();

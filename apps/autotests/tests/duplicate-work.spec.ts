@@ -78,7 +78,7 @@ test('precheck has one loop and stale results cannot publish after stop/restart'
 test('calibration preparation is single-flight and a failed preparation permits retry', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/tests-updated.js?v=20261110-integration1');
+    const module = await import(root + 'web-page/tests-updated.js?v=20261112-emotion2');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     state.sessionData.precheck = { pass_fail: true };
     const original = (window as any).QCMetricsReady;
@@ -212,7 +212,7 @@ test('legacy gaze cannot fork after restart and hands over without clearing cont
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async root => {
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
-    const loop = await import(root + 'gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261110-integration1');
+    const loop = await import(root + 'gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261112-emotion2');
     const video = document.createElement('video'); video.id = 'precheckVideo'; document.body.appendChild(video);
     Object.defineProperties(video, { srcObject: { value: {} }, readyState: { value: 2 }, currentTime: { value: 1 } });
     let continuous = false, updates = 0, resets = 0;

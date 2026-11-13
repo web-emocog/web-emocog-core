@@ -9,7 +9,7 @@
  */
 
 import { EMOTION_CONFIG }  from './emotion-config.js';
-import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261110-integration1';
+import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261112-emotion2';
 
 /**
  * Singleton — один экземпляр на всё приложение.
@@ -19,68 +19,97 @@ import { EmotionAnalyzer } from './emotion-analyzer.js?v=20261110-integration1';
 export const analyzer  = new EmotionAnalyzer();
 export const _analyzer = analyzer;   // алиас для обратной совместимости
 
+// Opt-in, local developer observation of existing calculations. No second inference.
+const diagnosticListeners = new Set();
+export function observeEmotionSamples(listener) {
+    diagnosticListeners.add(listener);
+    return () => diagnosticListeners.delete(listener);
+}
+
+function isSuccessfulSample(sample) {
+    return sample?.status === 'success'
+        && sample.calibrationReady === true
+        && sample.degraded !== true && sample.missingData !== true
+        && sample.staleHold !== true && sample.emotionInferred !== false
+        && Number.isFinite(sample.valence) && sample.valence >= -1 && sample.valence <= 1
+        && Number.isFinite(sample.arousal) && sample.arousal >= 0 && sample.arousal <= 1
+        && Number.isFinite(sample.confidence) && sample.confidence > 0 && sample.confidence <= 1
+        && analyzer.labels.every(label => Number.isFinite(sample.scores?.[label])
+            && sample.scores[label] >= 0 && sample.scores[label] <= 1);
+}
+
+function unavailableSample(status, dataSource) {
+    return {
+        status,
+        valence: null, arousal: null, dominant: 'unknown',
+        scores: Object.fromEntries(analyzer.labels.map(label => [label, 0])),
+        confidence: 0,
+        calibrationReady: false,
+        dataQuality: status === 'calibrating' ? 'calibrating' : 'missing',
+        dataSource,
+        emotionInferred: false,
+        degraded: true,
+        missingData: true,
+    };
+}
+
 // ── getEmotionSample ────────────────────────────────────────────────────────
 
 /**
  * Основная функция анализа эмоций.
  *
  * Три пути деградации:
- *   1. landmarks (≥468) → полный FACS-анализ, динамический confidence
- *   2. precheckResult без landmarks → только сведения о качестве, без вывода о мимике
- *   3. нет данных → missingData
+ *   1. пригодные landmarks после калибровки → FACS-анализ
+ *   2. калибровка, некорректные landmarks или ошибка → пропуск
+ *   3. нет landmarks → пропуск (metadata не определяет эмоцию)
  *
  * @param {Object} [precheckResult]
  * @returns {{ valence, arousal, dominant, scores, confidence, dataQuality, dataSource }}
  */
 export function getEmotionSample(precheckResult) {
-    const C = EMOTION_CONFIG;
+    const sample = calculateEmotionSample(precheckResult);
+    for (const listener of diagnosticListeners) {
+        // Input is transient and local. Observers must never retain landmarks/pixels.
+        try { listener(structuredClone(sample), analyzer.getCalibrationDiagnostics(), structuredClone(precheckResult?.landmarks)); }
+        catch (_) { /* Diagnostic UI must never break signal collection. */ }
+    }
+    return sample;
+}
 
+function calculateEmotionSample(precheckResult) {
     // ── Путь 1: landmarks → FACS ────────────────────────────────────────
-    if (Array.isArray(precheckResult?.landmarks) && precheckResult.landmarks.length >= C.minLandmarks) {
+    if (precheckResult?.landmarks != null) {
         const result = analyzer.analyzeLandmarks(precheckResult.landmarks);
-        if (result.missingData === true) {
-            return { ...result, dataQuality: 'missing', dataSource: 'landmarks', degraded: true };
+        if (!isSuccessfulSample(result)) {
+            return {
+                ...unavailableSample(result.status === 'success' ? 'analysis_error' : result.status, 'landmarks'),
+                calibrationReady: result.calibrationReady === true,
+                calibrationFrames: result.calibrationFrames,
+                rawActionUnits: result.rawActionUnits ?? null,
+                actionUnits: result.status === 'calibrating' ? null : (result.actionUnits ?? null),
+                geometry: result.geometry ?? null,
+            };
         }
-        const valence = Number.isFinite(result.valence) ? result.valence : 0;
-        const arousal = Number.isFinite(result.arousal) ? result.arousal : 0;
         return {
             ...result,
-            valence,
-            arousal,
-            dataQuality: result.calibrationReady === false ? 'calibrating' : 'high',
+            dataQuality: 'high',
             dataSource:  'landmarks',
-            degraded: result.calibrationReady === false,
+            emotionInferred: true,
+            degraded: false,
         };
     }
 
+    // Both missing-input paths skip analyzeLandmarks, which normally clears this history.
+    analyzer.resetExpressionHistory();
     // ── Путь 2: нет объекта → missing ──────────────────────────────────
     if (!precheckResult || typeof precheckResult !== 'object') {
-        return {
-            valence: null, arousal: null, dominant: 'unknown',
-            scores: { neutral: 0, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
-            confidence:  C.confidence.missing,
-            dataQuality: 'missing',
-            dataSource:  'none',
-            missingData: true,
-        };
+        return unavailableSample('missing_data', 'none');
     }
 
     // Camera metadata can describe signal quality, but it cannot identify an
     // emotion. Fail closed instead of turning brightness/head motion into a
     // fabricated affect label.
-    const faceOk   = precheckResult?.face?.detected !== false;
-    return {
-        valence:     0,
-        arousal:     0,
-        dominant:    'unknown',
-        scores:      { neutral: 1, happiness: 0, sadness: 0, anger: 0, fear: 0, surprise: 0, disgust: 0 },
-        confidence:  faceOk ? C.confidence.metadataFaceOk : C.confidence.metadataNoFace,
-        dataQuality: 'low',
-        dataSource:  'metadata',
-        isHeuristic: true,
-        emotionInferred: false,
-        degraded: true,
-    };
+    return unavailableSample('missing_landmarks', 'metadata');
 }
 
 // ── getEmotionSummary ───────────────────────────────────────────────────────
@@ -126,7 +155,15 @@ export function getEmotionSummary(sessionData) {
     }
 
     const valid = samples.filter(s => {
-        if (s?.degraded === true) return false;
+        // Preserve legacy finite observations, but never reinterpret an explicit
+        // failure or unfinished calibration as a neutral observation.
+        for (const value of [s, s?.data]) {
+            if (value?.degraded === true || value?.missingData === true || value?.staleHold === true
+                || value?.emotionInferred === false || value?.calibrationReady === false
+                || value?.baselineReady === false || value?.confidence === 0
+                || (value?.status != null && value.status !== 'success')
+                || ['calibrating', 'missing', 'low', 'invalid'].includes(value?.dataQuality)) return false;
+        }
         const v = s?.valence ?? s?.affective?.valence ?? s?.data?.affective?.valence;
         const a = s?.arousal ?? s?.affective?.arousal ?? s?.data?.affective?.arousal;
         return Number.isFinite(v) && Number.isFinite(a);
@@ -156,12 +193,12 @@ export function getEmotionSummary(sessionData) {
  * Cap: хранятся только последние maxEmotionSamples записей.
  */
 export function appendEmotionSample(state, sample, t = Date.now(), tRelMs = null) {
-    if (!state?.sessionData || !sample) return;
-    if (sample.degraded === true) return;
+    // Live ingestion requires positive evidence of success. The legacy read
+    // fallback in getEmotionSummary does not grant permission to append data.
+    if (!state?.sessionData || !isSuccessfulSample(sample)) return;
 
     const valence = sample.valence;
     const arousal = sample.arousal;
-    if (!Number.isFinite(valence) || !Number.isFinite(arousal)) return;
 
     if (!Array.isArray(state.sessionData.emotionSamples)) {
         state.sessionData.emotionSamples = [];
@@ -190,6 +227,8 @@ export function appendEmotionSample(state, sample, t = Date.now(), tRelMs = null
         tRelMs:   tRelMs != null ? tRelMs : Math.max(0, t - start),
         valence,
         arousal,
+        status: 'success',
+        calibrationReady: true,
         dominant: sample?.dominant || null,
         scores:   sample?.scores   || null,
         confidence: Number.isFinite(sample?.confidence) ? sample.confidence : null,

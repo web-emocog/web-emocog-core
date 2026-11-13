@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ingestAcknowledgement } from './helpers/ingestAcknowledgement';
 const participant = 'http://127.0.0.1:4173/apps/participant-web/mvp_with_precheck_1-updated.html';
-const version = '20261110-integration1';
+const version = '20261112-emotion2';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const video = readFileSync(path.resolve(__dirname, 'fixtures/passive-video.webm'));
 

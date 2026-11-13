@@ -289,3 +289,29 @@ test('developer benchmark keeps targets and Stop accessible on desktop/mobile wi
     expect(await page.evaluate(() => (window as any).cameraRequests)).toBe(0);
   }
 });
+
+test('eye-gate reading cue stays beside the dot on desktop and narrow screens without acquiring sensors', async ({ page }, testInfo) => {
+  await installGazeAccess(page); await pendingCamera(page);
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(url + '?protocol=eye-gate');
+    await expect(page.locator('#status')).toContainText('Доступ подтверждён');
+    await page.evaluate(() => {
+      document.body.classList.add('running'); document.body.dataset.eyeGateCue = 'prepare';
+      document.getElementById('status')!.textContent = 'Мягко закройте глаза примерно на 2 секунды, затем откройте.';
+      const target = document.getElementById('target')!;
+      target.hidden = false; target.style.left = '50%'; target.style.top = '50%';
+    });
+    const dot = (await page.locator('#target').boundingBox())!;
+    const hint = (await page.locator('#status').boundingBox())!;
+    expect(hint.x).toBeGreaterThanOrEqual(0);
+    expect(hint.x + hint.width).toBeLessThanOrEqual(viewport.width);
+    expect(hint.y).toBeGreaterThan(0);
+    expect(hint.y + hint.height).toBeLessThan(dot.y);
+    expect(Math.abs(hint.x + hint.width / 2 - dot.x - dot.width / 2)).toBeLessThan(1);
+    if (process.env.WECOG_ISSUE143_VISUAL_REVIEW === '1') {
+      await page.screenshot({ path: testInfo.outputPath(`eye-gate-reading-${viewport.width}.png`) });
+    }
+    expect(await page.evaluate(() => (window as any).cameraRequests)).toBe(0);
+  }
+});

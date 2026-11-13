@@ -1,7 +1,7 @@
 import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1';
 import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261110-integration1';
 import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261110-integration1';
-import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261110-integration1';
+import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261112-emotion2';
 import { MultimodalSessionCollector } from '../../participant-web/js/multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';
 import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
@@ -12,9 +12,14 @@ import { getContentViewport } from '../../participant-web/js/gaze-tracker/viewpo
 import { DiagnosticRun, SerialDiagnosticStage, waitForDiagnosticVideo } from './diagnostic-run.mjs?v=20261028-1';
 
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
+import { observeEmotionSamples } from '../../participant-web/js/emotion/public-api.js?v=20261112-emotion2';
+import { EmotionComparison } from './emotion-comparison.mjs?v=20261112-emotion2';
+import { hide as hideQcOverlay } from '../../participant-web/js/qc-pause-overlay-new.js?v=20261103-1';
 
 export class ProtocolDiagnostic {
-    constructor({ video, definition = null, onUpdate = () => {}, onStatus = () => {} }) {
+    constructor({ video, definition = null, onUpdate = () => {}, onStatus = () => {}, emotionDiagnostics = false }) {
+        this.emotionDiagnosticsEnabled = emotionDiagnostics;
+        this.emotionDiagnostics = null;
         this.video = video;
         this.definition = definition;
         this.onUpdate = onUpdate;
@@ -43,6 +48,13 @@ export class ProtocolDiagnostic {
         try {
             this.onStatus('access');
             await authorizeDiagnostic(run);
+            if (this.emotionDiagnosticsEnabled) {
+                this.emotionDiagnostics = new EmotionComparison();
+                const diagnostics = this.emotionDiagnostics;
+                run.onStop(observeEmotionSamples((sample, calibration, landmarks) => {
+                    if (this.run === run && !run.signal.aborted) diagnostics.record(sample, calibration, landmarks);
+                }));
+            }
             this.onStatus('models');
             const vision = await run.wait(() => import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs'));
             run.check();
@@ -91,6 +103,9 @@ export class ProtocolDiagnostic {
                 setModuleStatus() {}, reportIssue: issue => issues.set(issue.code, { code: issue.code, kind: issue.kind }),
                 resolveIssue: code => issues.delete(code), captureMultimodalFrame: input => multimodal.captureFrame(input) };
             const pipeline = this.pipeline = new SessionFramePipeline({ state, controller, video: this.video });
+            if (pipeline.neutralCalibration && this.emotionDiagnostics) {
+                this.emotionDiagnostics.attachNeutralCalibration(pipeline.neutralCalibration);
+            }
             qc.start();
             if (!await pipeline.start()) throw new Error('Diagnostic pipeline unavailable');
             if (pipeline.neutralCalibration) {
@@ -119,7 +134,11 @@ export class ProtocolDiagnostic {
         const profile = resolveSignalProfile(this.definition);
         return { profileId: profile.id, models: MODEL_ASSETS, schedule: profile.schedule,
             camera: settings ? { width: settings.width, height: settings.height, frameRate: settings.frameRate, facingMode: settings.facingMode } : null,
-            diagnostics, budget: diagnostics?.budget || frameBudget({ schedule: profile.schedule }),
+            diagnostics, emotionDiagnostics: this.emotionDiagnostics ? {
+                ...this.emotionDiagnostics.snapshot(), profileId: profile.id,
+                neutralCalibration: pipeline?.neutralCalibration?.snapshot(performance.now()) ?? null,
+            } : null,
+            budget: diagnostics?.budget || frameBudget({ schedule: profile.schedule }),
             frame: frame ? { faceDetected: frame.face?.detected === true, illumination: frame.illumination?.value } : null,
             bpm: pipeline?.bpm.lastSample || null,
             emotion: state?.runtime.lastEmotionSample || null, body: state?.runtime.lastBodyPoseSample || null,
@@ -128,9 +147,17 @@ export class ProtocolDiagnostic {
     }
 
     stop() {
+        if(this.emotionDiagnostics && this.state) {
+            try {
+                this.emotionDiagnostics.snapshot(); // Complete elapsed trials before interrupting an active one.
+                this.emotionDiagnostics.finishTrial();
+                this.onUpdate(this.snapshot());
+            } catch (_) { /* A diagnostic display failure must not prevent camera teardown. */ }
+        }
         const run = this.run; this.run = null;
         this.pending = null;
         run?.stop();
+        hideQcOverlay();
         this.pipeline = null;
         this.multimodal = null;
         this.state = null;

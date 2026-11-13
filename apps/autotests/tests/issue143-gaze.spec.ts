@@ -27,7 +27,7 @@ async function openProductionCalibration(page: Page, beforeStart?: () => Promise
       state.runtime.lastPrecheckResult = { timestamp: performance.now(), landmarks,
         eyes: { bothOpen: !(window as any).rejectCalibrationFrames }, pose: { status: 'stable', yaw: 0, pitch: 0, roll: 0 } };
     }, 33);
-    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261110-integration1';
+    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261112-emotion2';
     const module = await import(moduleUrl);
     (window as any).calibrationPrepared = module.startCalibration();
   }, landmarksForGaze(0, 0));
@@ -136,8 +136,7 @@ test('production calibration explains an insufficient capture and lets the parti
   await expect(page.locator('#calibInstructionText')).not.toContainText(/Не хватило подходящих кадров|not enough usable frames/);
 });
 
-test('developer eye-gate probe exports three conditions, controlled cues and bounded failures', async ({ page, browserName }) => {
-  test.skip(browserName !== 'webkit', 'Virtual-clock complete diagnostic in WebKit');
+async function openEyeGateOracle(page: Page) {
   await installGazeAccess(page);
   const writes: string[] = [];
   page.on('request', req => { if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method())) writes.push(req.url()); });
@@ -159,7 +158,9 @@ test('developer eye-gate probe exports three conditions, controlled cues and bou
     export default class Analyzer {
       backend = 'synthetic_oracle'; async initialize() { return true; } dispose() {}
       async analyzeFrame() {
-        const closed = window.eyeGateReject || document.getElementById('status').textContent.includes('Мягко закройте');
+        const stage = document.body.dataset.eyeGateCue;
+        if (stage === 'prepare') window.eyeGateClosedCue = document.getElementById('status').textContent.includes('Мягко закройте');
+        const closed = window.eyeGateReject || stage === 'prepare' || stage === 'settle' || stage === 'measure' && window.eyeGateClosedCue;
         return { timestamp: performance.now(), wallTimestamp: Date.now(), landmarks: window.eyeGateLandmarks,
           eyes: { bothOpen: !closed, left: { ear: closed ? .17 : .24, isOpen: !closed } },
           pose: { status: 'stable' }, blendShapes: { eyeBlinkLeft: closed ? .8 : .01, unused: 'PRIVATE_SENTINEL' } };
@@ -183,7 +184,30 @@ test('developer eye-gate probe exports three conditions, controlled cues and bou
   await click('#calibrate');
   await expect(page.locator('#poseContinue')).toBeVisible();
   await click('#poseContinue');
-  await page.clock.runFor(30000);
+  return { click, writes };
+}
+
+test('developer eye-gate probe exports three conditions, controlled cues and bounded failures', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'webkit', 'Complete virtual-clock diagnostic in WebKit; cue timing and cancellation run in every engine');
+  const { click, writes } = await openEyeGateOracle(page);
+  const body = page.locator('body');
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'prepare');
+  const dot = (await page.locator('#target').boundingBox())!;
+  const hint = (await page.locator('#status').boundingBox())!;
+  expect(Math.abs(hint.x + hint.width / 2 - dot.x - dot.width / 2)).toBeLessThan(1);
+  expect(dot.y - hint.y - hint.height).toBeGreaterThanOrEqual(0);
+  await page.screenshot({ path: testInfo.outputPath('eye-gate-prepare.png') });
+  await page.clock.runFor(1999);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'prepare');
+  await page.clock.runFor(1);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'settle');
+  await expect(page.locator('#status')).toBeEmpty();
+  await page.clock.runFor(699);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'settle');
+  await page.clock.runFor(1);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'measure');
+  await expect(page.locator('#status')).toBeEmpty();
+  await page.clock.runFor(51600);
   for (let condition = 0; condition < 3; condition++) {
     await expect(page.locator('#poseContinue')).toBeVisible();
     await click('#poseContinue');
@@ -205,7 +229,11 @@ test('developer eye-gate probe exports three conditions, controlled cues and bou
   expect(report.benchmark).toMatchObject({ protocol: 'eye-gate.v1', completed: true, diagnosticSurface: 'developer_panel',
     counters: { calibrationAttempts: 55, calibrationAccepted: 53 } });
   expect(report.eyeGate.scheduledClickSlots).toBe(54);
+  expect(report.eyeGate).toMatchObject({ cueTiming: 'read_then_signal.v1', cuePreparationMs: 2000, cueSettlingMs: 700 });
+  expect(report.eyeGate.cues.every((cue: any) => cue.preparationDurationMs === 2000)).toBe(true);
+  expect(report.eyeGate.cues.every((cue: any) => cue.settlingDurationMs === 700)).toBe(true);
   expect(report.eyeGate.cues.reduce((ms: number, cue: any) => ms + cue.durationMs, 0)).toBe(30000);
+  expect(report.eyeGate.cues[0].counts.precheckEyesRejected).toBe(0);
   const closed = report.eyeGate.cues.find((cue: any) => cue.cue === 'closed_cue');
   expect(closed.counts.precheckEyesRejected).toBeGreaterThan(10);
   expect(report.eyeGate.conditions.map((s: any) => s.condition)).toEqual(['neutral', 'smile', 'squint']);
@@ -223,6 +251,46 @@ test('developer eye-gate probe exports three conditions, controlled cues and bou
   expect(download.suggestedFilename()).toBe(`wecog-gaze-eye-gate.v1-${report.benchmark.runId}.json`);
   await download.cancel();
 });
+
+test('developer eye-gate excludes reading and settling captures from the measured cue in every engine', async ({ page }) => {
+  const { click, writes } = await openEyeGateOracle(page);
+  const body = page.locator('body');
+  await page.clock.runFor(1999);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'prepare');
+  await page.clock.runFor(1);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'settle');
+  await expect(page.locator('#status')).toBeEmpty();
+  await page.clock.runFor(699);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'settle');
+  await page.clock.runFor(1);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'measure');
+  await page.clock.runFor(5000);
+  await expect(body).toHaveAttribute('data-eye-gate-cue', 'prepare');
+  await click('#stop');
+  const stopped = JSON.parse((await page.locator('#result').textContent())!);
+  expect(stopped.diagnostics.eyeGate.cues).toHaveLength(1);
+  expect(stopped.diagnostics.eyeGate.cues[0]).toMatchObject({ preparationDurationMs: 2000, settlingDurationMs: 700,
+    durationMs: 5000, counts: { precheckEyesRejected: 0 } });
+  expect(stopped.diagnostics.eyeGate.cues[0].counts.accepted).toBeGreaterThan(100);
+  expect(writes).toEqual([]);
+});
+
+for (const [stage, elapsed] of [['prepare', 0], ['settle', 2000], ['measure', 2700]] as const) {
+  test(`developer eye-gate Stop cancels the pending ${stage} cue in every engine`, async ({ page }) => {
+    const { click, writes } = await openEyeGateOracle(page);
+    await page.clock.runFor(elapsed);
+    await expect(page.locator('body')).toHaveAttribute('data-eye-gate-cue', stage);
+    await click('#stop');
+    await page.clock.runFor(5000);
+    await expect(page.locator('#target')).toBeHidden();
+    expect(await page.locator('body').getAttribute('data-eye-gate-cue')).toBeNull();
+    const stopped = JSON.parse((await page.locator('#result').textContent())!);
+    expect(stopped.benchmark).toMatchObject({ completed: false, reason: 'user_stop', phase: 'eye_gate_reference' });
+    expect(stopped.diagnostics.eyeGate.cues).toEqual([]);
+    expect(await page.evaluate(() => (window as any).eyeGateStops)).toBe(1);
+    expect(writes).toEqual([]);
+  });
+}
 
 for (const mode of manualModes) test(`local manual ${mode || 'default'} check never asks for the camera automatically and Stop releases a late stream`, async ({ page }) => {
   await page.addInitScript(() => {
@@ -546,7 +614,7 @@ for (const mode of [...manualModes, 'nuisance-geometry-overlap', 'nuisance-geome
     return;
   }
   for (let click = 0; click < 50; click++) {
-    if (recoverCoverage && click === 40) {
+    if ((recoverCoverage || mode === 'developer-aoi-continuous') && click === 40) {
       await page.evaluate(() => { (window as any).oracleRejectClick = true; });
       await page.locator('#target').evaluate((point: HTMLElement) => point.click());
       await page.clock.runFor(2200);
@@ -608,14 +676,28 @@ for (const mode of [...manualModes, 'nuisance-geometry-overlap', 'nuisance-geome
     expect(report.aoiBlock).toMatchObject({ scheduledPresentations: 40, nominalPresentationMs: 6000, durationMs: 240000 });
     expect(report.aoiBlock.presentations).toHaveLength(40);
     expect(report.aoiBlock.presentations.every((p: any) => p.measured > 150 && p.pairs.corrected.common > 150)).toBe(true);
+    expect(report.calibration.clicks[0].eyeGate.counts.fresh).toBeGreaterThan(0);
+    if (mode === 'developer-aoi-continuous') {
+      expect(report.calibration.clicks[40]).toMatchObject({ targetIndex: 20, clickIndex: 0,
+        accepted: false, failureReason: 'eye_signal', eyeGate: { counts: { poseRejected: 0, gazeConfidenceRejected: 0 } } });
+      const [rejected] = report.diagnostics.targetCoverage.calibrationRejections;
+      expect(rejected.eyeGateCounts.precheckEyesRejected).toBeGreaterThan(10);
+      expect(rejected.eyeGateCounts.precheckEyesRejected).toBe(report.calibration.clicks[40].eyeGate.counts.precheckEyesRejected);
+      expect(report.calibration.clicks[41]).toMatchObject({ targetIndex: 20, clickIndex: 0, accepted: true });
+    }
     const { summarizeContinuousAoiReport, summarizeContinuousAoiReplicates } = await import('../../../scripts/reference-data/issue143-summarize-continuous-aoi.mjs');
     const recomputed = summarizeContinuousAoiReport({ ...report, aoiBlock: { ...report.aoiBlock, summary: {} } });
     expect(recomputed.all).toEqual(report.aoiBlock.summary.all);
+    expect(recomputed.all.signals['eye_patch.corrected'].fixationDiagnostics).toMatchObject({
+      version: 'aoi_fixation_diagnostics.v1', windows: 40, groupingWindows: 40 });
     expect(() => summarizeContinuousAoiReport({ ...report, benchmark: { ...report.benchmark, completed: false } }))
       .toThrow('incomplete_aoi_report');
     const invalid = structuredClone(report);
     invalid.aoiBlock.presentations[0].pairs.corrected.onlyPatchHit += 10000;
     expect(() => summarizeContinuousAoiReport(invalid)).toThrow('invalid_aoi_pairs');
+    const invalidDiagnostics = structuredClone(report);
+    invalidDiagnostics.aoiBlock.presentations[0].signals['eye_patch.corrected'].fixationDiagnostics.missingReasons.other++;
+    expect(() => summarizeContinuousAoiReport(invalidDiagnostics)).toThrow('invalid_aoi_signal');
     const incomplete = { version: report.version, benchmark: { ...report.benchmark, completed: false,
       runId: '9c23270e-64d7-44d2-b204-f3c306877164', reason: 'viewport_changed' } };
     const replicates = summarizeContinuousAoiReplicates([invalid, report, report, incomplete, null]);

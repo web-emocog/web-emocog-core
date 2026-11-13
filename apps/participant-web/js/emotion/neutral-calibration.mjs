@@ -1,4 +1,12 @@
-import { buildInternalMask, extractActionUnits } from './au-extractor.js';
+import { buildInternalMask, extractActionUnits, validEmotionLandmarks } from './au-extractor.js?v=20261112-emotion1';
+
+export function medianBaseline(samples) {
+    return Object.fromEntries(Object.keys(samples[0]).map(key => {
+        const values = samples.map(row => row[key]).sort((a, b) => a - b);
+        const mid = Math.floor(values.length / 2);
+        return [key, values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2];
+    }));
+}
 
 export class NeutralCalibration {
     constructor(policy) { this.policy = policy; this.reset(); }
@@ -19,8 +27,7 @@ export class NeutralCalibration {
         const valid = visible && !frame?.error && frame?.face?.detected === true
             && !['too_dark', 'too_bright'].includes(frame.illumination?.status)
             && !frame.pose?.isTilted
-            && Array.isArray(landmarks) && landmarks.length >= 468
-            && landmarks.every(point => Number.isFinite(point?.x) && Number.isFinite(point?.y))
+            && validEmotionLandmarks(landmarks)
             && Number.isFinite(frame.timestamp) && frame.timestamp <= now && now - frame.timestamp <= 1000;
         if (!valid || frame.timestamp === this.lastFrame || now - this.lastAt < this.policy.intervalMs) return this.snapshot(now);
         const au = extractActionUnits(landmarks, buildInternalMask(landmarks).geometry);
@@ -29,16 +36,13 @@ export class NeutralCalibration {
         this.samples.push(au);
         if (this.samples.length >= this.policy.minSamples && elapsed >= this.policy.minDurationMs) {
             // Median makes the neutral reference less sensitive to a brief blink.
-            this.baseline = Object.fromEntries(Object.keys(au).map(key => {
-                const values = this.samples.map(row => row[key]).sort((a, b) => a - b);
-                const mid = Math.floor(values.length / 2);
-                return [key, values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2];
-            }));
+            this.baseline = medianBaseline(this.samples);
             this.status = 'ready';
             this.finishedAt = now;
             this.acceptedSamples = this.samples.length;
             this.samples = [];
         }
+        this.onAccepted?.(landmarks, this.snapshot(now));
         return this.snapshot(now);
     }
     snapshot(now) {
