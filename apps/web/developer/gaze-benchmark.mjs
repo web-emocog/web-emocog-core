@@ -1,7 +1,7 @@
 // Explicit diagnostic mount only; never called by the participant flow.
 // The local harness and authenticated developer page share this implementation.
 import { createMatchedWindow, observeMatchedWindow, finishMatchedWindow } from './gaze-benchmark-summary.mjs?v=20261108-143m';
-import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-report.mjs?v=20261110-integration1';
+import { benchmarkMetadata, benchmarkFailureReason } from './gaze-benchmark-report.mjs?v=20261113-gaze1';
 import { createValidationAttemptRecorder, collectValidationTargets, calibrationRejection, countCalibrationRejection,
   recordMaskedCalibrationClick, summarizeLidSupportClick } from './gaze-benchmark-coverage.mjs?v=20261110-integration1';
 import { DiagnosticRun, SerialDiagnosticStage } from './diagnostic-run.mjs?v=20261104-4';
@@ -47,6 +47,8 @@ const exportTechnical = cohort || maskedMode || lidSupportProbe || nuisanceMode 
 const reportVersion = eyeGateMode ? 'gaze_eye_gate_probe.v1' : aoiMode ? 'gaze_continuous_aoi.v1' : lidSupportProbe ? 'gaze_lid_support.v1' : 'gaze_benchmark.v1';
 const probePositions = CALIBRATION_POSITIONS.filter(({ x, y }) => [8, 50, 92].includes(x) && [8, 50, 92].includes(y));
 const probeMaxAttempts = 2;
+const eyeCuePreparationMs = 2000;
+const eyeCueSettlingMs = 700;
 const gradientPose = nuisanceMode || (gradientMode || tophatMode) && pose;
 const gradientTemporal = (gradientMode || maskedMode || (cohort && tophatMode)) && !gradientPose && temporal;
 const eyeImageMode = appearanceMode || trioMode || aoiMode;
@@ -215,6 +217,7 @@ async function start() {
   if (lidSupportProbe) owned.lidSupportTargets = [];
   if (eyeGateMode) owned.eyeGate = { version: 'eye_gate_diagnostic.v1', captureVersion: CALIBRATION_CAPTURE_VERSION,
     scheduledClickSlots: 3 * probePositions.length * CALIBRATION_CLICKS, maxAttemptsPerClick: probeMaxAttempts,
+    cueTiming: 'read_then_signal.v1', cuePreparationMs: eyeCuePreparationMs, cueSettlingMs: eyeCueSettlingMs,
     cues: [], conditions: [], scope: 'unchanged_gate_observation_only_no_accuracy' };
   if (nuisanceMode) owned.nuisanceCalibration = { version: 'gaze_paired_nuisance_calibration.v1', rank: null, stages: [] };
   if (nuisanceGateMode) owned.appearanceGateInfo = { version: geometryGateMode ? 'gaze_patch_geometry_gate.v1' : 'gaze_patch_appearance_gate.v1',
@@ -256,10 +259,10 @@ async function start() {
       nuisanceMode ? import('./gaze-eye-patch-nuisance.mjs?v=20261110-integration1') : null,
       nuisanceGateMode ? import('./gaze-eye-patch-gate.mjs?v=20261110-143u') : null,
       geometryGateMode ? import('./gaze-eye-patch-geometry-gate.mjs?v=20261110-143u') : null,
-      aoiMode ? Promise.all([import('./gaze-continuous-aoi.mjs?v=20261110-143v'),
+      aoiMode ? Promise.all([import('./gaze-continuous-aoi.mjs?v=20261113-gaze1'),
         import('../../participant-web/js/web-page/heatmap.js?v=20261102-1')])
         .then(([aoi, heatmap]) => ({ ...aoi, createHeatmapAccumulator: heatmap.createHeatmapAccumulator })) : null,
-      eyeGateMode ? import('./gaze-eye-gate-probe.mjs?v=20261110-integration1') : null,
+      eyeGateMode || aoiMode ? import('./gaze-eye-gate-probe.mjs?v=20261110-integration1') : null,
     ]), 45000, owned);
     if (run !== owned) return;
     globalThis.FilesetResolver = vision.FilesetResolver; globalThis.FaceLandmarker = vision.FaceLandmarker;
@@ -686,7 +689,9 @@ async function calibrate() {
         await deadline(new Promise(resolve => { byId('target').onclick = () => { byId('target').onclick = null; resolve(); }; }), 60000, owned);
         byId('target').style.opacity = '0.5';
         const policy = calibrationCapturePolicy(pos);
+        const eyeProbe = aoiMode ? owned.createEyeGateProbeWindow() : null;
         const captured = await collectCalibrationClick({ policy, getFrame: () => owned.lastFrame,
+          onFrameAssessment: eyeProbe ? (frame, assessment) => eyeProbe.observe(frame, assessment) : null,
           onLandmarkCopy: eyeImageMode ? (frame, copy) => {
             const values = owned.eyePatchFeatures?.get(frame.landmarks);
             if (values) owned.eyePatchFeatures.set(copy, Object.fromEntries(Object.entries(values).map(([region, value]) => [region, value?.slice()])));
@@ -746,9 +751,21 @@ async function calibrate() {
           }
         }
         const failureReason = accepted ? null : calibrationRejection(captured.summary, patchReady);
-        if (exportTechnical && failureReason) countCalibrationRejection(owned.calibrationRejections, i, failureReason, captured.summary);
+        const eyeSummary = eyeProbe?.summary();
+        const eyeGate = eyeSummary ? { counts: eyeSummary.counts, ear: eyeSummary.ear,
+          longestEyeRejectionMs: eyeSummary.longestEyeRejectionMs } : null;
+        if (exportTechnical && failureReason) {
+          countCalibrationRejection(owned.calibrationRejections, i, failureReason, captured.summary);
+          if (eyeGate) {
+            // Keep bounded totals even when calibration never finishes.
+            const target = owned.calibrationRejections[i];
+            const counts = target.eyeGateCounts ??= {};
+            for (const [key, value] of Object.entries(eyeGate.counts)) counts[key] = (counts[key] || 0) + value;
+          }
+        }
         captured.frames.length = 0;
         clickSummaries.push({ targetIndex: i, clickIndex: click, ...captured.summary, accepted,
+          ...(eyeGate ? { eyeGate } : {}),
           ...(exportTechnical && failureReason ? { failureReason } : {}),
           ...(appearanceMode ? { eyePatchUsableFrames: patchFrames, eyePatchCoreUsableFrames: coreFrames,
             eyePatchCommonUsableFrames: commonFrames } : {}),
@@ -960,21 +977,31 @@ async function collectLidSupport(owned) {
 
 async function collectEyeGateProbe(owned) {
   owned.phase = 'eye_gate_reference';
-  status('Сначала — контрольная серия 30 секунд, без кликов по точкам.');
-  await awaitPosture(owned, 'Смотрите на центральную точку. Следуйте надписям над ней: обычный взгляд, один естественный морг по сигналу и короткое закрытие глаз. Если неудобно, остановите тест.');
+  status('Сначала — контрольная серия без кликов по точкам.');
+  await awaitPosture(owned, 'У каждой подсказки будет время на чтение. Когда надпись исчезнет и точка станет жёлтой, выполните действие. Во время короткого закрытия глаз не ждите нового сигнала: откройте глаза примерно через две секунды. Если неудобно, остановите тест.');
   position(50, 50);
-  byId('target').style.backgroundColor = '#F59E0B';
-  document.body.dataset.eyeGateCue = 'active';
   const policy = calibrationCapturePolicy({ x: 50, y: 50 });
   const cues = [['neutral_reference', 5000, 'Смотрите в центр, лицо расслаблено.'],
     ...Array.from({ length: 3 }, () => [
-      ['blink_cue', 2000, 'Моргните один раз сейчас.'], ['open_recovery', 3000, 'Снова смотрите в центр.'],
+      ['blink_cue', 2000, 'На жёлтый сигнал моргните один раз.'], ['open_recovery', 3000, 'Смотрите в центр естественно.'],
     ]).flat(),
-    ['closed_cue', 2000, 'Мягко закройте глаза до следующей подсказки.'],
-    ['open_recovery', 8000, 'Откройте глаза и смотрите в центр.']];
+    ['closed_cue', 2000, 'Мягко закройте глаза примерно на 2 секунды, затем откройте.'],
+    ['open_recovery', 8000, 'Смотрите в центр, глаза открыты.']];
   for (const [index, [cue, durationMs, text]] of cues.entries()) {
     const stats = owned.createEyeGateProbeWindow();
+    document.body.dataset.eyeGateCue = 'prepare';
+    byId('target').style.backgroundColor = '#a5a7bb';
     status(text);
+    const preparedAt = performance.now();
+    await delay(eyeCuePreparationMs, owned);
+    if (run !== owned) return;
+    const preparedUntil = performance.now();
+    document.body.dataset.eyeGateCue = 'settle';
+    status('');
+    await delay(eyeCueSettlingMs, owned);
+    if (run !== owned) return;
+    document.body.dataset.eyeGateCue = 'measure';
+    byId('target').style.backgroundColor = '#F59E0B';
     const since = performance.now();
     owned.eyeGateCue = frame => {
       if (frame?.timestamp >= since && frame.timestamp < since + durationMs) {
@@ -982,8 +1009,11 @@ async function collectEyeGateProbe(owned) {
       }
     };
     await delay(durationMs, owned);
+    if (run !== owned) return;
     owned.eyeGateCue = null;
-    owned.eyeGate.cues.push({ index, cue, durationMs, observedDurationMs: performance.now() - since, ...stats.summary() });
+    owned.eyeGate.cues.push({ index, cue, preparationDurationMs: preparedUntil - preparedAt,
+      settlingDurationMs: since - preparedUntil,
+      durationMs, observedDurationMs: performance.now() - since, ...stats.summary() });
   }
   delete document.body.dataset.eyeGateCue;
   for (const [condition, label, instruction] of [
@@ -1081,7 +1111,7 @@ if (aoiMode) {
 if (eyeGateMode) {
   byId('calibrate').textContent = 'Начать диагностику глаз';
   byId('modelDescription').textContent = 'Проверка причин отбрасывания кадров. Прогноз взгляда не обучается, рабочие пороги не меняются. Только агрегаты EAR, мимики, позы и кадров; без видео и автоматической отправки.';
-  byId('durationDescription').textContent = '30 секунд контрольных сигналов без кликов. Затем три серии по 9 точек: нейтрально, лёгкая улыбка, лёгкий прищур. На каждую точку два отдельных нажатия, по одному возможному повтору.';
+  byId('durationDescription').textContent = 'Около 55 секунд без кликов: чтение подсказок, возврат взгляда к точке и 30 секунд замеров. Затем три серии по 9 точек: нейтрально, лёгкая улыбка, лёгкий прищур. На каждую точку два отдельных нажатия, по одному возможному повтору.';
 }
 if (!canStart()) byId('start').disabled = true;
 return { stop, clearReport() { report = null; byId('download').hidden = true; byId('result').textContent = ''; } };
