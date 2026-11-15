@@ -37,6 +37,10 @@ export interface SessionEventV1 {
   tRelMs: number | null;
   blockId: string | number | null;
   trialId: string | number | null;
+  startTimestamp?: number | null;
+  endTimestamp?: number | null;
+  sampleCoverage?: 'not_inferred' | null;
+  modules?: SessionModule[] | Partial<Record<SessionModule, string | null>> | null;
   [key: string]: unknown;
 }
 
@@ -125,7 +129,30 @@ export interface RtAlignmentV1 {
   }>;
 }
 
+export type SessionModule = 'gaze' | 'blinks' | 'rt' | 'bpm' | 'emotion' | 'bodyPose' | 'audio' | 'multimodal';
+
+export interface AnalysisCadenceSummary {
+  frames: number;
+  windows: number;
+  observedMs: number;
+  meanFps: number | null;
+  threshold: number | null;
+  belowThresholdMs: number | null;
+}
+
+export interface GazeValidationMetrics extends Record<string, unknown> {
+  validSamples?: number | null;
+  totalSamples?: number | null;
+  validPct?: number | string | null;
+  screenDiag?: number | null;
+  screenSize?: { width?: number | null; height?: number | null } | null;
+}
+
 export interface GazeValidationSummary extends Record<string, unknown> {
+  metrics?: GazeValidationMetrics | null;
+  rawMetrics?: GazeValidationMetrics | null;
+  displayMetrics?: GazeValidationMetrics | null;
+  correctedCandidateMetrics?: GazeValidationMetrics | null;
   samplingVersion?: 'unique_capture.v1';
   sampling?: Array<{
     version: 'unique_capture.v1'; stage: 'correction' | 'benchmark'; pointIndex: number;
@@ -153,7 +180,9 @@ export interface SessionFeatureV1 {
     tech?: (Record<string, unknown> & { gazeFeatureMethod?: 'same_eye_iris.v2'; gazeCalibrationSampling?: 'open_eye_calibration.v1'; gazeQcSignalMethod?: 'corrected_validity.v1' }) | null;
   }) | null;
   precheck?: Record<string, unknown> | null;
-  qcSummary?: Record<string, unknown> | null;
+  qcSummary?: (Record<string, unknown> & {
+    fpsDiagnostics?: (Record<string, unknown> & { analysisSession?: AnalysisCadenceSummary }) | null;
+  }) | null;
   attentionMetrics?: Record<string, unknown> | null;
   blink_summary?: Record<string, unknown> | null;
   perclos_summary?: Record<string, unknown> | null;

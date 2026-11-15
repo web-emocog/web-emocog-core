@@ -14,8 +14,9 @@ export class VideoFpsMonitor {
 
     setVideoElement(video) { this._video = video; }
 
-    start(useRealFps = false) {
+    start(useRealFps = false, analysisThreshold = null) {
         this.reset();
+        if (Number.isFinite(analysisThreshold) && analysisThreshold > 0) this._analysisThreshold = analysisThreshold;
         this._isRunning = true;
         this._startTime = this._lastFrameTime = performance.now();
         if (useRealFps && this._video) {
@@ -50,6 +51,13 @@ export class VideoFpsMonitor {
             this._analysisWindow = { lastWindowFps: this._currentFps, method: 'completed-analysis-frames',
                 frames: this._frameCount, durationMs: elapsed,
                 startAfterMs: this._lastFrameTime - this._startTime, endAfterMs: now - this._startTime };
+            const session = this._analysisSession;
+            session.frames += this._frameCount;
+            session.observedMs += elapsed;
+            session.windows++;
+            if (this._analysisThreshold !== null && this._currentFps < this._analysisThreshold) {
+                session.belowThresholdMs += elapsed;
+            }
             this._fpsHistory.push(this._currentFps);
             if (this._fpsHistory.length > 60) this._fpsHistory.shift();
             this._frameCount = 0; this._lastFrameTime = now;
@@ -88,7 +96,14 @@ export class VideoFpsMonitor {
             return { status, fps: status === 'measured' ? window.lastWindowFps : null, ...window, ageMs };
         };
         return { schemaVersion: 'fps_diagnostics.v1', scope: 'last_completed_window', running: this._isRunning,
-            analysis: describe(this._analysisWindow), camera: describe(this._cameraWindow) };
+            analysis: describe(this._analysisWindow), camera: describe(this._cameraWindow),
+            analysisSession: this.getAnalysisSession() };
+    }
+
+    getAnalysisSession() {
+        const { frames, observedMs, windows, belowThresholdMs } = this._analysisSession;
+        return { frames, observedMs, windows, meanFps: observedMs > 0 ? frames * 1000 / observedMs : null,
+            threshold: this._analysisThreshold, belowThresholdMs: this._analysisThreshold === null ? null : belowThresholdMs };
     }
 
     getCameraFps() {
@@ -114,6 +129,8 @@ export class VideoFpsMonitor {
         this._fpsHistory = []; this._currentFps = 0; this._cameraFps = 0;
         this._cameraUpdatedAt = -Infinity; this._baselineFps = null; this._warmupComplete = false;
         this._analysisWindow = null; this._cameraWindow = null; this._stoppedAt = null;
+        this._analysisThreshold = null;
+        this._analysisSession = { frames: 0, observedMs: 0, windows: 0, belowThresholdMs: 0 };
         this.cameraMethod = null;
     }
 }

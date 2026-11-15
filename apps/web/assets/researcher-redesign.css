@@ -253,6 +253,13 @@ body {
 }
 .search-box input:focus { box-shadow: none; }
 .search-box .icon { color: var(--wc-muted); }
+.wecog-search-toggle { display:flex; align-items:center; justify-content:flex-start; gap:10px; width:100%; padding:0 14px; background:none; border:0; border-radius:inherit; color:var(--wc-muted); font-weight:650; }
+.wecog-search-toggle svg { flex:none; width:17px; height:17px; }
+.wecog-search-panel { position:absolute; z-index:35; top:0; right:0; width:max(100%, min(320px, 78vw)); }
+.wecog-search-panel[hidden] { display:none; }
+.search-box .wecog-search-panel input { opacity:1; height:42px; padding:0 14px; background:var(--wc-surface); border:1px solid var(--wc-line); }
+.wecog-search-results { max-height:min(440px, 65vh); overflow:auto; }
+.wecog-search-results p { padding:10px; margin:0; }
 .wecog-search-results {
   position: absolute;
   top: calc(100% + 9px);
@@ -265,10 +272,10 @@ body {
   box-shadow: var(--wc-shadow);
 }
 .wecog-search-results[hidden] { display: none; }
-.wecog-search-results a {
+.wecog-search-results [role="option"] {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 16px;
   min-height: 44px;
   padding: 9px 12px;
@@ -277,10 +284,16 @@ body {
   text-decoration: none;
   font-size: 14px;
   font-weight: 660;
+  box-sizing: border-box;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
-.wecog-search-results a:hover,
-.wecog-search-results a[aria-selected="true"] { background: var(--wc-accent); color: var(--wc-accent-ink); }
-.wecog-search-results small { color: var(--wc-muted); font-weight: 520; }
+.wecog-search-results [role="option"]:hover,
+.wecog-search-results [aria-selected="true"] { background: var(--wc-accent); color: var(--wc-accent-ink); }
 
 .wecog-toolbar-control {
   min-height: 42px;
@@ -463,9 +476,8 @@ body {
 @media (max-width: 560px) {
   .top-bar { min-height: 70px; gap: 8px; }
   .search-box { width: 44px; flex: 0 0 44px; }
-  .search-box:focus-within { position: absolute; left: 54px; right: 0; width: auto; z-index: 30; }
-  .search-box input { opacity: 0; }
-  .search-box:focus-within input { opacity: 1; }
+  .wecog-search-toggle { justify-content:center; padding:0; }
+  .wecog-search-toggle span { display:none; }
   .top-bar .wecog-theme-switch { display: none; }
   #welcomeScreen .ws-topbar { right: 16px; left: 16px; justify-content: space-between; }
 }

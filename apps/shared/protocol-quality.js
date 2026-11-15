@@ -20,6 +20,27 @@
         && rule.threshold >= 0 && rule.threshold <= (key === 'fpsStable' ? 60 : 100)
         && Object.keys(rule).every(name => ['enabled', 'hardStop', 'threshold'].includes(name)));
   }
+  function cameraCadence(definition, fps, { pending = false } = {}) {
+    const rule = definition?.settings?.qualityControl?.rules?.fpsStable;
+    const threshold = validate(definition) && rule?.enabled && rule.threshold > 0 ? rule.threshold : null;
+    const measured = Number.isFinite(fps) && fps >= 0;
+    const low = measured && threshold !== null && fps < threshold;
+    return { fps: measured ? fps : null, threshold, low, pending,
+      blocked: threshold !== null && (pending || (low && rule.hardStop)) };
+  }
+  function describeFpsAdvice(threshold, diagnostics, lang = 'en') {
+    if (!Number.isFinite(threshold) || threshold <= 0) return '';
+    const ru = lang === 'ru';
+    const camera = diagnostics?.camera?.status === 'measured' ? diagnostics.camera.fps : null;
+    if (!Number.isFinite(camera)) return ru
+      ? 'Проверьте свет спереди и закройте лишние приложения перед повтором.'
+      : 'Check the lighting in front of you and close other apps before retrying.';
+    return camera < threshold
+      ? (ru ? 'Камера даёт слишком мало кадров. Добавьте свет спереди и проверьте, не использует ли камеру другое приложение.'
+        : 'The camera is delivering too few frames. Add front lighting and check that another app is not using the camera.')
+      : (ru ? 'Камера даёт достаточно кадров, но анализ отстаёт. Закройте лишние вкладки и приложения перед повтором.'
+        : 'The camera delivers enough frames but analysis is slower. Close other tabs and apps before retrying.');
+  }
   function evaluate(definition, metrics) {
     const policy = definition?.settings?.qualityControl;
     if (!policy || !validate(definition)) return null;
@@ -47,6 +68,6 @@
     if (value === null || threshold === null) return `${label}: ${ru ? 'нет измерения' : 'no measurement'}`;
     return `${label}: ${value}${unit}; ${ru ? 'требуется не менее' : 'required minimum'} ${threshold}${unit}`;
   }
-  return { METRICS, validate, evaluate, describeCheck,
+  return { METRICS, validate, evaluate, describeCheck, cameraCadence, describeFpsAdvice,
     showBackupNotifications: definition => definition?.settings?.persistence?.showBackupNotifications !== false };
 });

@@ -29,6 +29,7 @@ function precheckFixture(file = 'precheck-updated.js') {
     if (!nodes.has(id)) {
       const listeners = new Map();
       nodes.set(id, { id, listeners, style: { removeProperty() {} }, classList: { toggle() {} }, appendChild() {},
+        remove() { nodes.delete(id); },
         addEventListener(type, fn) { listeners.set(type, fn); },
         removeEventListener(type, fn) { if (listeners.get(type) === fn) listeners.delete(type); }, play: async () => {} });
     }
@@ -36,8 +37,9 @@ function precheckFixture(file = 'precheck-updated.js') {
   };
   const state = { flags: {}, runtime: { localAnalyzer: { reset() { resets++; }, analyzeFrame() { analyses++; return frame.promise; } },
     faceSegmenter: { segmentFrame: async () => ({ isComplete: true, faceVisibility: {} }) } }, sessionData: { tech: {} }, currentLang: 'en' };
-  const context = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state,
+  const context = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state, performance,
     translations: { en: {} }, window: {}, AbortController, DOMException, protocolCameraConstraints, dbg, dbgErr,
+    WecogProtocolQuality: require('../../shared/protocol-quality'),
     getFramePixels: frame => frame?.fixturePixels,
     document: { getElementById: id => id === 'precheck-layout-fix-v1' ? {} : node(id), querySelector: node },
     navigator: { mediaDevices: { getUserMedia() { const request = deferred(); permissions.push(request); return request.promise; } } },

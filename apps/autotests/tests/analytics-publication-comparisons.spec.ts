@@ -155,7 +155,7 @@ test('comparison dashboard reports participant N, difference and missingness wit
   await expect(page.locator('#analyticsPdfDownload')).toBeEnabled();
   const download = page.waitForEvent('download');
   await page.locator('#analyticsPdfDownload').click();
-  expect((await download).suggestedFilename()).toMatch(/group-comparison\.pdf$/);
+  expect((await download).suggestedFilename()).toMatch(/^wecog-.+-\d{4}-\d{2}-\d{2}\.pdf$/u);
 });
 
 test('authored instructions replace the response automatically in the builder and survive repeated key changes', async ({ page }) => {

@@ -2814,8 +2814,9 @@ body{
 /* ===== END WELCOME SCREEN ===== */
 
 </style>
-  <link rel="stylesheet" href="assets/researcher-redesign.css?v=20260828-3">
-  <link rel="stylesheet" href="assets/analytics-block-dashboard.css?v=20261110-analyticsux4">
+  <link rel="stylesheet" href="assets/researcher-redesign.css?v=20261115-reportux5">
+  <link rel="stylesheet" href="assets/analytics-block-dashboard.css?v=20261114-reportux4">
+  <link rel="stylesheet" href="assets/analytics-explorer.css?v=20261115-reportux5">
 </head>
 <body>
   <script>
@@ -3117,12 +3118,15 @@ body{
           </div>
           <div class="right">
             <div class="search-box">
-              <span class="icon">
+              <button type="button" id="researcherSearchToggle" class="wecog-search-toggle" aria-expanded="false" aria-controls="researcherSearchPanel">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 </svg>
-              </span>
-              <input type="search" id="researcherNavSearch" name="wecog-navigation-filter" placeholder="Найти раздел" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other"/>
+                <span>Найти раздел</span>
+              </button>
+              <div id="researcherSearchPanel" class="wecog-search-panel" hidden>
+                <input type="text" id="researcherNavSearch" name="wecog-navigation-filter" placeholder="Найти раздел" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other"/>
+              </div>
             </div>
             <div class="wecog-theme-switch" data-wecog-theme-group role="group" aria-label="Цветовая схема">
               <button type="button" class="wecog-theme-option" data-wecog-theme-value="auto"><span data-theme-option-label>Авто</span></button>
@@ -3202,21 +3206,24 @@ body{
       }
     })();
   </script>
-  <script src="connectedness-view.js?v=20261110-analyticsux4"></script>
+  <script src="connectedness-view.js?v=20261115-reportux5"></script>
   <script src="assets/vendor/jspdf/dist/jspdf.umd.min.js?v=4.2.1"></script>
-  <script src="analytics-pdf.js?v=20261110-analyticsux4"></script>
-  <script src="analytics-block-dashboard.js?v=20261110-analyticsux4"></script>
-  <script src="researcher-analytics-production.js?v=20261112-emotion2"></script>
+  <script src="analytics-visualizations.js?v=20261115-reportux5"></script>
+  <script src="analytics-pdf.js?v=20261115-reportux5"></script>
+  <script src="analytics-block-dashboard.js?v=20261115-reportux5"></script>
+  <script src="analytics-explorer-charts.js?v=20261115-reportux5"></script>
+  <script src="analytics-explorer.js?v=20261115-reportux5"></script>
+  <script src="researcher-analytics-production.js?v=20261115-reportux5"></script>
   <script src="researcher-admin-settings.js?v=20261006-2"></script>
   <script src="aoi-geometry.js?v=20260919-1"></script>
   <script src="aoi-protocol.js?v=20261110-integration1"></script>
   <script src="../shared/survey-contract.js?v=20260828-2"></script>
   <script src="../shared/standard-stimuli.js?v=20261110-integration1"></script>
-  <script src="researcher-builder.js?v=20261111-mediahotfix1"></script>
-  <script src="researcher-stimuli.js?v=20261111-mediahotfix1"></script>
+  <script src="researcher-builder.js?v=20261114-reportux4"></script>
+  <script src="researcher-stimuli.js?v=20261115-reportux5"></script>
   <script src="../shared/invitation-link.js?v=1"></script>
   <script src="researcher-core.js?v=20261107-3"></script>
   <script src="researcher-api-bridge.js?v=20261027-2"></script>
-  <script src="researcher-navigation.js?v=20260909-1"></script>
+  <script src="researcher-navigation.js?v=20261115-reportux5"></script>
 </body>
 </html>

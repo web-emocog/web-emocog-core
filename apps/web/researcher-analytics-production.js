@@ -14,6 +14,16 @@
   let stimulusMediaFetches = 0;
   let stimulusMediaGeneration = 0;
   let resultImportGeneration = 0;
+  let saveAnalyticsViewport = null;
+  let cancelAnalyticsViewportRestore = null;
+  const boundStimulusRetries = new WeakSet();
+  const boundStimulusMedia = new WeakSet();
+  const observedHeatmapCanvases = new WeakSet();
+  const heatmapPaintState = new WeakMap();
+  global.addEventListener?.('pagehide', () => saveAnalyticsViewport?.());
+  for (const type of ['pointerdown', 'wheel', 'touchstart', 'keydown', 'input', 'change']) {
+    global.addEventListener?.(type, event => cancelAnalyticsViewportRestore?.(event), { capture: true, passive: true });
+  }
   ['hashchange', 'wecog:projectchange', 'wecog:researcherauthenticated', 'wecog:staffsessionblocked', 'pagehide']
     .forEach(type => global.addEventListener?.(type, () => { resultImportGeneration++; }));
 
@@ -360,6 +370,13 @@
   function reasonLabel(value) {
     const code = String(value || '').trim().toLowerCase();
     const labels = {
+      fps_low: ['Частота анализа кадров ниже порога', 'Analysis frame rate below threshold'],
+      camera_fps_low: ['Камера передавала слишком мало кадров', 'Camera frame rate too low'],
+      analysis_fps_low: ['Частота анализа кадров ниже порога', 'Analysis frame rate below threshold'],
+      face_not_detected: ['Лицо не видно', 'Face not visible'],
+      face_lost: ['Лицо не видно', 'Face not visible'],
+      low_valid_task_fraction: ['Слишком мало пригодных проб', 'Too few usable trials'],
+      gaze_fixation_duration_inconsistent: ['Длительность фиксаций превышает пригодное время взгляда', 'Fixation duration exceeds usable gaze time'],
       low_valid_gaze_fraction: ['Недостаточная доля валидного взгляда', 'Low valid-gaze fraction'],
       gaze_spatial_validation_failed: ['Проверка пространственной точности не пройдена; AOI-метрики недоступны', 'Spatial validation failed; AOI metrics are unavailable'],
       gaze_spatial_validation_missing: ['Нет сохранённого результата проверки пространственной точности', 'No recorded spatial-validation outcome'],
@@ -407,7 +424,7 @@
       high_rt_outlier_frac: ['Слишком много ответов имеют нетипичное время реакции', 'Too many responses have atypical reaction times']
     };
     const pair = labels[code];
-    return pair ? pair[isEnglish() ? 1 : 0] : String(value || tr('Причина не указана','Reason unavailable')).replace(/_/g, ' ');
+    return pair ? pair[isEnglish() ? 1 : 0] : tr('Причина не уточнена','Reason not specified');
   }
 
   function qualityCheckLabel(value) {
@@ -2037,7 +2054,7 @@
           ${state.query.mode === 'group' && state.groupLevel !== 'level-2' ? simpleSelectHtml('analyticsStimulusFilter', tr('Стимул','Stimulus'), stimuli, state.query.stimulusId, disabled || !state.query.blockId, tr('Все стимулы','All stimuli')) : ''}
           ${state.query.mode === 'group' && state.groupLevel !== 'level-2' ? simpleSelectHtml('analyticsAoiFilter', 'AOI', aois, state.query.aoiId, disabled || !state.query.stimulusId, tr('Все AOI','All AOIs')) : ''}
           ${state.query.mode === 'session'
-            ? `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><input value="${tr('Выбранная сессия · любой QC','Selected session · any QC')}" disabled style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);color:var(--muted);font-size:12px;"></label>`
+            ? `<p class="ab-static-filter"><strong>${tr('Проверка качества', 'Quality filter')}</strong><span>${tr('Выбранная сессия включена независимо от качества записи.', 'The selected session is included regardless of recording quality.')}</span></p>`
             : `<label style="display:flex;flex-direction:column;gap:5px;min-width:190px;flex:1;"><span style="font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;">QC</span><select id="analyticsQcMode" style="padding:9px 10px;border:1px solid var(--stroke);border-radius:10px;background:var(--card-bg);color:var(--text);font-size:12px;"><option value="valid_only" ${state.query.qcMode === 'valid_only' ? 'selected' : ''}>${tr('Только валидные','Valid only')}</option><option value="valid_and_borderline" ${state.query.qcMode === 'valid_and_borderline' ? 'selected' : ''}>${tr('Валидные + пограничные','Valid + borderline')}</option><option value="all" ${state.query.qcMode === 'all' ? 'selected' : ''}>${tr('Все, включая невалидные','All, including invalid')}</option></select></label>`}
         </div>
         <div style="display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin-top:11px;">
@@ -2094,6 +2111,13 @@
   }
 
   function metricLabel(metricId) {
+    const plainGaze = {
+      'qc.sample_count_total': ['Всего измерений взгляда','Total gaze measurements'],
+      'qc.sample_count_valid': ['Пригодные измерения взгляда','Usable gaze measurements'],
+      'qc.valid_gaze_pct': ['Доля пригодных измерений взгляда','Share of usable gaze measurements'],
+      'qc.low_confidence_pct': ['Доля ненадёжных измерений взгляда','Share of low-confidence gaze measurements'],
+    }[metricId];
+    if (plainGaze) return tr(...plainGaze);
     const definitions = [...(global.EmocogAnalyticsPlan?.metrics || []), ...(global.EmocogPassiveMetrics?.definitions || [])];
     const definition = definitions.find(item => item.id === metricId);
     return definition && definition.label
@@ -2145,8 +2169,8 @@
             return `<article style="padding:12px 13px;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.32);">
               <div style="font-size:10px;color:var(--muted);min-height:28px;line-height:1.35;">${escapeHtml(metricLabel(metric.metricId))}</div>
               <div style="font-size:21px;font-weight:780;color:var(--text);margin-top:5px;">${escapeHtml(metricValue(metric))}</div>
-              <div style="display:flex;justify-content:space-between;gap:7px;align-items:center;margin-top:9px;font-size:9px;color:var(--muted);"><span>${escapeHtml(denominator)}</span><span style="padding:3px 6px;border-radius:999px;background:${tone.bg};color:${tone.color};font-weight:700;">QC: ${escapeHtml(statusLabel(metric.qc && metric.qc.status))}</span></div>
-              <div style="font-size:8px;color:var(--muted2);margin-top:6px;">${tr('алгоритм','algorithm')} ${escapeHtml(metric.algorithm && metric.algorithm.version || '—')}</div>
+              <div style="display:flex;justify-content:space-between;gap:7px;align-items:center;margin-top:9px;font-size:9px;color:var(--muted);"><span>${escapeHtml(denominator)}</span><span style="padding:3px 6px;border-radius:999px;background:${tone.bg};color:${tone.color};font-weight:700;">${escapeHtml(statusLabel(metric.qc && metric.qc.status))}</span></div>
+
             </article>`;
           }).join('')}
         </div>
@@ -2200,7 +2224,7 @@
       <div style="font-size:18px;font-weight:760;color:var(--text);margin-top:5px;overflow-wrap:anywhere;">${escapeHtml(shown.value)}</div>
       ${shown.detail ? `<div style="font-size:9px;color:var(--muted);margin-top:4px;">${escapeHtml(shown.detail)}</div>` : ''}
       <div style="display:flex;justify-content:space-between;gap:7px;align-items:center;margin-top:9px;font-size:9px;color:var(--muted);"><span>N=${escapeHtml(n)} · ${escapeHtml(scopeLabel(metric))}</span><span style="padding:3px 6px;border-radius:999px;background:${tone.bg};color:${tone.color};font-weight:700;">QC: ${escapeHtml(statusLabel(metric.qc && metric.qc.status))}</span></div>
-      <div style="font-size:8px;color:var(--muted2);margin-top:6px;">${tr('алгоритм','algorithm')} ${escapeHtml(metric.algorithm && metric.algorithm.id || '—')} · v${escapeHtml(metric.algorithm && metric.algorithm.version || '—')}</div>
+
     </article>`;
   }
 
@@ -2305,6 +2329,14 @@
     const points = Array.isArray(heatmap.fixationPoints) ? heatmap.fixationPoints : [];
     const stimulus = context?.stimulus || heatmap.stimulus || {};
     const heatmapHasData = heatmap.nFixations > 0 && heatmap.grid && heatmap.grid.maxValue > 0;
+    if (!heatmapHasData && !points.length) {
+      const explanation = [...new Set((context.qualityIssueCodes || []).map(reasonLabel))].join('; ')
+        || (heatmap.reason ? reasonLabel(heatmap.reason) : tr('Нет пригодных фиксаций для карты', 'No usable fixations for a map'));
+      return `<article class="ab-heatmap-empty" data-attempt-status="${escapeHtml(context.attemptStatus || 'unknown')}">
+        <strong>${escapeHtml(names.stimulus(stimulus.id, stimulus.name))}</strong>
+        <p>${escapeHtml([attemptLabel(context), attemptStatusLabel(context), explanation].filter(Boolean).join(' · '))}</p>
+      </article>`;
+    }
     const ratio = stimulusAspectRatio(stimulus);
     const contentUrl = stimulusContentUrl(stimulus.contentUrl);
     return `<article style="padding:14px 0;border-top:${index ? '1px solid var(--stroke)' : '0'};">
@@ -2355,7 +2387,10 @@
       : tr('Нет данных','No data');
   }
 
-  function technicalDetailsHtml(session, algorithms) {
+  function technicalDetailsHtml(session) {
+    const cadence = session.analysisCadence;
+    const below = Number.isFinite(cadence?.belowThresholdMs) && cadence.observedMs > 0
+      ? `${formatMetricNumber(100 * cadence.belowThresholdMs / cadence.observedMs, 1)}% · ${tr('порог','threshold')} ${cadence.threshold}` : null;
     const timerRows = Array.isArray(session.protocolTimers)
       ? session.protocolTimers
         .filter(timer => Number.isFinite(Number(timer.durationMs)))
@@ -2368,20 +2403,21 @@
       [tr('Устройство','Device'), deviceClassLabel(session.deviceClass)],
       [tr('Экран','Screen'), resolutionLabel(session.resolution)],
       [tr('Камера','Camera'), resolutionLabel(session.cameraResolution)],
-      [tr('Измеренный FPS','Measured FPS'), session.actualFps],
-      [tr('FPS камеры','Camera FPS'), session.cameraFps],
-      [tr('FPS анализа','Analysis FPS'), session.analysisFps],
+      [tr('Камера, кадров/с','Camera, frames/s'), session.cameraFps],
+      [tr('Анализ, кадров/с','Analysis, frames/s'), cadence && Number.isFinite(cadence.meanFps) ? formatMetricNumber(cadence.meanFps, 1) : session.analysisFps],
+      [tr('Частота без указания источника, кадров/с','Frame rate (source not recorded), frames/s'), !cadence && session.analysisFps == null ? session.actualFps : null],
+      [tr('Доля измеренного времени ниже порога частоты','Measured time below the frame-rate threshold'), below],
       [tr('Браузер','Browser'), session.browserFamily],
       [tr('Язык браузера','Browser language'), session.browserLanguage],
       [tr('Плотность пикселей','Pixel ratio'), session.pixelRatio],
       [tr('Класс процессора','Processor class'), session.processorClass],
       ...timerRows
     ].filter(([, value]) => value !== null && value !== undefined && value !== '');
-    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:10px;">${rows.map(([label, value]) => `<div style="padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;background:rgba(100,116,139,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(label)}</div><div style="font-size:10px;font-weight:650;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div><div style="font-size:9px;color:var(--muted);margin-top:9px;line-height:1.5;">${tr('Версии алгоритмов','Algorithm versions')}: ${escapeHtml(algorithms || '—')}</div>`;
+    return `${session.synthetic ? `<p>${tr('Частоты в демонстрационной выборке заданы искусственно, а не измерены на устройстве.', 'Frame rates in the demo selection are simulated, not measured from the device.')}</p>` : ''}<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:10px;">${rows.map(([label, value]) => `<div style="padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;background:rgba(100,116,139,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(label)}</div><div style="font-size:10px;font-weight:650;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div>`;
   }
 
   function exclusionRowsHtml(exclusions) {
-    return exclusions.map(item => `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;overflow-wrap:anywhere;"><span style="font-weight:700;color:var(--text);">${escapeHtml(attemptLabel(item))}<br>${escapeHtml(item.stimulusId || item.trialId || item.entityId || '—')}<br>${escapeHtml(item.presentationId || '')}</span><span style="color:var(--muted);line-height:1.45;">${escapeHtml((item.qualityIssueCodes?.length ? item.qualityIssueCodes : [item.reasonCode]).map(reasonLabel).join('; '))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
+    return exclusions.map(item => `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;align-items:start;padding:10px 12px;border-top:1px solid var(--stroke);font-size:10px;overflow-wrap:anywhere;"><span style="font-weight:700;color:var(--text);">${escapeHtml(attemptLabel(item))}<br></span><span style="color:var(--muted);line-height:1.45;">${escapeHtml((item.qualityIssueCodes?.length ? item.qualityIssueCodes : [item.reasonCode]).map(reasonLabel).join('; '))}</span><span style="color:var(--muted);">${escapeHtml(item.channel ? channelLabel(item.channel) : tr('Канал не указан','Channel unknown'))}</span></div>`).join('');
   }
 
   function attemptLabel(item) {
@@ -2487,9 +2523,11 @@
     const hasNumber = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
     const percent = value => hasNumber(value) ? `${Math.round(Number(value) * 100)}%` : '—';
     const seconds = value => hasNumber(value) ? `${(Number(value) / 1000).toFixed(1)} ${tr('с','s')}` : '—';
+    const recordingLabel = audio.status === 'completed' && audio.windowCount > 0 && !audio.acceptedWindowCount
+      ? tr('Нет пригодных отрезков', 'No usable segments') : statusLabel(audio.status || 'not_computed');
     const cards = [
-      [tr('Статус записи','Recording status'), statusLabel(audio.status || 'not_computed')],
-      [tr('Принятые окна','Accepted windows'), `${audio.acceptedWindowCount ?? 0}/${audio.windowCount ?? 0}`],
+      [tr('Результат записи','Recording outcome'), recordingLabel],
+      [tr('Пригодные отрезки','Usable segments'), `${audio.acceptedWindowCount ?? 0}/${audio.windowCount ?? 0}`],
       [tr('Качество сигнала','Signal quality'), percent(audio.qualityMean)],
       [tr('Надёжность признаков','Feature reliability'), percent(audio.reliabilityMean)],
       [tr('Проанализировано','Analyzed'), seconds(audio.durationMs)]
@@ -2498,8 +2536,9 @@
     const taskTypeLabel = type => ({
       reading: tr('Чтение фразы','Phrase reading'),
       sustained_vowel: tr('Протяжный звук «а»','Sustained “ah”'),
-      oral_ddk: tr('Повторение «па-та-ка»','“Pa-ta-ka” repetition')
-    })[type] || type || tr('Аудиотест','Audio test');
+      oral_ddk: tr('Повторение «па-та-ка»','“Pa-ta-ka” repetition'),
+      free_speech: tr('Свободная речь','Free speech')
+    })[type] || tr('Голосовое задание','Voice task');
     const taskStatusLabel = status => ({
       completed: tr('рассчитано','scored'),
       insufficient_signal: tr('мало качественного сигнала','insufficient signal'),
@@ -2539,10 +2578,10 @@
       return `<details style="min-width:220px;"><summary style="cursor:pointer;white-space:nowrap;">${escapeHtml(taskMetricSummary(test))}</summary><div style="display:grid;grid-template-columns:minmax(135px,1fr) auto;gap:5px 12px;margin-top:7px;padding:8px;border:1px solid var(--stroke);border-radius:8px;background:var(--card-bg);text-align:left;">${rows.map(([label, value, formatter]) => `<span style="color:var(--muted);">${escapeHtml(label)}</span><strong style="color:var(--text);text-align:right;">${escapeHtml(formatter(value))}</strong>`).join('')}</div></details>`;
     };
     return `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Аудиотесты и голосовые признаки','Audio tests and voice features')}</div><div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Отображаются только рассчитанные признаки и QC. Исходный голос не сохраняется и не передаётся.','Only derived features and QC are shown. Raw voice is neither stored nor transmitted.')}</div></div><span style="font-size:9px;color:${audio.consentGranted ? 'var(--good)' : 'var(--muted)'};">${audio.consentGranted ? tr('Согласие получено','Consent granted') : tr('Нет согласия или аудио отключено','No consent or audio disabled')}</span></div>
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:750;color:var(--text);">${tr('Голосовые задания','Audio tests and voice features')}</div><div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Показаны измерения голоса. Сама запись не сохраняется и не передаётся.','Voice measurements only. Audio is not stored or transmitted.')}</div></div><span style="font-size:9px;color:${audio.consentGranted ? 'var(--good)' : 'var(--muted)'};">${audio.consentGranted ? tr('Согласие получено','Consent granted') : tr('Нет согласия или аудио отключено','No consent or audio disabled')}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px;">${cards.map(([label, value]) => `<div style="padding:10px;border:1px solid var(--stroke);border-radius:10px;background:rgba(15,118,110,.04);"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;">${escapeHtml(label)}</div><div style="font-size:14px;font-weight:750;color:var(--text);margin-top:4px;">${escapeHtml(value)}</div></div>`).join('')}</div>
-      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:900px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Задание','Task')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Окна','Windows')}</th><th>${tr('Оценка качества','Quality score')}</th><th>${tr('Показатели','Metrics')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);vertical-align:top;"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.title || taskTypeLabel(test.testType))}<div style="font-size:8px;color:var(--muted);font-weight:500;margin-top:2px;">${escapeHtml(taskTypeLabel(test.testType))}</div></td><td style="padding-top:9px;text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="padding-top:9px;text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="padding-top:9px;text-align:center;font-weight:700;">${escapeHtml(percent(test.metrics?.completionScore))}</td><td style="padding:8px;text-align:center;">${taskMetricDetails(test)}</td><td style="padding-top:9px;text-align:center;color:${test.status === 'completed' ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(taskStatusLabel(test.status))}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
-      <div style="font-size:8px;color:var(--muted2);margin-top:8px;">${escapeHtml(audio.algorithmVersion || '')}${audio.disclaimer ? ` · ${escapeHtml(audio.disclaimer)}` : ''}</div>
+      ${tests.length ? `<div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;margin-top:10px;"><table style="width:100%;min-width:900px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(15,118,110,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Задание','Task')}</th><th>${tr('Длительность','Duration')}</th><th>${tr('Отрезки','Segments')}</th><th>${tr('Оценка качества','Quality score')}</th><th>${tr('Показатели','Metrics')}</th><th>${tr('Статус','Status')}</th></tr></thead><tbody>${tests.map(test => `<tr style="border-top:1px solid var(--stroke);vertical-align:top;"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(test.title && !internalLabel(test.title) && test.title !== test.testType ? test.title : taskTypeLabel(test.testType))}</td><td style="padding-top:9px;text-align:center;">${escapeHtml(seconds(test.durationMs))}</td><td style="padding-top:9px;text-align:center;">${escapeHtml(`${test.acceptedWindowCount ?? 0}/${test.windowCount ?? 0}`)}</td><td style="padding-top:9px;text-align:center;font-weight:700;">${escapeHtml(percent(test.metrics?.completionScore))}</td><td style="padding:8px;text-align:center;">${taskMetricDetails(test)}</td><td style="padding-top:9px;text-align:center;color:${test.status === 'completed' ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(taskStatusLabel(test.status))}</td></tr>`).join('')}</tbody></table></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:9px;">${tr('В протоколе этой сессии нет отдельных аудиотестов.','This session protocol has no dedicated audio tests.')}</div>`}
+
     </section>`;
   }
 
@@ -2551,11 +2590,8 @@
   }
 
   function reportProvenance(response, extra = '') {
-    return reportDisclosure(tr('Паспорт отчёта и версии', 'Report provenance and versions'),
-      `${extra}<p class="ab-provenance">Snapshot: ${escapeHtml(response.snapshot.id)}<br>
-      ${tr('Хеш данных', 'Dataset hash')}: ${escapeHtml(response.snapshot.datasetHash)}<br>
-      ${tr('Версия контракта', 'Contract version')}: ${escapeHtml(response.contractVersion)}<br>
-      ${tr('Сформировано', 'Generated')}: ${escapeHtml(formatDateTime(response.generatedAt))}</p>`);
+    return reportDisclosure(tr('Условия записи', 'Recording conditions'),
+      `${extra}<p class="ab-provenance">${tr('Сформировано', 'Generated')}: ${escapeHtml(formatDateTime(response.generatedAt))}. ${tr('Технические сведения доступны в JSON.', 'Technical details are available in JSON.')}</p>`);
   }
 
   function reportIntro(section, title, caption, cards) {
@@ -2610,7 +2646,6 @@
     const exclusions = Array.isArray(data.exclusions) ? data.exclusions : [];
     const channels = Array.isArray(data.qcChannels) ? data.qcChannels : [];
     const protocol = selectedProtocol(state);
-    const algorithms = [...new Set(metrics.map(metric => metric.algorithm && metric.algorithm.version).filter(Boolean))].join(', ') || '—';
     const valueFor = (id, unit) => {
       const metric = metrics.find(item => item.metricId === id && item.status === 'computed' && Number.isFinite(item.value));
       return metric ? `${formatMetricNumber(metric.value, 1)}${unit}` : null;
@@ -2635,9 +2670,9 @@
       ${reportDisclosure(tr('Пробы и причины исключений', 'Trials and exclusion reasons'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${validCount === null ? '—' : escapeHtml(validCount)}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${excludedCount === null ? exclusions.length : escapeHtml(excludedCount)}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>`)}
       ${reportDisclosure(tr('Качество измерений', 'Measurement quality'), `
         ${measurementStatusHtml(data, state)}
-        <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · confidence ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}<div style="font-size:8px;opacity:.75;margin-top:5px;">${escapeHtml(channel.ruleVersion || '—')}</div></article>`; }).join('')}</div></section>
+        <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · ${tr('надёжность', 'confidence')} ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}</article>`; }).join('')}</div></section>
         ${qcMetrics.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Показатели качества данных','Data quality metrics')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${qcMetrics.map(metricCardHtml).join('')}</div></section>` : ''}`)}
-      ${reportProvenance(response, technicalDetailsHtml(session, algorithms))}
+      ${reportProvenance(response, technicalDetailsHtml(session))}
     </div>`;
   }
 
@@ -2681,22 +2716,22 @@
     return `${formatMetricNumber(metric.median)}${iqr}${unit}`;
   }
 
-  function groupMetricCardHtml(metric) {
-    const suffix = metric.unit === 'pct' ? '%' : metric.unit === 'ms' ? ` ${tr('мс','ms')}` : '';
-    const fraction = metric.numerator != null && metric.denominator != null ? `${formatMetricNumber(metric.numerator)}/${formatMetricNumber(metric.denominator)}` : (metric.observationDurationMs != null ? `${tr('валидное время','valid time')} ${formatMetricNumber(metric.observationDurationMs)} ${tr('мс','ms')}` : '');
+  function groupMetricCardHtml(metric, names) {
+    const suffix = metric.unit === 'pct' ? '%' : metric.unit === 'ms' ? ' ' + tr('мс','ms') : '';
+    const scope = metric.scope || {};
+    const context = [scope.aoiId && names.area(scope.aoiId), scope.blockId && names.block(scope.blockId),
+      scope.stimulusId && names.stimulus(scope.stimulusId)].filter(Boolean).join(' / ');
     const ci = metric.estimateCi95;
-    return `<article style="padding:13px;border:1px solid var(--stroke);border-radius:12px;background:rgba(255,255,255,.3);min-width:0;">
-      <div style="font-size:10px;color:var(--muted);">${escapeHtml(metricLabel(metric.metricId))}</div><div style="font-size:19px;font-weight:760;color:var(--text);margin-top:5px;">${escapeHtml(groupMetricPrimary(metric))}</div>
-      <div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Среднее','Mean')} ${metric.mean == null ? '—' : escapeHtml(formatMetricNumber(metric.mean) + ' ± ' + formatMetricNumber(metric.sd) + suffix)} · min/max ${metric.min == null ? '—' : escapeHtml(formatMetricNumber(metric.min) + '/' + formatMetricNumber(metric.max) + suffix)}</div>
-      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:7px;font-size:9px;color:var(--muted);"><span>N ${tr('участников','participants')}=${escapeHtml(metric.nParticipants)} · N ${tr('наблюдений','observations')}=${escapeHtml(metric.nObservations)}</span><span>${escapeHtml(fraction)}</span></div>
-      <div style="font-size:9px;color:var(--muted);margin-top:5px;">95% CI: ${ci && ci.lower != null ? `${escapeHtml(formatMetricNumber(ci.lower))}–${escapeHtml(formatMetricNumber(ci.upper))}${suffix}` : '—'} · ${escapeHtml(ci && ci.method || '—')}</div>
-      <div style="font-size:8px;color:var(--muted2);margin-top:5px;">${escapeHtml(metric.algorithm && metric.algorithm.id || '—')} v${escapeHtml(metric.algorithm && metric.algorithm.version || '—')}</div>
-    </article>`;
+    return `<article class="ab-group-metric"><span>${escapeHtml(metricLabel(metric.metricId))}</span>
+      ${context ? `<small>${escapeHtml(context)}</small>` : ''}
+      <strong>${escapeHtml(groupMetricPrimary(metric))}</strong><span>${tr('Участников','Participants')}: ${escapeHtml(metric.nParticipants)}</span>
+      <details><summary>${tr('Подробности','Details')}</summary><p>${tr('Среднее','Mean')}: ${escapeHtml(metric.mean == null ? '—' : formatMetricNumber(metric.mean) + suffix)} · ${tr('Наблюдений','Observations')}: ${escapeHtml(metric.nObservations)}</p>
+      ${ci?.lower == null ? '' : `<p>${tr('95% доверительный интервал','95% confidence interval')}: ${escapeHtml(formatMetricNumber(ci.lower))}–${escapeHtml(formatMetricNumber(ci.upper))}${suffix}</p>`}</details></article>`;
   }
 
   function groupHeatmapHtml(state) {
     if (state.groupHeatmapStatus === 'not_configured') return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:12px;font-weight:700;color:var(--text);">${tr('Групповая heatmap не настроена','Group heatmap is not configured')}</div><div style="font-size:9px;color:var(--muted);margin-top:4px;">${tr('Метрика viz.heatmap не выбрана в плане аналитики протокола.','The viz.heatmap metric is not selected in the protocol analytics plan.')}</div></section>`;
-    if (state.groupHeatmapStatus === 'context_required') return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:12px;font-weight:700;color:var(--text);">${tr('Групповая heatmap','Group heatmap')}</div><div style="font-size:9px;color:var(--muted);margin-top:5px;">${tr('Выберите конкретные block и stimulus и примените фильтры.','Select a specific block and stimulus, then apply the filters.')}</div></section>`;
+    if (state.groupHeatmapStatus === 'context_required') return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:12px;font-weight:700;color:var(--text);">${tr('Групповая тепловая карта','Group heatmap')}</div><div style="font-size:9px;color:var(--muted);margin-top:5px;">${tr('Выберите конкретные block и stimulus и примените фильтры.','Select a specific block and stimulus, then apply the filters.')}</div></section>`;
     if (state.groupHeatmapStatus === 'loading' || state.groupHeatmapStatus === 'idle') return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);font-size:10px;color:var(--muted);">${tr('Загружаем групповую heatmap…','Loading group heatmap…')}</section>`;
     if (state.groupHeatmapStatus === 'error') return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:10px;color:var(--bad);">${escapeHtml(state.groupHeatmapError && state.groupHeatmapError.message || '')}</div><button id="analyticsGroupHeatmapRetry" class="quick-btn" type="button" style="margin-top:8px;">${tr('Повторить','Retry')}</button></section>`;
     const response = state.groupHeatmapResponse;
@@ -2704,8 +2739,10 @@
     if (!heatmap) return '';
     const stimulus = heatmap.stimulus;
     const hasData = heatmap.nFixations > 0 && heatmap.grid && heatmap.grid.maxValue > 0;
+    if (!hasData) return `<section class="ab-heatmap-empty"><strong>${tr('Групповая тепловая карта','Group heatmap')}</strong>
+      <p>${escapeHtml(heatmap.reason ? reasonLabel(heatmap.reason) : tr('Нет пригодных фиксаций для карты', 'No usable fixations for a map'))}</p></section>`;
     const ratio = stimulusAspectRatio(stimulus);
-    return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Групповая heatmap','Group heatmap')} · ${escapeHtml(stimulus.name)}</div><div style="max-width:820px;margin:0 auto;position:relative;box-sizing:content-box;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">${(stimulus.contentUrl || stimulus.contentError) ? stimulusMediaHtml(stimulus) : ''}${hasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="group" role="img" aria-label="${escapeHtml(tr('Групповая heatmap с равным весом участников; параметры и N указаны под изображением','Group heatmap with equal participant weight; parameters and N are listed below'))}" style="position:absolute;inset:0;width:100%;height:100%;opacity:.66;"></canvas>` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.8);color:var(--muted);font-size:10px;">${heatmap.reason ? escapeHtml(reasonLabel(heatmap.reason)) : tr('Недостаточно валидных фиксаций','Insufficient valid fixations')}</div>`}</div><div style="display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} ${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>${tr('Равный вес участников','Equal participant weight')}: ${heatmap.equalParticipantWeight ? tr('да','yes') : tr('нет','no')} · N=${escapeHtml(heatmap.nParticipants)} · ${tr('сессий','sessions')}=${escapeHtml(heatmap.nSessions)} · ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div></section>`;
+    return `<section style="padding:15px 18px;border-top:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Групповая тепловая карта','Group heatmap')} · ${escapeHtml(stimulus.name)}</div><div style="max-width:820px;margin:0 auto;position:relative;box-sizing:content-box;aspect-ratio:${ratio};overflow:hidden;border:1px solid var(--stroke);border-radius:12px;background:#eef2f7;">${(stimulus.contentUrl || stimulus.contentError) ? stimulusMediaHtml(stimulus) : ''}${hasData ? `<canvas class="analytics-heatmap-canvas" data-heatmap-kind="group" role="img" aria-label="${escapeHtml(tr('Групповая heatmap с равным весом участников; параметры и N указаны под изображением','Group heatmap with equal participant weight; parameters and N are listed below'))}" style="position:absolute;inset:0;width:100%;height:100%;opacity:.66;"></canvas>` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.8);color:var(--muted);font-size:10px;">${heatmap.reason ? escapeHtml(reasonLabel(heatmap.reason)) : tr('Недостаточно валидных фиксаций','Insufficient valid fixations')}</div>`}</div><div style="display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(heatmap.coordinateSpace)} · ${escapeHtml(heatmap.normalizationMode)} · ${escapeHtml(heatmap.smoothing.method)} ${escapeHtml(heatmap.smoothing.bandwidthNorm)}</span><span>${tr('Равный вес участников','Equal participant weight')}: ${heatmap.equalParticipantWeight ? tr('да','yes') : tr('нет','no')} · N=${escapeHtml(heatmap.nParticipants)} · ${tr('сессий','sessions')}=${escapeHtml(heatmap.nSessions)} · ${tr('фиксаций','fixations')}=${escapeHtml(heatmap.nFixations)} · ${escapeHtml(heatmap.algorithm.id)} v${escapeHtml(heatmap.algorithm.version)}</span></div></section>`;
   }
 
   function groupDashboardHtml(state) {
@@ -2727,7 +2764,7 @@
       ${groupHeatmapHtml(state)}
       ${reportDisclosure(tr('Физиология и другие сигналы', 'Physiology and other signals'), passiveAnalyticsHtml(data, true, Boolean(snapshot.queryEcho?.filters?.blockIds?.length)))}
       ${reportDisclosure(tr('Качество выборки и исключения', 'Selection quality and exclusions'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество отдельных сигналов','Quality by signal')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">${(data.qcByChannel||[]).map(channel=>`<article style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="font-size:10px;font-weight:700;color:var(--text);">${escapeHtml(channelLabel(channel.channel))}</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:9px;"><span style="color:var(--good);">${statusLabel('valid')}: ${escapeHtml(channel.valid)}</span><span style="color:var(--warn);">${statusLabel('borderline')}: ${escapeHtml(channel.borderline)}</span><span style="color:var(--bad);">${statusLabel('invalid')}: ${escapeHtml(channel.invalid)}</span><span style="color:var(--muted);">${statusLabel('not_computed')}: ${escapeHtml(channel.notComputed)}</span></div></article>`).join('')}</div><details style="margin-top:10px;"><summary style="font-size:10px;font-weight:700;cursor:pointer;">${tr('Пропуски и причины исключения','Missingness and exclusion reasons')}</summary><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;">${(data.missingness||[]).map(item=>`<span style="padding:6px 8px;border-radius:8px;background:rgba(100,116,139,.08);font-size:9px;color:var(--muted);">${escapeHtml(reasonLabel(item.reasonCode))}: ${escapeHtml(item.count)}</span>`).join('')}</div>${(snapshot.excludedSessions||[]).map(item=>`<div style="font-size:9px;color:var(--muted);margin-top:6px;">${tr('Сессия','Session')} ${escapeHtml(item.sessionId)} · ${escapeHtml(reasonLabel(item.reasonCode))} · ${escapeHtml(item.channel?channelLabel(item.channel):'—')}</div>`).join('')}</details></section>`)}
-      ${reportDisclosure(tr('Все групповые показатели', 'All group metrics'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Описательные групповые показатели','Group descriptive metrics')}</div><div style="font-size:9px;color:var(--muted);margin:-5px 0 10px;">${tr('Точки — значения участников; рамка — IQR; тёмная линия — медиана.','Dots are participant values; the box is IQR; the dark line is the median.')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;">${metrics.map(groupMetricCardHtml).join('')}</div></section>`)}
+      ${reportDisclosure(tr('Все групповые показатели', 'All group metrics'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Описательные групповые показатели','Group descriptive metrics')}</div><div style="font-size:9px;color:var(--muted);margin:-5px 0 10px;">${tr('Точки — значения участников; рамка — IQR; тёмная линия — медиана.','Dots are participant values; the box is IQR; the dark line is the median.')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;">${metrics.map(metric => groupMetricCardHtml(metric, reportLabels(state))).join('')}</div></section>`)}
       ${reportDisclosure(tr('Таблица областей интереса', 'Area-of-interest table'), `${aoiMetrics.length?`<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('AOI-таблица','AOI table')}</div><div style="overflow:auto;border:1px solid var(--stroke);border-radius:10px;"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:9px;"><thead><tr style="background:rgba(92,102,189,.05);color:var(--muted);"><th style="padding:8px;text-align:left;">${tr('Метрика','Metric')}</th><th>AOI</th><th>${tr('Медиана [IQR]','Median [IQR]')}</th><th>n/N</th><th>N ${tr('участников','participants')}</th><th>N ${tr('наблюдений','observations')}</th></tr></thead><tbody>${aoiMetrics.map(metric=>`<tr style="border-top:1px solid var(--stroke);"><td style="padding:8px;color:var(--text);font-weight:650;">${escapeHtml(metricLabel(metric.metricId))}</td><td style="text-align:center;">${escapeHtml(metric.scope&&metric.scope.aoiId||'—')}</td><td style="text-align:center;">${escapeHtml(groupMetricPrimary(metric))}</td><td style="text-align:center;">${metric.numerator!=null&&metric.denominator!=null?`${escapeHtml(metric.numerator)}/${escapeHtml(metric.denominator)}`:'—'}</td><td style="text-align:center;">${escapeHtml(metric.nParticipants)}</td><td style="text-align:center;">${escapeHtml(metric.nObservations)}</td></tr>`).join('')}</tbody></table></div></section>`:''}`)}
       ${reportProvenance(response, `<details style="padding:12px 18px;border-top:1px solid var(--stroke);"><summary style="font-size:10px;font-weight:700;cursor:pointer;">${tr('Технический состав и версии','Technical composition and versions')}</summary><div style="margin-top:8px;font-size:9px;color:var(--muted);">${(data.deviceCounts||[]).map(item=>`${escapeHtml(item.deviceClass)}: ${escapeHtml(item.participantCount)} ${tr('участников','participants')}, ${escapeHtml(item.sessionCount)} ${tr('сессий','sessions')}`).join(' · ')||'—'}<br>${Object.entries(snapshot.versions||{}).map(([key,value])=>`${escapeHtml(key)}=${escapeHtml(value==null?'—':value)}`).join(' · ')}</div></details>`)}
     </div>`;
@@ -2801,7 +2838,7 @@
       <p style="font-size:12px;color:var(--muted);">${tr('Участники', 'Participants')}: ${escapeHtml(data.nParticipants)} · ${tr('Наблюдения', 'Observations')}: ${escapeHtml(data.nObservations)} · ${tr('Не вошли из-за неполных данных', 'Excluded for missing data')}: ${data.excludedParticipants.length}</p>
       ${data.unidentifiedSessionCount ? `<p role="status">${tr('Исключено сессий без идентификатора участника', 'Sessions excluded for missing participant ID')}: ${escapeHtml(data.unidentifiedSessionCount)}</p>` : ''}
       <div id="analyticsBlockComparison"></div>
-      ${data.pairs.length ? `<details class="ab-stat-details"><summary>${tr('Таблица пар', 'Pair table')} (${data.pairs.length})</summary><div style="overflow:auto;"><table style="width:100%;font-size:12px;"><thead><tr><th>${tr('Участник', 'Participant')}</th><th>A</th><th>B</th><th>B − A</th></tr></thead><tbody>${data.pairs.map(pair => `<tr><td>${escapeHtml(pair.participantId)}</td><td>${escapeHtml(number(pair.reference))}</td><td>${escapeHtml(number(pair.comparison))}</td><td>${escapeHtml(number(pair.difference))}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+      ${data.pairs.length ? `<details class="ab-stat-details"><summary>${tr('Таблица пар', 'Pair table')} (${data.pairs.length})</summary><div data-ab-pair-viz></div><div style="overflow:auto;"><table style="width:100%;font-size:12px;"><thead><tr><th>${tr('Участник', 'Participant')}</th><th>A</th><th>B</th><th>B − A</th></tr></thead><tbody>${data.pairs.map(pair => `<tr><td>${escapeHtml(pair.participantId)}</td><td>${escapeHtml(number(pair.reference, rawUnit))}</td><td>${escapeHtml(number(pair.comparison, rawUnit))}</td><td>${escapeHtml(number(pair.difference))}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       ${data.reference.q1 != null || data.comparison.q1 != null ? `<details class="ab-stat-details"><summary>${tr('Разброс и число наблюдений', 'Spread and observation counts')}</summary>
         <div style="overflow:auto;"><table><thead><tr><th>${tr('Сторона', 'Side')}</th><th>${tr('Медиана', 'Median')}</th><th>Q1 – Q3</th><th>SD</th><th>n</th></tr></thead>
         <tbody>${distributionRow('A', data.reference, rawUnit)}${distributionRow('B', data.comparison, rawUnit)}${distributionRow('B − A', data.pairedDifferences, unit)}</tbody></table></div>
@@ -2864,7 +2901,6 @@
     const channels = Array.isArray(data.qcChannels) ? data.qcChannels : [];
     const exclusions = Array.isArray(data.exclusions) ? data.exclusions : [];
     const metrics = Array.isArray(data.metrics) ? data.metrics : [];
-    const algorithms = [...new Set(metrics.map(metric => metric.algorithm && metric.algorithm.version).filter(Boolean))].join(', ') || '—';
     const checks = Object.entries(quality.checks || {});
     const percentages = [
       ['faceVisible', tr('Лицо обнаружено','Face detected')],
@@ -2899,7 +2935,7 @@
         ${percentages.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Доля качественных кадров','Share of quality frames')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">${percentages.map(([key,label]) => { const value = Number(quality.percentages[key]); const inverse = key === 'lowFps'; const good = inverse ? value <= 5 : value >= 80; return `<article style="padding:10px;border:1px solid var(--stroke);border-radius:10px;"><div style="display:flex;justify-content:space-between;gap:8px;font-size:9px;color:var(--muted);"><span>${escapeHtml(label)}</span><strong style="color:${good ? 'var(--good)' : 'var(--warn)'};">${escapeHtml(value)}%</strong></div><div style="height:6px;border-radius:999px;background:rgba(100,116,139,.12);margin-top:7px;overflow:hidden;"><span style="display:block;height:100%;width:${Math.max(0,Math.min(100,value))}%;background:${good ? 'var(--good)' : 'var(--warn)'};"></span></div></article>`; }).join('')}</div></section>` : ''}
         ${checks.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Проверки условий записи','Recording-condition checks')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${checks.map(([key,passed]) => `<div style="padding:9px 10px;border:1px solid var(--stroke);border-radius:9px;display:flex;justify-content:space-between;gap:9px;align-items:center;"><span style="font-size:9px;color:var(--text);">${escapeHtml(qualityCheckLabel(key))}</span><strong style="font-size:9px;color:${passed ? 'var(--good)' : 'var(--warn)'};">${passed ? tr('Пройдено','Passed') : tr('Требует внимания','Needs attention')}</strong></div>`).join('')}</div></section>` : ''}`)}
       ${reportDisclosure(tr('Пробы и причины исключений', 'Trials and exclusion reasons'), `${exclusions.length ? `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Исключённые пробы','Excluded trials')} (${exclusions.length})</div><div style="border:1px solid var(--stroke);border-radius:10px;overflow:hidden;">${exclusionRowsHtml(exclusions)}</div></section>` : ''}`)}
-      ${reportProvenance(response, technicalDetailsHtml(session, algorithms))}
+      ${reportProvenance(response, technicalDetailsHtml(session))}
     </div>`;
   }
 
@@ -2938,6 +2974,10 @@
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const dpr = Math.min(2, global.devicePixelRatio || 1);
+    const previous = heatmapPaintState.get(canvas);
+    if (previous?.data === data && previous.grid === grid && previous.width === rect.width
+      && previous.height === rect.height && previous.dpr === dpr) return;
+    heatmapPaintState.set(canvas, { data, grid, width: rect.width, height: rect.height, dpr });
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
     const source = global.document.createElement('canvas');
@@ -2962,11 +3002,17 @@
   }
 
   function bindHeatmapCanvases(root) {
-    root.querySelectorAll('.analytics-stimulus-retry').forEach(button => button.addEventListener('click', () => {
-      if (store.state.query.mode === 'group') store.loadGroupHeatmap();
-      else store.loadVisualAnalytics();
-    }));
+    root.querySelectorAll('.analytics-stimulus-retry').forEach(button => {
+      if (boundStimulusRetries.has(button)) return;
+      boundStimulusRetries.add(button);
+      button.addEventListener('click', () => {
+        if (store.state.query.mode === 'group') store.loadGroupHeatmap();
+        else store.loadVisualAnalytics();
+      });
+    });
     root.querySelectorAll('.analytics-stimulus-media').forEach(image => {
+      if (boundStimulusMedia.has(image)) return;
+      boundStimulusMedia.add(image);
       let readinessTimeout;
       const showFallback = () => {
         clearTimeout(readinessTimeout);
@@ -2992,7 +3038,8 @@
     });
     root.querySelectorAll('.analytics-heatmap-canvas').forEach(canvas => {
       drawHeatmapCanvas(canvas);
-      if (typeof global.ResizeObserver === 'function') {
+      if (typeof global.ResizeObserver === 'function' && !observedHeatmapCanvases.has(canvas)) {
+        observedHeatmapCanvases.add(canvas);
         const observer = new global.ResizeObserver(() => {
           if (!canvas.isConnected) return observer.disconnect();
           drawHeatmapCanvas(canvas);
@@ -3024,8 +3071,121 @@
     wrapper.style.cssText = 'display:flex;flex-direction:column;min-height:100%;margin:-20px;';
     wrapper.innerHTML = `<nav class="analytics-tabs" aria-label="${tr('Разделы аналитики','Analytics sections')}" role="tablist">${TABS.map(tab => `<button type="button" role="tab" aria-selected="${tab.id === activeTab}" class="analytics-tab ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}" style="border:0;background:transparent;">${tr(tab.ru, tab.en)}</button>`).join('')}</nav><main id="analyticsProductionBody" class="analytics-view-body" style="display:flex;flex-direction:column;gap:12px;"></main>`;
     const body = wrapper.querySelector('#analyticsProductionBody');
+    const visualizations = global.WecogAnalyticsVisualizations?.workspace(tr);
+    body.__chartManifest = () => visualizations?.manifest() || [];
     let unsubscribe = null;
     let pdfInProgress = false;
+    let explorerHost = null;
+    let explorerContext = null;
+    let renderedGeneration = stimulusMediaGeneration;
+    const renderedMarkup = new WeakMap();
+    const mountedDashboards = new WeakMap();
+    const viewportKey = 'emocog_analytics_viewport_v1';
+    let reloadViewport = null;
+
+    function viewportFingerprint() {
+      let account = global.WecogStaffSession?.getAccountId();
+      if (!account) {
+        try { account = JSON.parse(selectedStored('emocog_api_user') || 'null')?.id; } catch (_) {}
+      }
+      if (!account && global.EmocogAnalyticsPreviewFixture) account = 'local-preview';
+      return account ? JSON.stringify([String(account), global.location.pathname, global.location.search,
+        activeTab, isEnglish(), store.state.query, store.state.groupLevel]) : null;
+    }
+
+    try {
+      const saved = JSON.parse(global.sessionStorage.getItem(viewportKey) || 'null');
+      // Some engines report a reload of an SPA route as a new navigation.
+      if (saved && (!saved.url || saved.url === global.location.href)
+        && Date.now() - saved.at < 30 * 60 * 1000 && Array.isArray(saved.scrolls)) reloadViewport = saved;
+    } catch (_) {}
+
+    saveAnalyticsViewport = () => {
+      if (!body.isConnected || store.state.status !== 'ready' || !hasAuth()) return;
+      const fingerprint = viewportFingerprint();
+      if (!fingerprint) return;
+      const scrolls = [];
+      for (let node = body.parentElement; node; node = node.parentElement) {
+        if (!node.scrollTop && !node.scrollLeft && node !== global.document.scrollingElement) continue;
+        const path = [];
+        let anchor = node;
+        while (anchor !== global.document.documentElement && !anchor.id) {
+          path.unshift([Array.prototype.indexOf.call(anchor.parentElement.children, anchor), anchor.tagName]);
+          anchor = anchor.parentElement;
+        }
+        scrolls.push({ id: anchor.id, path, top: node.scrollTop, left: node.scrollLeft });
+      }
+      const active = global.document.activeElement;
+      try {
+        global.sessionStorage.setItem(viewportKey, JSON.stringify({ fingerprint, url: global.location.href, datasetHash: store.state.snapshot?.datasetHash, at: Date.now(), scrolls,
+          controls: [...body.querySelectorAll('.ab-dashboard select[id]')].slice(0, 48).map(node => ({ id: node.id, value: node.value })),
+          focusId: body.contains(active) ? active.id : '' }));
+      } catch (_) {}
+    };
+
+    function restoreReloadViewport() {
+      if (!reloadViewport || store.state.status !== 'ready' || store.state.dirty || !store.state.snapshot) return;
+      if (body.querySelector('#analyticsExplorer .ax-loading')) return;
+      const required = activeTab === 'group-comparison'
+        ? (store.state.groupLevel === 'level-2' ? store.state.comparisonStatus : store.state.groupStatus)
+        : store.state.summaryStatus;
+      if (required !== 'ready') return;
+      const saved = reloadViewport;
+      reloadViewport = null;
+      try { global.sessionStorage.removeItem(viewportKey); } catch (_) {}
+      if (saved.fingerprint !== viewportFingerprint() || (saved.datasetHash && saved.datasetHash !== store.state.snapshot.datasetHash)) return;
+      for (const control of (saved.controls || []).slice(0, 48)) {
+        if (!/^ab[A-Za-z]{1,60}$/.test(control.id) || typeof control.value !== 'string' || control.value.length > 1024) continue;
+        const select = global.document.getElementById(control.id);
+        if (body.contains(select) && select.tagName === 'SELECT' && [...select.options].some(option => option.value === control.value) && select.value !== control.value) {
+          select.value = control.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      if (saved.focusId && global.document.activeElement === global.document.body) {
+        const focus = global.document.getElementById(saved.focusId);
+        if (body.contains(focus) && !focus.disabled) focus.focus({ preventScroll: true });
+      }
+      for (const position of saved.scrolls.slice(0, 20)) {
+        let node = position.id ? global.document.getElementById(position.id) : global.document.documentElement;
+        for (const [index, tag] of position.path || []) {
+          node = node?.children[index];
+          if (node?.tagName !== tag) { node = null; break; }
+        }
+        if (node?.contains(body) && Number.isFinite(position.left) && Number.isFinite(position.top)) {
+          node.scrollTo({ left: position.left, top: position.top, behavior: 'instant' });
+        }
+      }
+    }
+
+    cancelAnalyticsViewportRestore = event => {
+      if (!body.isConnected || !event.isTrusted) return;
+      if (event.target.closest?.('#analyticsApplyFilters') && !['input', 'change', 'wheel', 'touchstart'].includes(event.type)) return;
+      reloadViewport = null;
+      try { global.sessionStorage.removeItem(viewportKey); } catch (_) {}
+    };
+    function updatePdfReady() {
+      const button = body.querySelector('#analyticsPdfDownload');
+      const explorer = body.querySelector('#analyticsExplorer');
+      if (!button) return;
+      button.hidden = Boolean(explorer?.querySelector('[data-export=pdf]'));
+      button.disabled = pdfInProgress || button.dataset.legacyReady !== 'true' || Boolean(explorer
+        && (explorer.__analyticsPdfPending || (!explorer.__analyticsPdfSource && !explorer.querySelector('.ax-unready'))));
+      const visibleButton = explorer?.querySelector('[data-export=pdf]');
+      if (visibleButton) visibleButton.disabled = button.disabled;
+    }
+    body.addEventListener('wecog:analytics-rendered', () => { restoreReloadViewport(); updatePdfReady(); });
+
+    function mountDashboard(host, data, paint) {
+      if (!host) return;
+      const previous = mountedDashboards.get(host);
+      const en = isEnglish();
+      if (previous && previous.data === data && previous.en === en && previous.generation === stimulusMediaGeneration
+        && previous.snapshot === store.state.snapshot) return;
+      paint();
+      global.WecogAnalyticsVisualizations?.zoomWithin(host, tr);
+      mountedDashboards.set(host, { data, en, generation: stimulusMediaGeneration, snapshot: store.state.snapshot });
+    }
     body.addEventListener('click', async event => {
       const button = event.target.closest('[data-ab-save-chart]');
       if (!button || button.disabled) return;
@@ -3045,7 +3205,8 @@
         if (!stillCurrent()) return;
         const png = await global.EmocogAnalyticsPdf.chartImage(chart, Boolean(global.EmocogAnalyticsPreviewFixture));
         if (!stillCurrent()) return;
-        triggerDownload(png, exportFilename(state, 'png'));
+        triggerDownload(png, card.dataset.vizId
+          ? `wecog-${isEnglish() ? 'chart' : 'график'}-${card.dataset.vizId}.png` : exportFilename(state, 'png'));
         status.textContent = tr('График скачан', 'Chart downloaded');
       } catch (_) {
         if (status.isConnected) status.textContent = tr('Не удалось скачать график. Проверьте доступ к экспорту.', 'Chart download failed. Check export permissions.');
@@ -3059,93 +3220,152 @@
         if (unsubscribe) unsubscribe();
         return;
       }
+      const restoreViewport = global.EmocogBlockDashboard?.viewportState(body);
+      const content = global.document.createElement('div');
+      visualizations?.reset(!state.dirty ? state.snapshot : null);
       const refinement = body.querySelector('#analyticsRefinement');
       if (refinement) state.refinementOpen = refinement.open;
       if (typeof global.setChips === 'function') {
         const statusLabel = global.EmocogAnalyticsPreviewFixture
           ? (state.query.mode === 'group' ? tr('Предпросмотр · 12 участников','Preview · 12 participants') : tr('Предпросмотр · 1 сессия','Preview · 1 session'))
-          : (state.status === 'ready' ? tr('Данные API','API data') : tr('Данные не загружены','Data not loaded'));
-        global.setChips([statusLabel]);
+          : (state.status === 'ready' ? null : tr('Данные не загружены','Data not loaded'));
+        global.setChips(statusLabel ? [statusLabel] : []);
       }
       if (state.status === 'unauthorized') {
-        body.innerHTML = stateCard('unauthorized', tr('Нужна авторизация исследователя','Researcher sign-in required'), tr('Без API production-аналитика не показывает числа и не переключается на демонстрационные данные. Войдите в систему и повторите запрос.','Without the API, production analytics shows no numbers and never falls back to demo data. Sign in and retry.'), tr('Повторить проверку','Retry'));
+        content.innerHTML = stateCard('unauthorized', tr('Нужна авторизация исследователя','Researcher sign-in required'), tr('Без API production-аналитика не показывает числа и не переключается на демонстрационные данные. Войдите в систему и повторите запрос.','Without the API, production analytics shows no numbers and never falls back to demo data. Sign in and retry.'), tr('Повторить проверку','Retry'));
         if (canOfferLocalPreview()) {
-          body.querySelector('#analyticsStateAction')?.insertAdjacentHTML('afterend', `<a href="${escapeHtml(localPreviewUrl())}" style="display:block;width:max-content;margin:9px auto 0;color:var(--accent);font-size:11px;font-weight:650;text-decoration:none;">${tr('Посмотреть preview с одной сессией','View one-session preview')}</a>`);
+          content.querySelector('#analyticsStateAction')?.insertAdjacentHTML('afterend', `<a href="${escapeHtml(localPreviewUrl())}" style="display:block;width:max-content;margin:9px auto 0;color:var(--accent);font-size:11px;font-weight:650;text-decoration:none;">${tr('Посмотреть preview с одной сессией','View one-session preview')}</a>`);
         }
       } else if (state.status === 'loading' || state.status === 'idle') {
-        body.innerHTML = stateCard('loading', tr('Загружаем выборку','Loading selection'), tr('Получаем проекты, протоколы и сессии из API. Демонстрационные значения в этот момент не отображаются.','Fetching projects, protocols, and sessions from the API. No demo values are displayed while loading.'));
+        content.innerHTML = stateCard('loading', tr('Загружаем выборку','Loading selection'), tr('Получаем проекты, протоколы и сессии из API. Демонстрационные значения в этот момент не отображаются.','Fetching projects, protocols, and sessions from the API. No demo values are displayed while loading.'));
       } else if (state.status === 'error') {
-        body.innerHTML = stateCard('error', tr('Не удалось загрузить аналитику','Analytics could not be loaded'), `${tr('Ответ API:','API response:')} ${escapeHtml(state.error && state.error.message || tr('неизвестная ошибка','unknown error'))}. ${tr('Старые данные не отображаются.','Stale data is not displayed.')}`, tr('Повторить','Retry'));
+        content.innerHTML = stateCard('error', tr('Не удалось загрузить аналитику','Analytics could not be loaded'), `${tr('Ответ API:','API response:')} ${escapeHtml(state.error && state.error.message || tr('неизвестная ошибка','unknown error'))}. ${tr('Старые данные не отображаются.','Stale data is not displayed.')}`, tr('Повторить','Retry'));
       } else {
-        body.innerHTML = filtersHtml(state);
-        body.insertAdjacentHTML('beforeend', previewBannerHtml(state));
+        content.innerHTML = filtersHtml(state);
+        content.insertAdjacentHTML('beforeend', previewBannerHtml(state));
         if (state.status === 'empty') {
           const title = state.emptyKind === 'projects' ? tr('Нет доступных проектов','No projects available') : tr('По выбранным фильтрам нет сессий','No sessions match the filters');
           const description = state.emptyKind === 'projects' ? tr('Создайте проект или попросите предоставить к нему доступ.','Create a project or request access to one.') : tr('Это состояние «нет данных», а не нулевой результат. Измените протокол или QC-фильтр.','This is a no-data state, not a zero result. Change the protocol or QC filter.');
-          body.insertAdjacentHTML('beforeend', stateCard('empty', title, description));
+          content.insertAdjacentHTML('beforeend', stateCard('empty', title, description));
         } else if (!state.snapshot || state.dirty) {
-          body.insertAdjacentHTML('beforeend', stateCard('empty', tr('Примените фильтры','Apply the filters'), tr('Нажмите «Применить», чтобы обновить графики и статистику.','Select Apply to update the charts and statistics.')));
+          content.insertAdjacentHTML('beforeend', stateCard('empty', tr('Примените фильтры','Apply the filters'), tr('Нажмите «Применить», чтобы обновить графики и статистику.','Select Apply to update the charts and statistics.')));
         } else if (activeTab === 'session-card') {
-          body.insertAdjacentHTML('beforeend', sessionShellHtml(state));
+          content.insertAdjacentHTML('beforeend', sessionShellHtml(state));
         } else if (activeTab === 'group-comparison') {
-          body.insertAdjacentHTML('beforeend', groupShellHtml(state));
+          content.insertAdjacentHTML('beforeend', groupShellHtml(state));
         } else if (activeTab === 'data-quality') {
-          body.insertAdjacentHTML('beforeend', dataQualityShellHtml(state));
+          content.insertAdjacentHTML('beforeend', dataQualityShellHtml(state));
         } else {
           if (state.summaryStatus === 'loading' || state.summaryStatus === 'idle') {
-            body.insertAdjacentHTML('beforeend', stateCard('loading', tr('Загружаем связанность','Loading connectedness'), tr('Загружаем пробы выбранной сессии.','Loading trials from the selected session.')));
+            content.insertAdjacentHTML('beforeend', stateCard('loading', tr('Загружаем связанность','Loading connectedness'), tr('Загружаем пробы выбранной сессии.','Loading trials from the selected session.')));
           } else if (state.summaryStatus === 'error') {
-            body.insertAdjacentHTML('beforeend', stateCard('error', tr('Не удалось загрузить связанность','Could not load connectedness'), tr('Старые результаты скрыты. Повторите применение выборки.','Stale results are hidden. Apply the selection again.')));
+            content.insertAdjacentHTML('beforeend', stateCard('error', tr('Не удалось загрузить связанность','Could not load connectedness'), tr('Старые результаты скрыты. Повторите применение выборки.','Stale results are hidden. Apply the selection again.')));
           } else {
             const connectednessHost = global.document.createElement('div');
-            body.appendChild(connectednessHost);
-            global.EmocogConnectedness.render(connectednessHost, state.summaryResponse, isEnglish(), reportLabels(state));
+            connectednessHost.id = 'analyticsConnectedness';
+            content.appendChild(connectednessHost);
           }
         }
       }
       if (state.status === 'ready' && state.snapshot && !state.dirty) {
+        if (global.WecogAnalyticsExplorer && !global.EmocogAnalyticsPreviewFixture) {
+          const explorer = global.document.createElement('section');
+          explorer.id = 'analyticsExplorer';
+          content.firstElementChild?.insertAdjacentElement('afterend', explorer);
+        }
+        if (visualizations) content.insertAdjacentHTML('beforeend', '<section class="ax-viz-collection" hidden></section>');
         const requiredStatus = activeTab === 'group-comparison'
           ? (state.groupLevel === 'level-2' ? state.comparisonStatus : state.groupStatus)
           : state.summaryStatus;
         const graphicsBusy = activeTab === 'session-card' ? state.visualStatus === 'loading'
           : activeTab === 'group-comparison' && (state.groupHeatmapStatus === 'loading' || state.comparisonStatus === 'loading');
         const ready = requiredStatus === 'ready' && !graphicsBusy;
-        body.firstElementChild?.insertAdjacentHTML('beforeend', `<div class="ab-report-tools"><button id="analyticsPdfDownload" type="button" class="quick-btn" ${!ready || pdfInProgress ? 'disabled' : ''}>${tr('Скачать PDF','Download PDF')}</button><span id="analyticsPdfStatus" role="status"></span>${analyticsGlossaryHtml()}</div>`);
+        content.firstElementChild?.insertAdjacentHTML('beforeend', `<div class="ab-report-tools"><button id="analyticsPdfDownload" type="button" class="quick-btn" data-legacy-ready="${ready}" ${!ready || pdfInProgress ? 'disabled' : ''}>${tr('Скачать PDF','Download PDF')}</button><span id="analyticsPdfStatus" role="status"></span>${analyticsGlossaryHtml()}</div>`);
       }
+      const nextExplorerContext = [state.snapshot, state.snapshot?.datasetHash, stimulusMediaGeneration, isEnglish()];
+      const reuseExplorer = explorerHost && explorerContext?.every((value, index) => value === nextExplorerContext[index]);
+      const previous = [...body.children];
+      const inserted = [];
+      // Compare the generated shell, not the interactive DOM modified by dashboards.
+      const next = [...content.children].map((node, index) => {
+        if (node.id === 'analyticsExplorer') {
+          if (reuseExplorer) return explorerHost;
+          inserted.push(node);
+          return node;
+        }
+        const markup = node.outerHTML;
+        if (renderedGeneration === stimulusMediaGeneration && renderedMarkup.get(previous[index]) === markup) return previous[index];
+        renderedMarkup.set(node, markup);
+        inserted.push(node);
+        return node;
+      });
+      const retained = new Set(next);
+      for (const node of previous) {
+        if (!retained.has(node)) node.remove();
+      }
+      for (const [index, node] of next.entries()) {
+        if (body.children[index] !== node) body.insertBefore(node, body.children[index] || null);
+      }
+      visualizations?.mount(body.querySelector('.ax-viz-collection'));
+      renderedGeneration = stimulusMediaGeneration;
+      const nextExplorer = body.querySelector('#analyticsExplorer');
+      if (nextExplorer !== explorerHost) {
+        body.__analyticsPdfSource = null;
+        explorerHost = nextExplorer;
+        explorerContext = nextExplorer ? nextExplorerContext : null;
+        if (nextExplorer) global.WecogAnalyticsExplorer.mount(nextExplorer, state, { en: isEnglish(), tab: activeTab, labels: reportLabels(state), visualizations });
+      }
+      if (!state.snapshot || state.dirty || state.status !== 'ready') body.__analyticsPdfSource = null;
+      if (state.status === 'unauthorized' || state.status === 'error') reloadViewport = null;
       const dashboard = global.EmocogBlockDashboard;
+      const connectednessHost = body.querySelector('#analyticsConnectedness');
+      mountDashboard(connectednessHost, state.summaryResponse, () => global.EmocogConnectedness.render(connectednessHost, state.summaryResponse, isEnglish(), reportLabels(state)));
       const sessionHost = body.querySelector('#analyticsSessionBlocks');
       const comparisonHost = body.querySelector('#analyticsBlockComparison');
       const qualityHost = body.querySelector('#analyticsChannelQuality');
       const groupHost = body.querySelector('#analyticsGroupDistribution');
       const relationHost = body.querySelector('#analyticsParticipantRelation');
       const rtHost = body.querySelector('#analyticsRtDistribution');
-      if (sessionHost) dashboard?.session(sessionHost, state.summaryResponse.data, {
-        en: isEnglish(), labels: reportLabels(state),
+      mountDashboard(sessionHost, state.summaryResponse, () => dashboard?.session(sessionHost, state.summaryResponse.data, {
+        en: isEnglish(), labels: reportLabels(state), visualizations,
         hasAoiFilter: Boolean(state.snapshot.queryEcho?.filters?.aoiIds?.length),
-      });
-      if (comparisonHost) dashboard?.comparison(comparisonHost, state.comparisonResponse.data, {
+      }));
+      mountDashboard(comparisonHost, state.comparisonResponse, () => dashboard?.comparison(comparisonHost, state.comparisonResponse.data, {
         en: isEnglish(), metric: metricLabel(state.comparisonResponse.data.metricId), labels: reportLabels(state),
         sideNames: comparisonSideNames(state.comparisonResponse.snapshot?.queryEcho?.comparison, state.filterOptions),
+      }));
+      const pairChart = body.querySelector('[data-ab-pair-viz]');
+      mountDashboard(pairChart, state.comparisonResponse, () => {
+        const data = state.comparisonResponse.data;
+        const unit = ({ pct: '%', bpm: tr('уд/мин', 'bpm'), 'breaths/min': tr('дых/мин', 'breaths/min') })[data.effectUnit] || tr('мс', 'ms');
+        visualizations?.attachTable(pairChart, { title: metricLabel(data.metricId), en: isEnglish(),
+          columns: [['A', 'reference', unit], ['B', 'comparison', unit], ['B − A', 'difference', data.effectUnit === 'pct' ? tr('п.п.', 'pp') : unit]]
+            .map(([label, key, unit]) => ({ label, unit, values: data.pairs.map(pair => pair[key]) })) });
       });
-      if (qualityHost) dashboard?.quality(qualityHost, state.summaryResponse.data, {
+      mountDashboard(qualityHost, state.summaryResponse, () => dashboard?.quality(qualityHost, state.summaryResponse.data, {
         en: isEnglish(), channelLabel, reasonLabel, statusLabel,
-      });
-      const groupOptions = { en: isEnglish(), metricLabel, labels: reportLabels(state),
-        unitLabel: unit => ({ pct: '%', ms: tr('мс', 'ms'), bpm: tr('уд/мин', 'bpm'), 'breaths/min': tr('дых/мин', 'breaths/min') })[unit] || unit || '',
+      }));
+      const groupOptions = { en: isEnglish(), metricLabel, labels: reportLabels(state), visualizations,
+        unitLabel: unit => ({ pct: '%', ms: tr('мс', 'ms'), bpm: tr('уд/мин', 'bpm'), 'breaths/min': tr('дых/мин', 'breaths/min'), count: '', boolean: '' })[unit] ?? unit ?? '',
       };
-      if (groupHost) dashboard?.group(groupHost, state.groupResponse.data, groupOptions);
+      mountDashboard(groupHost, state.groupResponse, () => dashboard?.group(groupHost, state.groupResponse.data, groupOptions));
       if (relationHost && dashboard) {
-        dashboard.participantRelation(relationHost.lastElementChild, state.groupResponse.data, groupOptions);
+        mountDashboard(relationHost.lastElementChild, state.groupResponse, () => dashboard.participantRelation(relationHost.lastElementChild, state.groupResponse.data, groupOptions));
         relationHost.hidden = !relationHost.lastElementChild.firstElementChild;
       }
-      if (rtHost && !state.snapshot.queryEcho?.filters?.aoiIds?.length) dashboard?.rtDistribution(rtHost,
-        state.summaryResponse.data.connectedness, { en: isEnglish() });
-      bindBodyEvents();
-      global.requestAnimationFrame(() => bindHeatmapCanvases(body));
+      if (rtHost && !state.snapshot.queryEcho?.filters?.aoiIds?.length) mountDashboard(rtHost, state.summaryResponse, () => dashboard?.rtDistribution(rtHost,
+        state.summaryResponse.data.connectedness, { en: isEnglish() }));
+      inserted.forEach(node => bindBodyEvents(node));
+      restoreViewport?.();
+      restoreReloadViewport();
+      updatePdfReady();
+      global.requestAnimationFrame(() => { if (body.isConnected) bindHeatmapCanvases(body); });
     }
 
-    function bindBodyEvents() {
-      body.querySelector('#analyticsGlossarySearch')?.addEventListener('input', event => {
+    function bindBodyEvents(root) {
+      const query = selector => root.matches(selector) ? root : root.querySelector(selector);
+      const queryAll = selector => [...(root.matches(selector) ? [root] : []), ...root.querySelectorAll(selector)];
+      query('#analyticsGlossarySearch')?.addEventListener('input', event => {
         const search = event.target;
         const term = search.value.trim().toLowerCase();
         const glossary = search.closest('details');
@@ -3156,18 +3376,19 @@
         }
         glossary.querySelector('#analyticsGlossaryEmpty').hidden = matches > 0;
       });
-      body.querySelector('#analyticsPdfDownload')?.addEventListener('click', async event => {
+      query('#analyticsPdfDownload')?.addEventListener('click', async event => {
         if (pdfInProgress) return;
         const state = store.state;
         const snapshot = state.snapshot;
         const generation = stimulusMediaGeneration;
         const snapshotId = snapshot?.id;
         const button = event.currentTarget;
-        const status = body.querySelector('#analyticsPdfStatus');
+        const status = query('#analyticsPdfStatus');
         const en = isEnglish();
         const controls = JSON.stringify(global.EmocogAnalyticsPdf.selection(body));
+        const savedCharts = JSON.stringify(visualizations?.manifest() || []);
         pdfInProgress = true;
-        button.disabled = true;
+        updatePdfReady();
         status.textContent = tr('Формируем текущий отчёт…', 'Preparing the current report…');
         try {
           await new Promise(resolve => global.requestAnimationFrame(resolve));
@@ -3178,7 +3399,10 @@
           validateExportBundle(bundle, state);
           const assertCurrent = () => {
             if (!body.isConnected || state.dirty || generation !== stimulusMediaGeneration || store.state.snapshot?.id !== snapshotId
-              || store.state.snapshot?.datasetHash !== snapshot.datasetHash || controls !== JSON.stringify(global.EmocogAnalyticsPdf.selection(body))) throw new Error(tr('Выборка или аккаунт изменились. Сформируйте отчёт заново.', 'Selection or account changed. Generate the report again.'));
+              || store.state.snapshot?.datasetHash !== snapshot.datasetHash || controls !== JSON.stringify(global.EmocogAnalyticsPdf.selection(body))
+              || savedCharts !== JSON.stringify(visualizations?.manifest() || [])
+              || body.querySelector('#analyticsExplorer')?.__analyticsPdfPending
+              || capture.analysisPlanKey !== JSON.stringify((body.querySelector('#analyticsExplorer')?.__analyticsPdfSource || body.__analyticsPdfSource)?.plan || null)) throw new Error(tr('Выборка или аккаунт изменились. Сформируйте отчёт заново.', 'Selection or account changed. Generate the report again.'));
           };
           assertCurrent();
           const tab = TABS.find(item => item.id === activeTab);
@@ -3186,53 +3410,56 @@
             snapshot: bundle.snapshot, counts: bundle.counts, generatedAt: bundle.generatedAt,
             en, preview: !!global.EmocogAnalyticsPreviewFixture });
           assertCurrent();
-          triggerDownload(blob, exportFilename(state, 'pdf').replace('.pdf', `-${activeTab}.pdf`));
+          const filename = (en ? tab.en : tab.ru).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+          triggerDownload(blob, `wecog-${filename}-${new Date().toISOString().slice(0,10)}.pdf`);
           status.textContent = tr('PDF скачан: текущий отчёт и применённая выборка.', 'PDF downloaded: current report and applied selection.');
         } catch (error) {
           if (status.isConnected) status.textContent = tr('Не удалось скачать PDF: ', 'PDF download failed: ') + error.message;
         } finally {
           pdfInProgress = false;
-          if (button.isConnected) button.disabled = false;
+          const mirror = body.querySelector('[data-export=pdf]')?.parentElement.querySelector('.ax-export-status');
+          if (mirror) mirror.textContent = status.textContent;
+          if (button.isConnected) updatePdfReady();
         }
       });
-      const refinement = body.querySelector('#analyticsRefinement');
+      const refinement = query('#analyticsRefinement');
       refinement?.addEventListener('toggle', () => {
         if (refinement.isConnected) store.state.refinementOpen = refinement.open;
       });
-      body.querySelector('#analyticsStateAction')?.addEventListener('click', () => store.initialize(true));
-      body.querySelector('#analyticsProjectFilter')?.addEventListener('change', event => store.setProject(event.target.value));
-      body.querySelector('#analyticsProtocolFilter')?.addEventListener('change', event => store.setProtocol(event.target.value));
-      body.querySelector('#analyticsVersionFilter')?.addEventListener('change', event => store.setProtocolVersion(event.target.value));
-      body.querySelector('#analyticsSessionFilter')?.addEventListener('change', event => store.setSession(event.target.value));
-      body.querySelector('#analyticsGroupFilter')?.addEventListener('change', event => store.setFilter('groupId', event.target.value));
-      body.querySelector('#analyticsConditionFilter')?.addEventListener('change', event => store.setFilter('conditionId', event.target.value));
-      [['analyticsComparisonDesign','comparisonDesign'],['analyticsComparisonMetric','comparisonMetric'],['analyticsComparisonAxis','comparisonAxis'],['analyticsReferenceLevel','referenceLevel'],['analyticsComparisonLevel','comparisonLevel']].forEach(([id, field]) => body.querySelector('#' + id)?.addEventListener('change', event => store.setFilter(field, event.target.value)));
-      [['analyticsReferenceParticipants','referenceParticipants'],['analyticsComparisonParticipants','comparisonParticipants']].forEach(([id, field]) => body.querySelector('#' + id)?.addEventListener('change', event => store.setFilter(field, [...event.target.selectedOptions].map(option => option.value))));
-      body.querySelector('#analyticsComparisonFilter')?.addEventListener('change', event => store.setFilter('comparisonId', event.target.value));
-      body.querySelector('#analyticsBlockFilter')?.addEventListener('change', event => store.setFilter('blockId', event.target.value));
-      body.querySelector('#analyticsStimulusFilter')?.addEventListener('change', event => store.setFilter('stimulusId', event.target.value));
-      body.querySelector('#analyticsAoiFilter')?.addEventListener('change', event => store.setFilter('aoiId', event.target.value));
-      body.querySelector('#analyticsQcMode')?.addEventListener('change', event => store.setFilter('qcMode', event.target.value));
-      body.querySelector('#analyticsDateFrom')?.addEventListener('change', event => store.setFilter('dateFrom', event.target.value));
-      body.querySelector('#analyticsDateTo')?.addEventListener('change', event => store.setFilter('dateTo', event.target.value));
-      body.querySelector('#analyticsIncludeIncomplete')?.addEventListener('change', event => store.setFilter('includeIncompleteSessions', event.target.checked));
-      body.querySelectorAll('.analytics-qc-channel').forEach(input => input.addEventListener('change', () => store.toggleChannel(input.value, input.checked)));
-      body.querySelector('#analyticsResetFilters')?.addEventListener('click', () => store.resetFilters());
-      body.querySelector('#analyticsApplyFilters')?.addEventListener('click', () => store.apply());
-      body.querySelector('#analyticsResultImport')?.addEventListener('click', () => body.querySelector('#analyticsResultImportFile')?.click());
-      body.querySelector('#analyticsResultImportFile')?.addEventListener('change', event => {
+      query('#analyticsStateAction')?.addEventListener('click', () => store.initialize(true));
+      query('#analyticsProjectFilter')?.addEventListener('change', event => store.setProject(event.target.value));
+      query('#analyticsProtocolFilter')?.addEventListener('change', event => store.setProtocol(event.target.value));
+      query('#analyticsVersionFilter')?.addEventListener('change', event => store.setProtocolVersion(event.target.value));
+      query('#analyticsSessionFilter')?.addEventListener('change', event => store.setSession(event.target.value));
+      query('#analyticsGroupFilter')?.addEventListener('change', event => store.setFilter('groupId', event.target.value));
+      query('#analyticsConditionFilter')?.addEventListener('change', event => store.setFilter('conditionId', event.target.value));
+      [['analyticsComparisonDesign','comparisonDesign'],['analyticsComparisonMetric','comparisonMetric'],['analyticsComparisonAxis','comparisonAxis'],['analyticsReferenceLevel','referenceLevel'],['analyticsComparisonLevel','comparisonLevel']].forEach(([id, field]) => query('#' + id)?.addEventListener('change', event => store.setFilter(field, event.target.value)));
+      [['analyticsReferenceParticipants','referenceParticipants'],['analyticsComparisonParticipants','comparisonParticipants']].forEach(([id, field]) => query('#' + id)?.addEventListener('change', event => store.setFilter(field, [...event.target.selectedOptions].map(option => option.value))));
+      query('#analyticsComparisonFilter')?.addEventListener('change', event => store.setFilter('comparisonId', event.target.value));
+      query('#analyticsBlockFilter')?.addEventListener('change', event => store.setFilter('blockId', event.target.value));
+      query('#analyticsStimulusFilter')?.addEventListener('change', event => store.setFilter('stimulusId', event.target.value));
+      query('#analyticsAoiFilter')?.addEventListener('change', event => store.setFilter('aoiId', event.target.value));
+      query('#analyticsQcMode')?.addEventListener('change', event => store.setFilter('qcMode', event.target.value));
+      query('#analyticsDateFrom')?.addEventListener('change', event => store.setFilter('dateFrom', event.target.value));
+      query('#analyticsDateTo')?.addEventListener('change', event => store.setFilter('dateTo', event.target.value));
+      query('#analyticsIncludeIncomplete')?.addEventListener('change', event => store.setFilter('includeIncompleteSessions', event.target.checked));
+      queryAll('.analytics-qc-channel').forEach(input => input.addEventListener('change', () => store.toggleChannel(input.value, input.checked)));
+      query('#analyticsResetFilters')?.addEventListener('click', () => store.resetFilters());
+      query('#analyticsApplyFilters')?.addEventListener('click', () => store.apply());
+      query('#analyticsResultImport')?.addEventListener('click', () => query('#analyticsResultImportFile')?.click());
+      query('#analyticsResultImportFile')?.addEventListener('change', event => {
         const file = event.target.files && event.target.files[0];
         if (file) store.importResult(file);
         event.target.value = '';
       });
-      body.querySelector('#analyticsOpenExport')?.addEventListener('click', () => global.navigate && global.navigate('#/export'));
-      body.querySelector('#analyticsSummaryRetry')?.addEventListener('click', () => store.loadSessionSummary());
-      body.querySelector('#analyticsVisualRetry')?.addEventListener('click', () => store.loadVisualAnalytics());
-      body.querySelector('#analyticsGroupRetry')?.addEventListener('click', () => store.loadGroupSummary());
-      body.querySelector('#analyticsGroupHeatmapRetry')?.addEventListener('click', () => store.loadGroupHeatmap());
-      body.querySelector('#analyticsComparisonRetry')?.addEventListener('click', () => store.loadComparison());
-      body.querySelectorAll('.analytics-layer-toggle').forEach(input => input.addEventListener('change', () => store.setLayer(input.dataset.layer, input.checked)));
-      body.querySelectorAll('.analytics-level').forEach(button => button.addEventListener('click', () => store.setGroupLevel(button.dataset.level)));
+      query('#analyticsOpenExport')?.addEventListener('click', () => global.navigate && global.navigate('#/export'));
+      query('#analyticsSummaryRetry')?.addEventListener('click', () => store.loadSessionSummary());
+      query('#analyticsVisualRetry')?.addEventListener('click', () => store.loadVisualAnalytics());
+      query('#analyticsGroupRetry')?.addEventListener('click', () => store.loadGroupSummary());
+      query('#analyticsGroupHeatmapRetry')?.addEventListener('click', () => store.loadGroupHeatmap());
+      query('#analyticsComparisonRetry')?.addEventListener('click', () => store.loadComparison());
+      queryAll('.analytics-layer-toggle').forEach(input => input.addEventListener('change', () => store.setLayer(input.dataset.layer, input.checked)));
+      queryAll('.analytics-level').forEach(button => button.addEventListener('click', () => store.setGroupLevel(button.dataset.level)));
     }
 
     wrapper.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
@@ -3241,7 +3468,11 @@
     }));
 
     unsubscribe = store.subscribe(renderState);
-    setTimeout(() => store.initialize(false), 0);
+    setTimeout(async () => {
+      await store.initialize(false);
+      if (body.isConnected && reloadViewport && reloadViewport.fingerprint === viewportFingerprint()
+        && store.state.status === 'ready' && hasAuth()) await store.apply();
+    }, 0);
     return wrapper;
   }
 

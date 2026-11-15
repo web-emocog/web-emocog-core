@@ -1531,8 +1531,9 @@ function StimuliAOIView() {
 
   lifetime.timeout(() => {
     rebuildTabBar();
-    renderStimuliGallery(gallery);
-    if (selectedFolder) showTab('folder');
+    if (window.location.hash === '#/stimuli/upload') showTab('upload');
+    else if (selectedFolder) showTab('folder');
+    else showTab('library');
 
     wireStimuliChips();
   });
@@ -2385,8 +2386,14 @@ async function openAoiEditor(stimulusId, options = {}) {
     const duration = options.stimulusDurationMs;
     const en = CURRENT_LANG === 'en';
     const hint = modal.querySelector('#aoiIntervalHint');
+    const outside = interval && duration > 0 && (interval.startMs >= duration ||
+      (interval.endMs !== Number.MAX_SAFE_INTEGER && interval.endMs > duration));
     const partial = interval && duration > 0 && (interval.startMs > 0 || interval.endMs < duration);
+    hint.style.color = outside ? 'var(--warn)' : '';
     hint.textContent = !interval ? (en ? 'End must follow start.' : 'Конец должен быть позже начала.')
+      : outside ? (interval.startMs >= duration
+        ? (en ? `The zone starts after the stimulus is gone (${duration} ms). Move the start earlier.` : `К началу действия зоны стимул уже исчезнет (${duration} мс). Укажите более раннее начало.`)
+        : (en ? `The zone ends after the ${duration} ms presentation. Leave the end blank to use the actual end of the presentation.` : `Конец зоны позже окончания показа (${duration} мс). Оставьте конец пустым, чтобы зона действовала до конца показа.`))
       : partial ? (en ? `This zone does not cover the full ${duration} ms presentation.` : `Зона действует не весь показ (${duration} мс).`)
       : interval.startMs === 0 && interval.endMs === Number.MAX_SAFE_INTEGER ? (en ? 'Active for the whole presentation.' : 'Действует весь показ.')
       : (en ? 'An empty end means until the stimulus ends.' : 'Пустой конец означает «до конца показа».');

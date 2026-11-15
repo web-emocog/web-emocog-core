@@ -532,7 +532,7 @@ describe('researcher navigation contract', () => {
     const runtime = read('participant-web/js/session-runtime/index.js');
     const ui = read('participant-web/js/web-page/ui-updated.js');
     const gazeTests = read('participant-web/js/gaze-tracker/gaze-tests/index.js');
-    assert.match(runtime, /runtime-ui\.js\?v=20261110-integration1/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261114-assigned1/);
     for (const source of [tests, task, ui, gazeTests, read('participant-web/js/web-page/precheck-updated.js'),
       read('participant-web/js/session-runtime/runtime-ui.js')]) {
       assert.match(source, /translations\.js\?v=20261110-integration1/);
@@ -552,20 +552,20 @@ describe('researcher navigation contract', () => {
     for (const source of [app, tests, task, runtime]) {
       assert.doesNotMatch(source, /(ui-updated|tests-updated|experimental_task-updated|session-runtime\/index)\.js\?v=20260828-2/);
     }
-    assert.match(tests, /ui-updated\.js\?v=20261112-emotion2/);
-    assert.match(app, /tests-updated\.js\?v=20261112-emotion2/);
-    assert.match(tests, /experimental_task-updated\.js\?v=20261112-emotion2/);
-    assert.match(task, /tests-updated\.js\?v=20261112-emotion2/);
-    assert.match(app, /session-runtime\/index\.js\?v=20261112-emotion2/);
-    assert.match(tests, /session-runtime\/index\.js\?v=20261112-emotion2/);
-    assert.match(task, /session-runtime\/index\.js\?v=20261112-emotion2/);
-    assert.match(runtime, /tests-updated\.js\?v=20261112-emotion2/);
-    assert.match(runtime, /runtime-ui\.js\?v=20261110-integration1/);
-    assert.match(app, /precheck-updated\.js\?v=20261110-integration1/);
-    assert.match(tests, /precheck-updated\.js\?v=20261110-integration1/);
-    assert.match(ui, /precheck-updated\.js\?v=20261110-integration1/);
-    assert.match(tests, /gaze-tests\/index\.js\?v=20261112-emotion2/);
-    assert.match(gazeTests, /analysis-loop\.js\?v=20261112-emotion2/);
+    assert.match(tests, /ui-updated\.js\?v=20261114-assigned1/);
+    assert.match(app, /tests-updated\.js\?v=20261114-assigned1/);
+    assert.match(tests, /experimental_task-updated\.js\?v=20261114-assigned1/);
+    assert.match(task, /tests-updated\.js\?v=20261114-assigned1/);
+    assert.match(app, /session-runtime\/index\.js\?v=20261114-assigned1/);
+    assert.match(tests, /session-runtime\/index\.js\?v=20261114-assigned1/);
+    assert.match(task, /session-runtime\/index\.js\?v=20261114-assigned1/);
+    assert.match(runtime, /tests-updated\.js\?v=20261114-assigned1/);
+    assert.match(runtime, /runtime-ui\.js\?v=20261114-assigned1/);
+    assert.match(app, /precheck-updated\.js\?v=20261114-assigned1/);
+    assert.match(tests, /precheck-updated\.js\?v=20261114-assigned1/);
+    assert.match(ui, /precheck-updated\.js\?v=20261114-assigned1/);
+    assert.match(tests, /gaze-tests\/index\.js\?v=20261114-assigned1/);
+    assert.match(gazeTests, /analysis-loop\.js\?v=20261114-assigned1/);
     assert.match(tests, /unified-aggregates-new\.js\?v=20261112-emotion2/);
     assert.match(ui, /unified-aggregates-new\.js\?v=20261112-emotion2/);
     for (const source of [

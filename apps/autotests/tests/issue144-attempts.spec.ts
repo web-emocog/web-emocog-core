@@ -58,7 +58,7 @@ test('a real timed protocol assigns a new presentation identity when the same tr
     const { loadAndStartCognitiveTask } = await import(moduleUrl);
     await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2', blocks: [{
       id: 'timed-loop', type: 'cognitive_task', blockConfig: { useFixation: false, stimulusDuration: 120,
-        protocolDurationMs: 600, showFeedback: false },
+        protocolDurationMs: 2400, showFeedback: false },
       trials: [{ stimulusId: 'std_simple_black_square', duration: 120, condition: 'passive_viewing' }],
     }] } });
   });

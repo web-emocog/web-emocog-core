@@ -180,7 +180,7 @@ async function loadProtocol(queryable, projectId, protocolId) {
   return result.rows[0] || null;
 }
 
-async function loadCandidateSessions(queryable, projectId, protocolId, { lock = false } = {}) {
+async function loadCandidateSessions(queryable, projectId, protocolId, { lock = false, includedIds = null } = {}) {
   const result = await queryable.query(
     `SELECT s.id, s.session_id,
             COALESCE(s.participant_id, NULLIF(f.payload->'ids'->>'participantAlias', '')) AS participant_id,
@@ -195,10 +195,10 @@ async function loadCandidateSessions(queryable, projectId, protocolId, { lock = 
      LEFT JOIN invitations i ON i.id = s.invitation_id
      LEFT JOIN session_qc_summary q ON q.session_id = s.id
      LEFT JOIN session_features f ON f.session_id = s.id
-     WHERE s.project_id = $1 AND s.protocol_id = $2
+     WHERE s.project_id = $1 AND s.protocol_id = $2${includedIds ? ' AND s.id = ANY($3::integer[])' : ''}
      ORDER BY s.started_at ASC NULLS LAST, s.id ASC
      LIMIT 2001${lock ? ' FOR SHARE OF s' : ''}`,
-    [projectId, protocolId]
+    includedIds ? [projectId, protocolId, includedIds] : [projectId, protocolId]
   );
   if (result.rows.length > 2000) throw new HttpError(422, 'This protocol requires paginated analysis: the 2000-session limit was exceeded', 'analytics_session_limit');
   return result.rows;
@@ -330,14 +330,15 @@ async function loadSnapshot(pool, snapshotId) {
   return result.rows[0] || null;
 }
 
-async function hydrateSnapshot(pool, snapshotRow) {
+async function hydrateSnapshot(pool, snapshotRow, { includedOnly = false } = {}) {
   if (snapshotRow.versions?.backend !== ANALYTICS_BACKEND_VERSION) {
     throw new HttpError(409, 'Analytics methods changed; apply the selection again', 'analytics_snapshot_stale');
   }
   const current = await loadProtocol(pool, snapshotRow.project_id, snapshotRow.protocol_id);
   if (!current) throw new HttpError(409, 'Snapshot protocol is unavailable', 'analytics_snapshot_stale');
   const protocol = await resolveProtocolVersion(pool, current, snapshotRow.query.protocolVersion);
-  const allRows = await loadCandidateSessions(pool, snapshotRow.project_id, snapshotRow.protocol_id);
+  const allRows = await loadCandidateSessions(pool, snapshotRow.project_id, snapshotRow.protocol_id,
+    { includedIds: includedOnly ? (snapshotRow.included_session_ids || []) : null });
   const ids = new Set((snapshotRow.included_session_ids || []).map(Number));
   const sessionRows = allRows.filter(row => ids.has(Number(row.id)));
   if (sessionRows.length !== ids.size) {

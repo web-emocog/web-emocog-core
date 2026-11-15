@@ -25,6 +25,86 @@
       `<option value="${esc(value)}"${value === selected ? ' selected' : ''}>${esc(text)}</option>`).join('')}</select></label>`;
   }
 
+  function localizedMetrics(metrics, label, en) {
+    const collator = new Intl.Collator(en ? 'en' : 'ru', { numeric: true, sensitivity: 'base' });
+    return metrics.slice().sort((left, right) => collator.compare(label(left), label(right)));
+  }
+
+  function scopedNames(metrics, options, withUnit = false) {
+    const names = new Map();
+    const seen = new Map();
+    for (const metric of metrics) {
+      const scope = metric.scope || {};
+      const unit = options.unitLabel?.(metric.unit) || '';
+      let name = options.metricLabel(metric.metricId);
+      if (withUnit && unit && !name.endsWith(unit)) name += ', ' + unit;
+      const context = [scope.aoiId && options.labels?.area?.(scope.aoiId),
+        scope.blockId && options.labels?.block?.(scope.blockId),
+        scope.stimulusId && options.labels?.stimulus?.(scope.stimulusId)].filter(Boolean);
+      if (context.length) name += ' · ' + context.join(' / ');
+      const index = (seen.get(name) || 0) + 1;
+      seen.set(name, index);
+      names.set(metric, index > 1 ? name + ' (' + index + ')' : name);
+    }
+    return metric => names.get(metric);
+  }
+
+  function viewportState(root) {
+    const doc = root.ownerDocument;
+    const locate = node => {
+      const path = [];
+      while (node && node !== root && !node.id) {
+        path.unshift([Array.prototype.indexOf.call(node.parentElement.children, node), node.tagName]);
+        node = node.parentElement;
+      }
+      return { id: node === root ? '' : node?.id, path };
+    };
+    const resolve = location => {
+      let node = location.id ? doc.getElementById(location.id) : root;
+      if (!node || !root.contains(node)) return null;
+      for (const [index, tag] of location.path) {
+        node = node.children[index];
+        if (!node || node.tagName !== tag) return null;
+      }
+      return node;
+    };
+    const active = doc.activeElement;
+    const focused = root.contains(active) ? locate(active) : null;
+    const selection = focused && typeof active.selectionStart === 'number'
+      ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
+    const disclosures = [...root.querySelectorAll('details')].map(node => [locate(node), node.open]);
+    const nested = [root, ...root.querySelectorAll('*')].filter(node => node.scrollTop || node.scrollLeft
+      || node.scrollHeight > node.clientHeight && /auto|scroll/.test(global.getComputedStyle(node).overflowY)
+      || node.scrollWidth > node.clientWidth && /auto|scroll/.test(global.getComputedStyle(node).overflowX))
+      .map(node => [node, locate(node), node.scrollLeft, node.scrollTop]);
+    const ancestors = [];
+    for (let node = root.parentElement; node; node = node.parentElement) {
+      ancestors.push([node, node.scrollLeft, node.scrollTop]);
+    }
+    return () => {
+      for (const [location, open] of disclosures) {
+        const node = resolve(location);
+        if (node?.tagName === 'DETAILS') node.open = open;
+      }
+      if (focused && (!doc.activeElement || doc.activeElement === doc.body || doc.activeElement === active)) {
+        const node = resolve(focused);
+        if (node && !node.disabled) {
+          node.focus({ preventScroll: true });
+          if (selection && typeof node.setSelectionRange === 'function') {
+            try { node.setSelectionRange(...selection); } catch (_) {}
+          }
+        }
+      }
+      for (const [original, location, left, top] of nested) {
+        const node = root.contains(original) ? original : resolve(location);
+        node?.scrollTo({ left, top, behavior: 'instant' });
+      }
+      for (const [node, left, top] of ancestors) {
+        if (node.isConnected && (node.scrollLeft !== left || node.scrollTop !== top)) node.scrollTo({ left, top, behavior: 'instant' });
+      }
+    };
+  }
+
   function shell(kind, title, sub, content) {
     return `<section class="ab-dashboard" data-ab-dashboard="${kind}">
       <header class="ab-heading"><h2>${esc(title)}</h2><p>${esc(sub)}</p></header>
@@ -101,16 +181,20 @@
 
   function group(root, data, options) {
     const h = helpers(options.en), { tr, number } = h;
-    const metrics = list(data.metrics).filter(metric => metric.status === 'computed' && list(metric.participantValues).some(row => finite(row.value)));
+    const available = list(data.metrics).filter(metric => metric.status === 'computed'
+      && list(metric.participantValues).some(row => finite(row.value)));
+    const metricName = scopedNames(available, options);
+    const metrics = localizedMetrics(available, metricName, options.en);
     if (!metrics.length) return;
     const state = { metric: '0', view: 'people', point: '0', page: '0' };
     browse(root, state, () => {
       const metric = metrics[Number(state.metric)];
-      const name = options.metricLabel(metric.metricId);
+      const name = metricName(metric);
       const unit = options.unitLabel(metric.unit);
       const values = metric.participantValues.filter(row => finite(row.value));
+      const custom = options.visualizations ? '<div data-ab-viz></div>' : '';
       const controls = select('abGroupMetric', tr('Показатель', 'Metric'), metrics.map((item, i) =>
-        [String(i), options.metricLabel(item.metricId) + (item.scope?.aoiId ? ' · ' + (options.labels?.area?.(item.scope.aoiId) || item.scope.aoiId) : '')]), state.metric)
+        [String(i), metricName(item)]), state.metric)
         + select('abGroupView', tr('График', 'Chart'), [['people', tr('Участники', 'Participants')], ['hist', tr('Распределение', 'Distribution')]], state.view);
       const stats = detail(name, [[tr('Участников', 'Participants'), values.length],
         [tr('Медиана', 'Median'), finite(metric.median) ? number(metric.median) + ' ' + unit : number(null)],
@@ -122,7 +206,7 @@
           tr('Один участник — одно значение. Повторные наблюдения не увеличивают число участников.', 'One value per participant. Repeated observations do not increase the number of participants.'),
           stats + chartPanel(controls + select('abPoint', tr('Диапазон', 'Range'), plot.bins.map((bin, i) => [String(i), plot.label(bin)]), state.point), plot.chart,
             tr('Высота столбца показывает число участников, а не число проб.', 'Bar height is the number of participants, not the number of trials.'))
-          + detail(plot.label(plot.selected), [[tr('Участников в диапазоне', 'Participants in range'), plot.selected.count]]));
+          + detail(plot.label(plot.selected), [[tr('Участников в диапазоне', 'Participants in range'), plot.selected.count]]) + custom);
       }
       const page = Number(state.page), index = Number(state.point);
       const rows = values.slice(page * PAGE, (page + 1) * PAGE);
@@ -149,22 +233,23 @@
         stats + chartPanel(controls + (pages.length > 1 ? select('abPage', tr('Участники', 'Participants'), pages, state.page) : '')
           + select('abPoint', tr('Выбранный участник', 'Selected participant'), rows.map((row, i) => [String(i), person(row.participantId)]), state.point),
           plot, tr('Нажмите на точку, чтобы посмотреть результат. Высота точки нужна только для разнесения меток.', 'Click a dot for its result. Vertical offset only separates marks.'),
-          pointNavigation(index, rows.length, tr)) + detail(label(rows[index]), [[tr('Значение', 'Value'), number(rows[index].value) + ' ' + unit]]));
-    }, { abGroupMetric: 'metric', abGroupView: 'view', abPage: 'page', abPoint: 'point' });
+          pointNavigation(index, rows.length, tr)) + (rows[index] ? detail(label(rows[index]), [[tr('Значение', 'Value'), number(rows[index].value) + ' ' + unit]]) : '') + custom);
+    }, { abGroupMetric: 'metric', abGroupView: 'view', abPage: 'page', abPoint: 'point' }, () => {
+      const metric = metrics[Number(state.metric)];
+      options.visualizations?.attach(root.querySelector('[data-ab-viz]'), { en: options.en,
+        title: metricName(metric), unit: options.unitLabel(metric.unit),
+        points: metric.participantValues.map((row, i) => ({ x: i, y: row.value })) });
+    });
   }
 
   function participantRelation(root, data, options) {
     const h = helpers(options.en), { tr, number } = h;
-    const metrics = list(data.metrics).filter(metric => metric.status === 'computed'
+    const available = list(data.metrics).filter(metric => metric.status === 'computed'
       && list(metric.participantValues).some(row => row.participantId != null && finite(row.value)));
+    const metricName = scopedNames(available, options, true);
+    const metrics = localizedMetrics(available, metricName, options.en);
     if (metrics.length < 2) return;
     const state = { x: '0', y: '1', point: '0', page: '0' };
-    const metricName = metric => {
-      const name = options.metricLabel(metric.metricId), unit = options.unitLabel?.(metric.unit) || metric.unit;
-      const hasUnit = unit && [`, ${unit}`, `(${unit})`].some(suffix => name.endsWith(suffix));
-      return name + (unit && !hasUnit ? `, ${unit}` : '')
-        + (metric.scope?.aoiId ? ' · ' + (options.labels?.area?.(metric.scope.aoiId) || metric.scope.aoiId) : '');
-    };
     const person = id => options.labels?.participant?.(id) || id;
     const metricOptions = metrics.map((metric, index) => [String(index), metricName(metric)]);
     const byPerson = metric => new Map(list(metric.participantValues).filter(row =>
@@ -218,12 +303,19 @@
     </div>`;
   }
 
-  function browse(root, state, paint, config = {}) {
+  function browse(root, state, paint, config = {}, afterPaint) {
     function render(focusId) {
+      const restore = viewportState(root);
+      const visualizations = global.WecogAnalyticsVisualizations;
+      const zoom = visualizations?.zoomState(root);
       root.innerHTML = paint();
-      if (!focusId) return;
-      const target = root.querySelector('#' + focusId);
-      (target && !target.disabled ? target : root.querySelector('#abPoint, #abRtRange, #abRelationPoint'))?.focus({ preventScroll: true });
+      afterPaint?.();
+      visualizations?.zoomWithin(root, (ru, en) => document.documentElement.lang === 'en' ? en : ru, zoom);
+      restore();
+      if (focusId) {
+        const target = root.querySelector('#' + focusId);
+        (target && !target.disabled ? target : root.querySelector('#abPoint, #abRtRange, #abRelationPoint'))?.focus({ preventScroll: true });
+      }
     }
     root.onchange = event => {
       const control = event.target;
@@ -261,26 +353,6 @@
         `Rows ${index * PAGE + 1}–${Math.min(count, (index + 1) * PAGE)}`)]);
   }
 
-  function participantMap(tr, channel, selected, number) {
-    const value = key => {
-      const mean = selected?.row?.[key]?.mean;
-      return finite(mean) ? number(mean) + (key === 'heartRate' ? tr(' уд/мин', ' bpm') : tr(' дых/мин', ' breaths/min')) : number(null);
-    };
-    return `<aside class="ab-card ab-map">
-      <h3>${tr('Каналы участника', 'Participant channels')}</h3>
-      <svg viewBox="0 0 140 172" aria-hidden="true" focusable="false">
-        <circle class="ab-body" cx="70" cy="37" r="25"/>
-        <path class="ab-body" d="M50 66h40l19 18 13 54-18 5-10-36v54H46v-54l-10 36-18-5 13-54z"/>
-        <path class="ab-outline" d="M58 37h24M70 91v53"/>
-        <circle class="ab-pin" data-ab-channel="heartRate" cx="56" cy="101" r="8"/>
-        <circle class="ab-pin ab-pin-secondary" data-ab-channel="respiration" cx="82" cy="126" r="8"/>
-      </svg>
-      <div class="ab-map-actions">
-        <button type="button" id="abMapHeartRate" data-ab-channel="heartRate" aria-pressed="${channel === 'heartRate'}">${tr('ЧСС', 'Heart rate')}<br><strong>${esc(value('heartRate'))}</strong></button>
-        <button type="button" id="abMapRespiration" data-ab-channel="respiration" aria-pressed="${channel === 'respiration'}">${tr('Дыхание', 'Respiration')}<br><strong>${esc(value('respiration'))}</strong></button>
-      </div><p class="ab-note">${tr('Схема каналов, не изображение участника.', 'Channel diagram, not an image of the participant.')}</p></aside>`;
-  }
-
   function session(root, data, options) {
     const { tr, number, time } = helpers(options.en);
     const intervals = data.physiologyIntervals;
@@ -290,9 +362,13 @@
       trials: options.hasAoiFilter ? [] : list(data.connectedness?.trials),
     };
     const modes = [['blocks', tr('Блоки и попытки', 'Blocks and attempts')], ['minutes', tr('Минуты', 'Minutes')], ['trials', tr('Пробы RT', 'RT trials')]];
-    const state = { mode: modes.find(([key]) => rowsFor[key].length)?.[0] || 'blocks',
-      intervalMode: rowsFor.blocks.length || !rowsFor.minutes.length ? 'blocks' : 'minutes', channel: 'heartRate', block: '', page: '0', point: '0' };
+    const initialInterval = ['blocks', 'minutes'].map(mode => ({ mode,
+      channel: ['heartRate', 'respiration'].find(channel => rowsFor[mode].some(row => finite(row[channel]?.mean))) }))
+      .find(item => item.channel);
+    const state = { mode: initialInterval?.mode || (rowsFor.trials.some(row => finite(row.rtMs)) ? 'trials' : modes.find(([key]) => rowsFor[key].length)?.[0] || 'blocks'),
+      intervalMode: initialInterval?.mode || (rowsFor.blocks.length || !rowsFor.minutes.length ? 'blocks' : 'minutes'), channel: initialInterval?.channel || 'heartRate', block: '', page: '0', point: '0' };
     const blockName = options.labels.block;
+    let source = null;
     const status = value => ({
       accepted: tr('Принята', 'Accepted'), repeat_required: tr('Потребовался повтор', 'Repeat required'),
       in_progress: tr('В процессе', 'In progress'),
@@ -315,6 +391,20 @@
       const index = Number(state.point);
       const selected = items[index];
       const unit = trial ? tr('мс', 'ms') : channel === 'heartRate' ? tr('уд/мин', 'bpm') : tr('дых/мин', 'breaths/min');
+      const selectedScope = state.block && !isMinute ? blockName(state.block) : tr('Все блоки','All blocks');
+      const eligible = row => trial ? row.qualityValid === true && row.correct === true
+        : (isMinute || row.status === 'accepted');
+      const series = rows.filter(item => finite(item.x)).map(item => ({ x: item.x, y: eligible(item.row) ? item.y : null, end: item.row.endMs, blockId: item.row.blockId }));
+      const points = series.flatMap((item, i) => {
+        const previous = series[i-1];
+        const gap = previous && (item.blockId !== previous.blockId
+          || (trial ? item.x - (finite(previous.end) ? previous.end : previous.x) > 10000
+            : finite(previous.end) && item.x > previous.end + 100));
+        return gap ? [{ x: (previous.x + item.x) / 2, y: null }, item] : [item];
+      });
+      source = { title: (trial ? tr('Время правильной реакции','Correct reaction time') : channel === 'heartRate' ? tr('Пульс','Pulse') : tr('Дыхание','Breathing'))
+        + ' · ' + modes.find(([key]) => key === state.mode)[1] + ' · ' + selectedScope,
+      en: options.en, ordered: true, points, unit, xLabel: time };
       const label = item => isMinute ? time(item.x)
         : trial ? `${tr('Проба', 'Trial')} ${item.order + 1} · ${options.labels.stimulus(item.row.stimulusId)}`
           : `${blockName(item.row.blockId)} · ${tr('попытка', 'attempt')} ${item.row.attempt ?? '—'}`;
@@ -361,10 +451,9 @@
           + (intervals?.truncated ? tr(' Хранится только часть интервалов.', ' Only a subset of intervals is retained.') : '');
       const plot = chartPanel(controls, graph, note, pointNavigation(index, items.length, tr));
       return shell('session', tr('Динамика сессии', 'Session dynamics'), tr('Нажмите на точку или полосу, чтобы посмотреть наблюдение.', 'Click a point or interval bar to inspect the observation.'),
-        rowsFor.minutes.length || rowsFor.blocks.length
-          ? `<div class="ab-split"><div>${plot}${selected ? detail(label(selected), fields) : ''}</div>${participantMap(tr, channel, trial ? null : selected, number)}</div>`
-          : plot + (selected ? detail(label(selected), fields) : ''));
-    }, { abMode: 'mode', abChannel: 'channel', abBlock: 'block', abPage: 'page', abPoint: 'point' });
+        plot + (selected ? detail(label(selected), fields) : '') + (options.visualizations ? '<div data-ab-viz></div>' : ''));
+    }, { abMode: 'mode', abChannel: 'channel', abBlock: 'block', abPage: 'page', abPoint: 'point' },
+    () => options.visualizations?.attach(root.querySelector('[data-ab-viz]'), source));
   }
 
   function comparison(root, data, options) {
@@ -449,5 +538,5 @@
     }, { abPoint: 'point' });
   }
 
-  global.EmocogBlockDashboard = { session, comparison, quality, group, rtDistribution, participantRelation };
+  global.EmocogBlockDashboard = { session, comparison, quality, group, rtDistribution, participantRelation, viewportState };
 })(window);
