@@ -94,6 +94,14 @@ const ISSUE_TRANSLATION_KEYS = Object.freeze({
 
 function localizedIssueMessage(issue, getLanguage) {
     const text = langText(getLanguage);
+    if (issue?.code === 'protocol_qc_fpsStable') {
+        const quality = globalThis.WecogProtocolQuality;
+        if (quality) {
+            return [quality.describeCheck('fpsStable', issue.details, text.lang),
+                quality.describeFpsAdvice(issue.details?.threshold, issue.details?.fpsDiagnostics, text.lang)]
+                .filter(Boolean).join('. ').replace(/[.; ]+$/, '');
+        }
+    }
     const pack = translations[text.lang] || translations.en;
     const key = ISSUE_TRANSLATION_KEYS[issue?.code];
     if (key && pack[key]) return pack[key];
@@ -283,10 +291,10 @@ export class SessionRuntimeUI {
         const body = text.lang === 'ru'
             ? (hasTrials
                 ? `Не засчитано ${count} ${russianTrialWord(count)}${total ? ` из ${total}` : ''}.${reasons ? ` ${text.repeatReasonPrefix}: ${reasons}.` : ''} ${text.repeatTrialsSuffix}`
-                : text.repeatBlockBody)
+                : [text.repeatBlockBody, reasons && `${text.repeatReasonPrefix}: ${reasons}.`].filter(Boolean).join(' '))
             : (hasTrials
                 ? `${count}${total ? ` / ${total}` : ''}.${reasons ? ` ${text.repeatReasonPrefix}: ${reasons}.` : ''} ${text.repeatTrialsSuffix}`
-                : text.repeatBlockBody);
+                : [text.repeatBlockBody, reasons && `${text.repeatReasonPrefix}: ${reasons}.`].filter(Boolean).join(' '));
         return this._showModal({
             title: hasTrials ? text.repeatTrialsTitle : text.repeatBlockTitle,
             body,

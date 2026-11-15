@@ -12,7 +12,7 @@ import {
     startEmotionSession
 } from '../emotion-stub-new.js?v=20261112-emotion2';
 import { NeutralCalibration } from '../emotion/neutral-calibration.mjs?v=20261112-emotion1';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261110-integration1';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261114-assigned1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
@@ -20,7 +20,11 @@ import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
 import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
 
 const SAME_FRAME_RETRY_MS = 8;
+// Native callbacks jitter around the requested cadence. Avoid an extra timer
+// hop for small early arrivals; still process at most one result per frame.
+const FRAME_CALLBACK_TOLERANCE_MS = 2;
 const PRIMARY_STAGES = ['face', 'guideGazeEyes', 'emotionMultimodal', 'quality', 'bpm', 'auxiliaryDispatch'];
+const FACE_TIMINGS = ['modelCallMs', 'bitmapCaptureMs', 'workerRoundTripMs', 'workerWorkMs'];
 
 function recordTiming(stage, durationMs) {
     stage.frames++;
@@ -89,7 +93,8 @@ export class SessionFramePipeline {
             emotionFrames: 0, emotionValidFrames: 0,
             primaryMsMax: 0, auxiliaryDeferredFrames: 0, segmentFrames: 0, poseFrames: 0,
             segmentMsTotal: 0, poseMsTotal: 0, timingMethod: 'completed-primary-stages.v1',
-            stages: Object.fromEntries(PRIMARY_STAGES.map(name => [name, { frames: 0, totalMs: 0, maxMs: 0 }])) };
+            stages: Object.fromEntries(PRIMARY_STAGES.map(name => [name, { frames: 0, totalMs: 0, maxMs: 0 }])),
+            faceTimings: Object.fromEntries(FACE_TIMINGS.map(name => [name, { frames: 0, totalMs: 0, maxMs: 0 }])) };
         this.diagnosticsPublishedAt = null;
         this.qualityDetector = new SessionQualityDetector();
         this.bpmErrorReported = false;
@@ -190,7 +195,7 @@ export class SessionFramePipeline {
     _requestFrame() {
         if (!this.active || this.primaryBusy) return;
         const delay = Math.max(0, this.schedule.targetIntervalMs - (performance.now() - this.primaryStartedAt));
-        if (delay > 0) this._schedule(delay);
+        if (delay > (this.videoFrameObserver ? FRAME_CALLBACK_TOLERANCE_MS : 0)) this._schedule(delay);
         else {
             clearTimeout(this.timeoutId);
             this.timeoutId = null;
@@ -330,6 +335,11 @@ export class SessionFramePipeline {
             this.diagnostics.primaryMsMax = Math.max(this.diagnostics.primaryMsMax, elapsed);
             const stages = this.diagnostics.stages;
             recordTiming(stages.face, faceDone - started);
+            const faceTiming = this.state.runtime.localAnalyzer.lastFrameTiming;
+            for (const name of FACE_TIMINGS) {
+                const duration = faceTiming?.[name];
+                if (Number.isFinite(duration) && duration >= 0) recordTiming(this.diagnostics.faceTimings[name], duration);
+            }
             recordTiming(stages.guideGazeEyes, guideGazeEyesDone - faceDone);
             recordTiming(stages.emotionMultimodal, multimodalDone - guideGazeEyesDone);
             recordTiming(stages.quality, qualityDone - multimodalDone);
@@ -380,6 +390,7 @@ export class SessionFramePipeline {
                 schedule: this.schedule }),
             // Only bounded timings/counts; no frames, landmarks or per-frame history.
             stages: Object.fromEntries(PRIMARY_STAGES.map(name => [name, { ...this.diagnostics.stages[name] }])),
+            faceTimings: Object.fromEntries(FACE_TIMINGS.map(name => [name, { ...this.diagnostics.faceTimings[name] }])),
             faceBackend: this.state.runtime.localAnalyzer?.backend || 'legacy_main',
             faceDelegate: this.state.runtime.localAnalyzer?.inferenceDelegate || null,
             faceDelegateFallbackReason: this.state.runtime.localAnalyzer?.cpuFallbackReason || null,

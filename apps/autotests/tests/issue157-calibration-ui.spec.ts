@@ -32,7 +32,7 @@ async function prepare(page: Page, fps: number) {
       s.runtime.lastPrecheckResult = { timestamp: performance.now(), landmarks,
         eyes: { bothOpen: true }, pose: { status: 'stable', yaw: 0, pitch: 0, roll: 0 } };
     }, 1000 / fps);
-    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261112-emotion2';
+    const moduleUrl = '/apps/participant-web/js/web-page/tests-updated.js?v=20261114-assigned1';
     const module = await import(moduleUrl);
     w.calibrationPrepared = module.startCalibration();
   }, { landmarks: landmarksForGaze(0, 0), fps });
@@ -48,8 +48,8 @@ for (const fps of [19, 30]) test(`classic-scrollbar transition accepts two disti
   for (let click = 0; click < 2; click++) {
     await point.evaluate((el: HTMLElement) => el.click());
     await expect(point).toHaveAttribute('aria-busy', 'true');
-    await expect(page.locator('#calibrationCaptureStatus')).toBeVisible();
-    await expect(page.locator('#calibrationCaptureStatus')).toContainText('Собираем кадры');
+    await expect(page.locator('#calibrationCaptureStatus')).toBeHidden();
+    await expect(point).toHaveCSS('opacity', '0.5');
     await page.clock.runFor(2100);
     expect(await page.evaluate(() => (window as any).__WECOG_STATE__.runtime.gazeTracker.getStatus().calibrationPoints)).toBe(click + 1);
   }

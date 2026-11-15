@@ -4,6 +4,46 @@ const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const load = file => import(pathToFileURL(path.resolve(__dirname, '../../participant-web/js', file)).href);
 
+test('#174 camera readiness follows the published FPS rule and keeps camera and processing advice separate', () => {
+  const { cameraCadence, describeFpsAdvice } = require('../../shared/protocol-quality');
+  const definition = { settings: { qualityControl: { schemaVersion: 'protocol_quality.v1', rules: {
+    fpsStable: { enabled: true, hardStop: true, threshold: 25 }
+  } } } };
+  assert.equal(cameraCadence(definition, null, { pending: true }).blocked, true);
+  assert.equal(cameraCadence(definition, 23).blocked, true);
+  assert.equal(cameraCadence(definition, 30).blocked, false);
+  definition.settings.qualityControl.rules.fpsStable.hardStop = false;
+  assert.deepEqual(cameraCadence(definition, 23), { fps: 23, threshold: 25, low: true, pending: false, blocked: false });
+  assert.equal(cameraCadence(null, 23).low, false);
+  assert.match(describeFpsAdvice(25, { camera: { status: 'measured', fps: 23 } }), /front lighting/);
+  assert.match(describeFpsAdvice(25, { camera: { status: 'measured', fps: 30 } }), /analysis is slower/);
+  assert.doesNotMatch(describeFpsAdvice(25, { camera: { status: 'stale', fps: 30 } }), /analysis is slower/);
+});
+
+test('#132 session FPS retains slow windows after history rolls over and live FPS recovers', async t => {
+  const { VideoFpsMonitor } = await load('qc-metrics/fps-monitor.js');
+  const previous = global.performance;
+  let now = 0;
+  global.performance = { now: () => now };
+  t.after(() => { global.performance = previous; });
+  const monitor = new VideoFpsMonitor();
+  monitor.start(false, 25);
+  assert.equal(monitor.getAnalysisSession().meanFps, null);
+  for (let w = 0; w < 70; w++) {
+    const frames = w < 10 ? 20 : 30;
+    const offset = w * 1000;
+    for (let n = 1; n <= frames; n++) {
+      now = offset + n * 1000 / frames;
+      monitor.tick();
+    }
+  }
+  assert.equal(monitor.getCurrentFps(), 30);
+  assert.equal(monitor.getHistory().length, 60);
+  assert.deepEqual(monitor.getAnalysisSession(), {
+    frames: 2000, windows: 70, observedMs: 70000, meanFps: 2000 / 70, threshold: 25, belowThresholdMs: 10000
+  });
+});
+
 test('camera FPS cannot overwrite analysis throughput, history or baseline', async t => {
   const { VideoFpsMonitor } = await load('qc-metrics/fps-monitor.js');
   const previous = global.performance; let now = 0;

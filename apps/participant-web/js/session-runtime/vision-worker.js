@@ -14,12 +14,12 @@ self.onmessage = async ({ data }) => {
                 FaceLandmarker: vision.FaceLandmarker, ImageSegmenter: vision.ImageSegmenter });
             if (task === 'face') {
                 ({ getFramePixels } = await import('./frame-pixels.mjs'));
-                const { PrecheckAnalyzer } = await import('../precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1');
+                const { PrecheckAnalyzer } = await import('../precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1');
                 analyzer = new PrecheckAnalyzer({ ...data.options, worker: false });
                 if (data.options.thresholds) analyzer.thresholds = data.options.thresholds;
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'segment') {
-                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261110-integration1');
+                const { FaceSegmenter } = await import('../face-segmenter/FaceSegmenter.js?v=20261114-assigned1');
                 analyzer = new FaceSegmenter({ ...data.options, worker: false });
                 if (!await analyzer.initialize()) throw new Error('vision_worker_init_failed');
             } else if (task === 'pose') {
@@ -54,13 +54,15 @@ self.onmessage = async ({ data }) => {
             let result;
             const input = data.imageData || bitmap;
             if (task === 'face') {
+                const started = performance.now();
                 const frame = await analyzer.analyzeFrame(bitmap, data);
                 frame.timestamp = data.timestamp;
                 frame.wallTimestamp = data.wallTimestamp;
                 frame.inferenceDelegate = analyzer.inferenceDelegate;
                 frame.delegateFallbackReason = analyzer.cpuFallbackReason || null;
                 const imageData = getFramePixels(frame);
-                self.postMessage({ id, result: { frame, imageData } }, imageData ? [imageData.data.buffer] : []);
+                const timing = { ...analyzer.lastFrameTiming, workerWorkMs: performance.now() - started };
+                self.postMessage({ id, result: { frame, imageData, timing } }, imageData ? [imageData.data.buffer] : []);
                 return;
             } else if (task === 'segment') {
                 result = await analyzer.segmentFrame(input, data.landmarks, data.timestamp);

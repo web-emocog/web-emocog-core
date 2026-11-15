@@ -34,6 +34,8 @@ const {
   channelQc,
 } = require('./metrics');
 const { trialSummary } = require('./attempts');
+const extended = require('./extended-service');
+const { participantCsv } = require('./participant-csv');
 
 const router = express.Router();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -57,8 +59,8 @@ function responseError(res, error) {
   return res.status(500).json({ error: 'Analytics request failed', code: 'analytics_internal_error' });
 }
 
-async function requireSnapshot(req) {
-  const snapshotId = String(req.query.snapshot_id || '').trim();
+async function requireSnapshot(req, snapshotIdInput = req.query.snapshot_id, maximumSessions = Infinity) {
+  const snapshotId = String(snapshotIdInput || '').trim();
   if (!UUID_PATTERN.test(snapshotId)) {
     throw new HttpError(400, 'snapshot_id must be a UUID', 'analytics_snapshot_id_invalid');
   }
@@ -67,7 +69,10 @@ async function requireSnapshot(req) {
   if (!(await hasProjectMembership(pool, row.project_id, req.user))) {
     throw new HttpError(404, 'Analysis snapshot not found', 'analytics_snapshot_not_found');
   }
-  return hydrateSnapshot(pool, row);
+  if ((row.included_session_ids || []).length > maximumSessions) {
+    throw new HttpError(422, 'Choose at most 100 sessions per extended report', 'analytics_extension_dataset_too_large');
+  }
+  return hydrateSnapshot(pool, row, { includedOnly: Number.isFinite(maximumSessions) });
 }
 
 function envelope(kind, snapshot, data) {
@@ -185,6 +190,7 @@ function sessionTechnicalDetails(row) {
     ? 'mobile_browser'
     : (cameraWidth && cameraHeight ? 'computer_webcam' : 'desktop_browser');
   return {
+    ...(payload.experimentMeta?.source === 'analytics-lab-synthetic.v1' ? { synthetic: true } : {}),
     deviceClass: String(tech.deviceClass || tech.device || inferredDevice).slice(0, 64),
     resolution: screenWidth && screenHeight
       ? { width: screenWidth, height: screenHeight }
@@ -202,6 +208,12 @@ function sessionTechnicalDetails(row) {
     ),
     cameraFps: finiteNumber(tech.cameraFPS, tech.cameraFPSDetails?.fps, camera.frameRate),
     analysisFps: finiteNumber(row?.qc_payload?.analysisFps),
+    ...(row?.qc_payload?.fpsDiagnostics?.analysisSession ? { analysisCadence: {
+      meanFps: finiteNumber(row.qc_payload.fpsDiagnostics.analysisSession.meanFps),
+      observedMs: finiteNumber(row.qc_payload.fpsDiagnostics.analysisSession.observedMs),
+      threshold: finiteNumber(row.qc_payload.fpsDiagnostics.analysisSession.threshold),
+      belowThresholdMs: finiteNumber(row.qc_payload.fpsDiagnostics.analysisSession.belowThresholdMs)
+    } } : {}),
     browserFamily: browser.family ? String(browser.family).slice(0, 64) : null,
     browserLanguage: browser.language ? String(browser.language).slice(0, 16) : null,
     pixelRatio: finiteNumber(tech.pixelRatio, screen.pixelRatio),
@@ -439,6 +451,47 @@ router.post('/snapshots', async (req, res) => {
   } catch (error) {
     return responseError(res, error);
   }
+});
+
+async function extendedReport(req, res) {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).some(key => !['snapshot_id', 'plan', 'format'].includes(key))) {
+    throw new HttpError(422, 'Invalid analysis report request', 'analytics_extension_plan_invalid');
+  }
+  if (typeof body.snapshot_id !== 'string') throw new HttpError(422, 'Specify an analysis snapshot', 'analytics_extension_plan_invalid');
+  const plan = extended.validatePlan(body.plan === undefined ? {} : body.plan);
+  const hydrated = await requireSnapshot(req, body.snapshot_id, 100);
+  const filters = hydrated.snapshot.queryEcho.filters;
+  const controller = new AbortController();
+  const cancelled = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', cancelled);
+  try {
+    const data = await extended.run({ rows: extended.scopeRows(hydrated.sessionRows, filters),
+      definition: hydrated.protocol.definition, filters, plan,
+      scope: { snapshotId: hydrated.snapshot.id, datasetHash: hydrated.snapshot.datasetHash,
+        protocolVersion: hydrated.snapshot.queryEcho.protocolVersion } }, { signal: controller.signal });
+    res.setHeader('Cache-Control', 'private, no-store');
+    return envelope('extension_report', hydrated.snapshot, data);
+  } finally { res.removeListener('close', cancelled); }
+}
+
+router.post('/extensions/run', async (req, res) => {
+  try { return res.json(await extendedReport(req, res)); }
+  catch (error) { if (!res.destroyed) return responseError(res, error); }
+});
+
+router.post('/extensions/export', requireOperation(OPERATIONS.EXPORT_READ), async (req, res) => {
+  try {
+    const format = req.body?.format || 'json';
+    if (!['json', 'csv'].includes(format)) throw new HttpError(422, 'Invalid export format', 'analytics_export_options_invalid');
+    const report = await extendedReport(req, res);
+    const filename = `wecog-${format === 'csv' ? 'participants' : 'analysis'}.${format}`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (format === 'json') return res.json(report);
+    res.type('text/csv; charset=utf-8');
+    return res.send(participantCsv(report.data, req.query.lang === 'en'));
+  } catch (error) { if (!res.destroyed) return responseError(res, error); }
 });
 
 router.get('/sessions/:sessionRef/summary', async (req, res) => {

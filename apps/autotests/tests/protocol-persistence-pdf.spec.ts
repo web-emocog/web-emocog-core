@@ -210,7 +210,7 @@ for (const tab of ['session-card', 'data-quality', 'connectedness', 'group-compa
     const button = page.locator('#analyticsPdfDownload');
     await expect(button).toBeEnabled();
     const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
-    expect(download.suggestedFilename()).toContain(`-${tab}.pdf`);
+    expect(download.suggestedFilename()).toMatch(/^wecog-.+-\d{4}-\d{2}-\d{2}\.pdf$/u);
     const file = info.outputPath(`${tab}.pdf`);
     await download.saveAs(file);
     const bytes = await readFile(file);

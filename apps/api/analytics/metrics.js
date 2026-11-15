@@ -378,10 +378,20 @@ function gazeAlgorithm(presentation, id = GAZE_ALGORITHM.id) {
   return { id, version: '1.1.0', parametersHash: sha256(parameters), parameters };
 }
 
+function inconsistentFixationDuration(presentation, points = presentation.fixationPoints) {
+  const observation = finite(presentation.validObservationDurationMs);
+  if (observation === null || !Array.isArray(points)) return false;
+  // The producer rounds total observation time to integer milliseconds, but keeps fixation durations unrounded.
+  const tolerance = Number.isInteger(observation) ? 0.5 : 0.001;
+  return points.reduce((sum, point) => sum + Math.max(0, finite(point?.durationMs) ?? 0), 0) > observation + tolerance;
+}
+
 function aoiMetric(metricId, row, aoiRow, presentations) {
   const reachMetric = ['aoi.target_reached', 'aoi.target_reached_pct'].includes(metricId);
   const totalPresentations = presentations.length;
-  if (reachMetric) presentations = presentations.filter(item => (finite(item.validObservationDurationMs) ?? 0) > 0);
+  const observationWasReported = presentations.some(item => !item.gazeMissing && finite(item.validObservationDurationMs) !== null);
+  presentations = presentations.filter(item => (finite(item.validObservationDurationMs) ?? 0) > 0);
+  const inconsistent = presentations.some(item => inconsistentFixationDuration(item));
   const presentationCoverage = reachMetric
     ? { total: totalPresentations, observed: presentations.length } : null;
   const reachAlgorithm = reachMetric ? (() => {
@@ -394,6 +404,9 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
     ...(presentationCoverage ? { presentationCoverage, algorithm: reachAlgorithm } : {}),
     presentationId: totalPresentations === 1 ? presentations[0]?.presentationId : null,
     trialId: totalPresentations === 1 ? presentations[0]?.trialId : null };
+  if (inconsistent) return metricBase(metricId, row, {
+    ...scope, status: 'insufficient_quality', reason: 'gaze_fixation_duration_inconsistent',
+  });
   if (gazeSpatialAccuracy(row).validationStatus === 'failed') return metricBase(metricId, row, {
     ...scope, status: 'insufficient_quality', reason: 'gaze_spatial_validation_failed',
   });
@@ -402,7 +415,7 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
   });
   const mixedMappings = coordinateMappings(presentations).size > 1;
   if (!presentations.length || mixedMappings) return metricBase(metricId, row, {
-    ...scope,
+    ...scope, observationDurationMs: !presentations.length && observationWasReported ? 0 : null,
     reason: mixedMappings ? 'gaze_coordinate_mappings_mixed'
       : totalPresentations ? 'valid_observation_missing' : 'gaze_presentation_missing',
     blockId: aoiRow.blockId,
@@ -439,6 +452,8 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
   const durations = inside.map(fixation => finite(fixation.durationMs)).filter(Number.isFinite);
   const dwell = durations.reduce((sum, value) => sum + value, 0);
   const observation = presentationRows.reduce((sum, item) => sum + item.observation, 0);
+  const shareDwell = presentationRows.reduce((sum, item) => sum + Math.min(item.observation,
+    item.inside.reduce((total, point) => total + Math.max(0, finite(point.durationMs) ?? 0), 0)), 0);
   const confidence = mean(presentations.map(item => finite(item.meanConfidence)));
   const visits = presentationRows.reduce((sum, item) => sum + item.visits, 0);
   const revisits = presentationRows.reduce((sum, item) => sum + Math.max(0, item.visits - 1), 0);
@@ -466,9 +481,9 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
     presentationCoverage,
   };
   const values = {
-    'aoi.gaze_on_target_pct': [observation ? round(dwell / observation * 100) : 0, dwell, observation],
+    'aoi.gaze_on_target_pct': [round(shareDwell / observation * 100), shareDwell, observation],
     'aoi.dwell_time_ms': [round(dwell), dwell, observation],
-    'aoi.dwell_time_pct': [observation ? round(dwell / observation * 100) : 0, dwell, observation],
+    'aoi.dwell_time_pct': [round(shareDwell / observation * 100), shareDwell, observation],
     'aoi.fixation_count': [inside.length, inside.length, fixations.length],
     'aoi.fixation_rate_per_min': [observation ? round(inside.length * 60000 / observation) : 0, inside.length, observation],
     'aoi.fixation_duration_median_ms': [round(quantile(durations, 0.5)), null, durations.length],
@@ -1114,6 +1129,7 @@ module.exports = {
   distribution,
   finite,
   fixationInsideAoi,
+  inconsistentFixationDuration,
   metricBase,
   normalizedGrid,
   protocolAois,

@@ -43,7 +43,7 @@ async function confirmProtocolPreflight(report, lang = 'ru', blocks = []) {
         }
         const message = document.createElement('span');
         message.textContent = item.code === 'short_physiology_window'
-          ? (ru ? 'Этот блок слишком короткий для отдельной оценки пульса или дыхания. Время реакции и другие доступные показатели сохранятся. Для расчёта физиологии алгоритму нужны окна данных: 10 секунд для пульса и 20 секунд для дыхания; это не гарантия точности.' : 'This block is too short for a separate heart-rate or breathing estimate. Reaction times and other available measurements will still be saved. The algorithm uses 10-second heart-rate and 20-second breathing windows; these do not guarantee accuracy.')
+          ? (ru ? 'Этот блок слишком короткий для отдельной оценки пульса или дыхания. Другие доступные измерения сохранятся. Для оценки нужно окно в 10 секунд для пульса и 20 секунд для дыхания; это не гарантия точности.' : 'This block is too short for a separate heart-rate or breathing estimate. Other available measurements will still be saved. The 10-second heart-rate and 20-second breathing windows do not guarantee accuracy.')
           : item.message[ru ? 'ru' : 'en'];
         li.append(message);
         list.append(li);
@@ -1256,6 +1256,8 @@ function ExperimentBuilderView(options = {}) {
     const rtMinVal = block.content?.rtMin != null && block.content.rtMin !== '' ? block.content.rtMin : '';
     const rtMaxVal = block.content?.rtWindow != null && block.content.rtWindow !== '' ? block.content.rtWindow : '';
     const isPassive = block.type === 'passive';
+    const passiveResponseHint = trb('В пассивном просмотре участник только смотрит: ответ и время реакции не записываются.',
+      'In passive viewing the participant only watches: responses and reaction times are not recorded.');
     const measureRt = !isPassive && block.content.useRT !== false;
     const responseMode = isPassive ? 'none' : ['keypress', 'click', 'pointer_intent', 'none'].includes(block.content?.responseMode)
       ? block.content.responseMode
@@ -1440,7 +1442,12 @@ function ExperimentBuilderView(options = {}) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     if (isPassive) {
-      for (const id of ['applyBulkResponse', 'bulkResponseAction']) modal.querySelector('#' + id).disabled = true;
+      for (const id of ['useRtCalcCb', 'rtMinInput', 'rtWindowInput', 'responseModeSel', 'applyBulkResponse', 'bulkResponseAction']) {
+        const control = modal.querySelector('#' + id);
+        control.disabled = true;
+        control.title = passiveResponseHint;
+        control.setAttribute('aria-describedby', 'responseModeHint');
+      }
     }
 
     const container = modal.querySelector('#trialsTbody');
@@ -1482,7 +1489,7 @@ function ExperimentBuilderView(options = {}) {
     const responseModeHint = modal.querySelector('#responseModeHint');
     const refreshResponseModeHint = () => {
       const pointer = responseModeSel?.value === 'pointer_intent';
-      responseModeHint.textContent = pointer
+      responseModeHint.textContent = isPassive ? passiveResponseHint : pointer
         ? trb(
           'Только для aiming/shooter-задач: движение засчитывается после baseline, dead-zone и устойчивого порога скорости/смещения.',
           'Only for aiming/shooter tasks: movement counts after baseline, dead-zone, and sustained velocity/displacement thresholds.'
@@ -1576,6 +1583,10 @@ function ExperimentBuilderView(options = {}) {
         }
         const actionEl = row.querySelector('.t-action');
         actionEl.disabled = isPassive || !currentTrials[idx].stimulusId;
+        if (isPassive) {
+          actionEl.title = passiveResponseHint;
+          actionEl.setAttribute('aria-describedby', 'responseModeHint');
+        }
         const savedAction = currentTrials[idx].action || currentTrials[idx].correctResponse || '';
         const physicalKey = window.WecogKeyboardResponses.normalize(savedAction);
         const legacyOption = { Space: 'space', ArrowUp: 'arrow_up', ArrowDown: 'arrow_down', ArrowLeft: 'arrow_left', ArrowRight: 'arrow_right' }[physicalKey];
@@ -3555,6 +3566,9 @@ function ExperimentBuilderView(options = {}) {
     const id = String(stimulus.id || '');
     const name = previewEscape(stimulus.name || stimulus.text || id);
     const url = safeBuilderMediaUrl(stimulus._previewObjectUrl || stimulus.url || stimulus.src, stimulus.type);
+    if (stimulus.apiContentUrl && !url) {
+      return `<div style="color:var(--bad);font-size:14px;font-weight:700;">${trb('Не удалось открыть файл стимула','Could not open the stimulus file')}: ${name}</div>`;
+    }
 
     if ((stimulus.type === 'image' || stimulus.type === 'slides') && url) {
       return `<img src="${previewEscape(url)}" alt="${name}" style="max-width:min(72vw,620px);max-height:48vh;object-fit:contain;border-radius:14px;box-shadow:0 12px 36px rgba(15,23,42,.16);">`;
@@ -3639,10 +3653,13 @@ function ExperimentBuilderView(options = {}) {
 
   function expandPreviewTrials(block) {
     let rows = [];
-    (block.content?.trials || []).forEach((trial, trialIndex) => {
+    const trials = block.type === 'passive' && !block.content?.trials?.length
+      ? block.content?.slides : block.content?.trials;
+    (Array.isArray(trials) ? trials : []).forEach((entry, trialIndex) => {
+      const trial = entry && typeof entry === 'object' ? entry : { stimulusId: entry };
       const reps = Math.max(1, parseInt(trial.repetitions) || 1);
       for (let rep = 0; rep < reps; rep++) {
-        rows.push({ ...trial, _trialIndex: trialIndex, _repIndex: rep });
+        rows.push({ ...trial, stimulusId: trial.stimulusId ?? trial.id, _trialIndex: trialIndex, _repIndex: rep });
       }
     });
     if (block.content?.randomize) {
@@ -3688,11 +3705,11 @@ function ExperimentBuilderView(options = {}) {
 
   function previewBlockSummary(block) {
     if (block.type === 'instruction') return resolvedInstructionText(block, CURRENT_LANG);
-    if (block.type === 'cognitive_task') {
-      const trials = block.content?.trials || [];
+    if (block.type === 'cognitive_task' || block.type === 'passive') {
+      const trials = block.content?.trials?.length ? block.content.trials : block.content?.slides || [];
       const total = trials.reduce((sum, tr) => sum + (parseInt(tr.repetitions) || 1), 0);
       const first = trials[0];
-      return `${block.content?.taskType || 'cognitive_task'} · ${total} проб${first ? ` · ${trb('первый стимул:','first stimulus:')} ` + stimulusNameById(first.stimulusId) : ''}`;
+      return `${total} ${trb('предъявлений', 'presentations')}${first ? ` · ${trb('первый стимул:','first stimulus:')} ` + stimulusNameById(typeof first === 'object' ? first.stimulusId ?? first.id : first) : ''}`;
     }
     if (block.type === 'rest') {
       const seconds = timedBlockDurationMs(block.content, 30) / 1000;
@@ -3760,7 +3777,8 @@ function ExperimentBuilderView(options = {}) {
         return;
       }
 
-      if (block.type !== 'cognitive_task') {
+      const passive = block.type === 'passive';
+      if (block.type !== 'cognitive_task' && !passive) {
         screens.push({
           kind:'generic',
           block,
@@ -3779,8 +3797,8 @@ function ExperimentBuilderView(options = {}) {
           block,
           blockIndex,
           manual:true,
-          title:localizedBlockLabel(block, 'Задача на время реакции'),
-          text:trb('В этом блоке пока нет trials.','This block does not have trials yet.')
+          title:localizedBlockLabel(block, passive ? trb('Пассивный просмотр','Passive viewing') : trb('Задача на время реакции','Reaction time task')),
+          text:trb('В этом блоке пока нет стимулов.','This block has no stimuli yet.')
         });
         return;
       }
@@ -3803,10 +3821,12 @@ function ExperimentBuilderView(options = {}) {
         if (trial.cue) {
           screens.push({ kind:'cue', block, blockIndex, trial, trialIndex, totalTrials:trials.length, duration:previewDurationMs(trial.cueDuration, 200) });
         }
-        const stimulusDuration = previewDurationMs(trial.duration || block.content?.stimulusDuration || block.content?.rtWindow, 1000);
+        const stimulusDuration = passive
+          ? previewDurationMs(trial.duration, previewDurationMs(block.content?.slideDuration, 5000))
+          : previewDurationMs(trial.duration || block.content?.stimulusDuration || block.content?.rtWindow, 1000);
         screens.push({ kind:'stimulus', block, blockIndex, trial, trialIndex, totalTrials:trials.length, duration:stimulusDuration });
         const responseWindow = parseInt(trial.responseWindow || block.content?.rtWindow);
-        if (Number.isFinite(responseWindow) && responseWindow > stimulusDuration) {
+        if (!passive && Number.isFinite(responseWindow) && responseWindow > stimulusDuration) {
           screens.push({ kind:'responseWindow', block, blockIndex, trial, trialIndex, totalTrials:trials.length, duration:responseWindow - stimulusDuration });
         }
         const iti = parseInt(trial.iti || block.content?.iti);
@@ -3821,6 +3841,9 @@ function ExperimentBuilderView(options = {}) {
     let timer = null;
     let closed = false;
     let feedbackActive = false;
+    let mediaPending = false;
+    let renderGeneration = 0;
+    const attemptedMedia = new Set();
 
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,35,.88);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -3920,7 +3943,7 @@ function ExperimentBuilderView(options = {}) {
         next();
         return;
       }
-      if (shouldPreviewFeedback(screen) && isSupportedPreviewKey(event)) {
+      if (!mediaPending && shouldPreviewFeedback(screen) && isSupportedPreviewKey(event)) {
         event.preventDefault();
         showPreviewFeedback(screen, responseMatches(screen, event));
       }
@@ -3972,9 +3995,13 @@ function ExperimentBuilderView(options = {}) {
     };
 
     const render = () => {
+      const generation = ++renderGeneration;
       if (timer) clearTimeout(timer);
       feedbackActive = false;
       const screen = screens[idx];
+      const currentMedia = screen.kind === 'stimulus' ? previewStimulusById(screen.trial?.stimulusId) : null;
+      mediaPending = !!(currentMedia?.apiContentUrl && !currentMedia._previewObjectUrl
+        && !attemptedMedia.has(currentMedia) && typeof hydrateApiStimulusPreview === 'function');
       const isTimed = !screen.manual && screen.duration;
       const effectiveDuration = isTimed ? Math.max(60, Math.round(screen.duration / speed)) : 0;
       const progressPct = screens.length > 1 ? (idx / (screens.length - 1)) * 100 : 100;
@@ -3998,11 +4025,11 @@ function ExperimentBuilderView(options = {}) {
         </div>
         <div style="flex:1;min-height:0;padding:22px;display:flex;flex-direction:column;gap:14px;">
           <div id="previewStage" style="flex:1;min-height:320px;border:1px solid var(--stroke);border-radius:18px;background:${screen.trial?.cue ? previewColorFromId(screen.trial.cue, '#fff') + '12' : 'rgba(255,255,255,.74)'};padding:28px;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;cursor:${shouldPreviewFeedback(screen) ? 'pointer' : 'default'};">
-            ${renderStage(screen)}
+            ${mediaPending ? trb('Загружаем стимул…', 'Loading stimulus…') : renderStage(screen)}
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px;line-height:1.45;">
             <div>
-              ${screen.trial ? `${trb('Стимул:','Stimulus:')} ${previewEscape(stimulusNameById(screen.trial.stimulusId))} · ${trb('Условие:','Condition:')} ${previewEscape(screen.trial.condition || '—')} · ${trb('Ответ:','Response:')} ${previewEscape(previewActionLabel(screen.trial.action || screen.trial.correctResponse))}` : trb('Системные обязательные блоки в этом предпросмотре не показываются.','Required system blocks are not shown in this preview.')}
+              ${screen.trial ? `${trb('Стимул:','Stimulus:')} ${previewEscape(stimulusNameById(screen.trial.stimulusId))}${screen.block?.type === 'passive' ? '' : ` · ${trb('Условие:','Condition:')} ${previewEscape(screen.trial.condition || '—')} · ${trb('Ответ:','Response:')} ${previewEscape(previewActionLabel(screen.trial.action || screen.trial.correctResponse))}`}` : trb('Системные обязательные блоки в этом предпросмотре не показываются.','Required system blocks are not shown in this preview.')}
             </div>
             <div style="white-space:nowrap;">${isTimed ? `${screen.duration} ${trb('мс','ms')}${speed > 1 ? ` · ${speed}x` : ''}` : trb('ручной переход','manual transition')}</div>
           </div>
@@ -4019,7 +4046,7 @@ function ExperimentBuilderView(options = {}) {
       modal.querySelector('#previewRunBack').addEventListener('click', previous);
       modal.querySelector('#previewRunNext').addEventListener('click', next);
       modal.querySelector('#previewStage')?.addEventListener('click', () => {
-        if (!shouldPreviewFeedback(screen) || feedbackActive) return;
+        if (mediaPending || !shouldPreviewFeedback(screen) || feedbackActive) return;
         showPreviewFeedback(screen, previewExpectedAction(screen) === 'mouse_click');
       });
       modal.querySelector('#previewSpeed').addEventListener('change', (e) => {
@@ -4031,6 +4058,15 @@ function ExperimentBuilderView(options = {}) {
         timer = null;
       });
       setTimeout(() => applyAutoI18n(modal), 0);
+      if (mediaPending) {
+        // Resolve only the current file through the scoped queue; never preload
+        // every large stimulus before opening a preview.
+        hydrateApiStimulusPreview(currentMedia).catch(() => null).finally(() => {
+          attemptedMedia.add(currentMedia);
+          if (!closed && generation === renderGeneration) render();
+        });
+        return;
+      }
       if (isTimed) {
         timer = setTimeout(() => {
           if (shouldPreviewFeedback(screen) && !hasNextResponseWindow(screen)) {
@@ -4191,7 +4227,7 @@ function ExperimentBuilderView(options = {}) {
           { key:'gazeValid', label:trb('Взгляд валиден','Gaze valid'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с валидным взглядом','Minimum % of frames with valid gaze'), yellowFrom:51, greenFrom:70 },
           { key:'faceDetected', label:trb('Лицо обнаружено','Face detected'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с обнаруженным лицом','Minimum % of frames with face detected'), yellowFrom:51, greenFrom:80 },
           { key:'fpsStable', label:trb('FPS (кадров в секунду) стабилен','FPS (frames per second) stable'), unit:'fps', min:0, max:60, hint:trb('Минимальная частота обработки кадров для стабильной записи','Minimum frame-processing rate for stable recording'), yellowFrom:16, greenFrom:25 },
-          { key:'lighting', label:trb('Освещение','Lighting'), unit:'%', min:0, max:100, hint:trb('Минимальный % кадров с допустимым освещением','Minimum % of frames with acceptable lighting'), yellowFrom:51, greenFrom:70 },
+          { key:'lighting', label:trb('Кадры с допустимым освещением','Frames with acceptable lighting'), unit:'%', min:0, max:100, hint:trb('Доля кадров, а не уровень яркости. Частота камеры проверяется отдельно.','Share of frames, not a brightness level. Camera frame rate is checked separately.'), yellowFrom:51, greenFrom:70 },
         ].map(param => `
           <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">

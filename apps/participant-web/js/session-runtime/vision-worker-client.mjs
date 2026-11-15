@@ -1,4 +1,4 @@
-const WORKER_URL = new URL('./vision-worker.js?v=20261110-integration1', import.meta.url);
+const WORKER_URL = new URL('./vision-worker.js?v=20261114-assigned1', import.meta.url);
 
 export class VisionWorkerClient {
     static supported() {
@@ -16,6 +16,7 @@ export class VisionWorkerClient {
         this.sequence = 0;
         this.closed = false;
         this.busy = false;
+        this.lastFrameTiming = null;
     }
 
     async start(options = {}) {
@@ -53,6 +54,7 @@ export class VisionWorkerClient {
     async analyze(source, context = {}) {
         if (this.busy || this.closed) throw new Error('vision_worker_unavailable');
         this.busy = true;
+        this.lastFrameTiming = null;
         let bitmap;
         try {
             const timestamp = performance.now();
@@ -64,7 +66,13 @@ export class VisionWorkerClient {
             }
             bitmap = await this._capture(source);
             if (this.closed) throw new Error('vision_worker_closed');
-            return await this._request({ type: 'frame', bitmap, timestamp, wallTimestamp, ...context }, [bitmap]);
+            const capturedAt = performance.now();
+            const result = await this._request({ type: 'frame', bitmap, timestamp, wallTimestamp, ...context }, [bitmap]);
+            if (this.task === 'face') this.lastFrameTiming = {
+                bitmapCaptureMs: capturedAt - timestamp,
+                workerRoundTripMs: performance.now() - capturedAt
+            };
+            return result;
         } finally {
             bitmap?.close();
             this.busy = false;

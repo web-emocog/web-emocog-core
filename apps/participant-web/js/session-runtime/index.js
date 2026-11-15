@@ -7,8 +7,8 @@ import {
 import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261110-integration1';
 import { LongSessionContinuity } from './long-session-continuity.mjs';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261110-integration1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261112-emotion2';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261114-assigned1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261114-assigned1';
 import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261110-integration1';
@@ -22,7 +22,7 @@ import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261107-prove
 import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261112-emotion2';
 import { showPersistenceNotice } from './persistence-ui.mjs?v=20261110-integration1';
 import { recordedConsentReceipt, sendSessionFeature } from './ingest-transport.mjs?v=20261110-integration1';
-import '../../../shared/protocol-quality.js?v=20261025-1';
+import '../../../shared/protocol-quality.js?v=20261114-assigned1';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
 
@@ -250,7 +250,7 @@ class ParticipantSessionRuntime {
             this.finalRetryTimer = null;
             this.finalRetryListener = null;
             if (this.pageExited) return;
-            import('../web-page/tests-updated.js?v=20261112-emotion2')
+            import('../web-page/tests-updated.js?v=20261114-assigned1')
                 .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };
@@ -523,11 +523,12 @@ class ParticipantSessionRuntime {
             severity: created.severity,
             issue: created
         });
-        this.ui.showIssue(
-            created,
-            created.invalidatesBlock !== false && this.machine.currentBlock?.stage === 'trial',
-            this.machine.currentBlock?.blockType
-        );
+        const duringTrial = created.invalidatesBlock !== false && this.machine.currentBlock?.stage === 'trial';
+        // Keep QC active but avoid altering stimuli or distracting the participant.
+        // The repeat dialog uses the recorded cause even if the rate recovers.
+        if (!duringTrial || created.code !== 'protocol_qc_fpsStable') {
+            this.ui.showIssue(created, duringTrial, this.machine.currentBlock?.blockType);
+        }
         return created;
     }
 

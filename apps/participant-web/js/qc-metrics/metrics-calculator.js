@@ -178,6 +178,7 @@ export function getSummary(counters, gazeState, validationState, trackingDeviati
 
     return {
         ...metrics,
+        analysisFps: metrics.fpsDiagnostics?.analysisSession?.meanFps ?? null,
         validation,
         trackingDeviation,
         checks,
