@@ -32,7 +32,7 @@ test('real trial windows render, rejected trials are excluded from pairs, labels
   await page.locator('#connectednessBlock').selectOption('rt');
   await page.locator('#connectednessCondition').selectOption('go');
   await expect(page.locator('#connectednessResults')).toContainText('ρ: 1.000');
-  await expect(page.getByRole('img', { name: 'Временная шкала стимулов и ответов' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Временная шкала стимулов и ответов' })).toBeVisible();
   await page.locator('#connectednessChannel').selectOption('bpm');
   await expect(page.locator('#connectednessResults')).toContainText('Нет данных');
   const downloaded = page.waitForEvent('download');
@@ -107,7 +107,7 @@ test('English labels and API failure state do not expose stale results or stack 
 });
 
 test('timeline, scatter plot, table and keyboard select the same trial and zoom follows it', async ({ page }) => {
-  const timeline = page.getByRole('img', { name: 'Временная шкала стимулов и ответов' });
+  const timeline = page.getByRole('group', { name: 'Временная шкала стимулов и ответов' });
   await expect(page.locator('#connectednessPrevious')).toBeDisabled();
   await timeline.locator('[data-trial-index="2"]').click();
   await expect(page.locator('#connectednessTrial')).toHaveValue('2');

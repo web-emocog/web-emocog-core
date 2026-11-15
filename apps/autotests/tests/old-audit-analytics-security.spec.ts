@@ -216,7 +216,7 @@ test('interactive session chart keeps missing values, block attempts and PDF sel
   const download = page.waitForEvent('download');
   await page.locator('#analyticsPdfDownload').click();
   const file = await download;
-  expect(file.suggestedFilename()).toMatch(/session-card\.pdf$/);
+  expect(file.suggestedFilename()).toMatch(/^wecog-(сессия|session)-\d{4}-\d{2}-\d{2}\.pdf$/u);
   const bytes = await readFile((await file.path())!);
   expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
   expect(bytes.toString('latin1')).toContain('/Subtype /Image');
@@ -225,9 +225,9 @@ test('interactive session chart keeps missing values, block attempts and PDF sel
   const png = await chartDownload;
   expect(png.suggestedFilename()).toMatch(/\.png$/);
   expect((await readFile((await png.path())!)).subarray(1, 4).toString()).toBe('PNG');
-  const respiration = dashboard.getByRole('button', { name: /Дыхание/ });
+  const respiration = dashboard.getByRole('combobox', { name: 'Канал' });
   await respiration.focus();
-  await respiration.press('Enter');
+  await respiration.selectOption('respiration');
   await expect(respiration).toBeFocused();
   await expect(dashboard.locator('#abPoint')).toHaveValue('1');
   await expect(dashboard.locator('.ab-detail')).toContainText('14 дых/мин');
@@ -243,11 +243,14 @@ test('interactive session chart keeps missing values, block attempts and PDF sel
   await expect(dashboard.locator('.ab-detail')).toContainText('220');
   await expect(dashboard.locator('#abPoint option:checked')).toHaveText('Проба 1 · Чёрный квадрат');
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await dashboard.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await expect.poll(() => dashboard.evaluate(node => node.clientWidth)).toBeGreaterThan(250);
+  expect(await dashboard.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
   await inert(page);
   await apply(page, 'data-quality');
   await expect(page.locator('#analyticsChannelQuality meter')).toHaveAttribute('value', '0');
-  await expect(page.locator('#analyticsChannelQuality .ab-detail')).toContainText('<img src=x onerror=');
+  const qualityDetail = page.locator('#analyticsChannelQuality .ab-detail');
+  await expect(qualityDetail).toContainText('Причина не уточнена');
+  await expect(qualityDetail).not.toContainText('onerror');
   await inert(page);
 });
 

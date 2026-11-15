@@ -209,7 +209,7 @@
       y: yKey === 'accuracy' && Number.isFinite(row[yKey]) ? row[yKey] * 100 : row[yKey], label: categoryKey ? observationValue(row[categoryKey], categoryKey, row, h) : row[categorical] || `${h.tr('Наблюдение','Observation')} ${index + 1}` })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
     if (!points.length) return `<div class="ax-chart-empty">${h.tr('Доступна таблица категориальных результатов ниже.','Categorical results are available in the table below.')}</div>`;
     const values = points.map(point => point.y), xs = points.map(point => point.x);
-    const type = requested.type || (/^R[24]|F[34]|A2/.test(module.id) ? 'line' : 'bar');
+    const type = requested.type || (['R2', 'R4', 'F3', 'F4', 'A2'].includes(module.id) ? 'line' : 'bar');
     const low = Math.min(...values, ...(type === 'bar' ? [0] : [])), high = Math.max(...values, ...(type === 'bar' ? [0] : [])), xmin = Math.min(...xs), xmax = Math.max(...xs);
     const x = value => xmax === xmin ? 390 : (type === 'bar' ? 85 : 55) + (value - xmin) / (xmax - xmin) * (type === 'bar' ? 620 : 650);
     const y = value => high === low ? 148 : 247 - (value - low) / (high - low) * 198;

@@ -1058,17 +1058,20 @@ for (const language of ['ru', 'en']) test(`spatial accuracy caveat is visible be
   await caveat.locator('summary').click();
   await expect(caveat.locator('p').last()).toBeVisible();
   await expect(caveat).toContainText(language === 'en' ? 'drift during the task was not measured' : 'сдвиг во время задания не измерялся');
+  await caveat.locator('summary').click();
+  await expect(caveat.locator('p').last()).toBeHidden();
   const pdfText = await page.evaluate(() => {
     const body = document.getElementById('analyticsProductionBody')!;
     const progress = document.createElement('span'); progress.setAttribute('role', 'status');
     progress.textContent = 'TRANSIENT_PROGRESS_NOT_IN_PDF'; body.appendChild(progress);
-    const text = (window as any).EmocogAnalyticsPdf.capture(body).text;
+    const text = (window as any).EmocogAnalyticsPdf.capture(body).limitations.join('\n');
     progress.remove(); return text;
   });
   expect(pdfText).toContain(language === 'en' ? 'drift during the task was not measured' : 'сдвиг во время задания не измерялся');
   expect(pdfText).not.toContain('TRANSIENT_PROGRESS_NOT_IN_PDF');
   if (process.env.WECOG_ISSUE143_VISUAL_REVIEW === '1') {
     await page.locator('[data-gaze-spatial-qc]').first().scrollIntoViewIfNeeded();
+    await caveat.locator('summary').click();
     await page.screenshot({ path: testInfo.outputPath('spatial-qc.png') });
   }
   if (process.env.WECOG_ISSUE143_PDF_REVIEW === '1' && language === 'ru' && testInfo.project.name === 'webkit') {

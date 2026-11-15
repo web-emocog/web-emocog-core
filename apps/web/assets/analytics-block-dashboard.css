@@ -165,6 +165,8 @@ g[data-ab-point]:hover .ab-pair, .ab-pair.is-active { opacity: 1; stroke-width: 
 .ab-effect text { fill: var(--muted); font: 12px var(--mono, monospace); }
 .ab-interval { padding: 10px 12px; background: var(--panel2); border-radius: 10px; }
 @media (max-width: 650px) {
+  .ab-field { width: min(100%, 260px); overflow-wrap: anywhere; overflow: clip; overflow-clip-margin: 4px; }
+  .ab-field select { width: 100%; text-overflow: ellipsis; }
   .ab-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ab-split { grid-template-columns: 1fr; }
   .ab-map svg { width: 65px; }

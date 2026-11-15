@@ -453,7 +453,7 @@ body {
 :root[data-theme="dark"] .brand .logo { background: #f5f5ec; }
 
 @media (max-width: 900px) {
-  .app { grid-template-columns: minmax(0, 1fr) !important; }
+  .app, .app.sidebar-collapsed { grid-template-columns: minmax(0, 1fr) !important; transition: none; }
   .app > .panel.left-panel {
     position: fixed;
     z-index: 1202;
@@ -461,7 +461,7 @@ body {
     width: min(280px, calc(100vw - 72px));
     height: auto;
   }
-  .app > .panel.center { grid-row: 1; min-height: 100%; }
+  .app > .panel.center { grid-area: 1 / 1; min-height: 100%; }
   .center-body { padding: 0 16px 30px; }
   #mobileNavToggle { width: 44px; height: 44px; background: var(--wc-accent); color: var(--wc-accent-ink); border: 0; }
   .app.mobile-nav-open .panel.left-panel { width: min(280px, calc(100vw - 72px)); }

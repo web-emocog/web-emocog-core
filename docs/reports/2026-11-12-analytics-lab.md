@@ -142,14 +142,12 @@ ANALYTICS_LAB_FIXTURE="$(cat /private/tmp/wecog-analytics-lab-current)/private/a
   npx playwright test --config=playwright.analytics-explorer.config.ts
 ```
 
-```bash
-ANALYTICS_LAB_FIXTURE="$(cat /private/tmp/wecog-analytics-lab-current)/private/analytics-lab.json" \
-  node apps/autotests/scripts/check-analytics-lab.mjs
-```
-
 Численные тесты сравнивают результаты с независимыми контрольными примерами
 R/SciPy и опубликованными примерами ICC; источники указаны в тестах.
-Сквозной тест отдельно пересчитывает среднее RT, проверяет все 40 сводок
+Сквозная проверка автоматически выполняется при запуске изолированного стенда
+(`ANALYTICS_LAB_VERIFY=YES`) сразу после заполнения синтетическими сессиями,
+без чтения учётных данных из файла и без записи полного ответа API на диск.
+Она отдельно пересчитывает среднее RT, проверяет все 40 сводок
 в подходящих конфигурациях, независимые группы, равенство экспорта и отчёта,
 отказ другому исследователю и неавторизованному клиенту.
 

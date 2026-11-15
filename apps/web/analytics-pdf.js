@@ -91,6 +91,8 @@
     const data = source?.extendedReport?.data;
     const figures = [], unavailable = [], metrics = [], statistics = [];
     const text = node => node?.textContent?.trim() || '';
+    const limitations = [...new Set([...body.querySelectorAll('[data-gaze-spatial-qc] > strong, [data-gaze-spatial-qc] details > p')]
+      .map(text).filter(Boolean))];
     const scope = ['analyticsProjectFilter','analyticsProtocolFilter','analyticsVersionFilter'].map(id =>
       text(body.querySelector('#' + id)?.selectedOptions[0])).filter(Boolean);
     function addFigure(node, caption, note = '') {
@@ -217,10 +219,13 @@
     if (!data) {
       for (const node of body.querySelectorAll('.ab-dashboard svg.ab-chart')) addFigure(node, node.getAttribute('aria-label') || tr('График текущего отчёта', 'Current report chart'));
     }
+    for (const node of body.querySelectorAll('.ab-dashboard .ab-effect > svg')) {
+      addFigure(node, node.getAttribute('aria-label') || tr('Доверительный интервал разности', 'Confidence interval of the difference'));
+    }
     const plan = data?.plan || source?.plan || {};
     const names = source?.helpers?.names;
     const name = id => names?.get(id) || tr('Не выбрано', 'Not selected');
-    return { controls: selection(body), figures, metrics: metrics.slice(0, 8), statistics, scope, unavailable,
+    return { controls: selection(body), figures, metrics: metrics.slice(0, 8), statistics, scope, unavailable, limitations,
       sourceSnapshotId: source?.extendedReport?.snapshot?.id,
       sourceDatasetHash: source?.extendedReport?.snapshot?.datasetHash,
       analysisPlanKey: JSON.stringify(source?.plan || null),
@@ -352,6 +357,11 @@
     }
     y += 2;
     paragraph(tr('Показатели исследовательские. Сохранённая запись не подтверждает точность измерений; пропуски не заменены нулями.', 'Research estimates. A stored recording does not establish measurement accuracy; missing values are not zero.'), 9, muted);
+    if (capture.limitations?.length) {
+      room(26);
+      heading(tr('Ограничения измерений', 'Measurement limitations'));
+      for (const note of capture.limitations) paragraph(note, 9, muted);
+    }
     for (const [index, figure] of capture.figures.entries()) {
       const caption = clean(figure.caption || tr('График','Chart'));
       pdf.setFontSize(13); const titleLines = pdf.splitTextToSize(caption, width);

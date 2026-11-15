@@ -53,7 +53,7 @@ docker run -d --rm --name "$name-api" --label wecog.purpose=synthetic-analytics-
   -lc 'mkdir -p /tmp/wecog-lab-uploads/stimuli; exec node server.js' >/dev/null
 created_api=1
 docker run --rm "${common[@]}" --mount "type=bind,src=$out/private,dst=/test-output" \
-  -e ANALYTICS_LAB_ISOLATED=YES -e ANALYTICS_LAB_DATABASE_URL="$db" \
+  -e ANALYTICS_LAB_ISOLATED=YES -e ANALYTICS_LAB_VERIFY=YES -e ANALYTICS_LAB_DATABASE_URL="$db" \
   -e ANALYTICS_LAB_API_BASE=http://127.0.0.1:3000 -e ANALYTICS_LAB_FIXTURE=/test-output/analytics-lab.json \
   --entrypoint node "$api_image" scripts/seed-analytics-lab.js >"$out/private/seed.log" 2>&1
 node docker/web/stage-public.mjs "$root" "$out/public" >"$out/private/staging.log" 2>&1

@@ -384,7 +384,7 @@ function dashboardSelection(projectId, protocolId, publicationVersion, sessionDb
     groups: Object.fromEntries(['A', 'B'].map(group => [group, [...new Set(sessions.filter(row => row.group === group).map(row => row.participantId))]])) };
 }
 
-async function apiRequest(apiBase, route, { body, token, headers = {}, expected = [200, 201], timeoutMs = 30000 } = {}) {
+async function apiResponse(apiBase, route, { body, token, headers = {}, expected = [200, 201], timeoutMs = 30000 } = {}) {
   const base = localHttp(apiBase);
   if (!route.startsWith('/') || route.startsWith('//')) reject('invalid_api_route');
   const target = new URL(route, base);
@@ -395,6 +395,11 @@ async function apiRequest(apiBase, route, { body, token, headers = {}, expected 
     body: body === undefined ? undefined : JSON.stringify(body) });
   // Never echo response bodies, URL codes, auth headers, DB errors or credentials.
   if (!expected.includes(response.status)) reject(`http_${response.status}`);
+  return response;
+}
+
+async function apiRequest(apiBase, route, options) {
+  const response = await apiResponse(apiBase, route, options);
   return response.status === 204 ? null : response.json();
 }
 
@@ -518,10 +523,17 @@ async function main(env = process.env) {
     }
     fixture.dashboard = dashboardSelection(fixture.projectId, fixture.protocolId, fixture.publicationVersion, fixture.sessions[0].sessionDbId, fixture.sessions);
     fixture.query = fixture.dashboard.query;
+    let verification;
+    if (env.ANALYTICS_LAB_VERIFY === 'YES') {
+      fixture.stage = 'verify_analytics';
+      const { verifyAnalyticsLab } = require('./verify-analytics-lab');
+      verification = await verifyAnalyticsLab(fixture, (route, body, token, status = 200) =>
+        apiResponse(config.apiBase, route, { body, token, expected: [status] }), tokens);
+    }
     fixture.status = 'complete';
     fixture.stage = 'complete';
     await writeFixture(file, fixture);
-    return fixture;
+    return verification ? { ...fixture, verification } : fixture;
   } catch (error) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     fixture.status = 'failed';
@@ -539,6 +551,7 @@ module.exports = { LAB_NAME, DEFAULT_SEED, assertSafetyGuards, createProtocolDef
 
 if (require.main === module) main().then(fixture => {
   process.stdout.write(`Seeded ${fixture.sessions.length} synthetic lab sessions and one foreign-tenant session. Credentials only in ANALYTICS_LAB_FIXTURE.\n`);
+  if (fixture.verification) process.stdout.write(`Verified ${fixture.verification.exercisedSummaries} synthetic analytics summaries, export and access isolation.\n`);
 }).catch(() => {
   process.stderr.write('Analytics lab seed failed closed. Check isolation flags, explicit API base, fixture permissions, test migrations and API readiness. No existing rows were deleted.\n');
   process.exitCode = 1;

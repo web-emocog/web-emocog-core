@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
+const { constants } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
@@ -84,6 +85,18 @@ test('CLI guard failure never discloses URL credentials or creates output', () =
   assert.doesNotMatch(child.stderr, /SECRET_SENTINEL|postgres:|stack|password_hash/);
 });
 
+async function readPrivateFixture(filename) {
+  const handle = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    assert.ok(info.isFile());
+    assert.equal(info.mode & 0o777, 0o600);
+    return await handle.readFile('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
 test('private fixture is 0600, exclusive, never follows links, and does not retain old tail bytes', async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'analytics-lab-test-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -92,14 +105,14 @@ test('private fixture is 0600, exclusive, never follows links, and does not reta
   await seed.writeFixture(file, { users: { researcher: { password: 'PRIVATE_TEST_SENTINEL' } }, lengthy: 'x'.repeat(1024) });
   await seed.writeFixture(file, { status: 'complete' });
   await file.close();
-  assert.equal((await fs.stat(filename)).mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), { status: 'complete' });
+  assert.deepEqual(JSON.parse(await readPrivateFixture(filename)), { status: 'complete' });
   await assert.rejects(seed.openPrivateFixture(filename), { code: 'EEXIST' });
   await fs.symlink(filename, path.join(root, 'linked.json'));
   await assert.rejects(seed.openPrivateFixture(path.join(root, 'linked.json')));
+  await assert.rejects(readPrivateFixture(path.join(root, 'linked.json')));
   await fs.symlink(root, path.join(root, 'parent-link'));
   await assert.rejects(seed.openPrivateFixture(path.join(root, 'parent-link', 'new.json')), /symlink/);
-  assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), { status: 'complete' });
+  assert.deepEqual(JSON.parse(await readPrivateFixture(filename)), { status: 'complete' });
 });
 
 test('default data is deterministic, named, repeated and balanced without DB dependencies', async () => {
@@ -441,8 +454,7 @@ test('main orchestration uses real routes, never SQL-publishes, verifies binding
   assert.equal(sql.some(q => /(?:INSERT|UPDATE).*?(?:protocols|invitations|protocol_publications)/.test(q)), false);
   assert.equal(sql.some(q => /\bDELETE\b|\bTRUNCATE\b/.test(q)), false);
   assert.ok(sql.every(q => !q.startsWith('UPDATE ') || q.startsWith('UPDATE sessions SET started_at=')));
-  assert.equal((await fs.stat(fixturePath)).mode & 0o777, 0o600);
-  const encoded = await fs.readFile(fixturePath, 'utf8'), written = JSON.parse(encoded);
+  const encoded = await readPrivateFixture(fixturePath), written = JSON.parse(encoded);
   assert.equal(written.users.researcher.email.endsWith('@example.test'), true);
   for (const account of Object.values(written.users)) {
     assert.equal(isEmail(account.email), true);

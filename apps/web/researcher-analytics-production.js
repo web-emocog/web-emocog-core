@@ -3470,8 +3470,9 @@
     unsubscribe = store.subscribe(renderState);
     setTimeout(async () => {
       await store.initialize(false);
-      if (body.isConnected && reloadViewport && reloadViewport.fingerprint === viewportFingerprint()
-        && store.state.status === 'ready' && hasAuth()) await store.apply();
+      if (!body.isConnected || !hasAuth() || store.state.status !== 'ready') return;
+      // Storage can request a refresh of the authorized view, not authorize a request.
+      if (reloadViewport?.fingerprint && reloadViewport.fingerprint === viewportFingerprint()) await store.apply();
     }, 0);
     return wrapper;
   }
