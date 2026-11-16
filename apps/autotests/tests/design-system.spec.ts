@@ -148,14 +148,18 @@ test.describe('wecog design system', () => {
     await expect(page.locator('#nav-billing')).toBeHidden();
 
     const search = page.locator('#researcherNavSearch');
+    await expect(search).toBeHidden();
+    await page.locator('#researcherSearchToggle').click();
     await search.fill('биб');
     await expect(page.locator('#researcherSearchResults')).toBeVisible();
     await expect(page.locator('#researcherSearchResults')).toContainText('Библиотека');
     await search.fill('качество');
-    await expect(page.locator('#researcherSearchResults a')).toHaveAttribute(
+    await expect(page.getByRole('option', { name: 'Качество данных', exact: true })).toHaveAttribute(
       'href',
       '#/analytics/data-quality'
     );
+    await page.keyboard.press('Escape');
+    await expect(search).toBeHidden();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('#mobileNavToggle')).toBeVisible();

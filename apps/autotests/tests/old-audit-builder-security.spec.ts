@@ -182,6 +182,10 @@ test('#156 generation and bulk timing preserve manual order, unselected fields, 
     { stimulusId: '20', duration: 2500, repetitions: 4 },
   ] } }], 3, {}, stimuli, [folder]);
   await page.locator('.open-trials-btn').click();
+  await expect(page.locator('#useRtCalcCb')).toBeDisabled();
+  await expect(page.locator('#applyBulkResponse')).toBeDisabled();
+  await expect(page.locator('#responseModeHint')).toContainText('ответ и время реакции не записываются');
+  await expect(page.locator('#responseModeSel')).toHaveAttribute('aria-describedby', 'responseModeHint');
   await page.locator('#autoGenFolder').selectOption('pages');
   await page.locator('#autoGenBtn').click();
   const values = (selector: string) => page.locator(selector).evaluateAll(nodes => nodes.map(node => (node as HTMLInputElement).value));
@@ -225,6 +229,9 @@ test('#156 AOI copy and interval apply stay in the current block and preserve li
   await page.mouse.up();
   await expect(page.locator('#aoiEnd')).toHaveValue('');
   await expect(page.locator('#aoiIntervalHint')).toContainText('Действует весь показ');
+  await page.locator('#aoiEnd').fill('5001');
+  await expect(page.locator('#aoiIntervalHint')).toContainText('Конец зоны позже окончания показа (5000 мс)');
+  await page.locator('#aoiEnd').fill('');
   await expect(page.locator('#aoiSizeHint')).toContainText(/\d+ × \d+ px/);
   await expect(page.locator('#aoiSizeHint')).toContainText('на устройстве участника');
   await page.locator('#aoiBatch summary').click();
@@ -440,6 +447,30 @@ test('trial feedback remains literal and response keys still advance the preview
   await page.keyboard.press('q');
   await expect(page.locator('#previewStage')).toContainText(marker);
   await inertInputs(page);
+  await page.locator('#previewRunClose').click();
+});
+
+test('#156 passive preview shows media at authored durations without prompting for an answer', async ({ page }) => {
+  await open(page);
+  const passive = { id: 'passive-preview', type: 'passive', label: 'Passive preview', content: {
+    slideDuration: 12000, rtWindow: 100000,
+    slides: [{ stimulusId: 'p1', action: 'KeyQ', duration: 7000 }, { stimulusId: 'p2' }]
+  } };
+  await mount(page, [passive], 5, {}, [
+    { id: 'p1', type: 'text', name: 'First slide', text: 'First synthetic slide' },
+    { id: 'p2', type: 'text', name: 'Second slide', text: 'Second synthetic slide' }
+  ]);
+  await page.locator('#runUserPreviewBtn').click();
+  const stage = page.locator('#previewStage');
+  await expect(stage).toContainText('First synthetic slide');
+  await expect(stage.locator('..')).toContainText('7000 мс');
+  await expect(stage.locator('..')).not.toContainText('Ответ:');
+  await page.keyboard.press('q');
+  await stage.click();
+  await expect(stage).toContainText('First synthetic slide');
+  await page.locator('#previewRunNext').click();
+  await expect(stage).toContainText('Second synthetic slide');
+  await expect(stage.locator('..')).toContainText('12000 мс');
   await page.locator('#previewRunClose').click();
 });
 

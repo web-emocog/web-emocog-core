@@ -22,11 +22,13 @@ process.exit(0);
     fs.writeFileSync(path.join(directory, 'timeout'), '#!/usr/bin/env bash\nshift\nexec "$@"\n');
     fs.writeFileSync(path.join(directory, 'sleep'), '#!/bin/sh\nexit 0\n');
     for (const file of ['docker', 'timeout', 'sleep']) fs.chmodSync(path.join(directory, file), 0o700);
-    const result = spawnSync('bash', [script], { encoding: 'utf8', timeout: 5000, env: {
+    // The unhealthy case starts 30 mock Node processes; the fixture's deadline must allow their cold starts.
+    const result = spawnSync('bash', [script], { encoding: 'utf8', timeout: 20000, env: {
       ...process.env, PATH: directory + ':' + process.env.PATH, CI: 'true', CI_POSTGRES_ALLOW_LOCAL: '',
       CI_POSTGRES_CONTAINER: 'wecog-unit-fixture', CI_POSTGRES_PORT: '55439', GITHUB_OUTPUT: output,
       FAKE_DOCKER_MODE: mode, FAKE_DOCKER_LOG: log, ...patch
     } });
+    if (result.error) throw result.error;
     return { ...result, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [],
       output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }

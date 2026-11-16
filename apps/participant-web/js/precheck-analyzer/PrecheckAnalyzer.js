@@ -16,7 +16,7 @@ import { analyzePose, checkStability, checkEyesCentering, addToHistory } from '.
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261110-integration1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261114-assigned1';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
     notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
@@ -138,6 +138,7 @@ class PrecheckAnalyzer {
     }
 
     async _analyzeFrame(videoElement, capture = {}) {
+        this.lastFrameTiming = null;
         const generation = this.generation;
         if (!this.isInitialized && this.initializationFailed) return this._createErrorResult('face_model_unavailable');
         if (!this.isInitialized && !await this.initialize()) return this._createErrorResult('Analyzer unavailable');
@@ -150,8 +151,9 @@ class PrecheckAnalyzer {
             const generation = this.generation;
             const worker = this.worker;
             try {
-                const { frame, imageData } = await worker.analyze(videoElement, capture);
+                const { frame, imageData, timing } = await worker.analyze(videoElement, capture);
                 if (generation !== this.generation) return this._createErrorResult('Analysis interrupted');
+                this.lastFrameTiming = { ...timing, ...worker.lastFrameTiming };
                 if (['GPU', 'CPU'].includes(frame.inferenceDelegate)) this.inferenceDelegate = frame.inferenceDelegate;
                 this.cpuFallbackReason = frame.delegateFallbackReason || this.cpuFallbackReason || null;
                 this.lastResult = rememberFramePixels(frame, imageData);
@@ -187,7 +189,9 @@ class PrecheckAnalyzer {
             // Сначала запускаем MediaPipe — нужны landmarks, чтобы illumination
             // считался по face ROI, а не по всему кадру (тёмный/светлый фон не должен
             // штрафовать пользователя при нормальном освещении лица).
+            const modelStart = performance.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
+            this.lastFrameTiming = { modelCallMs: performance.now() - modelStart };
 
             const faceData = parseFaceResults(mpResults, width, height, this.thresholds.face);
             const eyes = analyzeEyes(mpResults, width, height, this.thresholds.eyes);

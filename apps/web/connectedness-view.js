@@ -82,8 +82,7 @@
         <li>${tr('Связь показывается для одного блока и условия. Минимум три пары — ограничение отображения, а не достаточный размер выборки.', 'Association is shown within one block and condition. Three pairs are a display limit, not an adequate sample size.')}</li>
       </ul></details>
       <details class="ab-chart-method"><summary>${tr('Доступность сигналов и паспорт отчёта', 'Signal availability and report provenance')}</summary>
-        <p id="connectednessAvailability">${tr('Видео участника не сохраняется. Моргания и PERCLOS без оконных данных не подменяются средними за сессию.','Participant video is not stored. Blinks and PERCLOS without windowed data are not replaced by session averages.')}</p>
-      <p style="font-size:11px;overflow-wrap:anywhere">snapshot ${escape(response.snapshot.id)} · ${escape(response.snapshot.datasetHash)} · ${escape(report.algorithmVersion)} · ${escape(report.clock)} ${report.truncated ? tr('· сохранены первые 200 проб','· first 200 trials retained') : ''}</p>
+        <p id="connectednessAvailability">${tr('Видео участника не сохраняется. Средние за сессию не заменяют пропуски в отдельных пробах.','Participant video is not stored. Session averages do not replace missing trial data.')}${report.truncated ? tr(' Показаны первые 200 сохранённых проб.', ' Showing the first 200 retained trials.') : ''}</p>
       </details>
     </section>`;
     const select = id => host.querySelector('#' + id);
@@ -92,12 +91,14 @@
     function choose(index, focus = false) {
       if (!Number.isInteger(index) || !current[index]) return;
       selectedTrial = current[index]; update();
-      if (focus) select('connectednessTrial').focus();
+      if (focus) select('connectednessTrial').focus({ preventScroll: true });
     }
     function update() {
       const block = select('connectednessBlock').value, condition = select('connectednessCondition').value;
       const window = select('connectednessWindow').value, channel = select('connectednessChannel').value;
       const tableOpen = select('connectednessResults').querySelector('details')?.open;
+      const visualizations = globalThis.WecogAnalyticsVisualizations;
+      const zoom = visualizations?.zoomState(select('connectednessResults'));
       current = report.trials.filter(trial => (!block || selectionValue(trial.blockId) === block) && (!condition || selectionValue(trial.condition) === condition));
       if (!current.includes(selectedTrial)) selectedTrial = current[0] || null;
       const selectedIndex = current.indexOf(selectedTrial);
@@ -112,17 +113,27 @@
       const span = Number(select('connectednessZoom').value) || duration;
       const rangeStart = span >= duration ? 0 : Math.max(0, Math.min(duration - span, (selectedTrial?.onsetMs || 0) - span / 2));
       const rangeEnd = Math.min(duration, rangeStart + span);
-      const xTime = time => 20 + (time - rangeStart) / (rangeEnd - rangeStart || 1) * 600;
-      const timeline = `<svg role="img" aria-label="${escape(tr('Временная шкала стимулов и ответов','Stimulus and response timeline'))}" viewBox="0 0 640 85" style="width:100%;max-width:900px"><path d="M20 35H620" stroke="currentColor"/>${current.map((trial, index) => {
+      const xTime = time => 30 + (time - rangeStart) / (rangeEnd - rangeStart || 1) * 580;
+      const tickCount = rangeEnd - rangeStart < 3000 ? 2 : 5;
+      const tickTime = time => {
+        const seconds = time / 1000;
+        return seconds < 60 ? new Intl.NumberFormat(english ? 'en' : 'ru', { maximumFractionDigits: 1 }).format(seconds) + tr(' с',' s')
+          : Math.floor(seconds / 60) + ':' + String(Math.floor(seconds % 60)).padStart(2, '0');
+      };
+      const ticks = Array.from({ length: tickCount }, (_,i) => {
+        const tick = rangeStart + i / (tickCount - 1) * (rangeEnd - rangeStart), x = xTime(tick);
+        return `<path class="ab-grid" d="M${x} 13V63"/><text x="${x}" y="82" text-anchor="${i === 0 ? 'start' : i === tickCount - 1 ? 'end' : 'middle'}">${escape(tickTime(tick))}</text>`;
+      }).join('');
+      const timeline = `<svg class="ab-chart ab-stimulus-timeline" role="group" aria-label="${escape(tr('Временная шкала стимулов и ответов','Stimulus and response timeline'))}" viewBox="0 0 640 94">${ticks}<path class="ab-axis" d="M30 62H610"/>${current.map((trial, index) => {
         const ending = trial.endMs ?? trial.onsetMs;
         if (ending < rangeStart || trial.onsetMs > rangeEnd) return '';
         const x = xTime(Math.max(rangeStart, trial.onsetMs));
         return `<g role="button" tabindex="0" data-trial-index="${index}" aria-label="${escape(tr('Выбрать пробу','Select trial'))} ${index + 1}" aria-pressed="${trial === selectedTrial}" style="cursor:pointer">
-          <rect x="${x}" y="22" width="${Math.max(5, xTime(Math.min(rangeEnd, ending)) - x)}" height="26" stroke="${trial === selectedTrial ? 'currentColor' : 'none'}" stroke-width="2" fill="var(--accent)" opacity="${trial === selectedTrial ? 1 : .35}"><title>${escape(trialLabel(trial))}</title></rect>
-          ${trial.responseMs == null || trial.responseMs < rangeStart || trial.responseMs > rangeEnd ? '' : `<circle cx="${xTime(trial.responseMs)}" cy="35" r="5" fill="currentColor"><title>RT ${trial.rtMs ?? '?'} ms</title></circle>`}</g>`;
-      }).join('')}<text x="20" y="73" fill="currentColor">${(rangeStart / 1000).toFixed(1)} s</text><text x="510" y="73" fill="currentColor">${(rangeEnd / 1000).toFixed(1)} s</text></svg>`;
-      const plot = pairs.length ? `<svg role="img" aria-label="${escape(tr('RT и выбранный сигнал','RT versus selected signal'))}" viewBox="0 0 640 210" style="width:100%;max-width:760px"><path d="M45 10V180H630" fill="none" stroke="currentColor"/>${pairs.map(pair => `<circle role="button" tabindex="0" aria-pressed="${pairSelected(pair)}" data-trial-index="${current.findIndex(trial => trial.trialId === pair.trialId && trial.blockId === pair.blockId && trial.attempt === pair.attempt && trial.onsetMs === pair.onsetMs)}" aria-label="${escape(tr('Выбрать пробу','Select trial'))}" style="cursor:pointer" cx="${45 + pair.x / maxX * 575}" cy="${170 - (pair.y - minY) / (maxY - minY) * 150}" r="${pairSelected(pair) ? 6 : 4}" stroke="${pairSelected(pair) ? 'currentColor' : 'none'}" stroke-width="2" fill="var(--accent)"><title>${pair.x.toFixed(1)} ms · ${pair.y.toFixed(3)}</title></circle>`).join('')}<text x="45" y="202" fill="currentColor">0</text><text x="510" y="202" fill="currentColor">RT ${maxX.toFixed(0)} ms</text><text x="5" y="25" fill="currentColor">${maxY.toFixed(2)}</text></svg>` : `<p>${tr('Нет валидных правильных ответов с этим сигналом.','No valid correct responses with this signal.')}</p>`;
-      select('connectednessResults').innerHTML = `<div class="ab-connected-charts"><section class="ab-card"><h3>${tr('Когда были показаны стимулы?', 'When were stimuli shown?')}</h3>${timeline}<p>${tr('Нажмите на пробу, чтобы увидеть ответ.', 'Click a trial to inspect its response.')}</p></section><section class="ab-card"><h3>${tr('Как сигнал соотносится со временем реакции?', 'How does the signal relate to reaction time?')}</h3><p>${tr('Проб','Trials')}: ${current.length} · ${tr('Валидных правильных пар','Valid correct pairs')}: ${pairs.length} · ρ: ${rho == null ? tr('не вычислено (выберите один блок и условие; нужна вариативность)','not computed (select one block and condition; variation required)') : rho.toFixed(3)}</p>${plot}</section></div>
+          <rect x="${x}" y="18" width="${Math.max(3, xTime(Math.min(rangeEnd, ending)) - x)}" height="19" rx="2" class="ab-stimulus-span ${trial.qualityValid === false ? 'is-excluded' : ''}"><title>${escape(trialLabel(trial))}</title></rect>
+          ${trial.responseMs == null || trial.responseMs < rangeStart || trial.responseMs > rangeEnd ? '' : `<circle cx="${xTime(trial.responseMs)}" cy="51" r="3.3" class="ab-response-mark"><title>${escape(tr('Ответ', 'Response'))}</title></circle>`}</g>`;
+      }).join('')}</svg>`;
+      const plot = pairs.length ? `<svg role="img" aria-label="${escape(tr('RT и выбранный сигнал','RT versus selected signal'))}" viewBox="0 0 640 210" style="width:100%;max-width:760px"><path d="M45 10V180H630" fill="none" stroke="currentColor"/>${pairs.map(pair => `<circle role="button" tabindex="0" aria-pressed="${pairSelected(pair)}" data-trial-index="${current.findIndex(trial => trial.trialId === pair.trialId && trial.blockId === pair.blockId && trial.attempt === pair.attempt && trial.onsetMs === pair.onsetMs)}" aria-label="${escape(tr('Выбрать пробу','Select trial'))}" style="cursor:pointer" cx="${45 + pair.x / maxX * 575}" cy="${170 - (pair.y - minY) / (maxY - minY) * 150}" r="${pairSelected(pair) ? 6 : 4}" stroke="${pairSelected(pair) ? 'currentColor' : 'none'}" stroke-width="2" fill="var(--accent)"><title>${pair.x.toFixed(1)} ms · ${pair.y.toFixed(3)}</title></circle>`).join('')}<text x="45" y="202" fill="currentColor">0</text><text x="510" y="202" fill="currentColor">RT ${maxX.toFixed(0)} ms</text><text x="5" y="25" fill="currentColor">${maxY.toFixed(2)}</text></svg>` : `<p>${tr('Нет проб, где одновременно сохранены подходящий ответ и этот сигнал.','No valid correct responses with this signal.')}</p>`;
+      select('connectednessResults').innerHTML = `<div class="ab-connected-charts"><section class="ab-card"><h3>${tr('Когда были показаны стимулы?', 'When were stimuli shown?')}</h3>${timeline}<p>${tr('Полоса — показ, точка ниже — ответ. Нажмите на показ, чтобы открыть пробу.', 'Bar: stimulus display. Dot below: response. Select a bar to inspect the trial.')}</p></section><section class="ab-card"><h3>${tr('Как сигнал соотносится со временем реакции?', 'How does the signal relate to reaction time?')}</h3><p>${tr('Проб','Trials')}: ${current.length} · ${tr('Пригодных проб с ответом и сигналом','Usable trials with response and signal')}: ${pairs.length} · ρ: ${rho == null ? tr('не вычислено (выберите один блок и условие; нужна вариативность)','not computed (select one block and condition; variation required)') : rho.toFixed(3)}</p>${plot}</section></div>
         <details class="ab-chart-method" ${tableOpen ? 'open' : ''}><summary>${tr('Таблица проб', 'Trial table')}</summary><div style="overflow:auto;max-height:420px"><table style="width:100%;text-align:left"><thead><tr>${[tr('Проба / попытка','Trial / attempt'),tr('Условие','Condition'),'RT (ms)',tr('Ответ / QC','Response / QC'),names[channel],tr('Валидные / всего','Valid / total'),tr('Макс. пробел, мс','Max gap, ms')].map(label => `<th>${escape(label)}</th>`).join('')}</tr></thead><tbody>${current.map(trial => { const metric = trial.windows[window].channels[channel] || { n: 0, nValid: 0, maxGapMs: null }; return `<tr style="background:${trial === selectedTrial ? 'var(--accent-soft,rgba(30,90,250,.10))' : 'transparent'}"><td><button type="button" class="quick-btn" data-trial-index="${current.indexOf(trial)}" aria-pressed="${trial === selectedTrial}">${escape(trialLabel(trial))}</button></td><td>${escape(trial.condition)}</td><td>${trial.rtMs == null ? '—' : trial.rtMs.toFixed(1)}</td><td>${trial.correct === null ? '—' : trial.correct ? tr('Верно','Correct') : tr('Неверно','Incorrect')} / ${trial.qualityValid ? tr('Допустимо','Eligible') : tr('Исключено','Excluded')}</td><td>${value(metric)}</td><td>${metric.nValid} / ${metric.n}</td><td>${metric.maxGapMs ?? '—'}</td></tr>`; }).join('')}</tbody></table></div></details>`;
       select('connectednessTrial').innerHTML = current.map((trial, index) => `<option value="${index}" ${index === selectedIndex ? 'selected' : ''}>${escape(trialLabel(trial))} · ${escape(labels.stimulus?.(trial.stimulusId) || tr('Стимул', 'Stimulus'))}</option>`).join('');
       select('connectednessPrevious').disabled = selectedIndex <= 0;
@@ -141,6 +152,7 @@
         }).join('')}</tr>`).join('')}</tbody></table></div>` : `<p class="ab-empty">${tr('Для этой пробы нет измерений рядом с ответом.', 'No signal measurements near this response.')}</p>`}</section>`
         : `<p>${tr('Нет проб','No trials')}</p>`;
       if (rolling) select('connectednessResults').insertAdjacentHTML('afterbegin', `<p role="status">${tr('Описательный контекст скользящей физиологической оценки. ρ для коротких окон отключён.','Descriptive context of a rolling physiological estimate. Correlation is disabled for short windows.')}</p>`);
+      visualizations?.zoomWithin(select('connectednessResults'), tr, zoom);
       select('connectednessResults').querySelectorAll('[data-trial-index]').forEach(element => {
         element.addEventListener('click', () => choose(Number(element.dataset.trialIndex), true));
         if (element.tagName.toLowerCase() !== 'button') element.addEventListener('keydown', event => {

@@ -394,7 +394,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof window !== 'undefined') {
     window.PrecheckAnalyzer = PrecheckAnalyzerInline;
-    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261110-integration1')
+    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261114-assigned1')
         .then(module => {
             const Model = module.PrecheckAnalyzer || module.default;
             if (typeof Model !== 'function') throw new Error('face_export_missing');

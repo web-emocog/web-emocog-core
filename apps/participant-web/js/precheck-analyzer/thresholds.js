@@ -11,9 +11,7 @@
  */
 export const ILLUMINATION_THRESHOLDS = {
     tooDark: 30,
-    tooBright: 220,
-    optimalMin: 50,
-    optimalMax: 180
+    tooBright: 220
 };
 
 /**
@@ -67,9 +65,7 @@ export function createThresholds(options = {}) {
     return {
         illumination: {
             tooDark: options.illuminationTooDark ?? ILLUMINATION_THRESHOLDS.tooDark,
-            tooBright: options.illuminationTooBright ?? ILLUMINATION_THRESHOLDS.tooBright,
-            optimalMin: ILLUMINATION_THRESHOLDS.optimalMin,
-            optimalMax: ILLUMINATION_THRESHOLDS.optimalMax
+            tooBright: options.illuminationTooBright ?? ILLUMINATION_THRESHOLDS.tooBright
         },
         face: {
             minSize: options.faceMinSize ?? FACE_THRESHOLDS.minSize,

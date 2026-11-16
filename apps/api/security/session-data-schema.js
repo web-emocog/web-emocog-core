@@ -37,6 +37,7 @@ function validateSessionDataSchema(payload) {
       || (rule.pattern && !new RegExp(rule.pattern, 'u').test(value)))) fail('string');
     if (actual === 'array') {
       if (!rule.items || value.length > rule.maxItems) { fail('maxItems'); return; }
+      if (rule.minItems != null && value.length < rule.minItems) { fail('minItems'); return; }
       value.forEach((item, index) => visit(item, rule.items, `${path}/${index}`, output, depth + 1));
     }
     if (actual === 'object') {

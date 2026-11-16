@@ -7,6 +7,7 @@ import { protocolCameraConstraints } from '../session-runtime/protocol-profile.m
 import { getFramePixels } from '../session-runtime/frame-pixels.mjs';
 import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { PrecheckWindow } from '../session-runtime/precheck-window.mjs';
+import '../../../shared/protocol-quality.js?v=20261114-assigned1';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
     captureHeadPoseReference,
@@ -130,6 +131,36 @@ function setCalibrationButtonState(button, { visible, enabled = false }) {
     button.disabled = !enabled;
 }
 
+function renderCameraCadence(fps, pending = false) {
+    const check = globalThis.WecogProtocolQuality.cameraCadence(state.runtime.invitationProtocolDefinition, fps, { pending });
+    const status = document.querySelector('.precheck-status');
+    if (!status) return check;
+    let hint = document.getElementById('precheckCameraCadence');
+    if (!hint) {
+        hint = document.createElement('p');
+        hint.id = 'precheckCameraCadence';
+        hint.setAttribute('role', 'status');
+        hint.style.cssText = 'margin:8px 0 0;font-size:.9em;color:var(--text-secondary)';
+        status.append(hint);
+    }
+    const ru = state.currentLang === 'ru';
+    const subject = ru ? 'Частота кадров камеры' : 'Camera frame rate';
+    const minimum = check.threshold == null ? '' : (ru ? `; нужно не меньше ${check.threshold}` : `; minimum ${check.threshold}`);
+    const processing = precheckAnalysisRun?.faceTimes;
+    const overBudget = check.threshold !== null && check.fps !== null && !check.low
+        && processing?.length >= 8 && processing.filter(ms => ms > 1000 / check.threshold).length >= 6;
+    const text = (check.pending ? (ru ? `${subject}: измеряем…` : `${subject}: measuring…`)
+        : check.fps === null ? (ru ? `${subject}: не удалось измерить.` : `${subject}: unavailable.`)
+        : `${subject}: ${check.fps} ${ru ? 'к/с' : 'fps'}${minimum}.` + (check.low
+            ? ' ' + globalThis.WecogProtocolQuality.describeFpsAdvice(check.threshold,
+                { camera: { status: 'measured', fps: check.fps } }, state.currentLang) : ''))
+        + (overBudget ? (ru ? ' Анализ лица часто занимает слишком много времени. Закройте лишние приложения и вкладки, иначе часть проб может потребовать повтора.'
+            : ' Face processing often takes too long. Close other apps and tabs to reduce the chance of repeated trials.') : '');
+    if (hint.textContent !== text) hint.textContent = text;
+    hint.style.fontWeight = check.low || overBudget ? '700' : '';
+    return check;
+}
+
 export function startPreCheck() {
     if (state.runtime.participantPageExited) return Promise.resolve(false);
     if (precheckSetup) return precheckSetup.promise;
@@ -158,6 +189,9 @@ async function preparePrecheck(setup) {
     
     startPrecheckBtn.style.display = 'none';
     setCalibrationButtonState(startCalibBtn, { visible: true });
+    state.sessionData.tech.cameraFPS = null;
+    state.sessionData.tech.cameraFPSDetails = null;
+    renderCameraCadence(null, true);
     
     statusMessage.textContent = translations[state.currentLang].precheck_requesting;
     precheckStatus.className = 'precheck-status waiting-bg';
@@ -215,6 +249,7 @@ async function preparePrecheck(setup) {
     } catch (error) {
         if (!isCurrent()) return false;
         releaseSetupStream(setup);
+        document.getElementById('precheckCameraCadence')?.remove();
         dbgErr('precheck', 'camera:setup-failed');
         statusMessage.textContent = translations[state.currentLang].precheck_camera_error_help
             || translations.en.precheck_camera_error_help;
@@ -242,6 +277,8 @@ export function stopPreCheck() {
 }
 
 function retirePrecheckAnalysis() {
+    precheckAnalysisRun?.cadenceController.abort();
+    clearTimeout(precheckAnalysisRun?.cadenceTimer);
     precheckAnalysisRun = null;
     state.flags.isPrecheckRunning = false;
     if (state.runtime.analysisFrameId != null) {
@@ -253,7 +290,7 @@ function retirePrecheckAnalysis() {
 export function startContinuousAnalysis() {
     if (precheckAnalysisRun && state.flags.isPrecheckRunning) return true;
     if (state.runtime.sessionRuntime?.isAnalysisRunning?.()) return false;
-    const run = precheckAnalysisRun = {};
+    const run = precheckAnalysisRun = { cadenceController: new AbortController(), cadenceTimer: null, faceTimes: [] };
     const isCurrent = () => {
         if (precheckAnalysisRun !== run || !state.flags.isPrecheckRunning) return false;
         if (state.runtime.sessionRuntime?.isAnalysisRunning?.()) {
@@ -268,13 +305,38 @@ export function startContinuousAnalysis() {
     state.runtime.precheckFramesHistory = []; // Сбрасываем историю
     
     const video = document.getElementById('precheckVideo');
+    async function refreshCameraCadence() {
+        if (!isCurrent() || !video?.srcObject) return;
+        try {
+            const result = await measureCameraFPS(video, 2000, { signal: run.cadenceController.signal });
+            if (isCurrent() && !document.hidden) {
+                state.sessionData.tech.cameraFPS = result.fps;
+                state.sessionData.tech.cameraFPSDetails = result;
+                if (renderCameraCadence(result.fps).blocked) {
+                    setCalibrationButtonState(document.getElementById('startCalibBtn'), { visible: true });
+                }
+            }
+        } catch (error) {
+            if (error?.name !== 'AbortError' && isCurrent()) {
+                state.sessionData.tech.cameraFPS = null;
+                state.sessionData.tech.cameraFPSDetails = null;
+                renderCameraCadence(null);
+            }
+        }
+        if (isCurrent()) run.cadenceTimer = setTimeout(refreshCameraCadence, 300);
+    }
+    renderCameraCadence(state.sessionData.tech.cameraFPS);
+    if (video?.srcObject) run.cadenceTimer = setTimeout(refreshCameraCadence, 300);
 
     async function analyzeFrame() {
         if (!isCurrent()) return;
         
         try {
             // Используем ЛОКАЛЬНЫЙ анализатор вместо бэкенда
-            const results = await runLocalPrecheckAnalysis(video, isCurrent);
+            const results = await runLocalPrecheckAnalysis(video, isCurrent, ms => {
+                run.faceTimes.push(ms);
+                if (run.faceTimes.length > 8) run.faceTimes.shift();
+            });
             if (!isCurrent()) return;
 
             _precheckFrameLogN += 1;
@@ -415,8 +477,9 @@ export function checkAllIndicators() {
     }
 
     // Фаза 1.1: gate — записываем в sessionData.precheck для калибровки и отчётов
-    const pass_fail = allPassed && isConsistentSuccess;
-    const fail_reason = pass_fail ? null : getPrecheckFailReason(hasFailed);
+    const cadence = renderCameraCadence(state.sessionData.tech.cameraFPS, Boolean(precheckSetup && !precheckAnalysisRun));
+    const pass_fail = allPassed && isConsistentSuccess && !cadence.blocked;
+    const fail_reason = pass_fail ? null : cadence.blocked && allPassed ? 'camera_fps_low' : getPrecheckFailReason(hasFailed);
     state.sessionData.precheck = {
         pass_fail,
         ...(gate ? { gate, signalProfileId: profile.id } : {}),
@@ -463,10 +526,11 @@ export function checkAllIndicators() {
         startCalibBtn.disabled = true;
     } else if (allPassed && isConsistentSuccess) {
         // Все проверки пройдены стабильно
-        statusHTML = tt('status_all_good');
+        statusHTML = cadence.low
+            ? (state.currentLang === 'ru' ? 'Камера не достигает нужной частоты кадров' : 'Camera frame rate is below the required minimum')
+            : tt('status_all_good');
         statusMessage.className = 'status-message';
-        precheckStatus.className = 'precheck-status success-bg';
-        startCalibBtn.disabled = false;
+        precheckStatus.className = cadence.low ? 'precheck-status waiting-bg' : 'precheck-status success-bg';
     } else if (hasFailed) {
         // Есть проблемы — показываем подсказки
         const tips = collectTips();
@@ -939,7 +1003,7 @@ export function updateVisibilityIndicator(data) {
  * Использует PrecheckAnalyzer для анализа освещения, лица, позы и шеи
  * Использует FaceSegmenter для проверки видимости областей лица
  */
-async function runLocalPrecheckAnalysis(videoElement, isCurrent) {
+async function runLocalPrecheckAnalysis(videoElement, isCurrent, onFaceTime) {
     // Инициализируем анализатор если ещё не создан
     if (!state.runtime.localAnalyzer) {
         const paReady = !!window.PrecheckAnalyzerReady;
@@ -972,7 +1036,9 @@ async function runLocalPrecheckAnalysis(videoElement, isCurrent) {
     try {
         // Анализируем кадр локально
         const sourceVideoTime = videoElement.currentTime;
+        const faceStartedAt = performance.now();
         const results = await state.runtime.localAnalyzer.analyzeFrame(videoElement);
+        if (isCurrent() && !results?.error && results?.face?.detected === true) onFaceTime(performance.now() - faceStartedAt);
         results.sourceVideoTime = sourceVideoTime;
         if (!isCurrent()) return null;
         

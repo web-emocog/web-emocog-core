@@ -1318,69 +1318,89 @@
             "$ref": "#/$defs/pointer"
           },
           "modules": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "properties": {
-              "gaze": {
+            "anyOf": [
+              {
                 "type": [
-                  "string",
+                  "object",
                   "null"
                 ],
-                "maxLength": 256
+                "properties": {
+                  "gaze": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "blinks": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "rt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "bpm": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "emotion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "bodyPose": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "audio": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "multimodal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  }
+                },
+                "additionalProperties": false
               },
-              "blinks": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
-              },
-              "rt": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
-              },
-              "bpm": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
-              },
-              "emotion": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
-              },
-              "bodyPose": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
-              },
-              "audio": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
-              },
-              "multimodal": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
+              {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "gaze",
+                    "blinks",
+                    "rt",
+                    "bpm",
+                    "emotion",
+                    "bodyPose",
+                    "audio",
+                    "multimodal"
+                  ]
+                },
+                "maxItems": 8
               }
-            },
-            "additionalProperties": false
+            ]
           },
           "featureFlags": {
             "type": [
@@ -1410,6 +1430,12 @@
                 "type": [
                   "boolean",
                   "null"
+                ]
+              },
+              "audioDebugCapture": {
+                "enum": [
+                  false,
+                  null
                 ]
               }
             },
@@ -1681,6 +1707,26 @@
             "type": [
               "boolean",
               "null"
+            ]
+          },
+          "startTimestamp": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "endTimestamp": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sampleCoverage": {
+            "enum": [
+              "not_inferred",
+              null
             ]
           }
         },
@@ -2195,18 +2241,90 @@
               "additionalProperties": false
             },
             "hint": {
-              "type": "array",
-              "items": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 256
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "maxItems": 16
+                },
+                {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                }
+              ]
+            },
+            "eyesMidpoint": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "x": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "y": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
               },
-              "maxItems": 16
+              "additionalProperties": false
+            },
+            "quality": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "isOptimal": {
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           },
           "additionalProperties": false
+        },
+        "centerX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "centerY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -2307,6 +2425,59 @@
         },
         "camera": {
           "$ref": "#/$defs/fpsWindow"
+        },
+        "analysisSession": {
+          "type": "object",
+          "properties": {
+            "frames": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "windows": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "observedMs": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "meanFps": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "threshold": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 60
+            },
+            "belowThresholdMs": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "frames",
+            "windows",
+            "observedMs",
+            "meanFps",
+            "threshold",
+            "belowThresholdMs"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -2466,6 +2637,26 @@
                 "null"
               ],
               "maxLength": 256
+            },
+            "rule": {
+              "enum": [
+                "gazeValid",
+                "faceDetected",
+                "fpsStable",
+                "lighting"
+              ]
+            },
+            "method": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "totalFrames": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "fpsDiagnostics": {
+              "$ref": "#/$defs/fps"
             }
           },
           "additionalProperties": false
@@ -5061,6 +5252,18 @@
             "boolean",
             "null"
           ]
+        },
+        "rawVideoStored": {
+          "enum": [
+            false,
+            null
+          ]
+        },
+        "rawLandmarksStored": {
+          "enum": [
+            false,
+            null
+          ]
         }
       },
       "additionalProperties": false
@@ -6393,6 +6596,69 @@
             "null"
           ],
           "maxLength": 256
+        },
+        "validSamples": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "totalSamples": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "validPct": {
+          "anyOf": [
+            {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "string",
+              "maxLength": 8,
+              "pattern": "^(?:100(?:[.]0+)?|[0-9]{1,2}(?:[.][0-9]+)?)$"
+            }
+          ]
+        },
+        "screenDiag": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "screenSize": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "width": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "height": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -6512,6 +6778,15 @@
                 "boolean",
                 "null"
               ]
+            },
+            "rawMetrics": {
+              "$ref": "#/$defs/validationMetrics"
+            },
+            "filteredMetrics": {
+              "$ref": "#/$defs/validationMetrics"
+            },
+            "postCalibrationCorrection": {
+              "$ref": "#/$defs/gazePostCalibrationCorrection"
             }
           },
           "additionalProperties": false
@@ -6583,113 +6858,105 @@
                 "number",
                 "null"
               ]
-            }
-          },
-          "additionalProperties": false
-        },
-        "postCalibrationCorrection": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "properties": {
-            "applied": {
+            },
+            "independent": {
               "type": [
                 "boolean",
                 "null"
               ]
             },
-            "accepted": {
+            "targetsUsedForFit": {
               "type": [
-                "boolean",
-                "null"
-              ]
-            },
-            "method": {
-              "type": [
-                "string",
+                "integer",
                 "null"
               ],
-              "maxLength": 256
+              "minimum": 0,
+              "maximum": 1000000000000
             },
-            "version": {
+            "targetCount": {
               "type": [
-                "string",
+                "integer",
                 "null"
               ],
-              "maxLength": 256
+              "minimum": 0,
+              "maximum": 1000000000000
             },
-            "reason": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 256
-            },
-            "error": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 256
-            },
-            "correctionId": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 256
-            },
-            "sampleCount": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "pointCount": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "loocvRmsHeldOutPx": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "baselineRmsHeldOutPx": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "offset": {
+            "sampleFilter": {
               "type": [
                 "object",
                 "null"
               ],
               "properties": {
-                "x": {
+                "method": {
                   "type": [
-                    "number",
+                    "string",
                     "null"
-                  ]
+                  ],
+                  "maxLength": 128
                 },
-                "y": {
+                "keepRatio": {
                   "type": [
                     "number",
                     "null"
-                  ]
+                  ],
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "totalSamples": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "keptSamples": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "removedSamples": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "keptPct": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 100
                 }
               },
               "additionalProperties": false
             },
-            "metrics": {
+            "baselineRaw": {
               "$ref": "#/$defs/validationMetrics"
+            },
+            "candidateCorrected": {
+              "$ref": "#/$defs/validationMetrics"
+            },
+            "selected": {
+              "$ref": "#/$defs/validationMetrics"
+            },
+            "displayOnly": {
+              "$ref": "#/$defs/validationMetrics"
+            },
+            "decision": {
+              "$ref": "#/$defs/gazeValidationDecision"
             }
           },
           "additionalProperties": false
+        },
+        "postCalibrationCorrection": {
+          "$ref": "#/$defs/gazePostCalibrationCorrection"
         },
         "sampling": {
           "type": "array",
@@ -7161,6 +7428,39 @@
             }
           },
           "additionalProperties": false
+        },
+        "frameIdentityMethod": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "contextBoundaryFrames": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "faceTimings": {
+          "type": "object",
+          "properties": {
+            "modelCallMs": {
+              "$ref": "#/$defs/timing"
+            },
+            "bitmapCaptureMs": {
+              "$ref": "#/$defs/timing"
+            },
+            "workerRoundTripMs": {
+              "$ref": "#/$defs/timing"
+            },
+            "workerWorkMs": {
+              "$ref": "#/$defs/timing"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -7393,6 +7693,66 @@
                 "null"
               ],
               "maxLength": 256
+            },
+            "duration": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "measurementVersion": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 128
+            },
+            "fallbackReason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 128
+            },
+            "playbackQuality": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "complete": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "counterResets": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "droppedFrames": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "displayedFrames": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -7723,44 +8083,55 @@
               ]
             },
             "gazeDirection": {
-              "type": [
-                "object",
-                "null"
-              ],
-              "properties": {
-                "x": {
+              "anyOf": [
+                {
                   "type": [
-                    "number",
+                    "object",
                     "null"
-                  ]
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "y": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "horizontal": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "vertical": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "direction": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 256
+                    }
+                  },
+                  "additionalProperties": false
                 },
-                "y": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "horizontal": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "vertical": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "direction": {
+                {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "maxLength": 256
+                  "maxLength": 128
                 }
-              },
-              "additionalProperties": false
+              ]
             }
           },
           "additionalProperties": false
@@ -7794,6 +8165,13 @@
                 "number",
                 "null"
               ]
+            },
+            "openRatio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -7832,6 +8210,108 @@
                 "boolean",
                 "null"
               ]
+            },
+            "timestamp": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "regions": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "forehead": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "leftCheek": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "rightCheek": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "leftEye": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "rightEye": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "nose": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "mouth": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "chin": {
+                  "$ref": "#/$defs/precheckVisibilityRegion"
+                },
+                "globalBodySkinRatio": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "totalFaceSkinVisibility": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "symmetry": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "isSymmetric": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "asymmetry": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "leftVisibility": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "rightVisibility": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "occludedSide": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 128
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -8324,6 +8804,20 @@
             }
           },
           "additionalProperties": false
+        },
+        "inferenceDelegate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "delegateFallbackReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
         }
       },
       "additionalProperties": false
@@ -11124,52 +11618,215 @@
                 "maximum": 1000000000000
               },
               "layers": {
-                "type": "array",
-                "items": {
-                  "type": [
-                    "object",
-                    "null"
-                  ],
-                  "properties": {
-                    "id": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
                       "type": [
-                        "string",
+                        "object",
                         "null"
                       ],
-                      "maxLength": 256
-                    },
-                    "label": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "maxLength": 256
-                    },
-                    "grid": {
-                      "$ref": "#/$defs/grid"
-                    },
-                    "values": {
-                      "type": "array",
-                      "items": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
+                      "properties": {
+                        "id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 256
+                        },
+                        "label": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 256
+                        },
+                        "grid": {
+                          "$ref": "#/$defs/grid"
+                        },
+                        "values": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "maxItems": 4096
+                        },
+                        "sampleCount": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 0,
+                          "maximum": 1000000000000
+                        }
                       },
-                      "maxItems": 4096
+                      "additionalProperties": false
                     },
-                    "sampleCount": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ],
-                      "minimum": 0,
-                      "maximum": 1000000000000
-                    }
+                    "maxItems": 8
                   },
-                  "additionalProperties": false
+                  {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "density": {
+                        "$ref": "#/$defs/multimodalHeatmapLayer"
+                      },
+                      "valence": {
+                        "$ref": "#/$defs/multimodalHeatmapLayer"
+                      },
+                      "arousal": {
+                        "$ref": "#/$defs/multimodalHeatmapLayer"
+                      },
+                      "engagement": {
+                        "$ref": "#/$defs/multimodalHeatmapLayer"
+                      },
+                      "fixation": {
+                        "$ref": "#/$defs/multimodalHeatmapLayer"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "attempt": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              "stimulusName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "stimulusType": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "schemaVersion": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "coordinateSpace": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              },
+              "sampleCount": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              "rejectedSampleCount": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              "confidenceMean": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1
+              },
+              "alignment": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "maxAllowedMs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "matchedSampleCount": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "p95ErrorMs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "maxErrorMs": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
                 },
-                "maxItems": 8
+                "additionalProperties": false
+              },
+              "qc": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "minGazeConfidence": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "minEmotionConfidence": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "missingEmotionPreserved": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "lowConfidenceExcluded": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -11211,6 +11868,30 @@
                   "null"
                 ],
                 "maxLength": 256
+              },
+              "layer": {
+                "enum": [
+                  "density",
+                  "valence",
+                  "arousal",
+                  "engagement",
+                  "fixation"
+                ]
+              },
+              "domain": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2
+              },
+              "palette": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
               }
             },
             "additionalProperties": false
@@ -12048,6 +12729,596 @@
           "maxItems": 64
         }
       }
+    },
+    "precheckVisibilityRegion": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "isVisible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "faceSkinRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bodySkinRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "hairRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "occlusionRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "backgroundRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "skinRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "landmarkFaceSkinRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "landmarkBodySkinRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "landmarkHairRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bounds": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "x": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "y": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "width": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "height": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "pixelCounts": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "faceSkin": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "bodySkin": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "hair": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "background": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "clothes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "others": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "landmarkFaceSkinRatio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "landmarkBodySkinRatio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "landmarkHairRatio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "thresholds": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "minFaceSkin": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "maxHair": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "maxHand": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "areaName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "multimodalHeatmapLayer": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "density",
+            "valence",
+            "arousal",
+            "engagement",
+            "fixation"
+          ]
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "maxItems": 4096
+        },
+        "valueDomain": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "sampleCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "noData": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "algorithm": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "gazeValidationDecision": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "accepted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "requiredAccuracyGainPx": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "accuracyGainPx": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "precisionDeltaPx": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "biasGainPx": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "gazePostCalibrationCorrection": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "applied": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "accepted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "correctionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "sampleCount": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pointCount": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "loocvRmsHeldOutPx": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "baselineRmsHeldOutPx": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "offset": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "x": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "y": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "metrics": {
+          "$ref": "#/$defs/validationMetrics"
+        },
+        "fitted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "offsetX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "offsetY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "trajectoryCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "rawMetrics": {
+          "$ref": "#/$defs/validationMetrics"
+        },
+        "filteredMetrics": {
+          "$ref": "#/$defs/validationMetrics"
+        },
+        "correctedInSampleMetrics": {
+          "$ref": "#/$defs/validationMetrics"
+        },
+        "loocv": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "rawTargetRmsPx": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "loocvRmsHeldOutPx": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "rawTargetMedianPx": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "loocvMedianHeldOutPx": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "rawTargetP95Px": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "loocvP95HeldOutPx": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "rmsGainPx": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "worsenedTargetCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            "targetCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1000000000000
+            }
+          },
+          "additionalProperties": false
+        },
+        "independentBenchmark": {
+          "$ref": "#/$defs/gazeValidationDecision"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

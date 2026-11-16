@@ -1,7 +1,7 @@
-import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261110-integration1';
-import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261110-integration1';
+import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1';
+import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261114-assigned1';
 import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261110-integration1';
-import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261112-emotion2';
+import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261114-assigned1';
 import { MultimodalSessionCollector } from '../../participant-web/js/multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';
 import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';

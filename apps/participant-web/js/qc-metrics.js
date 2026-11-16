@@ -577,7 +577,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof window !== 'undefined') {
     window.QCMetrics = QCMetricsInline;
-    window.QCMetricsReady = import('./qc-metrics/index.js?v=20261110-integration1')
+    window.QCMetricsReady = import('./qc-metrics/index.js?v=20261114-assigned1')
         .then(module => {
             const Model = module.QCMetrics || module.default;
             if (typeof Model !== 'function') throw new Error('qc_export_missing');

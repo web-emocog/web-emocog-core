@@ -39,7 +39,8 @@ for (const { fps, latency, minimum } of [
     invitationProtocolDefinition: { settings: { signalProfileId: profileId } }, localAnalyzer: { async analyzeFrame() {
     peak = Math.max(peak, ++concurrent);
     await new Promise(resolve => setTimeout(resolve, latency));
-    concurrent--; processed++; return { timestamp: now };
+    concurrent--; processed++; this.lastFrameTiming = { modelCallMs: latency, bitmapCaptureMs: 1 };
+    return { timestamp: now };
   } } } };
   const pipeline = new SessionFramePipeline({ state, video, controller: { featureFlags: {},
     setModuleStatus() {}, captureMultimodalFrame() {}, resolveIssue() {}, reportIssue(error) { throw error; } } });
@@ -68,6 +69,10 @@ for (const { fps, latency, minimum } of [
   assert.equal(published.frames, processed, 'stop flushes the final diagnostic counters');
   assert.equal(published.timingMethod, 'completed-primary-stages.v1');
   assert.equal(Object.keys(published.stages).length, 6, 'timings have constant memory, not per-frame history');
+  assert.deepEqual({ ...published.faceTimings.modelCallMs }, {
+    frames: processed, totalMs: latency * processed, maxMs: latency
+  });
+  assert.equal(published.faceTimings.workerRoundTripMs.frames, 0);
   let total = 0;
   for (const [name, stage] of Object.entries(published.stages)) {
     assert.equal(stage.frames, processed, `${name} tracks every completed frame`);

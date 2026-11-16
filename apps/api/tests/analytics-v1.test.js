@@ -163,6 +163,16 @@ test('analytics v1 contract and computations', async t => {
     assert.equal(lookup().value, 0);
   });
 
+  await t.test('inconsistent fixation duration is never reported as a gaze share above 100%', () => {
+    const source = row();
+    source.features_payload.gaze_analytics.presentations[0].validObservationDurationMs = 20;
+    const { metrics } = buildAoiRows(source, protocol, query())[0];
+    const dwell = metrics.find(metric => metric.metricId === 'aoi.dwell_time_ms');
+    assert.equal(dwell.value, null);
+    assert.equal(dwell.status, 'insufficient_quality');
+    assert.equal(dwell.reason, 'gaze_fixation_duration_inconsistent');
+  });
+
   await t.test('returns every AOI heatmap context without narrowing the session snapshot', () => {
     const source = row();
     source.features_payload.gaze_analytics.presentations.push({
