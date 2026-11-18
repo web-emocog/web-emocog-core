@@ -370,7 +370,7 @@
     const blockName = options.labels.block;
     let source = null;
     const status = value => ({
-      accepted: tr('Принята', 'Accepted'), repeat_required: tr('Потребовался повтор', 'Repeat required'),
+      accepted: tr('Засчитана', 'Accepted'), repeat_required: tr('Потребовался повтор', 'Repeat required'),
       in_progress: tr('В процессе', 'In progress'),
       interrupted: tr('Прервана', 'Interrupted'), incomplete: tr('Не завершена', 'Incomplete'),
       responded: tr('Есть ответ', 'Responded'), no_response: tr('Без ответа', 'No response'),

@@ -814,6 +814,9 @@ export function updateFinalStepWithQC(qcSummary, options = {}) {
         } else {
             const issues = [];
             if (qcSummary?.checks) {
+                if (qcSummary.checks.historyComplete === false) issues.push(lang === 'ru'
+                    ? 'часть истории качества до перезагрузки недоступна'
+                    : 'part of the quality history before reload is unavailable');
                 if (!qcSummary.checks.duration) issues.push(t.issue_short_duration);
                 if (!qcSummary.checks.faceVisible) issues.push(t.issue_low_face_visible);
                 if (!qcSummary.checks.faceOk) issues.push(t.issue_low_face_ok_pct);

@@ -7,6 +7,8 @@ function computeQcValidity(qcSummary, payload) {
   const checks = qcSummary && typeof qcSummary === 'object' && qcSummary.checks && typeof qcSummary.checks === 'object'
     ? qcSummary.checks
     : null;
+  const historyIncomplete = qcSummary?.continuity?.historyComplete === false || checks?.historyComplete === false;
+  if (historyIncomplete) fail_reasons.push('qc_history_incomplete');
 
   function toScore100(value) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -72,7 +74,7 @@ function computeQcValidity(qcSummary, payload) {
     if (qc_score >= 70) validity = 'valid';
     else if (qc_score >= 50) validity = 'borderline';
   }
-  if (hasCriticalFailure) validity = 'invalid';
+  if (hasCriticalFailure || historyIncomplete) validity = 'invalid';
   else if (hasAdvisoryFailure && validity === 'valid') validity = 'borderline';
 
   return {
