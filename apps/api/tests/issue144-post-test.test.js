@@ -129,6 +129,16 @@ test('#144 interrupted presentations remain separate from completed results, wit
     assert.match(csv, /task_attempt/); assert.match(csv, /interrupted/); assert.match(csv, /page_reloaded/);
     assert.deepEqual(row, before);
   }
+  const ambiguous = taskFixture();
+  const entry = { presentationId: 'p1', blockId: 'b', trialId: 't1', stimulusId: 's', attempt: 1 };
+  ambiguous.features_payload.cognitiveResults[1].stimulusId = 's';
+  ambiguous.features_payload.gaze_analytics = { schemaVersion: 'gaze_analytics.v1', presentations: [entry, { ...entry }] };
+  const exported = buildExportBundle({ sessionRows: [ambiguous], protocol: null, snapshot: {
+    queryEcho: query, versions: {}, includedParticipantIds: ['synthetic'], includedSessionIds: [1]
+  } }, 'long').longData.filter(row => row.sourceKind === 'task_attempt' && row.presentationId === 'p1');
+  assert.equal(exported.length, 3);
+  assert.ok(exported.every(row => row.attemptStatus === 'ambiguous' && row.qualityValid === null
+    && row.includedInDefault === false && row.qualityIssueCodes.includes('presentation_attempt_ambiguous')));
 });
 
 test('#144 QC resumes weighted counters and completed FPS windows over multiple reloads, never the offline gap', async t => {
@@ -184,6 +194,8 @@ test('#144 QC resumes weighted counters and completed FPS windows over multiple 
   const assessed = assessQuality({ lifecycle: { status: 'completed' }, qcSummary: misleading });
   assert.equal(assessed.protocolQuality, 'unknown');
   assert.equal(assessed.recordingIntegrity.status, 'partial');
+  const checksOnly = { ...misleading, checks: { historyComplete: false } }; delete checksOnly.continuity;
+  assert.equal(assessQuality({ lifecycle: { status: 'completed' }, qcSummary: checksOnly }).recordingIntegrity.status, 'partial');
   for (const mutate of [
     saved => { saved.counters.faceVisible = saved.counters.totalFrames + 1; },
     saved => { saved.counters.gazeValid = saved.counters.gazeTotal + 1; },

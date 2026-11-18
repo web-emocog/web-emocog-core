@@ -32,6 +32,8 @@ prediction, authorization, published protocol binding, or production data.
   including durable full-QC snapshots and schema validation of final packets.
 - Live browser/API/PostgreSQL persistence suite: 21 passed across the same three
   browsers, including publication binding, reload recovery and final delivery.
+- FPS/duplicate-work suite: 84 passed across the same three browsers. Synthetic
+  cadence checks are not Windows hardware performance acceptance.
 - Autotest TypeScript check passed. Public manifest staging passed: 292 files.
 - Static release audit and RT Python smoke/unit checks passed.
 - Both retained original #169 JSON packets and both rebuilt packets validate

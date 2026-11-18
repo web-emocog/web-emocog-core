@@ -28,7 +28,9 @@
     const interrupted = lifecycle.status === 'failed' || !!meta.protocolTermination;
     const recovery = meta.storageRecovery || {};
     const integrityReasons = [];
-    if (payload.qcSummary?.continuity?.historyComplete === false) integrityReasons.push('qc_history_incomplete');
+    if (payload.qcSummary?.continuity?.historyComplete === false || payload.qcSummary?.checks?.historyComplete === false) {
+      integrityReasons.push('qc_history_incomplete');
+    }
     if (!completed) integrityReasons.push(interrupted ? 'protocol_interrupted' : 'recording_not_completed');
     if (recovery.signalSeriesIncomplete || meta.checkpointBuild?.signalSeriesIncomplete) integrityReasons.push('signal_history_incomplete');
     const recordingIntegrity = { status: completed && integrityReasons.length === 0 ? 'complete'

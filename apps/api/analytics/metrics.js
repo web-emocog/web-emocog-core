@@ -1062,14 +1062,16 @@ function taskAttemptExportRows(row, query, presentations, budget) {
   return sources.flatMap(({ result, entry }) => {
     const passiveTrial = result && passive(result);
     const required = result ? responseRequired(result) : null;
+    const ambiguous = entry?.attemptStatus === 'ambiguous' || result?.presentationId != null
+      && byIdentity.has(identity(result)) && byIdentity.get(identity(result)) === null;
     const context = { ...attemptMetadata(entry),
       presentationId: result?.presentationId ?? entry?.presentationId ?? null,
       attempt: result?.attempt ?? entry?.attempt ?? null,
-      attemptStatus: entry?.attemptStatus === 'ambiguous' ? 'ambiguous'
+      attemptStatus: ambiguous ? 'ambiguous'
         : result ? result.qualityValid === false ? 'excluded' : result.qualityValid === true ? 'accepted' : 'unknown' : 'interrupted',
-      qualityValid: result?.qualityValid ?? null,
-      qualityIssueCodes: result?.qualityIssueCodes ?? entry?.qualityIssueCodes ?? [],
-      includedInDefault: Boolean(result && result.qualityValid !== false && entry?.attemptStatus !== 'ambiguous'),
+      qualityValid: ambiguous ? null : result?.qualityValid ?? null,
+      qualityIssueCodes: ambiguous ? ['presentation_attempt_ambiguous'] : result?.qualityIssueCodes ?? entry?.qualityIssueCodes ?? [],
+      includedInDefault: Boolean(result && result.qualityValid !== false && !ambiguous),
       sourceKind: 'task_attempt', sessionId: Number(row.id), participantId: row.participant_id ?? null,
       observationDurationMs: result ? taskObservationDuration(row, [result], observationIndex) : null,
       nParticipants: row.participant_id ? 1 : 0, nObservations: result ? 1 : 0, responseRequired: required,
