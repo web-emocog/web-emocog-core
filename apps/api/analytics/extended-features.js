@@ -77,12 +77,13 @@ const blocked = v => v?.qualityValid === false || v?.valid === false || v?.accep
   || v?.held === true || v?.published === false || v?.skippedMedia === true
   || v?.invalidationReason === 'page_reloaded'
   || ['rejected', 'excluded', 'interrupted', 'repeat_required', 'in_progress', 'held', 'invalid', 'ambiguous', 'incomplete'].includes(v?.status);
-const rtValues = trials => trials.filter(t => !blocked(t) && t.correct === true)
+const { passive } = require('../../shared/task-response-semantics');
+const rtValues = trials => trials.filter(t => !blocked(t) && !passive(t) && t.correct === true)
   .map(t => nonnegative(t.rt)).filter(v => v !== null);
 const taskValues = trials => {
   const rt = rtValues(trials), avg = mean(rt);
   const sd = rt.length > 1 ? Math.sqrt(sum(rt.map(v => ((v - avg) / Math.sqrt(rt.length - 1)) ** 2))) : null;
-  const scored = trials.filter(t => !blocked(t) && typeof t.correct === 'boolean');
+  const scored = trials.filter(t => !blocked(t) && !passive(t) && typeof t.correct === 'boolean');
   return { 'rt.mean': avg, 'rt.median': quantile(rt, .5), 'rt.sd': number(sd),
     'rt.cv': avg > 0 && sd !== null ? number(sd / avg) : null,
     'rt.q10': quantile(rt, .1), 'rt.q25': quantile(rt, .25), 'rt.q75': quantile(rt, .75),

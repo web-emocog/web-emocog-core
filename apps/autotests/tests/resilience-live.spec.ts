@@ -326,7 +326,11 @@ test.describe('Durable participant backup through real API', () => {
     const sessionId = await page.evaluate(async () => {
       const shared = (window as any).__WECOG_STATE__;
       shared.sessionData.cognitiveResults = [{ rt: 350, correct: true, blockId: 'main', trialId: 'one' }];
-      shared.runtime.qcMetrics = { getCurrentMetrics: () => ({ durationMs: 20000, totalFrames: 100, gazeTotal: 100, gazeValidPct: 90 }) };
+      shared.runtime.qcMetrics = {
+        getCurrentMetrics: () => { throw new Error('Backups must preserve full QC history'); },
+        getSummary: () => ({ durationMs: 20000, totalFrames: 100, gazeTotal: 100, gazeValidPct: 90,
+          continuity: { schemaVersion: 'qc_continuity.v1', segmentCount: 2, historyComplete: true } })
+      };
       const result = await shared.runtime.sessionRuntime.delivery.checkpoint();
       if (!result.ok) throw new Error(`Backup failed: ${result.status}`);
       return shared.sessionData.ids.session;
@@ -337,6 +341,9 @@ test.describe('Durable participant backup through real API', () => {
     expect((await read()).publication_version).toBe(2);
     expect((await read()).payload.experimentMeta.publicationVersion).toBe(2);
     expect((await read()).payload.qcSummary.protocolQc.checks.gazeValid.threshold).toBe(85);
+    expect((await read()).payload.qcSummary.continuity).toEqual({
+      schemaVersion: 'qc_continuity.v1', segmentCount: 2, historyComplete: true
+    });
     expect((await read()).stopped_at).toBeNull();
     await page.reload();
     await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);

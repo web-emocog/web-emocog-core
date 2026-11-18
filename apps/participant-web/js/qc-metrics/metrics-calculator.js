@@ -104,9 +104,9 @@ export function computeQcScore(
 /**
  * Получение текущих метрик.
  */
-export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS, validationState = null) {
+export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS, validationState = null, elapsedMs = null) {
     const percentages = computePercentages(counters);
-    const durationMs = Date.now() - startTime;
+    const durationMs = elapsedMs ?? (Date.now() - startTime);
     const validation = validationState ? getValidationMetrics(validationState) : null;
     const qcScore = computeQcScore(percentages, thresholds, QC_WEIGHTS, counters, durationMs, validation);
 
@@ -142,8 +142,8 @@ export function getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, th
 /**
  * Получение итогового summary с трекинг-девиацией и accuracy/precision проверками.
  */
-export function getSummary(counters, gazeState, validationState, trackingDeviationState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS) {
-    const metrics = getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds, validationState);
+export function getSummary(counters, gazeState, validationState, trackingDeviationState, fpsMonitor, startTime, thresholds = DEFAULT_THRESHOLDS, elapsedMs = null) {
+    const metrics = getCurrentMetrics(counters, gazeState, fpsMonitor, startTime, thresholds, validationState, elapsedMs);
     const validation = getValidationMetrics(validationState);
     const trackingDeviation = getTrackingDeviationMetrics(trackingDeviationState, {
         validationAccuracyPx: validation.accuracyPx,

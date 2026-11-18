@@ -5,6 +5,9 @@ const { definitions: passiveDefinitions, measurement } = require('../../shared/p
 const { build: assessMetricQuality } = require('../../shared/metric-quality');
 const { presentationAttempts, attemptMetadata, trialSummary, taskTrials, matchesTrialFilters } = require('./attempts');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
+const { passive, noGo, responseRequired } = require('../../shared/task-response-semantics');
+const { taskObservationDuration, taskObservationIndex } = require('./task-observations');
+const { HttpError } = require('../security/http-error');
 
 const CATALOG_BY_ID = new Map((METRIC_CATALOG.metrics || []).map(metric => [metric.id, metric]));
 const GAZE_ALGORITHM = Object.freeze({
@@ -189,7 +192,7 @@ function metricBase(metricId, row, options = {}) {
     qc: options.qc || channelQc(row, channel),
     algorithm: options.algorithm || {
       id: channel === 'task' ? 'task-performance' : 'gaze-validity',
-      version: '1.0.0',
+      version: channel === 'task' ? '1.1.0' : '1.0.0',
       parametersHash: null,
     },
   };
@@ -198,35 +201,47 @@ function metricBase(metricId, row, options = {}) {
 function taskMetricValues(row, query) {
   const all = taskTrials(row, query);
   const valid = all.filter(trial => trial?.qualityValid !== false);
+  const scored = valid.filter(trial => !passive(trial));
+  const required = scored.filter(responseRequired);
   const excluded = all.length - valid.length;
-  const correct = valid.filter(trial => trial?.correct === true).length;
-  const errors = valid.filter(trial => trial?.correct === false).length;
-  const omissions = valid.filter(trial => trial?.response == null).length;
-  const noGo = valid.filter(trial => /no.?go/i.test(String(trial?.condition || '')));
-  const commissions = noGo.filter(trial => trial?.response != null).length;
-  const rtValues = valid.map(trial => finite(trial?.rt)).filter(Number.isFinite);
-  return { all, valid, excluded, correct, errors, omissions, noGo, commissions, rtValues };
+  const correct = scored.filter(trial => trial?.correct === true).length;
+  const errors = scored.filter(trial => trial?.correct === false).length;
+  const omissions = required.filter(trial => trial?.response == null).length;
+  const withholding = scored.filter(noGo);
+  const commissions = withholding.filter(trial => trial?.response != null).length;
+  const rtValues = scored.map(trial => finite(trial?.rt)).filter(value => value !== null && value >= 0);
+  return { all, valid, scored, required, excluded, correct, errors, omissions, noGo: withholding, commissions, rtValues };
 }
 
 function buildTaskMetric(metricId, row, query) {
   const task = taskMetricValues(row, query);
   if (!task.all.length) return metricBase(metricId, row, { reason: 'task_data_missing' });
-  const common = { status: 'computed', nObservations: task.valid.length, denominator: task.valid.length };
+  const hasScored = task.all.some(trial => !passive(trial));
+  const hasRequired = task.all.some(responseRequired);
+  const common = { status: task.scored.length ? 'computed' : hasScored ? 'no_data' : 'not_applicable',
+    reason: task.scored.length ? null : hasScored ? 'no_valid_task_trials' : 'response_not_required',
+    nObservations: task.scored.length, denominator: task.scored.length,
+    observationDurationMs: taskObservationDuration(row, task.valid) };
+  const omission = { ...common, denominator: task.required.length, nObservations: task.required.length,
+    status: task.required.length ? 'computed' : hasRequired ? 'no_data' : 'not_applicable',
+    reason: task.required.length ? null : hasRequired ? 'no_valid_task_trials' : 'response_not_required' };
   switch (metricId) {
     case 'task.accuracy_pct':
-      return metricBase(metricId, row, { ...common, value: task.valid.length ? round(task.correct / task.valid.length * 100) : null, numerator: task.correct });
+      return metricBase(metricId, row, { ...common, value: task.scored.length ? round(task.correct / task.scored.length * 100) : null, numerator: task.correct });
     case 'task.rt_median_ms':
       return metricBase(metricId, row, { ...common, value: round(quantile(task.rtValues, 0.5)), denominator: task.rtValues.length, nObservations: task.rtValues.length, distribution: distribution(task.rtValues) });
     case 'task.rt_mean_ms':
       return metricBase(metricId, row, { ...common, value: round(mean(task.rtValues)), denominator: task.rtValues.length, nObservations: task.rtValues.length, distribution: distribution(task.rtValues) });
-    case 'task.correct_count': return metricBase(metricId, row, { ...common, value: task.correct, numerator: task.correct });
-    case 'task.error_count': return metricBase(metricId, row, { ...common, value: task.errors, numerator: task.errors });
-    case 'task.omission_count': return metricBase(metricId, row, { ...common, value: task.omissions, numerator: task.omissions });
-    case 'task.omission_rate_pct': return metricBase(metricId, row, { ...common, value: task.valid.length ? round(task.omissions / task.valid.length * 100) : null, numerator: task.omissions });
-    case 'task.commission_count': return metricBase(metricId, row, { ...common, value: task.commissions, numerator: task.commissions, denominator: task.noGo.length });
+    case 'task.correct_count': return metricBase(metricId, row, { ...common, value: task.scored.length ? task.correct : null, numerator: task.correct });
+    case 'task.error_count': return metricBase(metricId, row, { ...common, value: task.scored.length ? task.errors : null, numerator: task.errors });
+    case 'task.omission_count': return metricBase(metricId, row, { ...omission, value: task.required.length ? task.omissions : null, numerator: task.omissions });
+    case 'task.omission_rate_pct': return metricBase(metricId, row, { ...omission, value: task.required.length ? round(task.omissions / task.required.length * 100) : null, numerator: task.omissions });
+    case 'task.commission_count': return metricBase(metricId, row, { ...common, value: task.noGo.length ? task.commissions : null,
+      numerator: task.commissions, denominator: task.noGo.length,
+      status: task.noGo.length ? 'computed' : 'not_applicable', reason: task.noGo.length ? null : 'no_nogo_trials' });
     case 'task.commission_rate_pct': return metricBase(metricId, row, { ...common, value: task.noGo.length ? round(task.commissions / task.noGo.length * 100) : null, numerator: task.commissions, denominator: task.noGo.length, status: task.noGo.length ? 'computed' : 'not_applicable', reason: task.noGo.length ? null : 'no_nogo_trials' });
-    case 'task.trial_count_valid': return metricBase(metricId, row, { ...common, value: task.valid.length, numerator: task.valid.length });
-    case 'task.trial_count_excluded': return metricBase(metricId, row, { ...common, value: task.excluded, numerator: task.excluded, denominator: task.all.length, nObservations: task.all.length });
+    case 'task.trial_count_valid': return metricBase(metricId, row, { ...common, status: 'computed', reason: null, denominator: task.valid.length, nObservations: task.valid.length, value: task.valid.length, numerator: task.valid.length });
+    case 'task.trial_count_excluded': return metricBase(metricId, row, { ...common, status: 'computed', reason: null, value: task.excluded, numerator: task.excluded, denominator: task.all.length, nObservations: task.all.length, observationDurationMs: taskObservationDuration(row, task.all) });
     default: return metricBase(metricId, row, { reason: 'metric_not_supported' });
   }
 }
@@ -1027,9 +1042,63 @@ function exportMetric(metric, sourceKind, context = {}) {
   };
 }
 
+function taskAttemptExportRows(row, query, presentations, budget) {
+  if (query.filters?.aoiIds?.length) return [];
+  const identity = entry => JSON.stringify([textId(entry.presentationId), textId(entry.blockId ?? entry.block), textId(entry.trialId)]);
+  const byIdentity = new Map();
+  for (const entry of presentations) {
+    const key = identity(entry);
+    byIdentity.set(key, byIdentity.has(key) ? null : entry);
+  }
+  const sources = taskTrials(row, query).map(result => ({ result,
+    entry: result.presentationId == null ? null : byIdentity.get(identity(result)) }));
+  sources.push(...presentations.filter(entry => entry.attemptStatus === 'interrupted' && matchesTrialFilters(entry, query))
+    .map(entry => ({ result: null, entry })));
+  if (sources.length * 3 > budget.remaining) {
+    throw new HttpError(413, 'Select fewer sessions or a shorter date range', 'export_output_limit');
+  }
+  budget.remaining -= sources.length * 3;
+  const observationIndex = taskObservationIndex(row);
+  return sources.flatMap(({ result, entry }) => {
+    const passiveTrial = result && passive(result);
+    const required = result ? responseRequired(result) : null;
+    const ambiguous = entry?.attemptStatus === 'ambiguous' || result?.presentationId != null
+      && byIdentity.has(identity(result)) && byIdentity.get(identity(result)) === null;
+    const context = { ...attemptMetadata(entry),
+      presentationId: result?.presentationId ?? entry?.presentationId ?? null,
+      attempt: result?.attempt ?? entry?.attempt ?? null,
+      attemptStatus: ambiguous ? 'ambiguous'
+        : result ? result.qualityValid === false ? 'excluded' : result.qualityValid === true ? 'accepted' : 'unknown' : 'interrupted',
+      qualityValid: ambiguous ? null : result?.qualityValid ?? null,
+      qualityIssueCodes: ambiguous ? ['presentation_attempt_ambiguous'] : result?.qualityIssueCodes ?? entry?.qualityIssueCodes ?? [],
+      includedInDefault: Boolean(result && result.qualityValid !== false && !ambiguous),
+      sourceKind: 'task_attempt', sessionId: Number(row.id), participantId: row.participant_id ?? null,
+      observationDurationMs: result ? taskObservationDuration(row, [result], observationIndex) : null,
+      nParticipants: row.participant_id ? 1 : 0, nObservations: result ? 1 : 0, responseRequired: required,
+      scope: { sessionId: Number(row.id), blockId: textId(result?.blockId ?? result?.block ?? entry?.blockId),
+        trialId: textId(result?.trialId ?? entry?.trialId), presentationId: textId(result?.presentationId ?? entry?.presentationId),
+        stimulusId: textId(result?.stimulusId ?? entry?.stimulusId), aoiId: null },
+      algorithm: { id: 'recorded-task-attempt', version: '1.0.0', parametersHash: null } };
+    const recordedRt = result && !passiveTrial && finite(result.rt) !== null && result.rt >= 0 ? result.rt : null;
+    return [['task.rt_ms', recordedRt, 'ms'],
+      ['task.correct', result && !passiveTrial && typeof result.correct === 'boolean' ? result.correct : null, 'boolean'],
+      ['task.responded', result && !passiveTrial ? result.response != null : null, 'boolean']].map(([metricId, value, unit]) => ({
+        ...context, metricId, value, unit,
+        status: !result ? 'no_data' : passiveTrial ? 'not_applicable' : value === null ? 'no_data' : 'computed',
+        reason: !result ? context.qualityIssueCodes[0] || 'trial_result_missing' : passiveTrial ? 'response_not_required'
+          : value === null ? required && result.response == null ? 'no_response' : 'rt_not_recorded' : null,
+      }));
+  });
+}
+
+const textId = value => value == null ? null : String(value);
+
 function buildExportBundle(hydrated, content = 'both') {
   const { snapshot, sessionRows, protocol } = hydrated;
   const query = snapshot.queryEcho;
+  const attemptBudget = { remaining: 25000 };
+  const attemptRows = content === 'summary' ? null : sessionRows.flatMap(row =>
+    taskAttemptExportRows(row, query, presentationAttempts(row), attemptBudget));
   const sessions = sessionRows.map(row => {
     const presentations = presentationAttempts(row);
     const trials = trialSummary(row, query, presentations);
@@ -1059,6 +1128,10 @@ function buildExportBundle(hydrated, content = 'both') {
       description: metric.description || null,
     };
   });
+  if (content !== 'summary') dataDictionary.push(
+    { metricId: 'task.rt_ms', label: { ru: 'Время реакции отдельной попытки', en: 'Recorded attempt reaction time' }, unit: 'ms', description: null },
+    { metricId: 'task.correct', label: { ru: 'Правильность ответа попытки', en: 'Recorded attempt correctness' }, unit: 'boolean', description: null },
+    { metricId: 'task.responded', label: { ru: 'Ответ в попытке', en: 'Recorded attempt response presence' }, unit: 'boolean', description: null });
   const observations = sessions.reduce((sum, session) => (
     sum + session.metrics.reduce((metricSum, metric) => metricSum + (metric.nObservations || 0), 0)
   ), 0);
@@ -1079,6 +1152,7 @@ function buildExportBundle(hydrated, content = 'both') {
       modelResult: null,
     },
     longData: content === 'summary' ? null : [
+      ...attemptRows,
       ...sessions.flatMap(session => [
         ...session.metrics.map(metric => exportMetric(metric, 'session_summary', {
           sessionId: session.sessionId,

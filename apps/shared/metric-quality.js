@@ -12,6 +12,7 @@
     physiologyBlockAttempts: 400, gazePresentations: 200 });
 
   function protocolStatus(qc, report) {
+    if (qc.continuity?.historyComplete === false || qc.checks?.historyComplete === false) return 'unknown';
     if (report?.schemaVersion === 'protocol_quality.v1') {
       if (report.failed?.length) return 'failed';
       if (report.missing?.length) return 'unknown';
@@ -27,10 +28,13 @@
     const interrupted = lifecycle.status === 'failed' || !!meta.protocolTermination;
     const recovery = meta.storageRecovery || {};
     const integrityReasons = [];
+    if (payload.qcSummary?.continuity?.historyComplete === false || payload.qcSummary?.checks?.historyComplete === false) {
+      integrityReasons.push('qc_history_incomplete');
+    }
     if (!completed) integrityReasons.push(interrupted ? 'protocol_interrupted' : 'recording_not_completed');
     if (recovery.signalSeriesIncomplete || meta.checkpointBuild?.signalSeriesIncomplete) integrityReasons.push('signal_history_incomplete');
     const recordingIntegrity = { status: completed && integrityReasons.length === 0 ? 'complete'
-      : interrupted || integrityReasons.includes('signal_history_incomplete') ? 'partial' : 'unknown',
+      : interrupted || integrityReasons.includes('signal_history_incomplete') || integrityReasons.includes('qc_history_incomplete') ? 'partial' : 'unknown',
     storage: options.serverAcknowledged === true ? 'server_acknowledged' : 'local_prepared', reasons: integrityReasons };
     const qc = payload.qcSummary || {}, gaze = payload.gaze_analytics?.summary || {};
     const minutes = Array.isArray(payload.physiology_intervals?.minutes) ? payload.physiology_intervals.minutes : [];

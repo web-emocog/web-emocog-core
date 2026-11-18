@@ -4,6 +4,7 @@ const { HttpError } = require('../security/http-error');
 const { sessionVersion } = require('../analytics/protocol-versions');
 const { build: assessQuality } = require('../../shared/metric-quality');
 const { definitions, measurement } = require('../../shared/passive-metrics');
+const { passive, responseRequired } = require('../../shared/task-response-semantics');
 
 const VERSION = 'reproducibility_export.v1';
 const LIMITS = Object.freeze({ sessions: 50, sourceBytes: 8 * 1024 * 1024,
@@ -125,7 +126,9 @@ function buildReproducibilityExport(sourceRows, { pseudonymKey, limits = LIMITS,
       }
       if (presentId != null) covered.add(presentId);
       const qualityValid = typeof trial.qualityValid === 'boolean' ? trial.qualityValid : null;
-      const missing = trial.skippedMedia === true ? 'stimulus_unavailable' : trial.response == null ? 'no_response' : null;
+      const isPassive = passive(trial);
+      const missing = trial.skippedMedia === true ? 'stimulus_unavailable' : isPassive ? 'response_not_required'
+        : trial.response == null && responseRequired(trial) ? 'no_response' : null;
       const context = { source_kind: 'task_attempt', scope: 'presentation', channel: 'task',
         block_id: id(trial.blockId ?? trial.block), trial_id: id(trial.trialId), presentation_id: presentId,
         attempt: number(trial.attempt), attempt_status: qualityValid === false ? 'excluded' : qualityValid === true ? 'accepted' : 'unknown',
@@ -135,19 +138,19 @@ function buildReproducibilityExport(sourceRows, { pseudonymKey, limits = LIMITS,
         time_origin_ms: record?.timeOriginMs ?? null, method_version: 'recorded_task_attempt.v1', quality_valid: qualityValid,
         signal_quality: qualityValid === true ? 'available_not_validated' : qualityValid === false ? 'rejected' : 'unknown',
         reason_codes: codes(trial.qualityIssueCodes) };
-      const rt = number(trial.rt);
+      const rt = isPassive ? null : number(trial.rt);
       push({ ...context, metric: 'task.rt_ms', value: rt != null && rt >= 0 && !trial.skippedMedia ? rt : null, unit: 'ms',
         missing_reason: trial.skippedMedia ? 'stimulus_unavailable' : rt == null ? missing || 'rt_not_recorded' : rt < 0 ? 'invalid_rt' : null });
-      push({ ...context, metric: 'task.correct', value: typeof trial.correct === 'boolean' ? trial.correct : null, unit: 'boolean',
-        missing_reason: typeof trial.correct === 'boolean' ? null : 'correctness_not_recorded' });
-      push({ ...context, metric: 'task.responded', value: trial.response != null, unit: 'boolean', missing_reason: missing });
+      push({ ...context, metric: 'task.correct', value: !isPassive && typeof trial.correct === 'boolean' ? trial.correct : null, unit: 'boolean',
+        missing_reason: isPassive ? 'response_not_required' : typeof trial.correct === 'boolean' ? null : 'correctness_not_recorded' });
+      push({ ...context, metric: 'task.responded', value: isPassive ? null : trial.response != null, unit: 'boolean', missing_reason: missing });
     }
     // Prepared/interrupted intent is exported even if no result ever reached the collector.
     for (const record of plan?.actual || []) if (!covered.has(record.presentationId)) push({
       source_kind: 'task_attempt', scope: 'presentation', channel: 'task', metric: 'task.rt_ms', unit: 'ms',
       block_id: record.blockId, trial_id: record.trialId, presentation_id: record.presentationId,
       stimulus_id: record.stimulusId, stimulus_version: record.stimulusVersion, attempt: record.attempt,
-      attempt_status: 'incomplete', onset_epoch_ms: record.stimulusOnEpochMs, onset_perf_ms: record.stimulusOnPerfMs,
+      attempt_status: record.status === 'interrupted' ? 'interrupted' : 'incomplete', onset_epoch_ms: record.stimulusOnEpochMs, onset_perf_ms: record.stimulusOnPerfMs,
       time_origin_ms: record.timeOriginMs, clock: 'performance_now_ms', method_version: plan.schemaVersion,
       missing_reason: 'trial_result_missing', reason_codes: record.deviations
     });

@@ -54,7 +54,7 @@ class ParticipantSessionRuntime {
             build: async () => {
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.capturePhysiologyIntervals();
-                const current = state.runtime.qcMetrics?.getCurrentMetrics?.();
+                const current = state.runtime.qcMetrics?.getSummary?.();
                 const bpm = this.getBpmSnapshot();
                 return this.checkpointBuilder.build({ ...state.sessionData,
                     ...(bpm.ready ? { bpm, continuousSignalState: bpm,
@@ -409,6 +409,8 @@ class ParticipantSessionRuntime {
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.getBpmSnapshot();
                 this.capturePhysiologyIntervals();
+                const qc = state.runtime.qcMetrics?.getSummary?.();
+                if (qc) state.sessionData.qcSummary = qc;
                 await this.checkpoints.save(
                     currentSessionId,
                     state.sessionData,

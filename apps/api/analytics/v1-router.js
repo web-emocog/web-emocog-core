@@ -754,6 +754,7 @@ function exportCsv(bundle) {
       qualityValid: metric.qualityValid, qualityIssueCodes: metric.qualityIssueCodes,
       qualityReasons: metric.qualityReasons,
       includedInDefault: metric.includedInDefault, observationDurationMs: metric.observationDurationMs,
+      responseRequired: metric.responseRequired,
       presentationCoverage: metric.presentationCoverage,
       blockId: metric.blockId, intervalStartMs: metric.intervalStartMs,
       intervalEndMs: metric.intervalEndMs, coveragePct: metric.coveragePct },

@@ -1,6 +1,7 @@
 const { quantile } = require('./metrics');
 const { passiveMetric } = require('./passive');
 const { COMPARISON_METRICS } = require('./query');
+const { passive } = require('../../shared/task-response-semantics');
 const average = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const participantId = row => Object.hasOwn(row, 'participant_key') ? row.participant_key : (row.participant_id || null);
 
@@ -45,7 +46,7 @@ function participantPhysiology(rows, metricId, blockId) {
 }
 
 function participantValue(trials, metricId) {
-  const valid = trials.filter(trial => trial && typeof trial === 'object' && trial.qualityValid !== false);
+  const valid = trials.filter(trial => trial && typeof trial === 'object' && trial.qualityValid !== false && !passive(trial));
   if (metricId === 'task.accuracy_pct') {
     const scored = valid.filter(trial => typeof trial.correct === 'boolean');
     return { value: scored.length ? scored.filter(trial => trial.correct).length / scored.length * 100 : null, n: scored.length };

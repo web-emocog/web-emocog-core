@@ -31,6 +31,33 @@
 
 Каталог версии 1.1 содержит 39 записей, но это не означает 39 карточек на экране. В него входят визуализация heatmap, пользовательские outcomes, дополнительные export-показатели и обязательный технический QC-контекст. Конструктор группирует показатели в компактные пакеты; фоновым сигналам соответствует пакет continuous_signals.
 
+## Task attempt semantics (2026-11-19)
+
+`task-performance` version `1.1.0` excludes passive viewing (`responseMode=none`
+or `task_id=passive_viewing`) from RT, correctness and response-rate outcomes.
+Passive presentations still count as recorded trials. A correct No-Go response
+withholding is not an omission. Omission rates use only trials requiring a
+response; a purely passive selection has `null / not_applicable`, not zero
+performance. Missing legacy response metadata retains legacy RT semantics.
+
+Observation duration uses matching presentation identity and actual monotonic
+on/off endpoints. Instructions, calibration, reload gaps and the server session
+lifetime are not substituted for presentation duration. Missing or conflicting
+timing remains null.
+
+`trialCounts.interrupted` is optional and separate from completed `total`,
+`valid`, and `excluded` counts. A saved interrupted presentation without a task
+result has `attemptStatus=interrupted`, no invented response/RT, and is excluded
+from default metrics. This also applies when no gaze context was recorded.
+
+Detailed level-1 JSON/CSV export includes `sourceKind=task_attempt` rows for
+recorded RT, correctness and response presence, plus identity, quality reasons,
+`includedInDefault`, `responseRequired` and observed duration. These rows are not
+created for an AOI-only selection: a whole-trial response is not an AOI-scoped
+measurement. More than 25,000 attempt rows return 413 `export_output_limit`
+instead of silently dropping attempts. Researcher-wide participant CSV remains
+the participant-by-metric table; long attempt rows belong to the detailed export.
+
 ## Gaze spatial QC extension (2026-11-06)
 
 `qcResult.spatialAccuracy` is optional and versioned as `gaze_spatial_qc.v1`.

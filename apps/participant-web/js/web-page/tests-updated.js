@@ -511,8 +511,9 @@ async function prepareCalibration(options) {
     }
     if (!targeted) {
         state.runtime.qcMetrics?.stop?.();
+        const previousSummary = state.runtime.qcMetrics?.getSummary?.() || state.sessionData.qcSummary;
         state.runtime.qcMetrics = new QCMetrics();
-        state.runtime.qcMetrics.start({ analysisFpsThreshold: globalThis.WecogProtocolQuality
+        state.runtime.qcMetrics.start({ previousSummary, analysisFpsThreshold: globalThis.WecogProtocolQuality
             .cameraCadence(state.runtime.invitationProtocolDefinition, null).threshold });
         state.runtime.sessionStartTime = Date.now();
         dbg('qc', 'QCMetrics:instance:created', {});
