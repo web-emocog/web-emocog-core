@@ -3,7 +3,6 @@ import { updateFromMetrics as updateQcOverlay } from '../qc-pause-overlay-new.js
 import { SessionQualityDetector } from './quality-detector.mjs?v=20261110-integration1';
 import { ERROR_KINDS } from './contracts.mjs';
 import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261120-methods1';
-import { resolvePhysiologyMethods } from '../../../shared/physiology-methods.mjs?v=20261120-methods1';
 import {
     appendEmotionSample,
     endEmotionSession,
@@ -63,7 +62,6 @@ export class SessionFramePipeline {
         this.controller = options.controller;
         this.video = options.video;
         this.profile = resolveSignalProfile(options.definition || this.state.runtime.invitationProtocolDefinition);
-        this.physiologyMethods = resolvePhysiologyMethods(options.definition || this.state.runtime.invitationProtocolDefinition);
         this.schedule = this.profile.schedule;
         this.neutralCalibration = this.profile.emotionCalibration.method === 'explicit-neutral.v2'
             ? new NeutralCalibration(this.profile.emotionCalibration) : null;
@@ -108,8 +106,8 @@ export class SessionFramePipeline {
             },
             onError: error => this._reportBpmError(error),
             onRecovered: () => this._recoverBpm(),
-            heartRateMethod: this.physiologyMethods.heartRate,
-            respirationMethod: this.physiologyMethods.respiration
+            // Методы ЧСС и дыхания сборщик берёт из определения протокола сам.
+            definition: options.definition || this.state.runtime.invitationProtocolDefinition
         });
         this.bodyPose = new ContinuousBodyPoseCollector({
             state: this.state,
@@ -120,8 +118,8 @@ export class SessionFramePipeline {
                 this.controller.setModuleStatus('bodyPose', 'running');
             },
             enabled: this.controller.featureFlags?.bodyMovement !== false,
-            onShoulders: this.physiologyMethods.respiration === 'motion'
-                ? (timestamp, left, right) => this.bpm.recordShoulders(timestamp, left, right) : null,
+            // Плечи нужны только методу дыхания по движению; иначе recordShoulders ничего не делает.
+            onShoulders: (timestamp, left, right) => this.bpm.recordShoulders?.(timestamp, left, right),
             gamerMode: this.controller.featureFlags?.gamerMode === true,
             clock: this.controller.sessionClock
         });

@@ -1,5 +1,5 @@
 import { BpmPublicationGate } from './bpm-publication-gate.mjs';
-import { HEART_RATE_METHODS, RESPIRATION_METHODS } from '../../../shared/physiology-methods.mjs?v=20261120-methods1';
+import { HEART_RATE_METHODS, RESPIRATION_METHODS, resolvePhysiologyMethods } from '../../../shared/physiology-methods.mjs?v=20261120-methods1';
 
 const SAMPLE_CAP = 7200;
 const stats = () => ({ n: 0, sum: 0, min: null, max: null });
@@ -74,9 +74,12 @@ function copyLandmarks(landmarks, target) {
 export class ContinuousBpmCollector {
     constructor(options = {}) {
         this.getFps = options.getFps || (() => 30);
-        // Методы из настроек протокола; неизвестное значение = прежний метод.
-        this.heartRateMethod = Object.hasOwn(HEART_RATE_METHODS, options.heartRateMethod) ? options.heartRateMethod : 'pos';
-        this.respirationMethod = Object.hasOwn(RESPIRATION_METHODS, options.respirationMethod) ? options.respirationMethod : 'luma';
+        // Методы из настроек протокола (options.definition) или явных опций; неизвестное значение = прежний метод.
+        const fromProtocol = resolvePhysiologyMethods(options.definition || null);
+        const heartRate = options.heartRateMethod ?? fromProtocol.heartRate;
+        const respiration = options.respirationMethod ?? fromProtocol.respiration;
+        this.heartRateMethod = Object.hasOwn(HEART_RATE_METHODS, heartRate) ? heartRate : 'pos';
+        this.respirationMethod = Object.hasOwn(RESPIRATION_METHODS, respiration) ? respiration : 'luma';
         this.bpmMethodVersion = HEART_RATE_METHODS[this.heartRateMethod].methodVersion;
         this.motionRespiration = null;
         this.onError = options.onError || (() => {});

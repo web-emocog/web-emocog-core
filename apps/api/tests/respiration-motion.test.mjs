@@ -218,3 +218,15 @@ test('the default collector keeps the current methods', () => {
     assert.equal(c.bpmMethodVersion, 'continuous_signals.v2');
   });
 });
+
+test('the collector reads the methods from the protocol definition', () => {
+  return import('../../participant-web/js/session-runtime/continuous-bpm.js').then(({ ContinuousBpmCollector }) => {
+    const c = new ContinuousBpmCollector({ definition: { settings: { physiologyMethods: { heartRate: 'auto', respiration: 'motion' } } } });
+    assert.equal(c.heartRateMethod, 'auto');
+    assert.equal(c.respirationMethod, 'motion');
+    assert.equal(c.bpmMethodVersion, 'continuous_signals.v2.auto');
+    assert.equal(c.recordShoulders(1000, { x: 0.3, y: 0.8 }, { x: 0.7, y: 0.8 }), false, 'до start() плечи не принимаются');
+    const legacy = new ContinuousBpmCollector({ definition: { settings: { signalProfileId: 'protocol_signals.v2' } } });
+    assert.equal(legacy.respirationMethod, 'luma');
+  });
+});
