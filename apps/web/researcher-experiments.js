@@ -243,6 +243,7 @@ function ExperimentsListView() {
       signalProfileId: definition.settings?.signalProfileId || builder.signalProfileId,
       qcThresholds: builder.qcThresholds || definition.settings?.qualityControl?.rules || local?.qcThresholds,
       persistenceSettings: definition.settings?.persistence || builder.persistenceSettings || local?.persistenceSettings,
+      physiologyMethods: definition.settings?.physiologyMethods || builder.physiologyMethods || local?.physiologyMethods,
       analyticsPlan: builder.analyticsPlan || definition.analyticsPlan,
       version: builder.version || definition.version,
       publicationVersion: protocol.publication_version || null,

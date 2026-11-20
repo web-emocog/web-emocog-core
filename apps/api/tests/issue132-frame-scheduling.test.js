@@ -26,6 +26,7 @@ for (const { fps, latency, minimum } of [
   const context = vm.createContext({ performance: global.performance, setTimeout: global.setTimeout,
     clearTimeout: global.clearTimeout, window: {}, Date, observeVideoFrames, ...profile,
     ContinuousBpmCollector: class {}, ContinuousBodyPoseCollector: class {},
+    resolvePhysiologyMethods: () => ({ heartRate: 'pos', respiration: 'luma' }),
     NeutralCalibration: class { reset() {} },
     SessionQualityDetector: class { reset() {} }, startEmotionSession() {}, endEmotionSession() {},
     getEmotionSummary() {}, updateHeadPoseGuide() {}, extractEyeSignalSample() { return null; } });
