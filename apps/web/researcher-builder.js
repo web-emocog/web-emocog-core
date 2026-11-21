@@ -177,6 +177,17 @@ function ExperimentBuilderView(options = {}) {
   let savedExperimentId = experimentId;
   let persistenceSettingsDraft = null;
   let signalProfileDraft = null;
+  let physiologyMethodsDraft = null;
+  // Значения совпадают с apps/shared/physiology-methods.mjs (проверяется тестом).
+  const BUILDER_HEART_RATE_METHODS = [
+    { id: 'pos', ru: 'POS (текущий)', en: 'POS (current)' },
+    { id: 'chrom', ru: 'CHROM (экспериментальный)', en: 'CHROM (experimental)' },
+    { id: 'auto', ru: 'Автовыбор POS/CHROM (экспериментальный)', en: 'Automatic POS/CHROM (experimental)' }
+  ];
+  const BUILDER_RESPIRATION_METHODS = [
+    { id: 'luma', ru: 'По яркости кожи (текущий)', en: 'Skin brightness (current)' },
+    { id: 'motion', ru: 'По движению головы и плеч (экспериментальный)', en: 'Head and shoulder motion (experimental)' }
+  ];
 
   let currentStep = startStep;
   let importMode = null;
@@ -4143,6 +4154,21 @@ function ExperimentBuilderView(options = {}) {
     };
   }
 
+  function getBuilderPhysiologyMethods() {
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem('emocog_physiology_methods_' + (experimentId || 'draft')) || 'null'); } catch (_) {}
+    const draft = cached?.revision === (editingExp?.updatedAt || null) ? cached?.methods : null;
+    const source = physiologyMethodsDraft || draft || editingExp?.physiologyMethods
+      || parsedExperimentData?.json?.settings?.physiologyMethods || editingExp?.definition?.settings?.physiologyMethods || {};
+    const heartRate = canvasCol.querySelector('#protocolHeartRateMethod')?.value || source.heartRate;
+    const respiration = canvasCol.querySelector('#protocolRespirationMethod')?.value || source.respiration;
+    physiologyMethodsDraft = {
+      heartRate: BUILDER_HEART_RATE_METHODS.some(item => item.id === heartRate) ? heartRate : 'pos',
+      respiration: BUILDER_RESPIRATION_METHODS.some(item => item.id === respiration) ? respiration : 'luma'
+    };
+    return { ...physiologyMethodsDraft };
+  }
+
   function getBuilderPersistenceSettings() {
     const key = 'emocog_protocol_persistence_' + (experimentId || 'draft');
     let cached;
@@ -4184,6 +4210,7 @@ function ExperimentBuilderView(options = {}) {
     const sessionFeatures = getBuilderSessionFeatures();
     const persistenceSettings = getBuilderPersistenceSettings();
     const signalProfileId = getBuilderSignalProfileId();
+    const physiologyMethods = getBuilderPhysiologyMethods();
 
     canvasCol.innerHTML = '';
     const wrap = document.createElement('div');
@@ -4199,6 +4226,18 @@ function ExperimentBuilderView(options = {}) {
             <option value="protocol_signals.v1" ${signalProfileId === 'protocol_signals.v1' ? 'selected' : ''}>${trb('Прежний профиль (v1)','Legacy profile (v1)')}</option>
           </select>
           <p style="font-size:11px;color:var(--muted);line-height:1.45;">${trb('В v2: устойчивый предчек, настройка нейтральной мимики и частоты по времени. Выбор сохраняется в версии протокола; опубликованные сессии не меняются.','v2 uses a tolerant precheck, explicit neutral-face preparation and time-based channel scheduling. The choice is stored with the protocol version; published sessions do not change.')}</p>
+        </div>
+        <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;" data-feature-status="experimental">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;">${trb('Методы оценки ЧСС и дыхания','Heart-rate and respiration methods')}</div>
+          <div><label for="protocolHeartRateMethod">${trb('ЧСС','Heart rate')}</label>
+          <select id="protocolHeartRateMethod">
+            ${BUILDER_HEART_RATE_METHODS.map(item => `<option value="${item.id}" ${physiologyMethods.heartRate === item.id ? 'selected' : ''}>${trb(item.ru, item.en)}</option>`).join('')}
+          </select></div>
+          <div style="margin-top:8px;"><label for="protocolRespirationMethod">${trb('Дыхание','Respiration')}</label>
+          <select id="protocolRespirationMethod">
+            ${BUILDER_RESPIRATION_METHODS.map(item => `<option value="${item.id}" ${physiologyMethods.respiration === item.id ? 'selected' : ''}>${trb(item.ru, item.en)}</option>`).join('')}
+          </select></div>
+          <p style="font-size:11px;color:var(--muted);line-height:1.45;">${trb('Экспериментальные методы не валидированы против ЭКГ и дыхательного пояса; используйте их для сравнения, а не для выводов. Дыхание по движению использует плечи, только если включено «Движение корпуса» (ниже); без него — масштаб лица. Метод сохраняется в версии протокола и в данных каждой сессии; разные методы в аналитике не смешиваются.','Experimental methods are not validated against ECG or a respiration belt; use them for comparison, not conclusions. Motion respiration uses the shoulders only when Body movement (below) is on; otherwise it uses face scale. The method is stored with the protocol version and in every session; analytics does not pool different methods.')}</p>
         </div>
         <div style="padding:14px 16px;background:var(--card-bg);border:1px solid var(--stroke);border-radius:12px;">
           <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;color:var(--text);">
@@ -4267,6 +4306,9 @@ function ExperimentBuilderView(options = {}) {
       localStorage.setItem('emocog_signal_profile_' + (experimentId || 'draft'),
         JSON.stringify({ id: signalProfileDraft, revision: editingExp?.updatedAt || null }));
       localStorage.setItem('emocog_protocol_persistence_' + (experimentId || 'draft'), JSON.stringify(getBuilderPersistenceSettings()));
+      physiologyMethodsDraft = null;
+      localStorage.setItem('emocog_physiology_methods_' + (experimentId || 'draft'),
+        JSON.stringify({ methods: getBuilderPhysiologyMethods(), revision: editingExp?.updatedAt || null }));
       wrap.querySelectorAll('.qc-enabled').forEach(cb => { qc[cb.dataset.key].enabled = cb.checked; });
       wrap.querySelectorAll('.qc-range').forEach(r => { qc[r.dataset.key].threshold = parseInt(r.value); });
       wrap.querySelectorAll('.qc-hardstop').forEach(cb => { qc[cb.dataset.key].hardStop = cb.checked; });
@@ -4277,7 +4319,7 @@ function ExperimentBuilderView(options = {}) {
       if (!sessionFeatures.multimodal) sessionFeatures.gamerMode = false;
       localStorage.setItem(featuresKey, JSON.stringify(sessionFeatures));
     }
-    wrap.querySelectorAll('#protocolSignalProfile, #protocolBackupNotificationsToggle, .session-feature, .qc-enabled, .qc-range, .qc-hardstop').forEach(cb => cb.addEventListener('change', saveQC));
+    wrap.querySelectorAll('#protocolSignalProfile, #protocolHeartRateMethod, #protocolRespirationMethod, #protocolBackupNotificationsToggle, .session-feature, .qc-enabled, .qc-range, .qc-hardstop').forEach(cb => cb.addEventListener('change', saveQC));
     wrap.querySelectorAll('#qcBack2').forEach(b => b.addEventListener('click', () => { saveQC(); currentStep--; renderStepper(); renderCanvas(); }));
     wrap.querySelector('#qcNext').addEventListener('click', () => { saveQC(); currentStep++; renderStepper(); renderCanvas(); });
   }
@@ -4756,6 +4798,7 @@ function ExperimentBuilderView(options = {}) {
         ...(srcData.settings || { backgroundColor:'#1a1a2e', textColor:'#ffffff' }),
         featureFlags: sessionFeatureFlags,
         signalProfileId,
+        physiologyMethods: getBuilderPhysiologyMethods(),
         qualityControl: { schemaVersion: 'protocol_quality.v1', rules: getBuilderQCThresholds() },
         persistence: getBuilderPersistenceSettings()
       },
@@ -4898,7 +4941,7 @@ function ExperimentBuilderView(options = {}) {
     // Validate the actual exported runtime definition, not incomplete builder cards.
     // Drafts remain editable; neither a failed preflight nor Cancel overwrites a live link.
     if (!draftOnly) {
-      const { inspectProtocolPreflight } = await import('../shared/protocol-preflight.mjs?v=20261106-1');
+      const { inspectProtocolPreflight } = await import('../shared/protocol-preflight.mjs?v=20261120-methods1');
       const report = inspectProtocolPreflight(json);
       const aoiValidation = globalThis.EmocogAoiProtocol?.validateProtocolAois(json);
       if (aoiValidation && !aoiValidation.ok) {
@@ -4936,6 +4979,7 @@ function ExperimentBuilderView(options = {}) {
       signalProfileId,
       qcThresholds: getBuilderQCThresholds(),
       persistenceSettings: getBuilderPersistenceSettings(),
+      physiologyMethods: getBuilderPhysiologyMethods(),
       analyticsPlan,
       blocks: userBlocks,
       version: protocolVersion,
@@ -4955,7 +4999,7 @@ function ExperimentBuilderView(options = {}) {
     json.builderState = {
       metadata: protocolMeta, blocks: userBlocks, version: protocolVersion,
       savedStep: entry.savedStep, sessionFeatureFlags, signalProfileId, analyticsPlan, qcThresholds: entry.qcThresholds,
-      persistenceSettings: entry.persistenceSettings
+      persistenceSettings: entry.persistenceSettings, physiologyMethods: entry.physiologyMethods
     };
     if (entry.apiProtocolId && typeof loadBuilderApiState === 'function' && !loadBuilderApiState(id).apiProtocolId) {
       saveBuilderApiState(id, { apiProtocolId: entry.apiProtocolId, projectId: entry.projectId,
