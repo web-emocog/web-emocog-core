@@ -132,6 +132,8 @@ export class ContinuousBodyPoseCollector {
         this.state = state;
         this.onError = onError || (() => {});
         this.onRecovered = options.onRecovered || (() => {});
+        // Сырые плечи для дыхания по движению; координаты не сохраняются в сессию.
+        this.onShoulders = typeof options.onShoulders === 'function' ? options.onShoulders : null;
         this.enabled = enabled !== false;
         this.gamerMode = gamerMode === true;
         this.clock = clock || null;
@@ -262,6 +264,10 @@ export class ContinuousBodyPoseCollector {
 
     consumeResult(result, timestamp, context) {
         const landmarks = result?.landmarks?.[0];
+        if (this.onShoulders && Array.isArray(landmarks) && landmarks.length > LANDMARK.RIGHT_SHOULDER) {
+            // Бёдра в кадре веб-камеры часто не видны; для дыхания достаточно плеч.
+            try { this.onShoulders(timestamp, landmarks[LANDMARK.LEFT_SHOULDER], landmarks[LANDMARK.RIGHT_SHOULDER]); } catch (_) {}
+        }
         if (!Array.isArray(landmarks) || landmarks.length <= LANDMARK.RIGHT_HIP) {
             this.state.runtime.lastBodyPoseSample = null;
             this._recordRejected('occluded');
