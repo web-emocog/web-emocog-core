@@ -2981,6 +2981,49 @@
       },
       "additionalProperties": false
     },
+    "passiveValidTime": {
+      "description": "Presentation-onset-relative integer milliseconds. Full chronological accepted/excluded partition is checked by ingest. Actual duration preserves late callback time; accepted segments cannot exceed the deadline.",
+      "type": "object",
+      "required": ["schemaVersion", "targetMs", "acceptedMs", "actualMs", "maxDurationMs", "extended", "limitReached", "acceptedSegments", "excludedSegments"],
+      "properties": {
+        "schemaVersion": { "const": "passive_valid_time.v1", "type": "string" },
+        "targetMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
+        "acceptedMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+        "actualMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+        "maxDurationMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
+        "extended": { "type": "boolean" },
+        "limitReached": { "type": "boolean" },
+        "acceptedSegments": {
+          "type": "array", "maxItems": 4096,
+          "items": { "$ref": "#/$defs/passiveAcceptedSegment" }
+        },
+        "excludedSegments": {
+          "type": "array", "maxItems": 4096,
+          "items": { "$ref": "#/$defs/passiveExcludedSegment" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "passiveAcceptedSegment": {
+      "type": "object", "required": ["startMs", "endMs"],
+      "properties": {
+        "startMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+        "endMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 }
+      },
+      "additionalProperties": false
+    },
+    "passiveExcludedSegment": {
+      "type": "object", "required": ["startMs", "endMs", "reasons"],
+      "properties": {
+        "startMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+        "endMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "reasons": {
+          "type": "array", "minItems": 1, "maxItems": 16,
+          "items": { "type": "string", "maxLength": 80, "pattern": "^[a-zA-Z0-9_.:-]{1,80}$" }
+        }
+      },
+      "additionalProperties": false
+    },
     "trial": {
       "type": [
         "object",
@@ -3148,6 +3191,9 @@
             "boolean",
             "null"
           ]
+        },
+        "validTime": {
+          "$ref": "#/$defs/passiveValidTime"
         },
         "pointerSummary": {
           "$ref": "#/$defs/pointer"

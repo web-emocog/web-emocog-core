@@ -2,6 +2,7 @@ const path = require('path');
 const config = require('../config');
 const { referencedDatabaseStimulusIds, referencedStimulusIds } = require('../../shared/protocol-stimuli');
 const { resolveStandardStimulus } = require('../../shared/standard-stimuli');
+const { eligiblePassiveValidTimeTrial } = require('../../shared/protocol-quality');
 const { loadPinnedStimuli, hashFile, ensureStimulusVersion } = require('./versions');
 const { mayReadStimulus } = require('./access');
 const { ensurePlayableVersion } = require('./media-preview');
@@ -17,6 +18,10 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
   const visualIds = new Set((definition?.blocks || [])
     .filter(block => ['cognitive_task', 'stimuli', 'passive'].includes(block?.type))
     .flatMap(block => referencedDatabaseStimulusIds({ blocks: [block] })));
+  const validTimeIds = new Set((definition?.blocks || [])
+    .filter(block => [block?.blockConfig, block?.content].some(source => source?.validTime?.enabled === true))
+    .flatMap(block => referencedDatabaseStimulusIds({ blocks: [block] })));
+  const validTimeMedia = {};
   const unavailable = referencedStimulusIds(definition)
     .filter(id => !/^[1-9]\d*$/.test(id) && !resolveStandardStimulus(id))
     .map(id => ({ id, code: 'stimulus_not_saved_on_server', name: null }));
@@ -37,6 +42,14 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
       unavailable.push({ id, code: 'stimulus_record_missing', name: null });
       continue;
     }
+    // Use the loaded version, not a trial label or client-supplied manifest MIME.
+    if (validTimeIds.has(id) && (!eligiblePassiveValidTimeTrial({ stimulusId: id },
+      { ...row.pinned_version?.media_info, mime_type: row.mime_type })
+      || (definition.mediaManifest && definition.mediaManifest[String(id)]?.mimeType !== row.mime_type))) {
+      unavailable.push({ id, code: 'passive_valid_time_media_unsupported', name: row.name || null });
+      continue;
+    }
+    if (validTimeIds.has(id)) validTimeMedia[String(id)] = { ...row.pinned_version?.media_info, mime_type: row.mime_type };
     if (visualIds.has(id) && row.mime_type && !/^(image|video|audio)\//.test(row.mime_type)) {
       unavailable.push({ id, code: 'stimulus_media_type_unsupported', name: row.name || null });
       continue;
@@ -65,7 +78,8 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
     }
   }
 
-  return { ok: unavailable.length === 0, referencedIds: ids, unavailable };
+  return { ok: unavailable.length === 0, referencedIds: ids, unavailable,
+    ...(validTimeIds.size ? { validTimeMedia } : {}) };
 }
 
 function rejectUnavailableProtocolStimuli(res, report) {
@@ -76,7 +90,9 @@ function rejectUnavailableProtocolStimuli(res, report) {
     .join(', ');
   res.status(422).json({
     error: 'Protocol references unavailable stimulus files',
-    message: report.unavailable.some(item => item.code === 'stimulus_media_type_unsupported')
+    message: report.unavailable.some(item => item.code === 'passive_valid_time_media_unsupported')
+      ? `Валидное время доступно только для статических изображений. Аудио, видео и неподтверждённые форматы не поддерживаются: ${labels}. Отключите настройку или замените файл.`
+      : report.unavailable.some(item => item.code === 'stimulus_media_type_unsupported')
       ? `Предъявление поддерживает изображения, видео и аудио, но не выбранный тип файла: ${labels}. Замените стимул перед публикацией.`
       : report.unavailable.some(item => item.code === 'audio_spatial_aoi_unsupported')
       ? `Для аудио нельзя задать экранные зоны AOI: ${labels}. Уберите эти зоны; аудиофайл удалять не нужно.`

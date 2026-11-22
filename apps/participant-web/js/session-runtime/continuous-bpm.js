@@ -35,7 +35,7 @@ export function motionFeatures(features, motion) {
 }
 
 const MODULE_URL = new URL(
-    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261122-integrity1',
+    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261122-validtime1',
     import.meta.url
 );
 
@@ -101,6 +101,9 @@ export class ContinuousBpmCollector {
         this.lastFrameTimestamp = null;
         this.bpmStats = stats(); this.respStats = stats();
         this.respMethodVersion = null;
+        this.validTimeContext = null;
+        this.freshWindowRequired = false;
+        this.freshWindowStartMs = null;
         updateDiagnostics({
             moduleLoaded: false,
             reporterAvailable: false,
@@ -155,7 +158,45 @@ export class ContinuousBpmCollector {
         return false;
     }
 
+    setValidTimeContext(context) {
+        if (this.finalized) return;
+        const next = context == null ? null : {
+            allowed: context.allowed === true && Number.isFinite(context.segmentStartMs) && context.segmentStartMs >= 0,
+            segmentStartMs: Number.isFinite(context.segmentStartMs) ? context.segmentStartMs : null
+        };
+        const previous = this.validTimeContext;
+        const changed = (previous === null) !== (next === null)
+            || (previous && next && (previous.allowed !== next.allowed
+                || (next.allowed && previous.segmentStartMs !== next.segmentStartMs)));
+        this.validTimeContext = next;
+        if (changed) this._resetMeasurementSegment();
+    }
+
+    _resetMeasurementSegment() {
+        this.freshWindowRequired = true;
+        this.freshWindowStartMs = null;
+        this.lastFrameTimestamp = null;
+        this.lastSample = null;
+        this.publicationGate.reset();
+        this.motionRespiration?.reset();
+        // Clear only reporter hold state, not the accepted history or its statistics.
+        if (this.reporter) this.reporter._lastPublished = null;
+        try {
+            if (this.engine) {
+                const Engine = this.engine.constructor;
+                if (Engine === Object) throw new Error('physiology_engine_reset_unavailable');
+                this.engine = new Engine(this.engine.cfg);
+            }
+        } catch (error) {
+            this.engine = null;
+            this.ready = false;
+            this.onError(error);
+        }
+        updateDiagnostics({ bpmEstimate: null, signalQuality: null, confidence: null });
+    }
+
     process(video, landmarks, timestampMs = performance.now(), sharedPixels = null, captureWallTime = null) {
+        if (this.validTimeContext && (!this.validTimeContext.allowed || timestampMs < this.validTimeContext.segmentStartMs)) return null;
         if (this.finalized || !this.ready || !this.engine || !this.context || !Array.isArray(landmarks)) return null;
         if (!Number.isFinite(timestampMs) || (this.lastFrameTimestamp !== null && timestampMs <= this.lastFrameTimestamp)) return null;
         const wallTime = Number.isFinite(captureWallTime) ? captureWallTime : Date.now();
@@ -163,8 +204,13 @@ export class ContinuousBpmCollector {
         const height = sharedPixels?.height || video?.videoHeight || 0;
         if (!width || !height || landmarks.length < 468) return null;
         // Confirmation must describe consecutive capture, not two bursts around a stall.
-        if (this.lastFrameTimestamp !== null && timestampMs - this.lastFrameTimestamp > 250) this.publicationGate.reset();
+        if (this.lastFrameTimestamp !== null && timestampMs - this.lastFrameTimestamp > 250) {
+            if (this.freshWindowRequired) this._resetMeasurementSegment();
+            else this.publicationGate.reset();
+        }
+        if (!this.engine) return null;
         this.lastFrameTimestamp = timestampMs;
+        if (this.freshWindowRequired && this.freshWindowStartMs === null) this.freshWindowStartMs = timestampMs;
 
         try {
             let imageData = sharedPixels;
@@ -198,11 +244,20 @@ export class ContinuousBpmCollector {
                 return null;
             }
 
-            const features = this.motionRespiration
+            let features = this.motionRespiration
                 ? motionFeatures(output.features || {}, this.motionRespiration.estimate(timestampMs))
                 : (output.features || {});
             this.respMethodVersion = features.respMethodVersion || this.respMethodVersion;
-            const publication = this.publicationGate.evaluate(output);
+            const freshMs = this.freshWindowRequired ? timestampMs - this.freshWindowStartMs : Infinity;
+            const heartReady = !this.freshWindowRequired
+                || freshMs >= Math.max(10000, (this.engine.cfg?.windowSec ?? 10) * 1000);
+            const respirationReady = !this.freshWindowRequired
+                || freshMs >= Math.max(20000, (this.engine.cfg?.respiration?.windowSec ?? 20) * 1000,
+                    (this.motionRespiration?.cfg?.windowSec ?? 20) * 1000);
+            if (!heartReady && !respirationReady) return null;
+            if (!respirationReady) features = { ...features, respRate: null, respConf: 0, respPublished: false, respHeld: false };
+            const publication = heartReady ? this.publicationGate.evaluate(output)
+                : { accepted: false, bpm: null, reason: 'valid_time_warmup' };
             const measuredBpm = publication.accepted && publication.held !== true;
             const respiration = publishedRespiration(features);
             if (!publication.accepted) this.rejectedSampleCount += 1;
@@ -211,6 +266,7 @@ export class ContinuousBpmCollector {
                     ...output,
                     published: measuredBpm,
                     bpmPublished: measuredBpm ? publication.bpm : null,
+                    ...(!heartReady ? { bpmSmoothed: null } : {}),
                     features: { ...features, respRate: respiration },
                     publishReason: publication.reason
                 }, timestampMs);
@@ -252,7 +308,8 @@ export class ContinuousBpmCollector {
             });
             return sample;
         } catch (error) {
-            this.publicationGate.reset();
+            if (this.freshWindowRequired) this._resetMeasurementSegment();
+            else this.publicationGate.reset();
             this.consecutiveErrors += 1;
             updateDiagnostics({
                 lastError: error?.message || String(error),
@@ -266,6 +323,9 @@ export class ContinuousBpmCollector {
     // Плечи из модели позы (если модуль корпуса включён); используются только методом motion.
     recordShoulders(timestampMs, left, right) {
         if (this.finalized || !this.motionRespiration) return false;
+        if (this.validTimeContext && (!this.validTimeContext.allowed || !Number.isFinite(timestampMs)
+            || timestampMs < this.validTimeContext.segmentStartMs)) return false;
+        if (this.freshWindowRequired && (this.freshWindowStartMs === null || timestampMs < this.freshWindowStartMs)) return false;
         return this.motionRespiration.pushShoulders(timestampMs, left, right);
     }
 

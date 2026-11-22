@@ -15,16 +15,16 @@ export class CheckpointBuilder {
         this.maxPayloadBytes = maxPayloadBytes;
         this.pending = null;
     }
-    build(sessionData, metrics = null) {
+    build(sessionData, metrics = null, { activeMeasurement = false } = {}) {
         if (this.pending) {
             if (this.sessionId !== sessionData.ids?.session) return Promise.reject(new Error('checkpoint_builder_session_changed'));
             return this.pending;
         }
         this.sessionId = sessionData.ids?.session;
-        this.pending = this._build(sessionData, metrics).finally(() => { this.pending = null; });
+        this.pending = this._build(sessionData, metrics, activeMeasurement).finally(() => { this.pending = null; });
         return this.pending;
     }
-    async _build(sessionData, metrics) {
+    async _build(sessionData, metrics, activeMeasurement) {
         const source = Object.fromEntries(KEYS.filter(key => sessionData[key] !== undefined).map(key => [key, sessionData[key]]));
         const series = Object.fromEntries(CHECKPOINT_SERIES.filter(key => Array.isArray(source[key]))
             .map(key => [key, describeSeries(source[key])]));
@@ -33,13 +33,26 @@ export class CheckpointBuilder {
         source.user = { interfaceLanguage: sessionData.user?.interfaceLanguage || null };
         source.checkpointViewport = { width: globalThis.innerWidth || 1920, height: globalThis.innerHeight || 1080 };
         if (metrics) source.qcSummary = metrics;
+        // Durable local delta chunks retain the complete source. Periodic server
+        // backups during measurement contain bounded summaries, not a growing
+        // clone/reanalysis of every captured eye frame on the RT thread.
+        if (activeMeasurement) {
+            for (const key of ['eyeTracking', 'eyeSignals', 'emotionSamples', 'bodyPoseSamples']) source[key] = [];
+            for (const key of ['attentionMetrics', 'blinkSummary', 'perclosSummary']) delete source[key];
+            source.experimentMeta = { ...source.experimentMeta,
+                backupScope: 'light_summary_without_signal_series',
+                checkpointBuild: { schemaVersion: 'checkpoint_build.v1', signalSeriesIncomplete: true,
+                    reason: 'active_measurement_summary', omittedSeries: series,
+                    aggregatePolicy: 'preserved_without_recomputation' } };
+            source.activeMeasurementBackup = true;
+        }
         let failureReason = 'worker_unavailable';
         if (typeof Worker === 'function') {
             try {
                 const request = createCheckpointRequest(source);
                 if (!isCheckpointRequest(request)) throw new Error('checkpoint_worker_invalid_request');
                 const packet = await new Promise((resolve, reject) => {
-                    this.worker = new Worker(new URL('./aggregate-worker.mjs?v=20261122-integrity1', import.meta.url), { type: 'module' });
+                    this.worker = new Worker(new URL('./aggregate-worker.mjs?v=20261122-validtime1', import.meta.url), { type: 'module' });
                     const timer = setTimeout(() => reject(new Error('checkpoint_worker_timeout')), this.timeoutMs);
                     this.cancel = () => { clearTimeout(timer); reject(new Error('checkpoint_worker_cancelled')); };
                     this.worker.onmessage = event => {
@@ -62,9 +75,9 @@ export class CheckpointBuilder {
         }
         // Unsupported workers must not run full gaze/alignment calculations
         // on the active RT thread or fabricate empty-signal measurements.
-        const { buildAggregatesPayload } = await import('../unified-aggregates-new.js?v=20261122-integrity1');
+        const { buildAggregatesPayload } = await import('../unified-aggregates-new.js?v=20261122-validtime1');
         if (source.heatmapState) {
-            const { buildCheckpointHeatmaps } = await import('./gaze-history.mjs?v=20261102-1');
+            const { buildCheckpointHeatmaps } = await import('./gaze-history.mjs?v=20261122-validtime1');
             source.heatmaps = buildCheckpointHeatmaps(source);
         }
         const packet = buildAggregatesPayload({ ...source, eyeTracking: [], eyeSignals: [], emotionSamples: [], bodyPoseSamples: [] }, { forIngest: true });

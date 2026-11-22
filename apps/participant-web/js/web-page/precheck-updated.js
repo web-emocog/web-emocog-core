@@ -7,7 +7,7 @@ import { protocolCameraConstraints } from '../session-runtime/protocol-profile.m
 import { getFramePixels } from '../session-runtime/frame-pixels.mjs';
 import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { PrecheckWindow } from '../session-runtime/precheck-window.mjs';
-import '../../../shared/protocol-quality.js?v=20261114-assigned1';
+import '../../../shared/protocol-quality.js?v=20261122-validtime1';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
     captureHeadPoseReference,

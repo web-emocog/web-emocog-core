@@ -3,10 +3,11 @@ const { buildConnectedness } = require('./connectedness');
 const { IDS: PASSIVE_IDS, passiveMetric, intervalData, intervalExportRows } = require('./passive');
 const { definitions: passiveDefinitions, measurement, hasMixedMethods } = require('../../shared/passive-metrics');
 const { build: assessMetricQuality } = require('../../shared/metric-quality');
-const { presentationAttempts, attemptMetadata, trialSummary, taskTrials, matchesTrialFilters } = require('./attempts');
+const { presentationAttempts, attemptMetadata, trialSummary, trialAttemptDetails, taskTrials, matchesTrialFilters } = require('./attempts');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
 const { passive, noGo, responseRequired } = require('../../shared/task-response-semantics');
 const { taskObservationDuration, taskObservationIndex } = require('./task-observations');
+const { validTimeMetadata } = require('./valid-time');
 const { HttpError } = require('../security/http-error');
 
 const CATALOG_BY_ID = new Map((METRIC_CATALOG.metrics || []).map(metric => [metric.id, metric]));
@@ -375,11 +376,15 @@ function indexPresentationScopes(presentations) {
 
 function coordinateMappings(presentations) {
   return new Set(presentations.map(presentation => (
-    `${presentation.algorithm?.parameters?.coordinateMappingVersion || 'stage-rect.legacy'}:${presentation.algorithm?.version === '1.2.0' ? 'fixation-grid.v1' : 'legacy-grid'}`
+    `${presentation.algorithm?.parameters?.coordinateMappingVersion || 'stage-rect.legacy'}:${presentation.validTimePresent ? 'accepted-fixation-grid.v1' : presentation.algorithm?.version === '1.2.0' ? 'fixation-grid.v1' : 'legacy-grid'}`
   )));
 }
 
 function gazeAlgorithm(presentation, id = GAZE_ALGORITHM.id) {
+  if (presentation?.validTimePresent) {
+    const parameters = presentation.algorithm?.parameters || { validTime: 'passive_valid_time.v1' };
+    return { id: `${id}-accepted-time`, version: '1.0.0', parametersHash: sha256(parameters), parameters };
+  }
   const mapping = presentation?.algorithm?.parameters?.coordinateMappingVersion;
     if (presentation?.algorithm?.version === '1.2.0') {
       const parameters = { fixation: 'centroid-dispersion', dispersionNorm: 0.04, minDurationMs: 100,
@@ -404,6 +409,11 @@ function inconsistentFixationDuration(presentation, points = presentation.fixati
 function aoiMetric(metricId, row, aoiRow, presentations) {
   const reachMetric = ['aoi.target_reached', 'aoi.target_reached_pct'].includes(metricId);
   const totalPresentations = presentations.length;
+  const validTimeReason = presentations.find(item => item.validTimeReason)?.validTimeReason;
+  if (validTimeReason) return metricBase(metricId, row, {
+    blockId: aoiRow.blockId, stimulusId: aoiRow.stimulusId, aoiId: aoiRow.aoi.id,
+    status: 'no_data', reason: validTimeReason, observationDurationMs: null,
+  });
   const observationWasReported = presentations.some(item => !item.gazeMissing && finite(item.validObservationDurationMs) !== null);
   presentations = presentations.filter(item => (finite(item.validObservationDurationMs) ?? 0) > 0);
   const inconsistent = presentations.some(item => inconsistentFixationDuration(item));
@@ -450,7 +460,8 @@ function aoiMetric(metricId, row, aoiRow, presentations) {
     const inside = fixations.filter((_fixation, index) => insideFlags[index]);
     let visits = 0;
     insideFlags.forEach((isInside, index) => {
-      if (isInside && (index === 0 || !insideFlags[index - 1])) visits += 1;
+      if (isInside && (index === 0 || !insideFlags[index - 1]
+        || fixations[index].acceptedSegmentIndex !== fixations[index - 1].acceptedSegmentIndex)) visits += 1;
     });
     return {
       presentation,
@@ -614,10 +625,11 @@ function stimulusDescriptor(presentation) {
 function buildHeatmapData(row, query, selectedPresentations) {
   const presentations = selectedPresentations ?? selectPresentations(row, query);
   const presentation = presentations[0] || null;
-  if (!presentation || presentation.gazeMissing === true) {
+  const missing = presentations.find(item => item.validTimePresent && item.validTimeReason);
+  if (!presentation || presentation.gazeMissing === true || missing) {
     return {
       status: 'no_data',
-      reason: 'gaze_presentation_missing',
+      reason: missing?.validTimeReason || presentation?.validTimeReason || 'gaze_presentation_missing',
       aggregationLevel: 'session',
       stimulus: presentation ? stimulusDescriptor(presentation) : null,
       coordinateSpace: 'stimulus_normalized_0_1',
@@ -629,7 +641,7 @@ function buildHeatmapData(row, query, selectedPresentations) {
       nParticipants: row.participant_id ? 1 : 0,
       nSessions: 1,
       nFixations: 0,
-      validObservationDurationMs: 0,
+      validObservationDurationMs: presentation?.validTimePresent ? null : 0,
       algorithm: GAZE_ALGORITHM,
     };
   }
@@ -1072,7 +1084,7 @@ function taskAttemptExportRows(row, query, presentations, budget) {
     const required = result ? responseRequired(result) : null;
     const ambiguous = entry?.attemptStatus === 'ambiguous' || result?.presentationId != null
       && byIdentity.has(identity(result)) && byIdentity.get(identity(result)) === null;
-    const context = { ...attemptMetadata(entry),
+    const context = { ...attemptMetadata(entry), ...validTimeMetadata(result),
       presentationId: result?.presentationId ?? entry?.presentationId ?? null,
       attempt: result?.attempt ?? entry?.attempt ?? null,
       attemptStatus: ambiguous ? 'ambiguous'
@@ -1081,6 +1093,8 @@ function taskAttemptExportRows(row, query, presentations, budget) {
       qualityIssueCodes: ambiguous ? ['presentation_attempt_ambiguous'] : result?.qualityIssueCodes ?? entry?.qualityIssueCodes ?? [],
       includedInDefault: Boolean(result && result.qualityValid !== false && !ambiguous),
       sourceKind: 'task_attempt', sessionId: Number(row.id), participantId: row.participant_id ?? null,
+      trialLabel: { ru: `Проба ${result?.sourceTrialIndex != null ? result.sourceTrialIndex + 1 : result?.trialId ?? entry?.trialId ?? ''}`,
+        en: `Trial ${result?.sourceTrialIndex != null ? result.sourceTrialIndex + 1 : result?.trialId ?? entry?.trialId ?? ''}` },
       observationDurationMs: result ? taskObservationDuration(row, [result], observationIndex) : null,
       nParticipants: row.participant_id ? 1 : 0, nObservations: result ? 1 : 0, responseRequired: required,
       scope: { sessionId: Number(row.id), blockId: textId(result?.blockId ?? result?.block ?? entry?.blockId),
@@ -1118,6 +1132,7 @@ function buildExportBundle(hydrated, content = 'both') {
       connectedness: buildConnectedness(row, query),
       ...(query.mode === 'session' ? { physiologyIntervals: intervalData(row, query) } : {}),
       trialCounts: trials.counts,
+      trialAttempts: trialAttemptDetails(row, query),
       exclusions: trials.exclusions,
       presentations: buildSessionVisuals(row, protocol, query, { respectFilters: true, presentations }).map(({ heatmap, ...context }) => context),
       aoiRows: buildAoiRows(row, protocol, query, presentations.filter(entry => entry.includedInDefault))

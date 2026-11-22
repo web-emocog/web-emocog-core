@@ -634,7 +634,8 @@ function buildFeatureReport(sourceRows, settings = {}) {
           return matches.length === 1 ? id(matches[0].id) : null;
         });
         const transitions = new Map();
-        for (let i = 1; i < visits.length; i++) if (visits[i] && visits[i - 1] && visits[i] !== visits[i - 1]) {
+        for (let i = 1; i < visits.length; i++) if (visits[i] && visits[i - 1] && visits[i] !== visits[i - 1]
+          && orderedFixations[i].acceptedSegmentIndex === orderedFixations[i - 1].acceptedSegmentIndex) {
           const k = JSON.stringify([visits[i - 1], visits[i]]); transitions.set(k, (transitions.get(k) || 0) + 1);
         }
         emit('G3', s, 'gaze.transitionCount', 'Среднее число переходов между AOI за предъявление', sum([...transitions.values()]), 'count');

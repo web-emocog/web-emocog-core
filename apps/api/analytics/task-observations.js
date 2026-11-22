@@ -1,3 +1,4 @@
+const { validResult } = require('../security/passive-valid-time');
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 
 // A presentation's own monotonic endpoints survive reload without counting
@@ -16,12 +17,19 @@ function taskObservationIndex(row) {
 }
 
 function taskObservationDuration(row, trials, records = taskObservationIndex(row)) {
-  if (!trials.length || !records) return null;
+  if (!trials.length) return null;
   let duration = 0;
   const seen = new Set();
   for (const trial of trials) {
     const key = trial.presentationId == null ? null : String(trial.presentationId);
-    const entry = key === null ? null : records.get(key);
+    if (key !== null && seen.has(key)) return null;
+    if (Object.hasOwn(trial, 'validTime')) {
+      if (!validResult(trial.validTime)) return null;
+      duration += trial.validTime.actualMs;
+      if (key !== null) seen.add(key);
+      continue;
+    }
+    const entry = key === null ? null : records?.get(key);
     if (!entry || seen.has(key) || String(entry.blockId) !== String(trial.blockId ?? trial.block)
       || String(entry.trialId) !== String(trial.trialId) || entry.attempt !== trial.attempt
       || (entry.stimulusId != null || trial.stimulusId != null)

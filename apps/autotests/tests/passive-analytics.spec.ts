@@ -19,6 +19,33 @@ const measured = { id: 105, participant_id: 'synthetic', features_payload: {
   emotion_summary: { n: 50, valence_mean: 0, arousal_mean: .2 }
 } };
 
+for (const language of ['ru', 'en']) test(`accepted-time trial shows actual seconds and readable exclusion reasons in ${language}`, async ({ page }) => {
+  await page.goto(`${base}#/analytics/session-card`);
+  await expect(page.locator('#analyticsApplyFilters')).toBeVisible();
+  if (language === 'en') await page.locator('#langEn').click();
+  await page.evaluate(() => {
+    const api = (window as any).EmocogAnalyticsProduction, load = api.api.sessionSummary;
+    api.api.sessionSummary = async (...args: any[]) => {
+      const response = await load(...args);
+      response.data.trialAttempts = [{ validTimePresent: true, presentationId: 'synthetic-valid-time',
+        presentationIndex: 1, trialId: 'one', blockId: 'passive', attempt: 1, qualityValid: true, attemptStatus: 'accepted',
+        validTime: { schemaVersion: 'passive_valid_time.v1', targetMs: 180000, acceptedMs: 180000,
+          actualMs: 185000, maxDurationMs: 270000, extended: true, limitReached: false,
+          acceptedSegments: [{ startMs: 0, endMs: 60000 }, { startMs: 65000, endMs: 185000 }],
+          excludedSegments: [{ startMs: 60000, endMs: 65000, reasons: ['protocol_qc_fpsStable'] }] } }];
+      return response;
+    };
+  });
+  await page.locator('#analyticsApplyFilters').click();
+  const timing = page.locator('[data-valid-time-trials]');
+  await expect(timing).toBeVisible();
+  await expect(timing).toContainText(language === 'en' ? 'Actual duration: 185 s' : 'Фактическая длительность: 185 с');
+  await expect(timing).toContainText(language === 'en' ? 'Target time: 180 s' : 'Целевое время: 180 с');
+  await timing.locator('summary').click();
+  await expect(timing.locator('li')).toContainText(language === 'en' ? 'Analysis frame rate is below the protocol threshold' : 'Частота анализа ниже порога протокола');
+  await expect(timing).not.toContainText('protocol_qc_fpsStable');
+});
+
 for (const language of ['ru', 'en']) test(`session exposes real background metrics and preserves zero vs missing in ${language}`, async ({ page }) => {
   await page.goto(`${base}#/analytics/session-card`);
   await expect(page.locator('#analyticsApplyFilters')).toBeVisible();
