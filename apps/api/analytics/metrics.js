@@ -1,7 +1,7 @@
 const { METRIC_CATALOG } = require('./query');
 const { buildConnectedness } = require('./connectedness');
 const { IDS: PASSIVE_IDS, passiveMetric, intervalData, intervalExportRows } = require('./passive');
-const { definitions: passiveDefinitions, measurement } = require('../../shared/passive-metrics');
+const { definitions: passiveDefinitions, measurement, hasMixedMethods } = require('../../shared/passive-metrics');
 const { build: assessMetricQuality } = require('../../shared/metric-quality');
 const { presentationAttempts, attemptMetadata, trialSummary, taskTrials, matchesTrialFilters } = require('./attempts');
 const { normalizeStimulusId, sha256 } = require('./snapshots');
@@ -780,6 +780,14 @@ function groupAlgorithm(records) {
 }
 
 function buildGroupMetric(metricId, records, scope = null) {
+  if (metricId.startsWith('physiology.') && hasMixedMethods(records
+    .filter(record => numericMetricValue(record.metric) != null
+      || record.metric?.reason === 'physiology_methods_mixed' && record.metric.denominator > 0)
+    .map(record => record.metric?.algorithm?.version))) {
+    records = records.map(record => ({ ...record, metric: { ...record.metric,
+      value: null, status: 'no_data', reason: 'physiology_methods_mixed', nObservations: 0,
+      numerator: null, denominator: null, observationDurationMs: null } }));
+  }
   const participantRecords = new Map();
   records.forEach(record => {
     if (!participantRecords.has(record.participantId)) participantRecords.set(record.participantId, []);

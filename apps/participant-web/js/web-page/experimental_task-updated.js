@@ -8,7 +8,7 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { finishSession } from './tests-updated.js?v=20261114-assigned1';
+import { finishSession } from './tests-updated.js?v=20261122-integrity1';
 import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
@@ -26,7 +26,7 @@ import { fetchMediaWithDeadline, mediaAbortError } from '../session-runtime/medi
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261114-assigned1';
+} from '../session-runtime/index.js?v=20261122-integrity1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues

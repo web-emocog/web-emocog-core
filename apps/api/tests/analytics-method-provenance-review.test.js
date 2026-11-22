@@ -43,15 +43,15 @@ test('a homogeneous group preserves the recorded method and existing participant
 test('mixed group provenance is explicit and invariant under every session ordering', () => {
   const rows = [session(1, 'a', 12, PREVIOUS, 10), session(2, 'a', 18, CURRENT, 90), session(3, 'b', 24)];
   const saved = structuredClone(rows);
-  const homogeneous = rows.map(row => ({ ...row, features_payload: { respiration_summary: {
-    ...row.features_payload.respiration_summary, methodVersion: CURRENT,
-  } } }));
-  const expectedMeasurements = measurements(groupMetric(homogeneous));
+  const expectedMeasurements = measurements(groupMetric(rows));
   const permutations = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
   let expectedAlgorithm;
   for (const order of permutations) {
     const metric = groupMetric(order.map(index => rows[index]));
     assert.equal(metric.algorithm.version, 'mixed_versions');
+    assert.equal(metric.mean, null);
+    assert.equal(metric.nParticipants, 0);
+    assert.equal(metric.reason, 'physiology_methods_mixed');
     assert.match(metric.algorithm.parametersHash, /^sha256:[a-f0-9]{64}$/);
     expectedAlgorithm ??= metric.algorithm;
     assert.deepEqual(metric.algorithm, expectedAlgorithm);
@@ -72,14 +72,15 @@ test('missing historical methods stay legacy; legacy plus a known method is expl
   const forward = groupMetric([legacy, known]);
   assert.equal(forward.algorithm.version, 'mixed_versions');
   assert.deepEqual(forward.algorithm, groupMetric([known, legacy]).algorithm);
-  assert.equal(forward.mean, 18);
+  assert.equal(forward.mean, null);
+  assert.equal(forward.reason, 'physiology_methods_mixed');
 });
 
 test('different methods within one participant are not hidden by within-participant averaging', () => {
   const rows = [session(1, 'a', 12, PREVIOUS), session(2, 'a', 18)];
   const metric = groupMetric(rows);
-  assert.equal(metric.nParticipants, 1);
-  assert.equal(metric.mean, 15);
+  assert.equal(metric.nParticipants, 0);
+  assert.equal(metric.mean, null);
   assert.equal(metric.algorithm.version, 'mixed_versions');
   assert.deepEqual(metric.algorithm, groupMetric([...rows].reverse()).algorithm);
 });

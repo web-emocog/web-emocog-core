@@ -53,7 +53,7 @@ test('checkpoints and final packets retain full QC counters rather than the curr
   await page.waitForFunction(() => Boolean((window as any).__WECOG_STATE__?.runtime?.sessionRuntime));
   const result = await page.evaluate(async () => {
     const s = (window as any).__WECOG_STATE__, runtime = s.runtime.sessionRuntime;
-    const qcUrl = location.origin + '/apps/participant-web/js/qc-metrics/QCMetrics.js?v=20261118-1';
+    const qcUrl = location.origin + '/apps/participant-web/js/qc-metrics/QCMetrics.js?v=20261122-integrity1';
     const { QCMetrics } = await import(qcUrl);
     const qc = new QCMetrics(); qc.start({ analysisFpsThreshold: 25 }); qc.stop();
     const summary = qc.getSummary(); summary.totalFrames = 17; summary.counters.totalFrames = 17;

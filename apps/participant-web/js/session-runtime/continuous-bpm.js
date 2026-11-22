@@ -35,7 +35,7 @@ export function motionFeatures(features, motion) {
 }
 
 const MODULE_URL = new URL(
-    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261120-methods1',
+    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261122-integrity1',
     import.meta.url
 );
 

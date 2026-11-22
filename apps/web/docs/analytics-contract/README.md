@@ -58,6 +58,21 @@ measurement. More than 25,000 attempt rows return 413 `export_output_limit`
 instead of silently dropping attempts. Researcher-wide participant CSV remains
 the participant-by-metric table; long attempt rows belong to the detailed export.
 
+## Physiology method compatibility (2026-11-22)
+
+Group estimates, custom
+comparisons and extended model features abstain with
+`physiology_methods_mixed` when contributing records have different method
+versions or already carry a mixed-method marker. Known and legacy/unknown
+methods are not silently pooled. Single-method participant-equal weighting is
+unchanged. Separate session measurements and recorded interval rows retain
+their provenance; a method tag alone never establishes independent validation.
+
+Resumed signal summaries preserve counts but have null pooled mean/range when
+methods differ. A lost shoulder stream cannot be extrapolated to fill a new
+respiration window. These are data-integrity checks, not new scientific
+thresholds or evidence of physiological accuracy.
+
 ## Gaze spatial QC extension (2026-11-06)
 
 `qcResult.spatialAccuracy` is optional and versioned as `gaze_spatial_qc.v1`.

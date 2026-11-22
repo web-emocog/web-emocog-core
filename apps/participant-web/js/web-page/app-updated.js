@@ -16,7 +16,7 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261114-assigned1';
+} from './ui-updated.js?v=20261122-integrity1';
 
 import { startPreCheck } from './precheck-updated.js?v=20261114-assigned1';
 
@@ -25,7 +25,7 @@ import {
     finishSession,
     stopParticipantTestLoops,
     stopSessionMediaResources
-} from './tests-updated.js?v=20261114-assigned1';
+} from './tests-updated.js?v=20261122-integrity1';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,7 +34,7 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261114-assigned1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261122-integrity1';
 import {
     getContentViewport,
     contentToLayoutViewport

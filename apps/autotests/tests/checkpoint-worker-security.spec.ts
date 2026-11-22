@@ -38,7 +38,7 @@ test('importing the worker entry in a page never installs a window message handl
   const unchanged = await page.evaluate(async () => {
     const before = window.onmessage;
     // @ts-ignore Browser-native ESM loaded from the static test server.
-    await import('/apps/participant-web/js/session-runtime/aggregate-worker.mjs?v=20261112-emotion2');
+    await import('/apps/participant-web/js/session-runtime/aggregate-worker.mjs?v=20261122-integrity1');
     return window.onmessage === before;
   });
   expect(unchanged).toBe(true);

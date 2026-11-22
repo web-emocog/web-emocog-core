@@ -182,7 +182,7 @@
       )) : source.events };
     }
     const moduleUrl = new URL(
-      '../participant-web/js/unified-aggregates-new.js?v=20261112-emotion2',
+      '../participant-web/js/unified-aggregates-new.js?v=20261122-integrity1',
       global.location.href
     );
     const aggregates = await import(moduleUrl.href);
@@ -406,6 +406,7 @@
       block_physiology_missing: ['Нет измерений в засчитанных попытках выбранного блока', 'No measurements in accepted attempts of the selected block'],
       summary_not_independent_validation: ['Сводка не является независимой проверкой точности канала', 'A summary is not independent channel-accuracy validation'],
       respiration_lighting_confound_unchecked: ['Влияние яркости стимулов на оценку дыхания не исключено', 'Stimulus-brightness interference with respiration has not been excluded'],
+      physiology_methods_mixed: ['Использованы разные методы измерения. Выберите сессии и интервалы одного метода; общая оценка не рассчитывается.', 'Different measurement methods were used. Select sessions and intervals using one method; no pooled estimate is computed.'],
       gaze_fixations_truncated: ['Карта накоплена за весь показ. Список фиксаций сокращён до 500 или из-за общего лимита размера отчёта; показатели AOI для этого показа недоступны.', 'The map covers the entire presentation. The fixation list is limited to 500 or shortened by the overall report size limit; AOI metrics for this presentation are unavailable.'],
       gaze_presentations_truncated: ['Сохранена только часть показов: достигнут лимит отчёта в 200 показов. Общая статистика взгляда сохранена; не используйте эту выборку как полную историю стимулов.', 'Only some presentations were retained: the 200-presentation report limit was reached. Overall gaze statistics are retained; do not treat this as the complete stimulus history.'],
       stimulus_versions_mixed: ['В этих сессиях показаны разные версии файла. Выберите сессии одной версии или откройте их тепловые карты отдельно.', 'These sessions used different file versions. Select sessions with one version or open their heatmaps separately.'],
@@ -2778,6 +2779,7 @@
       repeated_measures: ['Повторные измерения', 'Repeated measures'],
       channel_compatibility: ['Совместимость QC-каналов', 'QC channel compatibility'],
       version_compatibility: ['Совместимость версий', 'Version compatibility'],
+      physiology_method_compatibility: ['Совместимость методов физиологии', 'Physiology method compatibility'],
       technical_confounding: ['Техническое смешение', 'Technical confounding']
     };
     const pair = labels[id];

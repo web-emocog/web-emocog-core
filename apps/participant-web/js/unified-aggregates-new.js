@@ -1,7 +1,7 @@
 import { getEmotionSummary } from './emotion-stub-new.js?v=20261112-emotion2';
 import '../../shared/rt-alignment.js?v=20261025-1';
-import '../../shared/metric-quality.js?v=20261110-integration1';
-import '../../shared/task-response-semantics.js?v=20261118-1';
+import '../../shared/metric-quality.js?v=20261122-integrity1';
+import '../../shared/task-response-semantics.js?v=20261122-integrity1';
 import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs';
 
 /**

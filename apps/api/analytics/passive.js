@@ -1,4 +1,4 @@
-const { definitions, measurement } = require('../../shared/passive-metrics');
+const { definitions, measurement, hasMixedMethods } = require('../../shared/passive-metrics');
 const IDS = new Set(definitions.map(item => item.id));
 const CHANNELS = { 'physiology.bpm_mean': 'heartRate', 'physiology.respiration_mean': 'respiration' };
 const MIN_REPORT_COVERAGE_MS = 1000;
@@ -50,9 +50,10 @@ function blockMeasurement(row, query, channel) {
     sum += signal.mean * signal.count;
     if (signal.count > 0) methods.add(signal.methodVersion || 'legacy_summary');
   }
-  const value = n ? sum / n : null;
+  const mixed = hasMixedMethods(methods);
+  const value = n && !mixed ? sum / n : null;
   return { value, n, observedMs, status: value === null ? 'no_data' : 'computed',
-    reason: value !== null ? null : rows ? 'block_physiology_missing' : 'session_summary_not_interval',
+    reason: mixed ? 'physiology_methods_mixed' : value !== null ? null : rows ? 'block_physiology_missing' : 'session_summary_not_interval',
     scope: 'accepted_blocks', methodVersion: methods.size > 1 ? 'mixed_methods' : [...methods][0] || 'legacy_summary' };
 }
 

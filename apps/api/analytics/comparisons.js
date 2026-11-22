@@ -2,6 +2,7 @@ const { quantile } = require('./metrics');
 const { passiveMetric } = require('./passive');
 const { COMPARISON_METRICS } = require('./query');
 const { passive } = require('../../shared/task-response-semantics');
+const { hasMixedMethods } = require('../../shared/passive-metrics');
 const average = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const participantId = row => Object.hasOwn(row, 'participant_key') ? row.participant_key : (row.participant_id || null);
 
@@ -40,9 +41,13 @@ function exploratoryRtInterval(effect, spec, a, b, differences) {
 function participantPhysiology(rows, metricId, blockId) {
   const values = rows.map(row => passiveMetric(metricId, row, { filters: {
     blockIds: blockId == null ? [] : [blockId], stimulusIds: [], conditionIds: [], aoiIds: [],
-  } })).filter(metric => metric.status === 'computed' && Number.isFinite(metric.value));
-  return { value: average(values.map(metric => metric.value)),
-    n: values.reduce((sum, metric) => sum + metric.nObservations, 0) };
+  } }));
+  const contributing = values.filter(metric => metric.status === 'computed' && Number.isFinite(metric.value));
+  const methods = values.filter(metric => contributing.includes(metric)
+    || metric.reason === 'physiology_methods_mixed' && metric.denominator > 0)
+    .map(metric => metric.algorithm?.version || 'legacy_summary');
+  return { value: hasMixedMethods(methods) ? null : average(contributing.map(metric => metric.value)), methods,
+    n: contributing.reduce((sum, metric) => sum + metric.nObservations, 0) };
 }
 
 function participantValue(trials, metricId) {
@@ -70,6 +75,7 @@ function buildDescriptiveComparison(rows, query) {
     if (Array.isArray(trials)) for (const trial of trials) if (trial && typeof trial === 'object') participants.get(key).push(trial);
   });
   const a = [], b = [], pairs = [], excluded = [];
+  const methods = [];
   let observationsA = 0, observationsB = 0;
   const membersA = new Set(spec.referenceParticipantIds || []);
   const membersB = new Set(spec.comparisonParticipantIds || []);
@@ -82,6 +88,7 @@ function buildDescriptiveComparison(rows, query) {
         : participantValue(trials.filter(trial => String(level(trial)) === spec.referenceId), spec.metricId);
       const right = physiology ? participantPhysiology(participantRows.get(id), spec.metricId, spec.comparisonId)
         : participantValue(trials.filter(trial => String(level(trial)) === spec.comparisonId), spec.metricId);
+      if (physiology) methods.push(...left.methods, ...right.methods);
       if (left.value == null || right.value == null) {
         excluded.push({ participantId: id, reason: left.value == null ? 'reference_data_missing' : 'comparison_data_missing' });
         return;
@@ -92,12 +99,18 @@ function buildDescriptiveComparison(rows, query) {
       observationsB += right.n;
     } else {
       const value = physiology ? participantPhysiology(participantRows.get(id) || [], spec.metricId, null) : participantValue(trials, spec.metricId);
+      if (physiology) methods.push(...value.methods);
       if (value.value == null) { excluded.push({ participantId: id, reason: 'participant_data_missing' }); return; }
       (membersA.has(id) ? a : b).push(value.value);
       if (membersA.has(id)) observationsA += value.n;
       else observationsB += value.n;
     }
   });
+  const mixed = physiology && hasMixedMethods(methods);
+  if (mixed) {
+    a.length = 0; b.length = 0; pairs.length = 0;
+    observationsA = 0; observationsB = 0;
+  }
   const available = a.length > 0 && b.length > 0;
   const unidentifiedSessionCount = rows.filter(row => !participantId(row)).length;
   const reference = { nParticipants: a.length, nObservations: observationsA, ...describe(a), values: a };
@@ -114,7 +127,7 @@ function buildDescriptiveComparison(rows, query) {
     referenceLevel: spec.design === 'paired' ? spec.referenceId : 'A',
     comparisonLevel: spec.design === 'paired' ? spec.comparisonId : 'B',
     readiness: available ? 'available' : 'insufficient_data',
-    reason: available ? 'descriptive_only' : (spec.design === 'paired' ? 'complete_pairs_missing' : 'group_data_missing'),
+    reason: mixed ? 'physiology_methods_mixed' : available ? 'descriptive_only' : (spec.design === 'paired' ? 'complete_pairs_missing' : 'group_data_missing'),
     formula: (spec.design === 'paired' ? 'mean(participant_B - participant_A)' : 'mean(participant_B) - mean(participant_A)')
       + (physiology ? '; participant_value = mean(session_estimates); accepted_block_attempts_only_for_paired_design' : ''),
     effect, reference, comparison, pairedDifferences,
@@ -124,8 +137,10 @@ function buildDescriptiveComparison(rows, query) {
     nParticipants: spec.design === 'paired' ? a.length : a.length + b.length,
     nObservations: observationsA + observationsB,
     warnings: ['descriptive_only', 'no_hypothesis_test', warning, ...(excluded.length ? ['participants_with_missing_data_excluded'] : []),
+      ...(mixed ? ['physiology_methods_mixed'] : []),
       ...(unidentifiedSessionCount ? ['sessions_without_participant_id_excluded'] : [])],
     readinessChecks: [{ id: 'participant_level_aggregation', status: 'pass', reason: null },
+      ...(physiology ? [{ id: 'physiology_method_compatibility', status: mixed ? 'blocked' : 'pass', reason: mixed ? 'physiology_methods_mixed' : null }] : []),
       { id: spec.design === 'paired' ? 'complete_pairs' : 'disjoint_groups', status: available ? 'pass' : 'blocked', reason: available ? null : 'insufficient_participants' }],
   };
 }
