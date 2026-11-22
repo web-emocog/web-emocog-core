@@ -1,6 +1,7 @@
 import * as registryModule from './rt-registry.js';
 import * as stimulusModule from './standard-stimuli.js';
 import './keyboard-responses.js?v=20261025-1';
+import { physiologyMethodsSource, validatePhysiologyMethods, RESPIRATION_METHODS, HEART_RATE_METHODS } from './physiology-methods.mjs';
 
 export const PREFLIGHT_VERSION = 'protocol_preflight.v1';
 // Transport/runtime bounds, not scientific acceptance thresholds.
@@ -39,6 +40,11 @@ export function inspectProtocolPreflight(definition, { mediaReport = null } = {}
   if (profile != null && !['protocol_signals.v1', 'protocol_signals.v2'].includes(profile)) {
     fail('signal_profile_unsupported', '/settings/signalProfileId', 'Неизвестный профиль измерений.', 'Unsupported signal profile.');
   }
+  const physiologyMethods = physiologyMethodsSource(definition);
+  if (validatePhysiologyMethods(physiologyMethods).length)
+    fail('physiology_method_unsupported', '/settings/physiologyMethods', 'Неизвестный метод оценки ЧСС или дыхания.', 'Unsupported heart-rate or respiration method.');
+  else if (HEART_RATE_METHODS[physiologyMethods?.heartRate]?.experimental || RESPIRATION_METHODS[physiologyMethods?.respiration]?.experimental)
+    warn('physiology_method_experimental', '/settings/physiologyMethods', 'Выбран экспериментальный метод ЧСС или дыхания: он не валидирован против ЭКГ и дыхательного пояса.', 'An experimental heart-rate or respiration method is selected; it is not validated against ECG or a respiration belt.');
   if (definition.testHubMetrics != null && (!Array.isArray(definition.testHubMetrics)
     || definition.testHubMetrics.some(id => !['rt', 'tracking', 'vpc', 'visuospatial'].includes(id))))
     fail('hub_test_unsupported', '/testHubMetrics', 'Выбран неподдерживаемый тест.', 'An unsupported hub test is selected.');
