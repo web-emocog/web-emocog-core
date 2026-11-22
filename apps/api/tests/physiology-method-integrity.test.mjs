@@ -9,6 +9,7 @@ const { measurement } = require('../../shared/passive-metrics');
 const { buildGroupSummary, buildSessionMetrics } = require('../analytics/metrics');
 const { buildDescriptiveComparison } = require('../analytics/comparisons');
 const { buildFeatureReport } = require('../analytics/extended-features');
+const { intervalData, intervalExportRows } = require('../analytics/passive');
 const LUMA = 'respiration_luma.log_peak.v2', MOTION = 'respiration_motion.consensus.v1';
 const query = { metricIds: ['physiology.respiration_mean'], filters: { qcChannels: [] } };
 const row = (id, method, value) => ({ id, session_id: `s${id}`, participant_id: `p${id}`, features_payload: {
@@ -80,6 +81,12 @@ test('a block selection cannot hide mixed method provenance in an accepted inter
   ] };
   const [metric] = buildSessionMetrics(source, { ...query, filters: { blockIds: ['b'] } });
   assert.equal(metric.value, null); assert.equal(metric.reason, 'physiology_methods_mixed');
+  const intervals = intervalData(source, { filters: {} });
+  assert.equal(intervals.blocks[0].respiration.mean, null);
+  assert.equal(intervals.blocks[0].respiration.methodVersion, 'mixed_methods');
+  const [exported] = intervalExportRows(intervals, query.metricIds, {});
+  assert.equal(exported.value, null); assert.equal(exported.reason, 'physiology_methods_mixed');
+  assert.equal(source.features_payload.physiology_intervals.blocks[0].respiration.mean, 17);
 });
 
 test('custom physiology comparisons abstain across methods and still work within one method', () => {

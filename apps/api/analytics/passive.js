@@ -6,7 +6,8 @@ const incompatibleFilters = filters => ['stimulusIds', 'conditionIds', 'aoiIds']
 
 function reportInterval(row) {
   const visible = (channel, key) => validSignal(channel, key, row.endMs - row.startMs)
-    ? channel.observedMs >= MIN_REPORT_COVERAGE_MS ? channel : { ...channel, mean: null }
+    ? channel.observedMs >= MIN_REPORT_COVERAGE_MS && !hasMixedMethods([channel.methodVersion])
+      ? channel : { ...channel, mean: null }
     : { mean: null, count: 0, observedMs: 0 };
   return { ...row, heartRate: visible(row.heartRate, 'heartRate'), respiration: visible(row.respiration, 'respiration') };
 }
@@ -67,9 +68,10 @@ function intervalExportRows(data, metricIds, context) {
       for (const interval of intervals) {
         const { mean, count, observedMs, methodVersion } = interval[CHANNELS[metricId]];
         const duration = interval.endMs - interval.startMs;
-        const hasData = count > 0 && Number.isFinite(mean);
+        const mixed = hasMixedMethods([methodVersion]);
+        const hasData = count > 0 && Number.isFinite(mean) && !mixed;
         rows.push({ ...context, metricId, value: hasData ? mean : null, unit: definition.unit,
-          status: hasData ? 'computed' : 'no_data', reason: hasData ? null : 'interval_signal_missing',
+          status: hasData ? 'computed' : 'no_data', reason: mixed ? 'physiology_methods_mixed' : hasData ? null : 'interval_signal_missing',
           denominator: count, nObservations: count, observationDurationMs: observedMs,
           sourceKind: 'physiology_' + kind, intervalStartMs: interval.startMs, intervalEndMs: interval.endMs,
           coveragePct: duration > 0 ? observedMs / duration * 100 : 0,

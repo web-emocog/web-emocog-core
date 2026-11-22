@@ -455,7 +455,7 @@ function buildFeatureReport(sourceRows, settings = {}) {
             ['heartRate', 'physiology.bpm', 'ЧСС', 'bpm', 45, 180], ['respiration', 'physiology.respiration', 'Частота дыхания', 'breaths/min', 6, 24],
           ]) {
             const c = entry[channel];
-            if (blocked(c) || !Number.isSafeInteger(c?.count) || c.count <= 0 || c.count > 10000000
+            if (blocked(c) || hasMixedMethods([c?.methodVersion]) || !Number.isSafeInteger(c?.count) || c.count <= 0 || c.count > 10000000
               || number(c.mean) === null || c.mean < min || c.mean > max || number(c.observedMs) === null || !(c.observedMs >= 1000)
               || c.observedMs > entry.endMs - entry.startMs) continue;
             const blockId = kind === 'block' ? id(entry.blockId) : null;
