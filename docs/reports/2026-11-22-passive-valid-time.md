@@ -62,6 +62,15 @@ Additive optional field в закрытой session schema и TypeScript; нов
 private-media и checksum-проверки сохранены. Неизвестное качество остаётся
 неизвестным, а не успешным нулём. Пределы request/transport не увеличены.
 
+Дополнительная сквозная проверка с настоящими HTTP/БД выявила два пропуска
+закрытой схемы: `experimentMeta.backupScope` активной копии и
+`cognitiveResults[].invalidationReason` после reload. Схема/типы разрешают
+только существующие литералы `light_summary_without_signal_series` и
+`page_reloaded`, не произвольные строки или новые поля. Проверка проходит
+путь от частичной серверной копии через reload к новой попытке и финальному
+ingest; физическая камера в этом тесте запрещена, качество задаёт тестовый
+источник. Это проверка сохранности/жизненного цикла, не измерение FPS.
+
 Обновлены browser query versions до `20261122-validtime1`, включая родителей
 и HTML. В manifest добавлены только два общих runtime helper, всего 296 файлов.
 Тесты с warm HTTP cache проверяют реальное обновление, без routing cache bypass.

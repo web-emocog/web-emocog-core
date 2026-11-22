@@ -33,6 +33,104 @@ test.describe('Durable participant backup through real API', () => {
     });
   });
 
+  test('#177 active passive timing survives durable reload and a new attempt completes through the real API', async ({ page }) => {
+    const definition = { version: 'v2.0_universal', blocks: [
+      { id: 'passive', type: 'passive', content: { useFixation: false, slideDuration: 5000,
+        validTime: { schemaVersion: 'passive_valid_time.v1', enabled: true, maxExtensionRatio: .5, minSegmentMs: 1000 },
+        trials: [{ stimulusId: 'std_simple_black_square', duration: 5000 }] } },
+      { id: 'finish', type: 'finish' }
+    ] };
+    const protocol = (await pool.query('INSERT INTO protocols(project_id,name,definition) VALUES($1,$2,$3::jsonb) RETURNING id',
+      [projectId, 'Synthetic passive valid-time reload', JSON.stringify(definition)])).rows[0];
+    const code = 'valid-time-' + randomUUID();
+    await pool.query('INSERT INTO invitations(protocol_id,code,protocol_definition,max_runs) VALUES($1,$2,$3::jsonb,1)',
+      [protocol.id, code, JSON.stringify(definition)]);
+    await page.addInitScript(api => { (window as any).WECOG_API_BASE = api; }, api);
+    await page.goto(`/apps/participant-web/mvp_with_precheck_1-updated.html?code=${code}`);
+    await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
+    await page.locator('#btnStartIntro').click();
+    await page.locator('#consentCheck').check();
+    await page.locator('#consentBtn').click();
+    await expect(page.locator('#step3')).toHaveClass(/active/);
+    await page.locator('#participantLanguageSelect').selectOption('en');
+    const start = async (resume = false) => {
+      await page.evaluate(async resume => {
+        const shared = (window as any).__WECOG_STATE__;
+        shared.runtime.sessionRuntime.policyShown = true;
+        const moduleUrl = performance.getEntriesByType('resource').map(entry => entry.name)
+          .find(name => name.includes('/js/web-page/experimental_task-updated.js'))!;
+        const promise = (await import(moduleUrl)).loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition });
+        if (!resume) await promise;
+      }, resume);
+      if (resume) {
+        await expect(page.getByRole('dialog')).toContainText('repeat');
+        await page.getByRole('dialog').getByRole('button').click();
+      }
+      await expect(page.locator('[data-block-media-status]')).toHaveAttribute('data-block-media-status', 'ready');
+      await page.locator('#cogStartBtn').click();
+      await page.waitForFunction(() => !!(window as any).__WECOG_STATE__.runtime.validTimeTrial);
+      await page.evaluate(() => {
+        // Flow/data oracle only. Physical capture is forbidden by this fixture.
+        (window as any).__validTimeLiveOracle = setInterval(() => {
+          (window as any).__WECOG_STATE__.runtime.validTimeTrial?.observe(performance.now(), []);
+        }, 50);
+      });
+    };
+    await start();
+    await expect.poll(() => page.evaluate(() => {
+      const tracker = (window as any).__WECOG_STATE__.runtime.validTimeTrial;
+      return tracker?.acceptedMs(performance.now()) || 0;
+    })).toBeGreaterThanOrEqual(1000);
+    const interim = await page.evaluate(async () => {
+      const shared = (window as any).__WECOG_STATE__;
+      const prepared = await shared.runtime.sessionRuntime.delivery.build();
+      const backup = await shared.runtime.sessionRuntime.delivery.checkpoint();
+      return { backup, prepared, sessionId: shared.sessionData.ids.session };
+    });
+    const validation = requireApi('./security/payload-policy').validateSessionFeaturePayload(interim.prepared);
+    expect(interim.backup.ok, JSON.stringify({ code: interim.backup.code, status: interim.backup.status, validation })).toBe(true);
+    const stored = async () => (await pool.query(`SELECT s.stopped_at,sf.payload,i.used_runs FROM sessions s
+      JOIN session_features sf ON sf.session_id=s.id JOIN invitations i ON i.id=s.invitation_id WHERE s.session_id=$1`,
+    [interim.sessionId])).rows[0];
+    const partial = (await stored()).payload.cognitiveResults[0];
+    expect(partial.qualityValid).toBe(false);
+    expect(partial.validTime.acceptedMs).toBeGreaterThanOrEqual(1000);
+    expect(partial.validTime.acceptedMs).toBeLessThan(5000);
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__WECOG_STATE__?.runtime?.participantShellReady);
+    const restored = await page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.cognitiveResults[0]);
+    expect(restored).toMatchObject({ qualityValid: false, invalidationReason: 'page_reloaded' });
+    expect(restored.validTime.acceptedMs).toBeGreaterThanOrEqual(partial.validTime.acceptedMs);
+    expect(restored.validTime.acceptedMs).toBeLessThan(5000);
+    await page.getByRole('dialog').getByRole('button').click();
+    await page.waitForFunction(() => !(window as any).__WECOG_STATE__.runtime.sessionRuntime.reloadRecovery);
+    await start(true);
+    const restarted = await page.evaluate(() => {
+      const shared = (window as any).__WECOG_STATE__;
+      return { acceptedMs: shared.runtime.validTimeTrial.acceptedMs(performance.now()),
+        attempt: shared.sessionData.cognitiveResults.at(-1).attempt };
+    });
+    expect(restarted.attempt).toBe(2);
+    expect(restarted.acceptedMs).toBeLessThan(1000);
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+    const saved = page.waitForResponse(response => response.url() === `${api}/ingest`
+      && response.request().method() === 'POST' && response.request().postDataJSON().delivery?.kind === 'final');
+    await page.getByRole('dialog').getByRole('button', { name: 'Continue', exact: true }).click();
+    const savedResponse = await saved;
+    const savedBody = await savedResponse.json();
+    const finalValidation = requireApi('./security/payload-policy').validateSessionFeaturePayload(savedResponse.request().postDataJSON());
+    expect(savedResponse.status(), JSON.stringify({ code: savedBody.error?.code || savedBody.code, validation: finalValidation })).toBe(200);
+    await expect.poll(async () => Boolean((await stored()).stopped_at)).toBe(true);
+    const final = await stored();
+    expect(final.used_runs).toBe(1);
+    expect(final.payload.cognitiveResults).toHaveLength(2);
+    expect(final.payload.cognitiveResults[0].qualityValid).toBe(false);
+    expect(final.payload.cognitiveResults[1]).toMatchObject({ qualityValid: true, attempt: 2,
+      validTime: { targetMs: 5000, maxDurationMs: 7500, limitReached: false } });
+    expect(final.payload.cognitiveResults[1].validTime.acceptedMs).toBeGreaterThanOrEqual(5000);
+    expect(final.payload.cognitiveResults[1].presentationId).not.toBe(final.payload.cognitiveResults[0].presentationId);
+  });
+
   for (const repeated of [false, true]) {
     test(`RT and survey completion${repeated ? ' after a quality repeat' : ''} persist actual runtime events, answers and presentation plan`, async ({ page }) => {
       const definition = { version: 'v2.0_universal', blocks: [

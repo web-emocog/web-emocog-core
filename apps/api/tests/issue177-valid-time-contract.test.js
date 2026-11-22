@@ -47,6 +47,14 @@ test('issue177: a checkpoint can preserve the zero-duration failed partial resul
   assert.doesNotThrow(() => assertPublishedPassiveValidTime(input, published()));
 });
 
+test('issue177: a reloaded attempt retains its explicit invalidation reason in the closed contract', () => {
+  const input = packet();
+  Object.assign(input.cognitiveResults[0], { qualityValid: false, invalidationReason: 'page_reloaded' });
+  assert.deepEqual(validateSessionFeaturePayload(input), []);
+  input.cognitiveResults[0].invalidationReason = 'unrecognized_reason';
+  assert.ok(validateSessionFeaturePayload(input).some(error => error.path.endsWith('/invalidationReason')));
+});
+
 test('issue177: timer jitter remains actual elapsed time beyond the acceptance deadline', () => {
   const value = { ...timing(), acceptedMs: 1000, actualMs: 3027, limitReached: true,
     acceptedSegments: [{ startMs: 0, endMs: 1000 }], excludedSegments: [

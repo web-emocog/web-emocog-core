@@ -3192,6 +3192,11 @@
             "null"
           ]
         },
+        "invalidationReason": {
+          "type": "string",
+          "const": "page_reloaded",
+          "maxLength": 32
+        },
         "validTime": {
           "$ref": "#/$defs/passiveValidTime"
         },
@@ -10851,6 +10856,11 @@
         },
         "checkpointBuild": {
           "$ref": "#/$defs/recovery"
+        },
+        "backupScope": {
+          "const": "light_summary_without_signal_series",
+          "type": "string",
+          "maxLength": 64
         },
         "photodiode": {
           "type": [

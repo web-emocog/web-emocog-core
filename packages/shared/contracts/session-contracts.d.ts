@@ -206,6 +206,7 @@ export interface CognitiveResultV1 {
   qualityIssueCodes?: Array<string | null>;
   qualityIssues?: Array<Record<string, unknown> | null>;
   validTime?: PassiveValidTimeV1;
+  invalidationReason?: 'page_reloaded';
 }
 
 export interface SessionFeatureV1 {
@@ -238,7 +239,7 @@ export interface SessionFeatureV1 {
   bpm_summary?: Record<string, unknown> | null;
   rppg_summary?: Record<string, unknown> | null;
   respiration_summary?: Record<string, unknown> | null;
-  experimentMeta?: Record<string, unknown> | null;
+  experimentMeta?: (Record<string, unknown> & { backupScope?: 'light_summary_without_signal_series' }) | null;
   blocks?: Array<Record<string, unknown>>;
   cognitiveResults?: Array<CognitiveResultV1 | null>;
   gazeValidation?: GazeValidationSummary | null;

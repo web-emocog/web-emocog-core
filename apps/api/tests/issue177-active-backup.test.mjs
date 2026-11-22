@@ -4,6 +4,7 @@ import { CheckpointBuilder } from '../../participant-web/js/session-runtime/chec
 import { createHeatmapAccumulator } from '../../participant-web/js/web-page/heatmap.js';
 import { PassiveValidTime } from '../../participant-web/js/session-runtime/passive-valid-time.mjs';
 import validTimeAnalytics from '../analytics/valid-time.js';
+import schema from '../security/session-data-schema.js';
 
 test('active backup does not clone 30/180/300 seconds of eye frames, while normal/final preparation preserves them', async () => {
     const original = globalThis.Worker;
@@ -35,6 +36,8 @@ test('active backup does not clone 30/180/300 seconds of eye frames, while norma
             assert.equal(source.experimentMeta.checkpointBuild.omittedSeries.eyeSignals.count, seconds * 30);
             assert.equal(source.experimentMeta.checkpointBuild.reason, 'active_measurement_summary');
             assert.equal(source.experimentMeta.checkpointBuild.signalSeriesIncomplete, true);
+            assert.deepEqual(schema.validateSessionDataSchema({ experimentMeta: source.experimentMeta }), []);
+            assert.ok(schema.validateSessionDataSchema({ experimentMeta: { ...source.experimentMeta, backupScope: 'arbitrary' } }).length > 0);
             assert.equal(data.eyeSignals.length, seconds * 30);
             assert.equal(data.eyeTracking, rows);
             assert.equal(data.experimentMeta, undefined);
