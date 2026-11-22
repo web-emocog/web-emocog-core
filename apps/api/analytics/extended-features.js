@@ -1,7 +1,7 @@
 'use strict';
 
 const { presentationAttempts } = require('./attempts');
-const { measurement } = require('../../shared/passive-metrics');
+const { measurement, hasMixedMethods } = require('../../shared/passive-metrics');
 const { inconsistentFixationDuration } = require('./metrics');
 
 const LIMITS = Object.freeze({ sessions: 100, trials: 2000, totalTrials: 40000,
@@ -77,12 +77,13 @@ const blocked = v => v?.qualityValid === false || v?.valid === false || v?.accep
   || v?.held === true || v?.published === false || v?.skippedMedia === true
   || v?.invalidationReason === 'page_reloaded'
   || ['rejected', 'excluded', 'interrupted', 'repeat_required', 'in_progress', 'held', 'invalid', 'ambiguous', 'incomplete'].includes(v?.status);
-const rtValues = trials => trials.filter(t => !blocked(t) && t.correct === true)
+const { passive } = require('../../shared/task-response-semantics');
+const rtValues = trials => trials.filter(t => !blocked(t) && !passive(t) && t.correct === true)
   .map(t => nonnegative(t.rt)).filter(v => v !== null);
 const taskValues = trials => {
   const rt = rtValues(trials), avg = mean(rt);
   const sd = rt.length > 1 ? Math.sqrt(sum(rt.map(v => ((v - avg) / Math.sqrt(rt.length - 1)) ** 2))) : null;
-  const scored = trials.filter(t => !blocked(t) && typeof t.correct === 'boolean');
+  const scored = trials.filter(t => !blocked(t) && !passive(t) && typeof t.correct === 'boolean');
   return { 'rt.mean': avg, 'rt.median': quantile(rt, .5), 'rt.sd': number(sd),
     'rt.cv': avg > 0 && sd !== null ? number(sd / avg) : null,
     'rt.q10': quantile(rt, .1), 'rt.q25': quantile(rt, .25), 'rt.q75': quantile(rt, .75),
@@ -154,6 +155,34 @@ function buildFeatureReport(sourceRows, settings = {}) {
   const fineScope = ['conditionIds', 'stimulusIds', 'aoiIds'].some(k => Array.isArray(filters[k]) && filters[k].length);
   const blockScope = Array.isArray(filters.blockIds) && filters.blockIds.length > 0;
   const wholeScope = !fineScope && !blockScope;
+  const methodSets = new Map([['physiology.bpm', new Set()], ['physiology.respiration', new Set()]]);
+  const methodSessions = new Set();
+  for (const input of (Array.isArray(sourceRows) ? sourceRows : []).slice(0, LIMITS.sessions)) {
+    const sessionId = id(input?.session_id) ?? id(input?.id);
+    const participantId = Object.hasOwn(input || {}, 'participant_key') ? id(input.participant_key) : id(input?.participant_id);
+    if (sessionId === null || methodSessions.has(sessionId) || !selected(filters.sessionIds, input.id ?? sessionId)
+      || !selected(filters.participantIds, participantId)) continue;
+    methodSessions.add(sessionId);
+    const payload = object(input.features_payload);
+    for (const [metricId, channel, summaryId, sourceId] of [
+      ['physiology.bpm', 'heartRate', 'bpm_summary', 'physiology.bpm_mean'],
+      ['physiology.respiration', 'respiration', 'respiration_summary', 'physiology.respiration_mean'],
+    ]) {
+      const methods = methodSets.get(metricId);
+      const summary = measurement(payload, sourceId);
+      if (wholeScope && (summary.value !== null || summary.reason === 'physiology_methods_mixed' && summary.n > 0)) methods.add(summary.methodVersion);
+      if (fineScope) continue;
+      const intervals = object(payload.physiology_intervals);
+      for (const entry of [...(blockScope ? [] : list(intervals.minutes, LIMITS.intervals, 'physiology_intervals')),
+        ...list(intervals.blocks, LIMITS.intervals, 'physiology_intervals').filter(entry => entry.status === 'accepted'
+          && selected(filters.blockIds, entry.blockId))]) {
+        const signal = entry[channel];
+        if (!blocked(entry) && !blocked(signal) && signal?.count > 0 && number(signal.mean) !== null
+          && signal.observedMs >= 1000) methods.add(signal.methodVersion || 'legacy_summary');
+      }
+    }
+  }
+  const mixedPhysiology = [...methodSets].filter(([, methods]) => hasMixedMethods(methods)).map(([metricId]) => metricId);
   const blocks = list(definition.blocks, LIMITS.blocks, 'definition_blocks');
   const scaleSpecs = list(plan.surveyScoring, LIMITS.scales, 'survey_scales').map((scale, index) => {
     const items = list(scale.items, LIMITS.items, 'scale_items');
@@ -223,6 +252,7 @@ function buildFeatureReport(sourceRows, settings = {}) {
   };
   const emit = (key, s, metricId, metricLabel, value, unit, level = null, extra = {}) => {
     value = number(value);
+    if (mixedPhysiology.some(prefix => metricId === prefix || metricId.startsWith(prefix + '.'))) value = null;
     register(metricId, metricLabel, unit);
     const levelId = id(level);
     const target = levelId === null ? s.metrics : (() => {
@@ -391,6 +421,7 @@ function buildFeatureReport(sourceRows, settings = {}) {
           const min = number(metricId === 'physiology.bpm' ? p.bpm_summary?.bpmMin : p.respiration_summary?.resp_rate_min);
           const max = number(metricId === 'physiology.bpm' ? p.bpm_summary?.bpmMax : p.respiration_summary?.resp_rate_max);
           row('F1', { participantId, sessionId, metricId, label: metricLabel, value: m.value, count: m.n,
+            methodVersion: m.methodVersion,
             min: min !== null && min >= low && min <= m.value ? min : null,
             max: max !== null && max <= high && max >= m.value ? max : null, unit });
         }
@@ -424,7 +455,7 @@ function buildFeatureReport(sourceRows, settings = {}) {
             ['heartRate', 'physiology.bpm', 'ЧСС', 'bpm', 45, 180], ['respiration', 'physiology.respiration', 'Частота дыхания', 'breaths/min', 6, 24],
           ]) {
             const c = entry[channel];
-            if (blocked(c) || !Number.isSafeInteger(c?.count) || c.count <= 0 || c.count > 10000000
+            if (blocked(c) || hasMixedMethods([c?.methodVersion]) || !Number.isSafeInteger(c?.count) || c.count <= 0 || c.count > 10000000
               || number(c.mean) === null || c.mean < min || c.mean > max || number(c.observedMs) === null || !(c.observedMs >= 1000)
               || c.observedMs > entry.endMs - entry.startMs) continue;
             const blockId = kind === 'block' ? id(entry.blockId) : null;
@@ -444,6 +475,7 @@ function buildFeatureReport(sourceRows, settings = {}) {
       const first = vs[0], count = sum(vs.map(v => v.count));
       const value = sum(vs.map(v => v.value * (v.count / count)));
       const methods = new Set(vs.map(v => v.methodVersion));
+      if (hasMixedMethods(methods)) continue;
       blockMeans.push({ ...first, value, startMs: Math.min(...vs.map(v => v.startMs)), endMs: Math.max(...vs.map(v => v.endMs)),
         methodVersion: methods.size === 1 ? first.methodVersion : 'mixed_methods' });
       if (axis === 'block') emit('F3', s, first.metricId, first.label, value, first.unit, first.blockId);
@@ -867,6 +899,10 @@ function buildFeatureReport(sourceRows, settings = {}) {
   note('G2', 'Доля предъявлений с достигнутой целью: сессии и участники взвешены поровну.');
   note('G3', 'Ширина связи отражает сумму сохранённых переходов, не корреляцию и не причинное влияние.');
   note('F4', 'Доступно только изменение сохранённых блочных средних, не латентность и не непрерывная длительность восстановления.');
+  if (mixedPhysiology.length) {
+    availability.limitations.push('Для разных методов физиологии общие оценки и сравнения не рассчитываются; отдельные записанные интервалы сохранены.');
+    for (const key of ['F1', 'F2', 'F3', 'F4']) note(key, 'Выбраны разные методы физиологии: общей оценки нет.');
+  }
   note('F7', 'Записанные мимические proxy не являются истинными эмоциями.');
   if (displayedMaps.length) note('G6', 'Каждая карта полная; ячейки укрупнены с сохранением суммарной массы. Разные карты не накладываются друг на друга.');
   note('Q1', 'Только выбранные зарегистрированные сессии; отказы до начала и полная воронка приглашений неизвестны.');

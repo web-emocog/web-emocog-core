@@ -35,6 +35,7 @@ const oldDependencies = [
   extractorUrl,
   linked('apps/participant-web/js/emotion-stub-new.js', 'public-api.js'),
   linked(pipeline, 'neutral-calibration.mjs'),
+  linked('apps/participant-web/js/web-page/app-updated.js', 'index.js'),
 ];
 const entries = [
   { page: developer, name: 'emotion-test.js', button: '#startBtn', video: '#video' },
@@ -150,6 +151,20 @@ try {
           throw new Error(`${entry.page} did not start a test camera after upgrading: ${errors.join('; ') || error.message}`, { cause: error });
         }
         assert.deepEqual(errors, [], `JavaScript errors after starting ${entry.page}`);
+        if (entry.page === participant) {
+          const methods = await page.evaluate(async () => {
+            const pipelineUrl = performance.getEntriesByType('resource').map(resource => resource.name)
+              .find(name => new URL(name).pathname.endsWith('/session-runtime/frame-pipeline.js'));
+            if (!pipelineUrl) throw new Error('Frame pipeline was not loaded');
+            const { SessionFramePipeline } = await import(pipelineUrl);
+            const definition = { settings: { physiologyMethods: { heartRate: 'chrom', respiration: 'motion' } } };
+            const pipeline = new SessionFramePipeline({ definition, video: null, controller: { featureFlags: {} },
+              state: { sessionData: {}, runtime: { invitationProtocolDefinition: definition } } });
+            return { heartRate: pipeline.bpm.heartRateMethod, respiration: pipeline.bpm.respirationMethod };
+          });
+          assert.deepEqual(methods, { heartRate: 'chrom', respiration: 'motion' },
+            'A warm cache must not silently substitute legacy physiology methods');
+        }
         console.log(`PASS ${entry.name} (${warmEntries ? 'warm entries and dependencies' : 'warm dependencies'})`);
       }
     } finally {

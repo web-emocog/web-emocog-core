@@ -8,7 +8,7 @@ import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261110-integration1';
 import { LongSessionContinuity } from './long-session-continuity.mjs';
 import { SessionRuntimeUI } from './runtime-ui.js?v=20261114-assigned1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261120-methods1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261122-integrity1';
 import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261110-integration1';
@@ -17,9 +17,9 @@ import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 import { SessionDelivery } from './delivery.mjs?v=20261025-1';
 import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261102-1';
-import { combineSignalSummaries } from './signal-history.mjs?v=20261107-resp1';
+import { combineSignalSummaries } from './signal-history.mjs?v=20261122-integrity1';
 import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261107-provenance1';
-import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261112-emotion2';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261122-integrity1';
 import { showPersistenceNotice } from './persistence-ui.mjs?v=20261110-integration1';
 import { recordedConsentReceipt, sendSessionFeature } from './ingest-transport.mjs?v=20261110-integration1';
 import '../../../shared/protocol-quality.js?v=20261114-assigned1';
@@ -54,7 +54,7 @@ class ParticipantSessionRuntime {
             build: async () => {
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.capturePhysiologyIntervals();
-                const current = state.runtime.qcMetrics?.getCurrentMetrics?.();
+                const current = state.runtime.qcMetrics?.getSummary?.();
                 const bpm = this.getBpmSnapshot();
                 return this.checkpointBuilder.build({ ...state.sessionData,
                     ...(bpm.ready ? { bpm, continuousSignalState: bpm,
@@ -250,7 +250,7 @@ class ParticipantSessionRuntime {
             this.finalRetryTimer = null;
             this.finalRetryListener = null;
             if (this.pageExited) return;
-            import('../web-page/tests-updated.js?v=20261114-assigned1')
+            import('../web-page/tests-updated.js?v=20261122-integrity1')
                 .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };
@@ -409,6 +409,8 @@ class ParticipantSessionRuntime {
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.getBpmSnapshot();
                 this.capturePhysiologyIntervals();
+                const qc = state.runtime.qcMetrics?.getSummary?.();
+                if (qc) state.sessionData.qcSummary = qc;
                 await this.checkpoints.save(
                     currentSessionId,
                     state.sessionData,

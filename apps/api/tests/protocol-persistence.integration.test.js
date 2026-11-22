@@ -154,6 +154,32 @@ describe('Protocol persistence and project boundaries', { skip: !process.env.S2_
     assert.equal(forbidden.status, 401);
   });
 
+  it('retains incomplete QC history after reload and never upgrades it to a valid session', async () => {
+    const protocol = await create('QC continuity after reload');
+    const invitation = await (await request('/invitations', 'POST', { protocol_id: protocol.id })).json();
+    const sessionId = randomUUID();
+    const token = await (await fetch(url + `/invitations/by-code/${invitation.code}/ingest-token`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, consent_receipt: fixtureConsentReceipt })
+    })).json();
+    const payload = { schemaVersion: 'session_feature.v1',
+      ids: { session: sessionId, participant: 'synthetic-qc-continuity', invitationCode: invitation.code }, events: [],
+      lifecycle: { schemaVersion: 'session_lifecycle.v1', state: 'completed', status: 'completed',
+        finishAttemptId: randomUUID(), completedAt: Date.now() },
+      qcSummary: { qcScore: 1, overallPass: true, checks: { duration: true },
+        continuity: { schemaVersion: 'qc_continuity.v1', segmentCount: 2, historyComplete: false } } };
+    const response = await fetch(url + '/ingest', { method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token.token}` }, body: JSON.stringify(payload) });
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal((await response.json()).qc_validity, 'invalid');
+    const saved = (await pool.query(`SELECT sf.payload FROM session_features sf
+      JOIN sessions s ON sf.session_id=s.id WHERE s.session_id=$1`, [sessionId])).rows[0].payload;
+    assert.deepEqual(saved.qcSummary.continuity, payload.qcSummary.continuity);
+    assert.equal(saved.quality_assessment.protocolQuality, 'unknown');
+    assert.equal(saved.quality_assessment.recordingIntegrity.status, 'partial');
+    assert.ok(saved.quality_assessment.recordingIntegrity.reasons.includes('qc_history_incomplete'));
+  });
+
   it('shares incomplete drafts with project members, but never publishes them or exposes them outside the project', async () => {
     const draft = definition('Incomplete draft');
     draft.blocks.push({ id: 'survey', type: 'survey', content: { questions: [{ id: 'unfinished', text: '', type: 'single', options: [] }] } });

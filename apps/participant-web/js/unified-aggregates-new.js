@@ -1,6 +1,7 @@
 import { getEmotionSummary } from './emotion-stub-new.js?v=20261112-emotion2';
 import '../../shared/rt-alignment.js?v=20261025-1';
-import '../../shared/metric-quality.js?v=20261110-integration1';
+import '../../shared/metric-quality.js?v=20261122-integrity1';
+import '../../shared/task-response-semantics.js?v=20261122-integrity1';
 import { SESSION_CONTRACT_VERSION, normalizeSessionEventCategory } from './session-runtime/contracts.mjs';
 
 /**
@@ -195,16 +196,16 @@ function buildBlocksFromSession(sessionData, emotion_summary) {
 
         const blinks = att?.blinkDynamics?.blinkCount != null ? Number(att.blinkDynamics.blinkCount) : null;
 
-        const trials = cognitiveResults.filter(r => String(r?.blockId) === String(blockId));
-        const total = trials.length;
+        const trials = cognitiveResults.filter(r => String(r?.blockId) === String(blockId)
+            && r?.qualityValid !== false && !globalThis.WecogTaskResponses.passive(r));
         const rtVals = trials
             .map(r => r?.rt)
             .filter(v => Number.isFinite(v));
         const rt = mean(rtVals);
 
-        // omissions: "no response" rate in percent, to match analytics examples (~2-5 for typical trial counts).
-        const omissionCount = trials.filter(r => r?.response == null).length;
-        const omissionRatePct = total > 0 ? (omissionCount / total) * 100 : null;
+        const required = trials.filter(globalThis.WecogTaskResponses.responseRequired);
+        const omissionCount = required.filter(r => r?.response == null).length;
+        const omissionRatePct = required.length > 0 ? (omissionCount / required.length) * 100 : null;
 
         const blockInfo = blocksById.get(String(blockId));
         const name = (blockInfo?.blockType || blockId);

@@ -220,6 +220,7 @@
     "apps/shared/rt-registry.js",
     "apps/shared/standard-stimuli.js",
     "apps/shared/survey-contract.js",
+    "apps/shared/task-response-semantics.js",
     "apps/web/account-storage.js",
     "apps/web/account/account.css",
     "apps/web/account/account.js",

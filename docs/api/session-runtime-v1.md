@@ -57,6 +57,24 @@ coverage, наличие принятых benchmark samples для каждой 
 checkpoint не заменяется. Legacy summaries без новых полей совместимы; миграций
 БД нет. Методика и ограничения: [gaze methods](../research/gaze-blink-body-methods.md).
 
+## QC continuity after reload (2026-11-19)
+
+Checkpoints and interim/final packets capture `QCMetrics.getSummary()`, including
+raw counters and completed analysis-FPS windows. A new calibration segment can
+restore that summary without averaging rounded percentages or segment means.
+Elapsed QC time is the sum of monotonic segment durations; time with the page
+closed is not observed time. Current camera/analysis FPS and validation results
+are reacquired, not restored as if freshly measured.
+
+Optional `qcSummary.continuity` uses `qc_continuity.v1`, `segmentCount`, and
+`historyComplete`. Missing counters, incompatible FPS thresholds/window history,
+or unsupported continuity versions make history incomplete. Such recordings
+remain stored, but cannot pass overall session QC. The quality assessment marks
+recording integrity partial and protocol quality unknown. Legacy packets without
+this optional field remain ingest-compatible; their missing history is not
+reconstructed from rounded percentages. JSON Schema, TypeScript, producer,
+consumer and browser/database regression tests cover the extension.
+
 ## Назначение
 
 `apps/participant-web/js/session-runtime/` управляет единой измерительной

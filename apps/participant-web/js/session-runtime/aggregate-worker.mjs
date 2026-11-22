@@ -1,4 +1,4 @@
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261112-emotion2';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261122-integrity1';
 import { buildCheckpointHeatmaps } from './gaze-history.mjs?v=20261102-1';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261025-2';
 import { isCheckpointRequest, isLegacyCheckpointRequest } from './checkpoint-messages.mjs?v=20261025-1';

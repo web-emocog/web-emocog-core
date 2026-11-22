@@ -106,6 +106,18 @@ export class VideoFpsMonitor {
             threshold: this._analysisThreshold, belowThresholdMs: this._analysisThreshold === null ? null : belowThresholdMs };
     }
 
+    restoreAnalysisSession(summary) {
+        if (!summary || !['frames', 'windows'].every(key => Number.isSafeInteger(summary[key]) && summary[key] >= 0)
+            || !Number.isFinite(summary.observedMs) || summary.observedMs < 0
+            || !(summary.belowThresholdMs === null && summary.threshold === null
+                || Number.isFinite(summary.belowThresholdMs) && summary.belowThresholdMs >= 0 && summary.belowThresholdMs <= summary.observedMs)
+            || summary.threshold !== this._analysisThreshold) return false;
+        this._analysisSession = { frames: summary.frames, windows: summary.windows,
+            observedMs: summary.observedMs, belowThresholdMs: summary.belowThresholdMs ?? 0 };
+        // The old mean and last window are not samples in the new segment.
+        return true;
+    }
+
     getCameraFps() {
         return !this._isRunning || performance.now() - this._cameraUpdatedAt <= 2500 ? this._cameraFps : 0;
     }

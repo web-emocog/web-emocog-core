@@ -824,6 +824,7 @@
             "excluded",
             "ambiguous",
             "incomplete",
+            "interrupted",
             "unknown",
             null
           ]
@@ -2238,6 +2239,10 @@
               "minimum": 0
             },
             "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "interrupted": {
               "type": "integer",
               "minimum": 0
             }

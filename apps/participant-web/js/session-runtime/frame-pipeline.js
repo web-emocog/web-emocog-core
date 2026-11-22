@@ -2,7 +2,7 @@ import { extractEyeSignalSample } from '../web-page/eye-signal.js';
 import { updateFromMetrics as updateQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { SessionQualityDetector } from './quality-detector.mjs?v=20261110-integration1';
 import { ERROR_KINDS } from './contracts.mjs';
-import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261120-methods1';
+import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261122-integrity1';
 import {
     appendEmotionSample,
     endEmotionSession,
