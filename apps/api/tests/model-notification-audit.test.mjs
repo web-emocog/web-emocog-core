@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1';
-import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261114-assigned1';
-import { VisionWorkerClient } from '../../participant-web/js/session-runtime/vision-worker-client.mjs?v=20261114-assigned1';
+import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261123-fps1';
+import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261123-fps1';
+import { VisionWorkerClient } from '../../participant-web/js/session-runtime/vision-worker-client.mjs?v=20261123-fps1';
 
 function replace(t, key, value) {
     const original = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -109,9 +109,13 @@ test('repeated CPU mask failures release every mask but log one fixed code, not 
     const analyzer = new FaceSegmenter({ worker: false }); analyzer.isInitialized = true;
     analyzer.inferenceDelegate = 'CPU';
     let closed = 0;
-    analyzer.imageSegmenter = { segmentForVideo: () => ({ categoryMask: {
+    const masks = { categoryMask: {
         getAsUint8Array() { throw new Error('SYNTHETIC-PRIVATE-MASK'); }, close() { closed++; } },
-        confidenceMasks: [{ close() { closed++; } }] }), close() {} };
+        confidenceMasks: [{ close() { closed++; } }] };
+    analyzer.imageSegmenter = { segmentForVideo(_source, _time, callback) {
+        try { callback(masks); }
+        finally { masks.categoryMask.close(); masks.confidenceMasks.forEach(mask => mask.close()); }
+    }, close() {} };
     for (let i = 0; i < 100; i++) {
         const result = await analyzer.segmentFrame({ width: 2, height: 2 });
         assert.equal(result.error, 'segment_inference_failed'); assert.equal(result.isComplete, false);

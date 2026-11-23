@@ -312,6 +312,20 @@ Firefox/WebKit используют GPU, при ошибке есть однок
 Результаты трёх движков и ограничения: `docs/reports/2026-10-26-cross-browser-fps-audit.md`.
 Успешный Worker с ответом медленнее 1000 ms не доказывает свежесть сегментации.
 
+Сегментация читает заимствованные MPMask только внутри синхронного callback
+`segmentForVideo`: return-value overload клонирует все выходные маски.
+Не закрывать borrowed masks вручную и не сохранять их за пределами callback;
+сохраняется только собственная копия category bytes и производные оценки.
+Переход на CPU разрешён после выхода из callback и cleanup vendor.
+`frame_latency.v1` содержит сводку ограниченной гистограммы завершённых primary
+frames, не историю кадров. Инженерный запас: mean <=25 ms, p95 <=30 ms,
+p99 <=33 ms при >=60 samples; это не изменение опубликованного QC и не
+performance pass по одной средней. Precheck использует более короткое окно
+только для подсказки. При публикации telemetry сначала обновить API contract.
+Локальный CPU/GPU benchmark не разрешает автоматическую смену delegate на всех
+Windows и не заменяет длительную приёмку на проблемном устройстве.
+См. `docs/reports/2026-11-23-windows-fps-headroom.md`.
+
 Поздний ответ/ошибка Worker после reset/stop не изменяет новую generation.
 Primary scheduling использует `frame-notification.v1`: уведомление нового
 кадра, один in-flight inference, только последний pending frame, бюджет 33 ms

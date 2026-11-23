@@ -16,7 +16,7 @@ import { analyzePose, checkStability, checkEyesCentering, addToHistory } from '.
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261114-assigned1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261123-fps1';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
     notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
@@ -183,15 +183,18 @@ class PrecheckAnalyzer {
             }
             if (this._canvas.width !== width) this._canvas.width = width;
             if (this._canvas.height !== height) this._canvas.height = height;
+            const pixelStart = performance.now();
             this._ctx.drawImage(videoElement, 0, 0, width, height);
+            const pixelsDrawn = performance.now();
             const imageData = this._ctx.getImageData(0, 0, width, height);
+            const pixelsRead = performance.now();
 
             // Сначала запускаем MediaPipe — нужны landmarks, чтобы illumination
             // считался по face ROI, а не по всему кадру (тёмный/светлый фон не должен
             // штрафовать пользователя при нормальном освещении лица).
             const modelStart = performance.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
-            this.lastFrameTiming = { modelCallMs: performance.now() - modelStart };
+            const modelDone = performance.now();
 
             const faceData = parseFaceResults(mpResults, width, height, this.thresholds.face);
             const eyes = analyzeEyes(mpResults, width, height, this.thresholds.eyes);
@@ -235,6 +238,8 @@ class PrecheckAnalyzer {
             const mouth = analyzeMouth(mpResults);
             const analysisTime = performance.now() - startTime;
             const blendShapes = extractBlendShapes(mpResults);
+            this.lastFrameTiming = { pixelDrawMs: pixelsDrawn - pixelStart, pixelReadMs: pixelsRead - pixelsDrawn,
+                modelCallMs: modelDone - modelStart, derivedMs: performance.now() - modelDone };
 
             this.lastResult = {
                 illumination, face: faceData, pose, eyes, mouth,

@@ -7,6 +7,7 @@ import { protocolCameraConstraints } from '../session-runtime/protocol-profile.m
 import { getFramePixels } from '../session-runtime/frame-pixels.mjs';
 import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { PrecheckWindow } from '../session-runtime/precheck-window.mjs';
+import { FrameLatency, assessFrameHeadroom } from '../session-runtime/frame-latency.mjs?v=20261123-fps1';
 import '../../../shared/protocol-quality.js?v=20261122-validtime1';
 import { getDistanceStatus, precheckPoseStatus } from '../precheck-status.mjs';
 import {
@@ -147,15 +148,19 @@ function renderCameraCadence(fps, pending = false) {
     const subject = ru ? 'Частота кадров камеры' : 'Camera frame rate';
     const minimum = check.threshold == null ? '' : (ru ? `; нужно не меньше ${check.threshold}` : `; minimum ${check.threshold}`);
     const processing = precheckAnalysisRun?.faceTimes;
+    const recentLatency = new FrameLatency();
+    for (const ms of processing || []) recentLatency.record(ms);
+    const margin = assessFrameHeadroom(recentLatency.snapshot(), 8);
     const overBudget = check.threshold !== null && check.fps !== null && !check.low
-        && processing?.length >= 8 && processing.filter(ms => ms > 1000 / check.threshold).length >= 6;
+        && (margin === 'over_budget'
+            || (processing?.length >= 8 && processing.filter(ms => ms > 1000 / check.threshold).length >= 6));
     const text = (check.pending ? (ru ? `${subject}: измеряем…` : `${subject}: measuring…`)
         : check.fps === null ? (ru ? `${subject}: не удалось измерить.` : `${subject}: unavailable.`)
         : `${subject}: ${check.fps} ${ru ? 'к/с' : 'fps'}${minimum}.` + (check.low
             ? ' ' + globalThis.WecogProtocolQuality.describeFpsAdvice(check.threshold,
                 { camera: { status: 'measured', fps: check.fps } }, state.currentLang) : ''))
-        + (overBudget ? (ru ? ' Анализ лица часто занимает слишком много времени. Закройте лишние приложения и вкладки, иначе часть проб может потребовать повтора.'
-            : ' Face processing often takes too long. Close other apps and tabs to reduce the chance of repeated trials.') : '');
+        + (overBudget ? (ru ? ' Для обработки лица не хватает запаса скорости. Закройте лишние приложения и вкладки; при длительной записи часть заданий может потребовать повтора.'
+            : ' Face processing has too little speed headroom. Close other apps and tabs; longer recordings may require repeated trials.') : '');
     if (hint.textContent !== text) hint.textContent = text;
     hint.style.fontWeight = check.low || overBudget ? '700' : '';
     return check;
@@ -335,7 +340,7 @@ export function startContinuousAnalysis() {
             // Используем ЛОКАЛЬНЫЙ анализатор вместо бэкенда
             const results = await runLocalPrecheckAnalysis(video, isCurrent, ms => {
                 run.faceTimes.push(ms);
-                if (run.faceTimes.length > 8) run.faceTimes.shift();
+                if (run.faceTimes.length > 120) run.faceTimes.shift();
             });
             if (!isCurrent()) return;
 

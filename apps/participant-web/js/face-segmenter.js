@@ -166,7 +166,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof window !== 'undefined') {
     window.FaceSegmenter = FaceSegmenterInline;
-    window.FaceSegmenterReady = import('./face-segmenter/index.js?v=20261114-assigned1')
+    window.FaceSegmenterReady = import('./face-segmenter/index.js?v=20261123-fps1')
         .then(module => {
             const Model = module.FaceSegmenter || module.default;
             if (typeof Model !== 'function') throw new Error('segment_export_missing');

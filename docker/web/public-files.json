@@ -146,6 +146,7 @@
     "apps/participant-web/js/session-runtime/contracts.mjs",
     "apps/participant-web/js/session-runtime/delivery.mjs",
     "apps/participant-web/js/session-runtime/feature-flags.mjs",
+    "apps/participant-web/js/session-runtime/frame-latency.mjs",
     "apps/participant-web/js/session-runtime/frame-pipeline.js",
     "apps/participant-web/js/session-runtime/frame-pixels.mjs",
     "apps/participant-web/js/session-runtime/gaze-history.mjs",

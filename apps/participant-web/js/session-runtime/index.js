@@ -8,7 +8,7 @@ import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261110-integration1';
 import { LongSessionContinuity } from './long-session-continuity.mjs';
 import { SessionRuntimeUI } from './runtime-ui.js?v=20261114-assigned1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261122-validtime1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261123-fps1';
 import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261110-integration1';
@@ -251,7 +251,7 @@ class ParticipantSessionRuntime {
             this.finalRetryTimer = null;
             this.finalRetryListener = null;
             if (this.pageExited) return;
-            import('../web-page/tests-updated.js?v=20261122-validtime1')
+            import('../web-page/tests-updated.js?v=20261123-fps1')
                 .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };

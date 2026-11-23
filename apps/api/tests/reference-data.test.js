@@ -58,7 +58,7 @@ test('private replay stage profiling changes no model settings and refuses unkno
 
 test('performance windows retain stalls, exclude only a partial tail and reject invalid clocks', async () => {
   const { distribution, fpsWindows } = await import(pathToFileURL(path.resolve(__dirname, '../../../scripts/reference-data/performance.mjs')));
-  assert.deepEqual(distribution([]), { n: 0, mean: null, p50: null, p95: null, max: null });
+  assert.deepEqual(distribution([]), { n: 0, mean: null, p50: null, p95: null, p99: null, max: null });
   const result = fpsWindows([10, 20, 2000, 2499], 2500);
   assert.deepEqual(result.counts, [2, 0]);
   assert.equal(result.below25Windows, 2); assert.equal(result.longestBelow25RunMs, 2000);

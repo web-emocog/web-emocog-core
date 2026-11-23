@@ -209,6 +209,15 @@ export interface CognitiveResultV1 {
   invalidationReason?: 'page_reloaded';
 }
 
+export interface FrameLatencyV1 {
+  schemaVersion: 'frame_latency.v1';
+  scope: 'completed_primary_frames';
+  primary: { samples: number; meanMs: number | null; p95Ms: number | null; p99Ms: number | null; maxMs: number | null };
+  headroom: 'not_measured' | 'within_budget' | 'over_budget';
+}
+
+export interface FrameTimingV1 { frames: number; totalMs: number; maxMs: number }
+
 export interface SessionFeatureV1 {
   delivery?: SessionDeliveryV1;
   schemaVersion: 'session_feature.v1';
@@ -221,7 +230,10 @@ export interface SessionFeatureV1 {
   lifecycle: SessionLifecycleV1;
   events: SessionEventV1[];
   meta?: (Record<string, unknown> & {
-    tech?: (Record<string, unknown> & { gazeFeatureMethod?: 'same_eye_iris.v2'; gazeCalibrationSampling?: 'open_eye_calibration.v1'; gazeQcSignalMethod?: 'corrected_validity.v1' }) | null;
+    tech?: (Record<string, unknown> & { gazeFeatureMethod?: 'same_eye_iris.v2'; gazeCalibrationSampling?: 'open_eye_calibration.v1'; gazeQcSignalMethod?: 'corrected_validity.v1';
+      framePipeline?: Record<string, unknown> & { latency?: FrameLatencyV1; faceTimings?: Partial<Record<
+        'modelCallMs' | 'bitmapCaptureMs' | 'workerRoundTripMs' | 'workerWorkMs' | 'pixelDrawMs' | 'pixelReadMs' | 'derivedMs', FrameTimingV1>> }
+    }) | null;
   }) | null;
   precheck?: Record<string, unknown> | null;
   qcSummary?: (Record<string, unknown> & {

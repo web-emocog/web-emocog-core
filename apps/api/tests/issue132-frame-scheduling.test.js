@@ -13,6 +13,7 @@ for (const { fps, latency, minimum } of [
   const { observeVideoFrames } = await import(pathToFileURL(path.resolve(__dirname,
     '../../participant-web/js/session-runtime/video-frames.mjs')).href);
   const profile = await import('../../participant-web/js/session-runtime/protocol-profile.mjs');
+  const latencyStats = await import('../../participant-web/js/session-runtime/frame-latency.mjs');
   const saved = { performance: global.performance, window: global.window,
     setTimeout: global.setTimeout, clearTimeout: global.clearTimeout };
   let now = 0, sequence = 0, callback, processed = 0, concurrent = 0, peak = 0;
@@ -24,7 +25,7 @@ for (const { fps, latency, minimum } of [
   t.after(() => Object.assign(global, saved));
   // Run the real orchestrator with I/O adapters stubbed; no DOM/model inference.
   const context = vm.createContext({ performance: global.performance, setTimeout: global.setTimeout,
-    clearTimeout: global.clearTimeout, window: {}, Date, observeVideoFrames, ...profile,
+    clearTimeout: global.clearTimeout, window: {}, Date, observeVideoFrames, ...profile, ...latencyStats,
     ContinuousBpmCollector: class {}, ContinuousBodyPoseCollector: class {},
     NeutralCalibration: class { reset() {} },
     SessionQualityDetector: class { reset() {} }, startEmotionSession() {}, endEmotionSession() {},
@@ -73,6 +74,8 @@ for (const { fps, latency, minimum } of [
     frames: processed, totalMs: latency * processed, maxMs: latency
   });
   assert.equal(published.faceTimings.workerRoundTripMs.frames, 0);
+  assert.equal(published.latency.primary.samples, processed);
+  assert.equal(published.latency.headroom, latency === 80 ? 'over_budget' : 'within_budget');
   let total = 0;
   for (const [name, stage] of Object.entries(published.stages)) {
     assert.equal(stage.frames, processed, `${name} tracks every completed frame`);

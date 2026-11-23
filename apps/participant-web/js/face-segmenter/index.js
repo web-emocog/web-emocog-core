@@ -7,7 +7,7 @@
  */
 
 // Основной класс
-export { default, FaceSegmenter } from './FaceSegmenter.js?v=20261114-assigned1';
+export { default, FaceSegmenter } from './FaceSegmenter.js?v=20261123-fps1';
 
 // Константы
 export { CLASS_INDICES, CLASS_NAMES, LANDMARK_INDICES, CLASS_COLORS } from './constants.js?v=20261025-1';

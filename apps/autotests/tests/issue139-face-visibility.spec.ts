@@ -17,7 +17,7 @@ for (const outside of [0, 2, 4, 5]) {
       const { analyzeMasks } = await import(root + 'face-segmenter/mask-analyzer.js?v=20261104-4');
       const { analyzeFaceRegionsVisibility } = await import(root + 'face-segmenter/region-analyzer.js?v=20261110-integration1');
       const { DEFAULT_THRESHOLDS } = await import(root + 'face-segmenter/thresholds.js?v=20261110-integration1');
-      const precheck = await import(root + 'web-page/precheck-updated.js?v=20261114-assigned1');
+      const precheck = await import(root + 'web-page/precheck-updated.js?v=20261123-fps1');
       const state = (window as any).__WECOG_STATE__;
       const one = (input: any) => {
         const mask = analyzeMasks(input, input.width, input.height, input.landmarks);
@@ -66,7 +66,7 @@ test('real Worker messaging uses face-local mask evidence without sending its ra
     window.Worker = class extends NativeWorker {
       constructor(url: string | URL, options?: WorkerOptions) { requested.push(String(url)); super(workerUrl, options); }
     };
-    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261114-assigned1';
+    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261123-fps1';
     const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
     const { FaceSegmenter } = await import(modulePath);
     const { faceVisibilityFixture } = await import(fixturePath);
@@ -96,7 +96,7 @@ test('real Worker messaging uses face-local mask evidence without sending its ra
 test('folder-loader failure uses the same corrected analysis in inline fallback, not the old global hand heuristic', async ({ page }) => {
   await page.route('**/face-segmenter/index.js*', route => route.abort());
   await page.goto('/apps/participant-web/tools/session-report.html');
-  await page.addScriptTag({ url: '/apps/participant-web/js/face-segmenter.js?v=20261114-assigned1' });
+  await page.addScriptTag({ url: '/apps/participant-web/js/face-segmenter.js?v=20261123-fps1' });
   const result = await page.evaluate(async () => {
     const w = window as any;
     const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
@@ -105,7 +105,10 @@ test('folder-loader failure uses the same corrected analysis in inline fallback,
     fixture.categoryMask.close = () => { closed++; };
     const kind = await w.FaceSegmenterReady;
     w.FilesetResolver = { forVisionTasks: async () => ({}) };
-    w.ImageSegmenter = { createFromOptions: async () => ({ segmentForVideo: () => fixture, close() {} }) };
+    w.ImageSegmenter = { createFromOptions: async () => ({ segmentForVideo(_source, _time, callback) {
+      if (!callback) return fixture;
+      try { callback(fixture); } finally { fixture.categoryMask.close(); }
+    }, close() {} }) };
     const segmenter = new w.FaceSegmenter();
     try {
       const result = await segmenter.segmentFrame({ readyState: 2, videoWidth: fixture.width, videoHeight: fixture.height }, fixture.landmarks);

@@ -61,6 +61,11 @@ test('face canvas dimensions change only on resize; identical pixels keep identi
   assert.equal(sizes, 2);
   assert.equal(reads, 2);
   assert.deepEqual(a.illumination, b.illumination);
+  for (const key of ['pixelDrawMs', 'pixelReadMs', 'modelCallMs', 'derivedMs']) {
+    assert.ok(Number.isFinite(analyzer.lastFrameTiming[key]));
+    assert.ok(analyzer.lastFrameTiming[key] >= 0);
+  }
+  assert.equal('timing' in b, false, 'diagnostic timing stays separate from feature samples');
   assert.equal(b.timestamp, 200); assert.equal(b.wallTimestamp, 1100);
   assert.equal(getFramePixels(b).width, 8);
   const oldNow = Date.now; let wallNow = 10_000;
@@ -309,13 +314,18 @@ test('expired segmentation is not reused; freshness uses the capture monotonic c
   assert.equal(pipeline._currentSegmentation(50), null);
 });
 
-test('segmentation masks are released even when derived analysis throws', async () => {
+test('borrowed segmentation masks are released by the callback owner even when derived analysis throws', async () => {
   const { FaceSegmenter } = await load('face-segmenter/FaceSegmenter.js');
   const analyzer = new FaceSegmenter({ worker: false }); analyzer.isInitialized = true;
   let closed = 0;
-  analyzer.imageSegmenter = { segmentForVideo: () => ({ categoryMask: {
+  const masks = { categoryMask: {
     getAsUint8Array() { throw new Error('synthetic_mask_failure'); }, close() { closed++; } },
-    confidenceMasks: [{ close() { closed++; } }] }), close() {} };
+    confidenceMasks: [{ close() { closed++; } }] };
+  analyzer.imageSegmenter = { segmentForVideo(_source, _time, callback) {
+    assert.equal(typeof callback, 'function');
+    try { callback(masks); }
+    finally { masks.categoryMask.close(); masks.confidenceMasks.forEach(mask => mask.close()); }
+  }, close() {} };
   const result = await analyzer.segmentFrame({ width: 10, height: 10 });
   assert.equal(result.error, 'segment_inference_failed'); assert.equal(closed, 2);
   analyzer.dispose();
@@ -326,15 +336,17 @@ test('unsupported GPU mask readback retries once inside the worker on CPU, after
   const analyzer = new FaceSegmenter({ worker: false }); analyzer.isInitialized = true;
   analyzer.inferenceDelegate = 'GPU';
   const order = []; let inits = 0;
-  analyzer.imageSegmenter = { segmentForVideo: () => ({ categoryMask: {
-    getAsUint8Array() { throw new Error('synthetic_gpu_read_failure'); }, close() { order.push('mask'); } } }),
+  const gpuMask = { getAsUint8Array() { throw new Error('synthetic_gpu_read_failure'); }, close() { order.push('mask'); } };
+  analyzer.imageSegmenter = { segmentForVideo(_source, _time, callback) {
+    try { callback({ categoryMask: gpuMask }); } finally { gpuMask.close(); }
+  },
     close() { order.push('gpu'); } };
   analyzer.initialize = async () => {
     inits++; assert.deepEqual(order, ['mask', 'gpu']);
     analyzer.isInitialized = true; analyzer.inferenceDelegate = 'CPU';
-    analyzer.imageSegmenter = { segmentForVideo(_source, t) {
-      assert.equal(t, 42); return { categoryMask: { width: 2, height: 2,
-        getAsUint8Array: () => new Uint8Array([3, 3, 3, 3]), close() {} } };
+    analyzer.imageSegmenter = { segmentForVideo(_source, t, callback) {
+      assert.equal(t, 42); callback({ categoryMask: { width: 2, height: 2,
+        getAsUint8Array: () => new Uint8Array([3, 3, 3, 3]), close() {} } });
     }, close() {} }; return true;
   };
   const frame = await analyzer.segmentFrame({ width: 2, height: 2 }, null, 42);
@@ -342,6 +354,26 @@ test('unsupported GPU mask readback retries once inside the worker on CPU, after
   assert.equal(inits, 1); assert.equal(analyzer.inferenceDelegate, 'CPU');
   assert.equal(analyzer.cpuFallbackReason, 'gpu_mask_or_inference_failed');
   analyzer.dispose();
+});
+
+test('segmentation borrows every model output, retains only owned derived data and never closes or clones borrowed masks', async () => {
+  const { FaceSegmenter } = await load('face-segmenter/FaceSegmenter.js');
+  const analyzer = new FaceSegmenter({ worker: false }); analyzer.isInitialized = true;
+  let active = false, calls = 0;
+  const bytes = new Uint8Array([3, 3, 3, 3]);
+  const mask = { width: 2, height: 2, getAsUint8Array() { assert.equal(active, true); return bytes; },
+    close() { assert.fail('borrowed masks belong to MediaPipe'); }, clone() { assert.fail('no mask copies'); } };
+  analyzer.imageSegmenter = { segmentForVideo(_source, timestamp, callback) {
+    assert.equal(timestamp, 123); assert.equal(typeof callback, 'function'); calls++;
+    active = true;
+    try { callback({ categoryMask: mask }); } finally { active = false; bytes.fill(0); }
+  }, close() {} };
+  try {
+    const output = await analyzer.segmentFrame({ width: 2, height: 2 }, null, 123);
+    assert.equal(output.error, undefined); assert.equal(calls, 1);
+    assert.deepEqual([...output.maskAnalysis._rawMaskData], [3, 3, 3, 3]);
+    assert.equal(output.maskAnalysis.classDistribution.face_skin.count, 4);
+  } finally { analyzer.dispose(); }
 });
 
 test('overlapping stage calls serialize instead of treating a busy worker as a failure', async () => {

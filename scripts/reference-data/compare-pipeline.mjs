@@ -11,7 +11,7 @@ import { verifyManifest, privateFile, fingerprint, DATASET } from './reference.m
 import { benchmarkPipeline } from './pipeline-benchmark-page.mjs';
 import { profileFaceStages } from './profile-stages.mjs';
 import { validateCameraFileMetadata } from './prepare-camera-file.mjs';
-import { processCpuDelta } from './performance.mjs';
+import { processCpuDelta, assessPipelinePerformance } from './performance.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const baseline = await fs.realpath(process.env.WECOG_BASELINE_ROOT);
@@ -49,6 +49,8 @@ const faceCanvas = process.env.WECOG_PIPELINE_FACE_CANVAS || 'default';
 const profileStages = process.env.WECOG_PIPELINE_PROFILE_STAGES === '1';
 const collectCpu = process.env.WECOG_PIPELINE_COLLECT_CPU === '1';
 const segmentDelegate = process.env.WECOG_PIPELINE_SEGMENT_DELEGATE || 'default';
+const faceDelegate = process.env.WECOG_PIPELINE_FACE_DELEGATE || 'default';
+if (!['default', 'GPU', 'CPU'].includes(faceDelegate)) throw new Error('invalid_benchmark_face_delegate');
 if (!['default', 'GPU', 'CPU'].includes(segmentDelegate)) throw new Error('invalid_benchmark_segment_delegate');
 if (collectCpu && browsers.some(key => key !== 'chromium')) throw new Error('invalid_benchmark_cpu_browser');
 const baselineProfile = process.env.WECOG_BASELINE_PROFILE || 'v1';
@@ -56,7 +58,7 @@ if (!['v1', 'v2'].includes(baselineProfile)) throw new Error('invalid_benchmark_
 if (!['bitmap', 'imageData'].includes(faceInput) || !['default', 'compute'].includes(faceCanvas)) throw new Error('invalid_benchmark_face_options');
 if (!['automatic', 'manual'].includes(captureMode)) throw new Error('invalid_benchmark_capture_mode');
 if (fakeVideo && captureMode !== 'automatic') throw new Error('invalid_benchmark_fake_capture_mode');
-if (!Number.isInteger(repeats) || repeats < 1 || repeats > 3 || !Number.isFinite(durationMs) || durationMs < 5000 || durationMs > 30000
+if (!Number.isInteger(repeats) || repeats < 1 || repeats > 3 || !Number.isFinite(durationMs) || durationMs < 5000 || durationMs > 600000
     || !Number.isFinite(warmupMs) || warmupMs < 8000 || warmupMs > 20000) throw new Error('invalid_benchmark_duration');
 const variants = [
     baselineProfile === 'v2'
@@ -69,7 +71,7 @@ const variants = [
 const selected = process.env.WECOG_PIPELINE_VARIANTS?.split(',');
 const chosen = selected ? variants.filter(row => selected.includes(row.id)) : variants;
 if (!chosen.length || (selected && selected.length !== chosen.length)) throw new Error('invalid_benchmark_variant');
-const permitted = ['apps/participant-web/js/', 'packages/shared/multimodal/', 'lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/'];
+const permitted = ['apps/participant-web/js/', 'apps/shared/', 'packages/shared/multimodal/', 'lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/'];
 const exact = ['apps/participant-web/translations.js'];
 const types = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm',
     '.task': 'application/octet-stream', '.tflite': 'application/octet-stream' };
@@ -114,6 +116,10 @@ const server = http.createServer(async (req, res) => {
         if (url.pathname === '/clip.webm') { file = clip; mime = 'video/webm'; }
         else if (url.pathname === '/benchmark-performance.mjs') {
             file = path.join(repo, 'scripts/reference-data/performance.mjs'); mime = 'text/javascript';
+        } else if (url.pathname === '/apps/participant-web/js/session-runtime/frame-latency.mjs') {
+            // This shared measurement helper belongs to the comparison harness,
+            // including when the frozen baseline predates its introduction.
+            file = path.join(repo, url.pathname.slice(1)); mime = 'text/javascript';
         } else {
             const relative = decodeURIComponent(url.pathname.slice(1));
             if ((!permitted.some(prefix => relative.startsWith(prefix)) && !exact.includes(relative)) || !types[path.extname(relative)]) {
@@ -127,6 +133,14 @@ const server = http.createServer(async (req, res) => {
         const { size } = info;
         if (!info.isFile() || size > 256 * 1024 * 1024) throw new Error('invalid_benchmark_file');
         res.setHeader('Content-Type', mime);
+        if (faceDelegate !== 'default' && url.pathname === '/apps/participant-web/js/precheck-analyzer/face-model.mjs') {
+            const original = "cpuOnly ? ['CPU'] : ['GPU', 'CPU']";
+            const input = await opened.readFile('utf8');
+            if (input.split(original).length !== 2) throw new Error('benchmark_face_source_changed');
+            const source = input.replace(original, `['${faceDelegate}']`);
+            res.setHeader('Content-Length', Buffer.byteLength(source));
+            res.end(req.method === 'HEAD' ? undefined : source); return;
+        }
         if (segmentDelegate !== 'default' && url.pathname === '/apps/participant-web/js/face-segmenter/delegate-policy.mjs') {
             const source = `export function segmentationDelegate() { return '${segmentDelegate}'; }`;
             res.setHeader('Content-Length', Buffer.byteLength(source));
@@ -167,8 +181,8 @@ catch (_) { /* A local frozen source snapshot is identified by its content hash.
 const report = { schemaVersion: 'pipeline-comparison.v1', startedAt: new Date().toISOString(),
     machine: { platform: process.platform, arch: process.arch, cpu: os.cpus()[0].model, ramBytes: os.totalmem() },
     automationVersion: version, durationMs, warmupMs, repeats, captureMode, faceInput, faceCanvas,
-    diagnosticInstrumentation: profileStages || faceInput !== 'bitmap' || faceCanvas !== 'default' || segmentDelegate !== 'default',
-    collectCpu, segmentDelegate,
+    diagnosticInstrumentation: profileStages || faceInput !== 'bitmap' || faceCanvas !== 'default' || segmentDelegate !== 'default' || faceDelegate !== 'default',
+    collectCpu, segmentDelegate, faceDelegate,
     sourceHashes, modelAssets: MODEL_ASSETS,
     harnessHashes: Object.fromEntries(await Promise.all(['compare-pipeline.mjs', 'pipeline-benchmark-page.mjs', 'performance.mjs'].map(async name =>
         [name, (await fingerprint(path.join(repo, 'scripts/reference-data', name))).sha256]))),
@@ -186,6 +200,7 @@ const save = async () => { await fs.mkdir(path.dirname(output), { recursive: tru
 let browser;
 let currentRun;
 let page;
+let resourceFailures = [];
 const debugValue = async expression => {
     let timer;
     try {
@@ -207,6 +222,15 @@ try {
             await context.route('**/*', route => route.request().url().startsWith(origin + '/')
                 ? route.continue() : (blockedNetwork++, route.abort()));
             page = await context.newPage();
+            resourceFailures = [];
+            const recordResourceFailure = requestUrl => {
+                if (resourceFailures.length >= 24 || !requestUrl.startsWith(origin + '/')) return;
+                const name = new URL(requestUrl).pathname;
+                if (name === '/clip.webm' || name === '/benchmark-performance.mjs'
+                    || permitted.some(prefix => name.startsWith('/' + prefix))) resourceFailures.push(name);
+            };
+            page.on('requestfailed', request => recordResourceFailure(request.url()));
+            page.on('response', response => { if (response.status() >= 400) recordResourceFailure(response.url()); });
             const cpu = {};
             if (collectCpu) {
                 const session = await browser.newBrowserCDPSession();
@@ -215,7 +239,8 @@ try {
                     cpu[stage] = (await session.send('SystemInfo.getProcessInfo')).processInfo;
                 });
             }
-            page.setDefaultTimeout(120000);
+            const runDeadlineMs = durationMs + warmupMs + 120000;
+            page.setDefaultTimeout(runDeadlineMs);
             await page.goto(origin); await page.bringToFront();
             let deadline;
             let result;
@@ -223,11 +248,13 @@ try {
                 result = await Promise.race([
                     page.evaluate(benchmarkPipeline, { profile: variant.profile, body: variant.body, warmupMs, durationMs, captureMode,
                         cameraInput: fakeVideo ? 'fake-file' : 'canvas' }),
-                    new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('benchmark_deadline')), 120000); })
+                    new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('benchmark_deadline')), runDeadlineMs); })
                 ]);
             } finally { clearTimeout(deadline); }
             if (blockedNetwork) throw new Error('benchmark_external_network_attempt');
             if (segmentDelegate !== 'default' && result.workers.segmentDelegate !== segmentDelegate) throw new Error('benchmark_requested_delegate_not_active');
+            if (faceDelegate !== 'default' && result.workers.faceDelegate !== faceDelegate) throw new Error('benchmark_requested_face_delegate_not_active');
+            result.performanceAssessment = assessPipelinePerformance(result);
             if (collectCpu) result.processCpu = processCpuDelta(cpu.start, cpu.end, result.elapsedMs);
             report.runs.push({ engine, browserVersion: browser.version(), variant: variant.id, round: round + 1, ...result });
             await browser.close(); browser = null;
@@ -246,6 +273,7 @@ try {
     report.failedRun = currentRun;
     report.failedPhase = await debugValue(() => window.__pipelineBenchmarkPhase || 'before_page_evaluation');
     report.invalidMeasurement = await debugValue(() => window.__pipelineBenchmarkFailure || null);
+    report.failedResources = resourceFailures;
     report.failure = String(error.message).match(/\b((?:benchmark_|reference_|invalid_|unlocked_)[a-z_]+)\b/)?.[1] || 'benchmark_execution_failed';
     await save(); process.stderr.write(report.failure + '\n'); process.exitCode = 1;
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
