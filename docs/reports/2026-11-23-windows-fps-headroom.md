@@ -110,6 +110,12 @@ The Chromium browser job timed out while downloading PulseAudio dependencies,
 before executing native media tests. Installation now has a bounded 360-second
 command inside an eight-minute step; daemon/sink commands each have a 15-second
 deadline. Signed repositories and all browser/media checks remain required.
+That bounded download also timed out on the EC2 mirror (exit 124, before tests).
+The shared APT action now routes only `*.ec2.archive.ubuntu.com/ubuntu` entries
+to Ubuntu's `https://archive.ubuntu.com/ubuntu` origin. Suites, components,
+publisher key paths, security/third-party repositories and signature checking
+remain unchanged; a fixture asserts the exact rewrite. This is CI transport
+resilience, not a product test pass. The actual hosted rerun is still required.
 
 Local results before the CI follow-up: API 1392 passed, 10 skipped; Worker/
 runtime/browser matrix 312 passed; FPS diagnostics 84 passed; #177 integration

@@ -1,10 +1,19 @@
 name: Bound Ubuntu APT network waits
-description: Keep the runner's signed repositories and bound slow mirror requests, including Playwright's APT subprocesses.
+description: Keep Ubuntu publisher keys and suites, avoid slow EC2 mirrors, and bound APT requests including Playwright subprocesses.
 runs:
   using: composite
   steps:
     - shell: bash
       run: |
+        # Change transport/host only for the Ubuntu EC2 mirror observed stalling
+        # on large packages. Keep suites, components, Signed-By and other vendors.
+        sources=()
+        for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+          if [[ -f "$source" ]]; then sources+=("$source"); fi
+        done
+        if (( ${#sources[@]} )); then
+          sudo sed -E -i -f "$GITHUB_ACTION_PATH/ubuntu-origin.sed" "${sources[@]}"
+        fi
         printf '%s\n' \
           'Acquire::Retries "1";' \
           'Acquire::http::Timeout "5";' \
