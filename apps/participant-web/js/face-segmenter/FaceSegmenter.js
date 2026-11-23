@@ -236,11 +236,22 @@ class FaceSegmenter {
             // Выполняем сегментацию
             const timestamp = captureTimestamp;
             let maskAnalysis, faceVisibility;
-            // Borrow masks only inside the callback: the return-value overload
-            // clones every output mask, including confidence maps we never read.
+            // Avoid cloning every output. Keep one GPU confidence clone to
+            // preserve the old copy/readback rounding, including software GL.
             this.imageSegmenter.segmentForVideo(videoElement, timestamp, masks => {
-                maskAnalysis = analyzeMasks(masks, width, height, faceLandmarks, this.maskReader);
-                faceVisibility = analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, width, height, this.thresholds);
+                let ownedConfidence;
+                try {
+                    let input = masks;
+                    const faceSkin = masks.confidenceMasks?.[CLASS_INDICES.FACE_SKIN];
+                    if (faceSkin?.hasWebGLTexture?.()) {
+                        ownedConfidence = faceSkin.clone();
+                        const confidenceMasks = masks.confidenceMasks.slice();
+                        confidenceMasks[CLASS_INDICES.FACE_SKIN] = ownedConfidence;
+                        input = { categoryMask: masks.categoryMask, confidenceMasks };
+                    }
+                    maskAnalysis = analyzeMasks(input, width, height, faceLandmarks, this.maskReader);
+                    faceVisibility = analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, width, height, this.thresholds);
+                } finally { ownedConfidence?.close(); }
             });
             if (!maskAnalysis || !faceVisibility) throw new Error('segment_callback_missing');
             

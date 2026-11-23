@@ -167,19 +167,33 @@ test('same-frame segmentation preserves owned mask and QC output after releasing
     gradient.addColorStop(0, '#bba08a'); gradient.addColorStop(1, '#304659');
     ctx.fillStyle = gradient; ctx.fillRect(0, 0, 320, 240);
     const analyzer = new FaceSegmenter({ worker: false });
-    let owned, clones = 0;
+    let owned, clones = 0, borrowedCopies = 0, referenceCopies = 0, requiredCopies = 0;
     const originalClone = vision.MPMask.prototype.clone;
     vision.MPMask.prototype.clone = function() { clones++; return originalClone.call(this); };
     try {
       if (!await analyzer.initialize()) throw new Error('segmenter_not_initialized');
+      const infer = analyzer.imageSegmenter.segmentForVideo.bind(analyzer.imageSegmenter);
+      // Compare from ONE inference, with exactly the old return overload's
+      // clone operations as the oracle, rather than re-running the GPU graph.
+      analyzer.imageSegmenter.segmentForVideo = (image, timestamp, callback) => infer(image, timestamp, masks => {
+        const before = clones;
+        owned = { categoryMask: masks.categoryMask.clone(),
+          confidenceMasks: masks.confidenceMasks.map(mask => mask.clone()) };
+        referenceCopies = clones - before;
+        requiredCopies = masks.confidenceMasks[3].hasWebGLTexture() ? 1 : 0;
+        const callbackStart = clones;
+        callback(masks);
+        borrowedCopies = clones - callbackStart;
+      });
       const actual = await analyzer.segmentFrame(canvas, null, 100);
-      const borrowedCopies = clones;
-      owned = analyzer.imageSegmenter.segmentForVideo(canvas, 200);
-      const masks = analyzeMasks(owned, 320, 240, null);
+      // Keep the production readback path identical: native RED/FLOAT readback
+      // is not equivalent to MaskReader's portable RGBA/FLOAT on software GL.
+      const masks = analyzeMasks(owned, 320, 240, null, analyzer.maskReader);
       const visibility = analyzeFaceRegionsVisibility(masks, null, 320, 240, analyzer.thresholds);
       return { error: actual.error || null, hasData: actual.maskAnalysis?.hasData,
-        borrowedCopies, ownedCopies: clones - borrowedCopies,
+        borrowedCopies, requiredCopies, ownedCopies: referenceCopies,
         sameMask: JSON.stringify(actual.maskAnalysis) === JSON.stringify(masks),
+        actualMasks: actual.maskAnalysis, ownedMasks: masks,
         sameVisibility: JSON.stringify(actual.faceVisibility) === JSON.stringify(visibility) };
     } finally {
       vision.MPMask.prototype.clone = originalClone;
@@ -187,8 +201,10 @@ test('same-frame segmentation preserves owned mask and QC output after releasing
       analyzer.dispose();
     }
   });
-  expect(result).toMatchObject({ error: null, hasData: true, sameMask: true, sameVisibility: true, borrowedCopies: 0 });
-  expect(result.ownedCopies).toBeGreaterThan(0);
+  expect(result.actualMasks).toEqual(result.ownedMasks);
+  expect(result).toMatchObject({ error: null, hasData: true, sameMask: true, sameVisibility: true });
+  expect(result.borrowedCopies).toBe(result.requiredCopies);
+  expect(result.borrowedCopies).toBeLessThan(result.ownedCopies);
 });
 
 test('real auxiliary models use workers or a verified compatible fallback', async ({ page }, info) => {

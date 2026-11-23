@@ -356,7 +356,7 @@ test('unsupported GPU mask readback retries once inside the worker on CPU, after
   analyzer.dispose();
 });
 
-test('segmentation borrows every model output, retains only owned derived data and never closes or clones borrowed masks', async () => {
+test('segmentation borrows category output, retains owned derived data and never closes or clones that mask', async () => {
   const { FaceSegmenter } = await load('face-segmenter/FaceSegmenter.js');
   const analyzer = new FaceSegmenter({ worker: false }); analyzer.isInitialized = true;
   let active = false, calls = 0;
@@ -373,6 +373,36 @@ test('segmentation borrows every model output, retains only owned derived data a
     assert.equal(output.error, undefined); assert.equal(calls, 1);
     assert.deepEqual([...output.maskAnalysis._rawMaskData], [3, 3, 3, 3]);
     assert.equal(output.maskAnalysis.classDistribution.face_skin.count, 4);
+  } finally { analyzer.dispose(); }
+});
+
+for (const failure of ['none', 'read', 'clone']) test(`GPU confidence keeps only its compatibility copy and releases owners: ${failure}`, async () => {
+  const { FaceSegmenter } = await load('face-segmenter/FaceSegmenter.js');
+  const analyzer = new FaceSegmenter({ worker: false }); analyzer.isInitialized = true;
+  analyzer.inferenceDelegate = 'CPU'; // Isolate ownership, without a fallback model.
+  let copies = 0, ownedClosed = 0, borrowedClosed = 0, active = false;
+  const categoryMask = { width: 2, height: 2, getAsUint8Array() {
+    assert.equal(active, true);
+    if (failure === 'read') throw Error('synthetic_read');
+    return new Uint8Array([3, 3, 3, 3]);
+  }, clone() { assert.fail('category copies are unnecessary'); }, close() { borrowedClosed++; } };
+  const confidence = { hasWebGLTexture: () => true, clone() {
+    assert.equal(active, true); copies++;
+    if (failure === 'clone') throw Error('synthetic_clone');
+    return { width: 2, height: 2, getAsFloat32Array() { assert.equal(active, true); return new Float32Array(4).fill(.75); },
+      close() { assert.equal(active, true); ownedClosed++; } };
+  }, close() { borrowedClosed++; } };
+  analyzer.imageSegmenter = { segmentForVideo(_source, timestamp, callback) {
+    assert.equal(timestamp, 123); active = true;
+    try { callback({ categoryMask, confidenceMasks: [null, null, null, confidence] }); }
+    finally { active = false; categoryMask.close(); confidence.close(); }
+  }, close() {} };
+  try {
+    const result = await analyzer.segmentFrame({ width: 2, height: 2 }, null, 123);
+    assert.equal(copies, 1); assert.equal(borrowedClosed, 2);
+    assert.equal(ownedClosed, failure === 'clone' ? 0 : 1);
+    assert.equal(result.error, failure === 'none' ? undefined : 'segment_inference_failed');
+    if (failure === 'none') assert.equal(result.maskAnalysis.confidenceMap.faceSkin.averageConfidence, .75);
   } finally { analyzer.dispose(); }
 });
 

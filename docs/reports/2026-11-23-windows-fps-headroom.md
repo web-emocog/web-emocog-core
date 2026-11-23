@@ -13,8 +13,7 @@ stage averaged 59.126 ms, with 51.815 ms inside the model call. The comparable
 Windows Chrome/Edge issue attachments also separate camera cadence from
 analysis: 15.849/21.580 FPS, primary mean 59.988/37.769 ms. That paired comparison
 used the same legacy profile within the pair, not the newer run's v2 profile.
-These observations
-locate the main deficit in processing, not camera delivery. They do not prove
+These observations locate the main deficit in processing, not camera delivery. They do not prove
 which driver, power, thermal, or browser behavior caused the deficit. No raw
 participant recordings, identifiers, tokens, or exports are checked in.
 
@@ -22,9 +21,11 @@ participant recordings, identifiers, tokens, or exports are checked in.
 
 - Consume MediaPipe segmentation masks inside its synchronous callback. The
   return-value overload clones all output masks, including unused confidence
-  maps. Keep the owned category byte copy needed by derived face-region QC;
-  do not retain or manually close borrowed MediaPipe masks. The runtime releases
-  them before an error can trigger the existing one-time CPU retry.
+  maps. Keep the owned category byte copy needed by derived face-region QC and
+  one GPU face-skin confidence clone, closed inside the callback. That one copy
+  preserves the old copy/readback rounding on software GL; all other output
+  clones are avoided. Do not retain or manually close borrowed MediaPipe masks.
+  The runtime releases them before an error can trigger the existing CPU retry.
 - Separate face draw, readback, model-call, and derived calculation times.
   The same image, models, resolution, timestamps, and formulas remain in use.
 - Record a fixed-size 1 ms latency histogram (1002 buckets, 8016 bytes), never
@@ -50,7 +51,7 @@ doi:10.1145/3746027.3758255. It remains outside the webroot and repository.
 ## Verification
 
 Full machine-readable evidence: [benchmark JSON](2026-11-23-windows-fps-headroom-benchmark.json).
-All ten completed measurements used Apple M4 Pro/macOS and the same 640x480
+The initial ten completed measurements used Apple M4 Pro/macOS and the same 640x480
 locked reference video; they are not Windows hardware or scientific accuracy
 acceptance. Paired 30-second runs alternate order (before/after, after/before)
 with fresh browsers, equal weights/profile, and no physical sensors/uploads.
@@ -79,7 +80,36 @@ were corrected before the ten completed measurements. No observations from that
 failed import-only probe are counted. The first full API run exposed outdated
 VM imports, callback-owner mocks, and version-specific test imports. These were
 updated to exercise the new API, retaining the existing cleanup/privacy/QC
-assertions; final run results follow below.
+assertions.
+
+### CI Follow-Up
+
+Initial CI found a real compatibility gap in the proposed zero-copy path:
+software GL changed average face confidence by about 4.3e-10 in the fixture,
+even when comparing one inference through the same MaskReader. Category bytes
+and visibility agreed, but exact confidence compatibility did not. The final
+implementation retains just the used GPU confidence clone (one rather than
+seven output clones). No tolerance or QC threshold was relaxed. The ten initial
+benchmark runs above measure the earlier revision, not this corrected final
+implementation; a new long run is required and recorded separately below.
+
+Windows smoke also found that Python's system MIME associations made `.mjs`
+files non-executable despite HTTP 200. The loopback test handler now explicitly
+serves JavaScript/WASM types. A regression test poisons both the extension table
+and OS MIME map; actual HTTP HEAD checks run in each browser. This is a test
+server correction, not a deployment server or Windows driver change.
+
+The Chromium browser job timed out while downloading PulseAudio dependencies,
+before executing native media tests. Installation now has a bounded 360-second
+command inside an eight-minute step; daemon/sink commands each have a 15-second
+deadline. Signed repositories and all browser/media checks remain required.
+
+Local results before the CI follow-up: API 1392 passed, 10 skipped; Worker/
+runtime/browser matrix 312 passed; FPS diagnostics 84 passed; #177 integration
+36 passed. Typecheck, release audit, public staging (297 files), and warm-cache
+upgrade passed. The skipped API cases need separate PostgreSQL/HTTP, converter,
+Linux or nginx environments; they are not counted as passed tests. Hosted
+PostgreSQL/migration/ingest and API/security checks passed on the initial commit.
 
 Reproduce the benchmark from a private licensed reference cache and a frozen
 develop snapshot (including `apps/shared/`), outside the webroot:

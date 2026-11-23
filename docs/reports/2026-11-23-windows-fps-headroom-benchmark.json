@@ -4,6 +4,7 @@
   "windowsMeasured": false,
   "baselineSnapshotOf": "51c3c3709876dc73473f46a5685989a0b7344b65",
   "limitations": [
+    "These initial experiments predate the retained GPU face-confidence copy added during CI follow-up; not final implementation performance evidence.",
     "All measurements on Apple M4 Pro/macOS, not affected Windows hardware.",
     "No scientific accuracy or physical-camera validation.",
     "No demonstrated before/after throughput improvement on this host.",
@@ -4402,5 +4403,7 @@
       "completedAt": "2026-11-23T13:50:06.960Z",
       "complete": true
     }
-  ]
+  ],
+  "sourceRevision": "2ccef46",
+  "finalImplementationMeasured": false
 }

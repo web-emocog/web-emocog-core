@@ -1,5 +1,17 @@
 import { test, expect } from '@playwright/test';
 
+test('test server supplies JavaScript and WASM MIME types before loading the participant graph', async ({ request }) => {
+  for (const [file, type] of [
+    ['/apps/participant-web/js/session-runtime/frame-latency.mjs', 'text/javascript'],
+    ['/apps/participant-web/js/web-page/state.js', 'text/javascript'],
+    ['/apps/participant-web/js/vendor/mediapipe/wasm/vision_wasm_internal.wasm', 'application/wasm']
+  ]) {
+    const response = await request.head(file);
+    expect(response.status()).toBe(200);
+    expect(response.headers()['content-type']).toBe(type);
+  }
+});
+
 test('transferred PCM is not copied again and a stalled audio queue stays bounded without requesting a microphone', async ({ page }) => {
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async () => {
