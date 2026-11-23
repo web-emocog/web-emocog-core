@@ -7,15 +7,21 @@ Evidence received 2026-11-23; follow-up verification 2026-11-24.
 The two Windows exports supplied on 2026-11-23 contain original
 `pendingFinalUpload.payload` objects. Validating these objects, without
 rebuilding or removing any fields, reproduces HTTP 422 against the current
-main contract (`1c1e571`). This does not require a long protocol or a large
+main contract (`6a9f73e`, after the merge of #183). This does not require a long protocol or a large
 request. The rejected event is `calibration_viewport_changed`, whose existing
 producer adds a boolean `targeted` field not declared in the closed API schema.
 
 | Retained packet | Wire size, bytes | Main validation failures | Patched validation failures |
 | --- | ---: | --- | ---: |
-| Windows, illuminated condition | 359485 | `events[16].targeted`, `qcSummary.continuity` | 0 |
+| Windows, illuminated condition | 359485 | `events[16].targeted` | 0 |
 | Windows, natural-light condition | 380114 | `events[16].targeted` | 0 |
 | Previously supplied Safari export | 1217381 | 50 `events[].stimulusName` occurrences | 0 |
+
+The older main snapshot `1c1e571` was also tested: it additionally rejects
+`qcSummary.continuity` in the illuminated-condition packet. That specific gap
+is already covered by #177/#183 in current main and develop. The current-main
+validator was checked from a fresh git-archive snapshot, not the stale local
+main tracking ref. Main and develop have identical source trees at this check.
 
 The previous Safari packet contains photodiode events with a nullable stimulus
 label copied from the existing task context. It is NOT the session shown in
@@ -36,7 +42,7 @@ tests use newly created synthetic sessions in an isolated disposable database.
 - Matching public event declarations and TypeScript types.
 - Main-compatible typed `qcSummary.continuity`: fixed `qc_continuity.v1`, integer
   segment count in [1, 1000000], boolean history completeness, no unknown fields.
-  Develop already contains the identical schema from #177; there is no duplicate
+  Current main and develop already contain the identical schema from #177; there is no duplicate
   or changed continuity definition in the develop diff.
 - Seven focused tests and an expanded real HTTP/PostgreSQL release-path test.
 
@@ -73,7 +79,7 @@ problems. No QC thresholds, models, protocol duration or measured data changed.
 
 ## Verification
 
-Initial main-based verification:
+Initial historical-main (`1c1e571`) verification:
 
 - Full API suite: 1259 passed, 10 skipped, no failures (before the additional
   public-schema consistency assertion, subsequently checked in the focused suite).
