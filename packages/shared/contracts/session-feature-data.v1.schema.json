@@ -1728,6 +1728,16 @@
               "not_inferred",
               null
             ]
+          },
+          "targeted": {
+            "type": "boolean"
+          },
+          "stimulusName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
           }
         },
         "additionalProperties": false
@@ -4079,6 +4089,28 @@
         },
         "protocolQc": {
           "$ref": "#/$defs/protocolCheck"
+        },
+        "continuity": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": "qc_continuity.v1"
+            },
+            "segmentCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "historyComplete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "segmentCount",
+            "historyComplete"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -89,8 +89,17 @@ test('release path: admission, interrupted delivery, finish replay, scoped expor
   plan.actual.push({ ...make(2, 2), status: 'interrupted', deviations: ['page_reloaded'] });
   const row = (sequence, attempt, rt, valid) => ({ trialId: 't1', blockId: 'rt', stimulusId: 'std_simple_black_square',
     presentationId: `p-${sequence}`, attempt, rt, response: 'Space', correct: true, qualityValid: valid, qualityIssueCodes: valid ? [] : ['fps_low'] });
+  const retainedEvents = [
+    { type: 'calibration_viewport_changed', targeted: true, phase: 'calibration' },
+    { type: 'photodiode_marker_request', stimulusName: null, phase: 'task' },
+    { type: 'photodiode_marker', stimulusName: 'Synthetic black square', phase: 'task' },
+  ].map((details, index) => ({ schemaVersion: 'session_event.v1', eventId: `legacy-${index}`,
+    sessionId, category: 'technical', severity: 'info', timestamp: 2000 + index,
+    tRelMs: index, ...details }));
+  const continuity = { schemaVersion: 'qc_continuity.v1', segmentCount: 2, historyComplete: true };
   const payload = (sequence, complete, results) => ({ ...buildAggregatesPayload({
-    ids: { session: sessionId, invitationCode: invite.code, participant: 'synthetic-a' }, events: [], startTime: 2000,
+    ids: { session: sessionId, invitationCode: invite.code, participant: 'synthetic-a' }, events: retainedEvents, startTime: 2000,
+    qcSummary: { continuity, overallPass: false, analysisFps: 19.25, cameraFps: 30 },
     experimentMeta: { presentationPlan: plan }, cognitiveResults: results,
     lifecycle: { schemaVersion: 'session_lifecycle.v1', state: complete ? 'completed' : 'running', status: complete ? 'completed' : 'in_progress',
       ...(complete ? { finishAttemptId: `finish-${stamp}`, completedAt: Date.now() } : {}) }
@@ -108,6 +117,10 @@ test('release path: admission, interrupted delivery, finish replay, scoped expor
   for (const events of [[answer('undeclared')], [answer('yes', 'different-survey')], [answer(), answer()]]) {
     await request('/ingest', 422, { token: admission.token, body: { ...checkpoint, events } });
   }
+  for (const details of [{ targeted: 'true' }, { stimulusName: {} }, { unknownLegacyField: true }]) {
+    await request('/ingest', 422, { token: admission.token,
+      body: { ...checkpoint, events: [{ ...retainedEvents[0], ...details }] } });
+  }
   assert.equal((await pool.query('SELECT 1 FROM session_features WHERE session_id=$1', [dbSession])).rowCount, 0);
   await request('/ingest', 200, { token: admission.token, body: checkpoint });
   await stop();
@@ -115,9 +128,29 @@ test('release path: admission, interrupted delivery, finish replay, scoped expor
   plan.actual.push({ ...make(3, 3), status: 'completed', qualityValid: true });
   const final = payload(2, true, [row(1, 1, 100, false), row(3, 3, 300, true)]);
   final.events.push(answer());
-  await request('/ingest', 200, { token: admission.token, body: final });
+  const wire = JSON.stringify(final);
+  const previousStorage = global.sessionStorage;
+  const cacheKey = `wecog_ingest_token:${sessionId}:${invite.code}`;
+  const tokenCache = new Map([[cacheKey, 'expired-synthetic-token']]);
+  global.sessionStorage = { getItem: key => tokenCache.get(key) || null,
+    setItem: (key, value) => tokenCache.set(key, value), removeItem: key => tokenCache.delete(key) };
+  try {
+    const { sendSessionFeature } = await import('../../participant-web/js/session-runtime/ingest-transport.mjs');
+    const result = await sendSessionFeature(final, { apiBase: base, retries: 2, backoffMs: 0,
+      idempotencyKey: final.lifecycle.finishAttemptId });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(JSON.stringify(final), wire, 'token renewal must not rewrite the retained packet');
+  } finally {
+    if (previousStorage === undefined) delete global.sessionStorage;
+    else global.sessionStorage = previousStorage;
+  }
   assert.equal((await request('/ingest', 200, { token: admission.token, body: final })).data.idempotent, true);
   assert.equal((await pool.query('SELECT * FROM session_features WHERE session_id=$1', [dbSession])).rowCount, 1);
+  const persisted = (await pool.query('SELECT payload FROM session_features WHERE session_id=$1', [dbSession])).rows[0].payload;
+  assert.deepEqual(persisted.events, final.events);
+  assert.deepEqual(persisted.qcSummary.continuity, continuity);
+  assert.equal(persisted.qcSummary.analysisFps, 19.25);
+  assert.equal(persisted.qcSummary.overallPass, false);
   const exportPath = `/export/reproducibility?project_id=${owner.project}&protocol_id=${protocol.id}&session_db_id=${dbSession}`;
   for (const version of ['publication:2147483648', 'invitation:9999999999']) {
     await request(exportPath + '&protocol_version=' + version, 400, { token: owner.token });
