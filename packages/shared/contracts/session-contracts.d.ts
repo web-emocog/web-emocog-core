@@ -41,7 +41,15 @@ export interface SessionEventV1 {
   endTimestamp?: number | null;
   sampleCoverage?: 'not_inferred' | null;
   modules?: SessionModule[] | Partial<Record<SessionModule, string | null>> | null;
+  targeted?: boolean;
+  stimulusName?: string | null;
   [key: string]: unknown;
+}
+
+export interface QcContinuityV1 {
+  schemaVersion: 'qc_continuity.v1';
+  segmentCount: number;
+  historyComplete: boolean;
 }
 
 export interface SessionLifecycleV1 {
@@ -237,7 +245,7 @@ export interface SessionFeatureV1 {
   }) | null;
   precheck?: Record<string, unknown> | null;
   qcSummary?: (Record<string, unknown> & {
-    continuity?: { schemaVersion: 'qc_continuity.v1'; segmentCount: number; historyComplete: boolean };
+    continuity?: QcContinuityV1;
     fpsDiagnostics?: (Record<string, unknown> & { analysisSession?: AnalysisCadenceSummary }) | null;
   }) | null;
   attentionMetrics?: Record<string, unknown> | null;

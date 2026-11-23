@@ -1728,6 +1728,16 @@
               "not_inferred",
               null
             ]
+          },
+          "targeted": {
+            "type": "boolean"
+          },
+          "stimulusName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
           }
         },
         "additionalProperties": false

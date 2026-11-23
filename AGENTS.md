@@ -974,6 +974,12 @@ Contract change procedure:
 5. Проверить researcher analytics/export consumer.
 6. Обновить `docs/api/` и mini-report.
 
+Совместимость сохранённых итоговых пакетов включает boolean `events[].targeted`,
+nullable label `events[].stimulusName` (до 2000 символов) и типизированный
+`qcSummary.continuity` версии `qc_continuity.v1`. Это поля существующих producers,
+не разрешение произвольных event/QC properties. Серверная проверка не удаляет
+эти поля, не пересчитывает измерения и не превращает низкий FPS в успешный QC.
+
 Сейчас top-level SessionFeature строго ограничен, но ряд summary/event объектов
 намеренно допускает расширяемое внутреннее содержимое. Это риск contract drift:
 новые аналитические поля должны получать явную схему, лимиты и тесты, а не
