@@ -661,6 +661,7 @@ function validateSessionFeaturePayload(payload, customLimits = {}) {
     errors.push(...require('./physiology-intervals').validatePhysiologyIntervals(payload.physiology_intervals));
   }
   errors.push(...validateSessionDataSchema(payload));
+  errors.push(...require('./passive-valid-time').validatePassiveValidTime(payload));
   return errors.slice(0, 100);
 }
 

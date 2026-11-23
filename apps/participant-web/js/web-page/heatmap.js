@@ -244,14 +244,27 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
     const perBlockMap = new Map(saved ? structuredClone(saved.perBlock) : []);
     if (perStimulusMap.size > 2000 || perBlockMap.size > 200) throw new Error('Heatmap checkpoint exceeds context limits');
     const sessionAcc = saved ? structuredClone(saved.session) : createAccumulator(width, height);
+    const continuityBreaks = new WeakSet();
+    let observedDeltasOnly = false;
+    const observationDt = (acc, t) => {
+        if (observedDeltasOnly && acc.lastT === null) { continuityBreaks.delete(acc); acc.lastT = t; return 0; }
+        if (!continuityBreaks.has(acc)) return nextDtMs(acc, t);
+        continuityBreaks.delete(acc); acc.lastT = t;
+        return 0;
+    };
     const summary = saved ? { ...saved.summary } : { sampleCountTotal: 0, sampleCountValid: 0, lowConfidenceCount: 0,
         offScreenCount: 0, confidenceSum: 0, confidenceCount: 0, firstT: null, lastT: null, ignoredTimestamps: 0, omittedPresentations: 0 };
+    const activeAccumulators = new Set([sessionAcc]);
+    if (saved) for (const entry of [...perStimulusMap.values(), ...perBlockMap.values()]) {
+        if (entry.acc.lastT === summary.lastT) activeAccumulators.add(entry.acc);
+    }
 
     function add(sample) {
         const analysisX = Number.isFinite(sample?.correctedX) ? sample.correctedX : sample?.x;
         const analysisY = Number.isFinite(sample?.correctedY) ? sample.correctedY : sample?.y;
         const t = sample?.t;
         if (!Number.isFinite(t) || (summary.lastT !== null && t <= summary.lastT)) { summary.ignoredTimestamps++; return; }
+        activeAccumulators.clear(); activeAccumulators.add(sessionAcc);
         summary.sampleCountTotal++;
         if (summary.firstT === null) summary.firstT = t;
         summary.lastT = t;
@@ -270,7 +283,7 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
         // Phase 3, шаг 1: trust honest onScreen flag from gaze-tracker.
         const onScreen = sample?.onScreen === true;
 
-        const sessionDt = nextDtMs(sessionAcc, t);
+        const sessionDt = observationDt(sessionAcc, t);
         sessionAcc.totalSamples++;
         updateTimeRange(sessionAcc, t);
         if (onScreen) sessionAcc.onScreenSamples++;
@@ -317,7 +330,8 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
                 });
             }
             const stimulusRef = perStimulusMap.get(perStimulusKey);
-            const stimDt = nextDtMs(stimulusRef.acc, t);
+            activeAccumulators.add(stimulusRef.acc);
+            const stimDt = observationDt(stimulusRef.acc, t);
             stimulusRef.acc.totalSamples++;
             updateTimeRange(stimulusRef.acc, t);
             if (!onScreen) stimulusRef.acc.offScreenSamples++;
@@ -369,7 +383,8 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
                 });
             }
             const blockRef = perBlockMap.get(blockId);
-            const blockDt = nextDtMs(blockRef.acc, t);
+            activeAccumulators.add(blockRef.acc);
+            const blockDt = observationDt(blockRef.acc, t);
             blockRef.acc.totalSamples++;
             updateTimeRange(blockRef.acc, t);
             if (onScreen) blockRef.acc.onScreenSamples++;
@@ -412,7 +427,23 @@ export function createHeatmapAccumulator(options = {}, saved = null) {
         return structuredClone({ schemaVersion: 'heatmap_accumulator.v1', options: { ...options, gridWidth: width, gridHeight: height,
             screenWidth: fallbackW, screenHeight: fallbackH }, perStimulus: [...perStimulusMap], perBlock: [...perBlockMap], session: sessionAcc, summary });
     }
-    return { add, finalize, snapshot, setValidationRmsPx, lastTimestamp: () => summary.lastT };
+    function breakContinuity() {
+        observedDeltasOnly = true;
+        // Retain completed fixations, but never connect two accepted stretches
+        // across an excluded QC interval, including gaps shorter than 100 ms.
+        for (const acc of activeAccumulators) {
+            const pending = fixationResult(acc.fixation);
+            if (pending) {
+                acc.fixationCount++;
+                addPointToBins(acc.stimulusBins, pending.x, pending.y, acc.fixation.qualityWeightedMs);
+                if (acc.fixations.length < 500) acc.fixations.push(pending);
+            }
+            acc.fixation = null;
+            acc.lastT = null;
+            continuityBreaks.add(acc);
+        }
+    }
+    return { add, finalize, snapshot, setValidationRmsPx, breakContinuity, lastTimestamp: () => summary.lastT };
 }
 
 export function buildHeatmaps(samples, options = {}) {

@@ -5,6 +5,10 @@
 })(typeof globalThis === 'object' ? globalThis : this, function () {
   'use strict';
   const finite = value => typeof value === 'number' && Number.isFinite(value);
+  function hasMixedMethods(versions) {
+    const methods = new Set(Array.from(versions, version => typeof version === 'string' && version ? version : 'legacy_summary'));
+    return methods.size > 1 || [...methods].some(version => /(?:^|[._:-])mixed(?:$|[._:-])/.test(version));
+  }
   const definitions = [
     ['physiology.bpm_mean', 'ЧСС: средняя оценка', 'Heart rate: mean estimate', 'bpm', 'rppg'],
     ['physiology.respiration_mean', 'Дыхание: средняя частота', 'Respiration: mean rate', 'breaths/min', 'respiration'],
@@ -55,14 +59,16 @@
       || (id === 'physiology.respiration_mean' && (value < 6 || value > 24))
       || (id.startsWith('face.') && (value < -1 || value > 1))
       || ((id.startsWith('body.') || id === 'blink.count' || id === 'blink.rate_per_min') && value < 0));
-    return { value: invalidRange ? null : value, n,
-      status: value != null && !invalidRange ? 'computed' : 'no_data',
-      reason: incompleteEyes ? 'signal_history_incomplete' : shortWindow ? 'insufficient_window_duration' : invalidRange ? 'signal_summary_invalid'
+    const methodVersion = id === 'physiology.respiration_mean' ? respiration.methodVersion || 'legacy_summary'
+      : id === 'physiology.bpm_mean' ? bpm.methodVersion || 'legacy_summary' : 'passive-summary.v1';
+    const mixed = id.startsWith('physiology.') && hasMixedMethods([methodVersion]);
+    return { value: invalidRange || mixed ? null : value, n,
+      status: value != null && !invalidRange && !mixed ? 'computed' : 'no_data',
+      reason: mixed ? 'physiology_methods_mixed' : incompleteEyes ? 'signal_history_incomplete' : shortWindow ? 'insufficient_window_duration' : invalidRange ? 'signal_summary_invalid'
         : value == null ? 'signal_data_missing' : null,
       source: field, scope: id === 'body.velocity_p95' ? 'retained_samples' : 'whole_measured_session',
-      methodVersion: id === 'physiology.respiration_mean' ? respiration.methodVersion || 'legacy_summary'
-        : id === 'physiology.bpm_mean' ? bpm.methodVersion || 'legacy_summary' : 'passive-summary.v1',
+      methodVersion,
       countsKnown: n !== null };
   }
-  return { definitions, measurement };
+  return { definitions, measurement, hasMixedMethods };
 });

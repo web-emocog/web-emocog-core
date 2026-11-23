@@ -546,7 +546,7 @@ for (const kind of ['face', 'segment'] as const) for (const mode of ['throw', 'r
 
 test('optional QC diagnostics preserve exact counters and summaries with disabled, enabled and throwing sinks', async ({ page }) => {
   const output = await page.evaluate(async () => {
-    const modulePath = '/apps/participant-web/js/qc-metrics/index.js?v=20261110-integration1';
+    const modulePath = '/apps/participant-web/js/qc-metrics/index.js?v=20261122-validtime1';
     const { QCMetrics } = await import(modulePath);
     const originalNow = Object.getOwnPropertyDescriptor(performance, 'now');
     const originalDateNow = Date.now, originalDebug = (window as any).WECOG_DEBUG;

@@ -182,7 +182,7 @@
       )) : source.events };
     }
     const moduleUrl = new URL(
-      '../participant-web/js/unified-aggregates-new.js?v=20261112-emotion2',
+      '../participant-web/js/unified-aggregates-new.js?v=20261122-validtime1',
       global.location.href
     );
     const aggregates = await import(moduleUrl.href);
@@ -389,6 +389,24 @@
       presentation_attempt_ambiguous: ['Старые данные не позволяют разделить попытки; исключено из итогового расчёта', 'Legacy data cannot separate attempts; excluded from default statistics'],
       trial_result_missing: ['Попытка не завершена; исключена из итогового расчёта', 'Attempt is incomplete; excluded from default statistics'],
       page_reloaded: ['Попытка прервана перезагрузкой страницы', 'Attempt was interrupted by a page reload'],
+      valid_time_limit_reached: ['Недостаточно принятого времени до предела показа', 'Insufficient accepted time before the presentation limit'],
+      valid_time_incomplete: ['Проба завершена до набора принятого времени', 'Trial ended before the accepted-time target was met'],
+      valid_time_deadline: ['Время после предельной длительности исключено', 'Time after the presentation deadline was excluded'],
+      valid_time_invalid: ['Некорректное разбиение времени показа', 'Invalid presentation time partition'],
+      valid_time_alignment_missing: ['Нельзя сопоставить время фиксаций с началом показа', 'Fixation time cannot be aligned to presentation onset'],
+      valid_time_gaze_missing: ['В принятых интервалах нет пригодных фиксаций', 'No usable fixations in accepted intervals'],
+      valid_time_fixation_invalid: ['Время фиксаций не согласуется с показом', 'Fixation timing is inconsistent with the presentation'],
+      valid_time_segment_too_short: ['Непрерывный пригодный участок короче секунды', 'Continuous usable interval is shorter than one second'],
+      valid_time_segment_limit: ['Слишком много разрывов измерения', 'Too many interruptions in measurement'],
+      measurement_gap: ['Измерения перестали поступать', 'Measurements stopped arriving'],
+      measurement_unobserved: ['Участок без подтверждённых измерений', 'Interval without confirmed measurements'],
+      qc_unobserved: ['Качество ещё не подтверждено', 'Quality has not been confirmed yet'],
+      face_visibility_unavailable: ['Нет свежего подтверждения видимости областей лица', 'No fresh confirmation of facial-region visibility'],
+      face_missing: ['Лицо не видно', 'Face not visible'],
+      head_pose: ['Положение головы мешает измерению', 'Head position interferes with measurement'],
+      face_occluded: ['Часть лица закрыта', 'Part of the face is covered'],
+      low_light: ['Неподходящее освещение', 'Unsuitable lighting'],
+      low_fps: ['Камера передавала слишком мало кадров', 'Camera frame rate was too low'],
       gaze_presentation_missing: ['Для этого показа нет данных взгляда', 'Gaze data is missing for this presentation'],
       low_signal_confidence: ['Низкая надёжность сигнала', 'Low signal confidence'],
       response_before_rt_min: ['Ответ раньше минимально допустимого RT', 'Response before minimum RT'],
@@ -399,12 +417,14 @@
       missing_samples: ['Нет необходимых сэмплов', 'Required samples are missing'],
       signal_data_missing: ['Нет опубликованных измерений этого канала', 'No published measurements for this channel'],
       signal_history_incomplete: ['История сигналов восстановлена не полностью; сводка скрыта', 'Signal history is incomplete after recovery; summary hidden'],
+      qc_history_incomplete: ['Часть истории качества до перезагрузки недоступна', 'Part of the quality history before reload is unavailable'],
       signal_summary_invalid: ['Некорректная сводка сигнала', 'Invalid signal summary'],
       insufficient_window_duration: ['Недостаточно данных для полного окна 60 секунд', 'Insufficient data for a full 60-second window'],
       session_summary_not_interval: ['Сводка относится ко всей сессии. Для неё снимите фильтр блока, стимула или условия; оконные данные смотрите в связанности.', 'This is a whole-session summary. Clear block, stimulus or condition filters; use Connectedness for trial windows.'],
       block_physiology_missing: ['Нет измерений в засчитанных попытках выбранного блока', 'No measurements in accepted attempts of the selected block'],
       summary_not_independent_validation: ['Сводка не является независимой проверкой точности канала', 'A summary is not independent channel-accuracy validation'],
       respiration_lighting_confound_unchecked: ['Влияние яркости стимулов на оценку дыхания не исключено', 'Stimulus-brightness interference with respiration has not been excluded'],
+      physiology_methods_mixed: ['Использованы разные методы измерения. Выберите сессии и интервалы одного метода; общая оценка не рассчитывается.', 'Different measurement methods were used. Select sessions and intervals using one method; no pooled estimate is computed.'],
       gaze_fixations_truncated: ['Карта накоплена за весь показ. Список фиксаций сокращён до 500 или из-за общего лимита размера отчёта; показатели AOI для этого показа недоступны.', 'The map covers the entire presentation. The fixation list is limited to 500 or shortened by the overall report size limit; AOI metrics for this presentation are unavailable.'],
       gaze_presentations_truncated: ['Сохранена только часть показов: достигнут лимит отчёта в 200 показов. Общая статистика взгляда сохранена; не используйте эту выборку как полную историю стимулов.', 'Only some presentations were retained: the 200-presentation report limit was reached. Overall gaze statistics are retained; do not treat this as the complete stimulus history.'],
       stimulus_versions_mixed: ['В этих сессиях показаны разные версии файла. Выберите сессии одной версии или откройте их тепловые карты отдельно.', 'These sessions used different file versions. Select sessions with one version or open their heatmaps separately.'],
@@ -828,6 +848,12 @@
     };
     const sessionData = state.summaryResponse && state.summaryResponse.data;
     (sessionData && sessionData.metrics || []).forEach(metric => append(metric, { sourceKind: 'session_summary' }));
+    (sessionData?.trialAttempts || []).forEach(attempt => append({
+      metricId: 'task.presentation_duration_ms', value: attempt.actualDurationMs, unit: 'ms',
+      status: attempt.actualDurationMs == null ? 'no_data' : 'computed',
+      reason: attempt.actualDurationMs == null ? 'presentation_timing_missing' : null,
+      observationDurationMs: attempt.actualDurationMs,
+    }, { ...attempt, sourceKind: 'task_attempt' }));
     const groupData = state.groupResponse && state.groupResponse.data;
     (groupData && groupData.metrics || []).forEach(metric => append(metric, { sourceKind: 'group_summary' }));
     const visualData = state.visualResponse && state.visualResponse.data;
@@ -835,6 +861,10 @@
       context.aoiRows || []
     ).forEach(row => (row.metrics || []).forEach(metric => append(metric, {
       sourceKind: 'session_aoi',
+      presentationId: context.presentationId, trialId: context.trialId, trialLabel: context.trialLabel,
+      attempt: context.attempt, attemptStatus: context.attemptStatus, qualityIssueCodes: context.qualityIssueCodes,
+      validTimePresent: context.validTimePresent, validTime: context.validTime,
+      actualDurationMs: context.actualDurationMs, validTimeReason: context.validTimeReason,
       aoiId: row.aoi && row.aoi.id || null,
       aoiName: row.aoi && row.aoi.name || null,
       aoiOrder: row.aoi && row.aoi.order == null ? null : row.aoi.order
@@ -923,7 +953,11 @@
       ['counts', ...base, '', '', '', 'computed', '', '', '', bundle.counts.participants, bundle.counts.sessions, bundle.counts.observations, '', JSON.stringify({ versions: bundle.snapshot.versions, queryEcho: bundle.snapshot.queryEcho, provenance: bundle.provenance })]
     ];
     (bundle.dataDictionary || []).forEach(item => rows.push(['dictionary', ...base, item.metricId, '', item.unit, 'not_applicable', '', '', '', '', '', '', JSON.stringify(item.label), JSON.stringify(item.description)]));
-    (bundle.longData || []).forEach(item => rows.push(['metric', ...base, item.metricId, item.value, item.unit, item.status, item.reason, item.numerator, item.denominator, item.nParticipants, '', item.nObservations, item.aoiName || '', JSON.stringify({ statistic: item.statistic, sourceKind: item.sourceKind, scope: item.scope, algorithm: item.algorithm, observationDurationMs: item.observationDurationMs, aoiId: item.aoiId, aoiOrder: item.aoiOrder })]));
+    (bundle.longData || []).forEach(item => rows.push(['metric', ...base, item.metricId, item.value, item.unit, item.status, item.reason, item.numerator, item.denominator, item.nParticipants, '', item.nObservations, item.aoiName || '', JSON.stringify({ statistic: item.statistic, sourceKind: item.sourceKind, scope: item.scope, algorithm: item.algorithm, observationDurationMs: item.observationDurationMs, aoiId: item.aoiId, aoiOrder: item.aoiOrder,
+      presentationId: item.presentationId, trialId: item.trialId, trialLabel: item.trialLabel,
+      attempt: item.attempt, attemptStatus: item.attemptStatus, qualityIssueCodes: item.qualityIssueCodes,
+      validTimePresent: item.validTimePresent, validTime: item.validTime,
+      actualDurationMs: item.actualDurationMs, validTimeReason: item.validTimeReason })]));
     return [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
   }
 
@@ -2323,6 +2357,34 @@
     </section>`;
   }
 
+  function validTimeDetailsHtml(item) {
+    if (item?.validTimePresent !== true) return '';
+    const value = item.validTime;
+    if (!value || ![value.targetMs, value.acceptedMs, value.actualMs, value.maxDurationMs].every(Number.isSafeInteger)) {
+      return `<p data-valid-time="invalid">${escapeHtml(reasonLabel('valid_time_invalid'))}</p>`;
+    }
+    const seconds = ms => `${formatMetricNumber(ms / 1000, 2)} ${tr('с', 's')}`;
+    const text = [
+      `${tr('Целевое время', 'Target time')}: ${seconds(value.targetMs)}`,
+      `${tr('Принятое время', 'Accepted time')}: ${seconds(value.acceptedMs)}`,
+      `${tr('Фактическая длительность', 'Actual duration')}: ${seconds(value.actualMs)}`,
+      `${tr('Предельная длительность', 'Duration limit')}: ${seconds(value.maxDurationMs)}`,
+      value.extended ? tr('Показ продлён', 'Presentation extended') : tr('Без продления', 'Not extended'),
+      value.limitReached ? tr('Недостаточно принятого времени: предел достигнут', 'Accepted-time target unmet: limit reached') : '',
+    ].filter(Boolean).join(' · ');
+    const exclusions = value.excludedSegments || [];
+    const details = exclusions.length ? `<details><summary>${tr('Исключённые участки', 'Excluded intervals')}: ${escapeHtml(exclusions.length)}</summary><ul>${exclusions.slice(0, 12).map(segment => `<li>${escapeHtml(seconds(segment.startMs))} – ${escapeHtml(seconds(segment.endMs))}: ${escapeHtml((segment.reasons || []).map(reasonLabel).join('; '))}</li>`).join('')}</ul>${exclusions.length > 12 ? `<p>${tr('Все участки доступны в выгрузке.', 'All intervals are available in the export.')}</p>` : ''}</details>` : '';
+    return `<p data-valid-time="present" style="font-size:11px;overflow-wrap:anywhere;">${escapeHtml(text)}</p>${details}`;
+  }
+
+  function validTimeTrialsHtml(data) {
+    const attempts = (Array.isArray(data?.trialAttempts) ? data.trialAttempts : []).filter(item => item.validTimePresent === true);
+    if (!attempts.length) return '';
+    return `<section data-valid-time-trials style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><h3>${tr('Время пассивных проб', 'Passive trial timing')}</h3>
+      <p>${tr('Принятое время не равно длительности доступных фиксаций. Полное разбиение интервалов сохранено в выгрузке.', 'Accepted time is not the duration of available fixations. The full interval partition is retained in the export.')}</p>
+      ${attempts.map(item => `<article><strong>${escapeHtml(attemptLabel(item))} · ${escapeHtml(attemptStatusLabel(item))}</strong>${validTimeDetailsHtml(item)}</article>`).join('')}</section>`;
+  }
+
   function visualContextHtml(context, state, index, names) {
     const rows = Array.isArray(context?.aoiRows) ? context.aoiRows : [];
     const heatmap = context?.heatmap || {};
@@ -2335,6 +2397,7 @@
       return `<article class="ab-heatmap-empty" data-attempt-status="${escapeHtml(context.attemptStatus || 'unknown')}">
         <strong>${escapeHtml(names.stimulus(stimulus.id, stimulus.name))}</strong>
         <p>${escapeHtml([attemptLabel(context), attemptStatusLabel(context), explanation].filter(Boolean).join(' · '))}</p>
+        ${validTimeDetailsHtml(context)}
       </article>`;
     }
     const ratio = stimulusAspectRatio(stimulus);
@@ -2342,6 +2405,7 @@
     return `<article style="padding:14px 0;border-top:${index ? '1px solid var(--stroke)' : '0'};">
       ${context.presentationId ? `<p data-attempt-status="${escapeHtml(context.attemptStatus || 'unknown')}" style="font-size:11px;overflow-wrap:anywhere;color:${context.includedInDefault === false ? 'var(--bad)' : 'var(--muted)'};">${escapeHtml(attemptLabel(context))} · ${escapeHtml(attemptStatusLabel(context))}${context.qualityIssueCodes?.length ? ` · ${escapeHtml(context.qualityIssueCodes.map(reasonLabel).join('; '))}` : ''}</p>` : ''}
       ${heatmap.reason ? `<p role="status" style="color:var(--warn);font-size:11px;">${escapeHtml(reasonLabel(heatmap.reason))}</p>` : ''}
+      ${validTimeDetailsHtml(context)}
       <header class="ab-heatmap-heading"><div><h3>${escapeHtml(names.stimulus(stimulus.id, stimulus.name))}</h3>
         <p>${escapeHtml(names.block(context.blockId))}</p></div>
         <span>${context.status === 'computed' ? tr('Есть фиксации','Fixations available') : tr('Нет данных взгляда','No gaze data')}</span></header>
@@ -2432,6 +2496,7 @@
     if (item.attemptStatus === 'accepted') return tr('Засчитана','Accepted');
     if (item.attemptStatus === 'ambiguous') return reasonLabel('presentation_attempt_ambiguous');
     if (item.attemptStatus === 'incomplete') return reasonLabel('trial_result_missing');
+    if (item.attemptStatus === 'interrupted') return tr('Прервана', 'Interrupted');
     return tr('Статус попытки не сохранён (старые данные)','Attempt status was not recorded (legacy data)');
   }
 
@@ -2483,8 +2548,8 @@
         ${channel.count > 0 ? `<br><small data-interval-method>${tr('Метод','Method')}: ${escapeHtml(channel.methodVersion || tr('не записан','not recorded'))}</small>` : ''}</td>`;
     };
     const statuses = {
-      accepted: tr('Засчитан','Accepted'), repeat_required: tr('Потребовался повтор','Repeat required'),
-      interrupted: tr('Прерван','Interrupted'), in_progress: tr('В процессе','In progress')
+      accepted: tr('Засчитана','Accepted'), repeat_required: tr('Потребовался повтор','Repeat required'),
+      interrupted: tr('Прервана','Interrupted'), in_progress: tr('В процессе','In progress')
     };
     const table = (rows, label, block) => {
       if (!rows.length) return '';
@@ -2666,8 +2731,9 @@
       ${sessionVisualAnalyticsHtml(state)}
       ${reportDisclosure(tr('Все показатели задачи', 'All task metrics'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:10px;">${tr('Выполнение задачи','Task performance')}</div>${taskMetrics.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;">${taskMetrics.map(metricCardHtml).join('')}</div>` : `<div style="font-size:11px;color:var(--muted);">${tr('Метрики задачи не настроены для этого протокола.','Task metrics are not configured for this protocol.')}</div>`}</section>`)}
       ${reportDisclosure(tr('Физиология и другие сигналы', 'Physiology and other signals'), passiveAnalyticsHtml(data) + physiologyIntervalsHtml(data, state.filterOptions?.blocks))}
+      ${validTimeTrialsHtml(data)}
       ${reportDisclosure(tr('Аудиоизмерения', 'Audio measurements'), audioAnalyticsHtml(data.audio))}
-      ${reportDisclosure(tr('Пробы и причины исключений', 'Trials and exclusion reasons'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${validCount === null ? '—' : escapeHtml(validCount)}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${excludedCount === null ? exclusions.length : escapeHtml(excludedCount)}</span></div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>`)}
+      ${reportDisclosure(tr('Пробы и причины исключений', 'Trials and exclusion reasons'), `<section style="padding:15px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:13px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Пробы и исключения','Trials and exclusions')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:7px 10px;border-radius:9px;background:rgba(16,185,129,.09);color:var(--good);font-size:10px;">${tr('Валидные','Valid')}: ${validCount === null ? '—' : escapeHtml(validCount)}</span><span style="padding:7px 10px;border-radius:9px;background:rgba(239,68,68,.08);color:var(--bad);font-size:10px;">${tr('Исключённые','Excluded')}: ${excludedCount === null ? exclusions.length : escapeHtml(excludedCount)}</span>${data.trialCounts?.interrupted ? `<span data-interrupted-count style="padding:7px 10px;font-size:10px;">${tr('Прерванные','Interrupted')}: ${escapeHtml(data.trialCounts.interrupted)}</span>` : ''}</div>${exclusions.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--text);">${tr('Показать причины исключения','Show exclusion reasons')} (${exclusions.length})</summary><div style="margin-top:7px;border:1px solid var(--stroke);border-radius:10px;overflow:hidden;"><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.55fr);gap:14px;padding:8px 12px;background:rgba(100,116,139,.05);font-size:8px;font-weight:750;color:var(--muted);text-transform:uppercase;"><span>${tr('Проба','Trial')}</span><span>${tr('Почему исключена','Why excluded')}</span><span>${tr('Канал','Channel')}</span></div>${exclusionRowsHtml(exclusions)}</div></details>` : `<div style="font-size:10px;color:var(--muted);margin-top:8px;">${tr('Исключений нет','No exclusions')}</div>`}</section>`)}
       ${reportDisclosure(tr('Качество измерений', 'Measurement quality'), `
         ${measurementStatusHtml(data, state)}
         <section style="padding:14px 18px;border-bottom:1px solid var(--stroke);"><div style="font-size:12px;font-weight:750;color:var(--text);margin-bottom:9px;">${tr('Качество каналов','Channel quality')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${channels.map(channel => { const tone = qcTone(channel.status); const reasons = (channel.reasons || []).map(reasonLabel); return `<article style="padding:10px 11px;border-radius:11px;background:${tone.bg};color:${tone.color};"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:750;"><span>${escapeHtml(channelLabel(channel.channel))}</span><span>${escapeHtml(statusLabel(channel.status))}</span></div><div style="font-size:9px;margin-top:6px;">${tr('Валидность','Validity')}: ${channel.validFraction == null ? '—' : Math.round(channel.validFraction * 100) + '%'}${channel.signalConfidence == null ? '' : ` · ${tr('надёжность', 'confidence')} ${Math.round(channel.signalConfidence * 100)}%`}</div>${reasons.length ? `<div style="font-size:9px;margin-top:5px;">${escapeHtml(reasons.join('; '))}</div>` : ''}</article>`; }).join('')}</div></section>
@@ -2776,6 +2842,7 @@
       repeated_measures: ['Повторные измерения', 'Repeated measures'],
       channel_compatibility: ['Совместимость QC-каналов', 'QC channel compatibility'],
       version_compatibility: ['Совместимость версий', 'Version compatibility'],
+      physiology_method_compatibility: ['Совместимость методов физиологии', 'Physiology method compatibility'],
       technical_confounding: ['Техническое смешение', 'Technical confounding']
     };
     const pair = labels[id];

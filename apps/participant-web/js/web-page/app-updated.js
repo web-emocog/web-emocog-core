@@ -16,16 +16,16 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData
-} from './ui-updated.js?v=20261114-assigned1';
+} from './ui-updated.js?v=20261122-validtime1';
 
-import { startPreCheck } from './precheck-updated.js?v=20261114-assigned1';
+import { startPreCheck } from './precheck-updated.js?v=20261122-validtime1';
 
 import { 
     startCalibration, 
     finishSession,
     stopParticipantTestLoops,
     stopSessionMediaResources
-} from './tests-updated.js?v=20261114-assigned1';
+} from './tests-updated.js?v=20261122-validtime1';
 
 import {
     deriveInvitationHubMetrics,
@@ -34,7 +34,7 @@ import {
 } from './protocol-invite-utils.js?v=20260915-1';
 
 import { init as initQcPauseOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
-import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261114-assigned1';
+import { initSessionRuntime, getSessionRuntime } from '../session-runtime/index.js?v=20261122-validtime1';
 import {
     getContentViewport,
     contentToLayoutViewport
@@ -44,7 +44,7 @@ import { createInvitationRequestPool, pinnedInvitationContentUrl } from '../sess
 import { fetchMediaWithDeadline } from '../session-runtime/media-preload.mjs?v=20261110-integration1';
 import { createBlockMediaPreparation, invitationMediaDescriptor, invitationMediaScope } from '../session-runtime/block-media-preparation.mjs?v=20261110-integration1';
 import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
-import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261102-1';
+import { appendGazeHistory } from '../session-runtime/gaze-history.mjs?v=20261122-validtime1';
 import { mediaContentRect } from './stimulus-geometry.mjs?v=20261025-1';
 import { qcGazeSignal, QC_GAZE_SIGNAL_METHOD } from '../gaze-tracker/qc-signal.mjs';
 import {
@@ -65,7 +65,16 @@ function participantText(ru, en, es) {
     return en;
 }
 
-export function appendGazeSample(sample) {
+export function appendGazeSample(sample, captureMs = null) {
+    const validTime = state.runtime.validTimeTrial;
+    if (validTime && sample.presentationId === state.runtime.taskContext?.presentationId) {
+        validTime.deferGaze(sample, commitGazeSample, captureMs);
+        return;
+    }
+    commitGazeSample(sample);
+}
+
+function commitGazeSample(sample) {
     appendGazeHistory(state.sessionData, state.runtime, sample);
     state.sessionData.eyeTracking.push(sample);
     if (state.sessionData.eyeTracking.length > RETAINED_GAZE_HARD_CAP) {
@@ -212,7 +221,7 @@ export function handleGazeUpdate(gazeData) {
                 stimulusRect,
                 screenWidth: viewport.width,
                 screenHeight: viewport.height
-            });
+            }, gazeData.frameTimestamp);
         }
         
         return;
@@ -300,7 +309,7 @@ export function handleGazeUpdate(gazeData) {
             screenWidth,
             screenHeight
         };
-        appendGazeSample(eyeSample);
+        appendGazeSample(eyeSample, gazeData.frameTimestamp);
         if (d && d.enabled && !_eyeTrackingShapeLogged) {
             _eyeTrackingShapeLogged = true;
             dbg('gaze', 'eyeTracking:sampleShape', {
@@ -350,7 +359,9 @@ export function handleEyeSignalUpdate(signalData) {
 
     state.runtime.lastEyeSignal = sample;
     if (state.flags.isRecording) {
-        state.sessionData.eyeSignals.push(sample);
+        const tracker = state.runtime.validTimeTrial;
+        if (tracker) tracker.deferGaze(sample, accepted => state.sessionData.eyeSignals.push(accepted), sample.frameTimestamp);
+        else state.sessionData.eyeSignals.push(sample);
     }
 }
 

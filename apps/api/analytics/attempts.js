@@ -1,3 +1,5 @@
+const { validTimeMetadata, filterPresentation } = require('./valid-time');
+
 // Identity is session-local. Never infer an attempt from a suffix in a trial ID.
 const text = value => value == null ? null : String(value);
 const same = (a, b) => a != null && b != null && String(a) === String(b);
@@ -25,6 +27,10 @@ const reasonLabels = new Map([
     ['trial_result_missing', ['Попытка не завершена', 'Attempt is incomplete']],
     ['page_reloaded', ['Попытка прервана перезагрузкой страницы', 'Attempt was interrupted by a page reload']],
     ['quality_invalid', ['Не выполнено правило качества', 'Quality rule was not met']],
+    ['valid_time_limit_reached', ['Недостаточно принятого времени до предела показа', 'Insufficient accepted time before the presentation limit']],
+    ['valid_time_incomplete', ['Проба завершена до набора принятого времени', 'Trial ended before the accepted-time target was met']],
+    ['valid_time_invalid', ['Некорректное разбиение времени показа', 'Invalid presentation time partition']],
+    ['valid_time_deadline', ['Время после предельной длительности исключено', 'Time after the presentation deadline was excluded']],
 ]);
 function qualityReasons(values) {
   return values.map(code => { const pair = reasonLabels.get(code.toLowerCase());
@@ -42,11 +48,24 @@ function matchesTrialFilters(entry, query) {
 function trials(row, query) {
   return (Array.isArray(row.features_payload?.cognitiveResults) ? row.features_payload.cognitiveResults : [])
     .filter(result => result && typeof result === 'object' && !Array.isArray(result)
-      && matchesTrialFilters(result, query));
+      && matchesTrialFilters(result, query))
+    .map(result => validTimeMetadata(result).validTimeReason
+      ? { ...result, qualityValid: false, qualityIssueCodes: [...codes(result), 'valid_time_invalid'] } : result);
 }
 
 function presentationAttempts(row) {
   const results = trials(row);
+  const plan = row.features_payload?.presentation_plan ?? row.features_payload?.experimentMeta?.presentationPlan;
+  const actual = Array.isArray(plan?.actual) ? plan.actual : [];
+  const planById = new Map();
+  const planned = new Map((Array.isArray(plan?.blocks) ? plan.blocks : []).flatMap(block =>
+    (Array.isArray(block?.entries) ? block.entries : []).filter(entry => entry && typeof entry === 'object')
+      .map(entry => [entry.planItemId, entry])));
+  for (const entry of actual) {
+    if (entry?.presentationId == null) continue;
+    const key = text(entry.presentationId);
+    planById.set(key, planById.has(key) ? null : entry);
+  }
   const sequence = row.features_payload?.experimentMeta?.presentationSequence;
   const resultsTracked = Number.isSafeInteger(sequence) && sequence > 0;
   const analytics = row.features_payload?.gaze_analytics;
@@ -93,17 +112,20 @@ function presentationAttempts(row) {
     const result = !ambiguous && candidates.length === 1 ? candidates[0] : null;
     const incomplete = !result && (hasScoped || resultsTracked);
     const qualityValid = ambiguous ? null : typeof result?.qualityValid === 'boolean' ? result.qualityValid : null;
-    const qualityIssueCodes = ambiguous ? ['presentation_attempt_ambiguous'] : incomplete ? ['trial_result_missing']
+    const record = planById.get(text(entry.presentationId));
+    const interrupted = !result && !ambiguous && record?.status === 'interrupted';
+    const qualityIssueCodes = ambiguous ? ['presentation_attempt_ambiguous'] : interrupted
+      ? record.deviations?.includes('page_reloaded') ? ['page_reloaded'] : ['trial_result_missing'] : incomplete ? ['trial_result_missing']
       : qualityValid === false && !codes(result).length ? ['quality_invalid'] : codes(result);
-    return { ...entry, presentationId: text(entry.presentationId), trialId: text(entry.trialId),
-      condition: text(result?.condition),
+    return { ...filterPresentation(entry, result), presentationId: text(entry.presentationId), trialId: text(entry.trialId),
+      condition: text(result?.condition ?? planned.get(record?.planItemId)?.condition),
       attempt: number(entry.attempt) ?? number(result?.attempt),
       sourceTrialIndex: number(result?.sourceTrialIndex),
       presentationIndex: number(result?.presentationIndex),
       presentationStartMs: number(result?.onsetMs) ?? number(entry.presentationStartMs),
-      attemptStatus: ambiguous ? 'ambiguous' : incomplete ? 'incomplete' : qualityValid === false ? 'excluded' : qualityValid === true ? 'accepted' : 'unknown',
+      attemptStatus: ambiguous ? 'ambiguous' : interrupted ? 'interrupted' : incomplete ? 'incomplete' : qualityValid === false ? 'excluded' : qualityValid === true ? 'accepted' : 'unknown',
       qualityValid, qualityIssueCodes, qualityReasons: qualityReasons(qualityIssueCodes),
-      includedInDefault: !ambiguous && !incomplete && qualityValid !== false,
+      includedInDefault: !ambiguous && !interrupted && !incomplete && qualityValid !== false,
       attemptMethod: 'presentation_attempts.v1', originalIndex: index };
   });
   results.forEach((result, index) => {
@@ -111,7 +133,7 @@ function presentationAttempts(row) {
       || result.stimulusId == null || (result.blockId ?? result.block) == null) return;
     const qualityValid = typeof result.qualityValid === 'boolean' ? result.qualityValid : null;
     const reasons = codes(result);
-    mapped.push({ blockId: text(result.blockId ?? result.block), trialId: text(result.trialId),
+    mapped.push({ ...validTimeMetadata(result), blockId: text(result.blockId ?? result.block), trialId: text(result.trialId),
       condition: text(result.condition),
       stimulusId: text(result.stimulusId), presentationId: text(result.presentationId) ?? `no-gaze-result-${index + 1}`,
       attempt: number(result.attempt), sourceTrialIndex: number(result.sourceTrialIndex),
@@ -120,15 +142,31 @@ function presentationAttempts(row) {
       qualityIssueCodes: reasons, qualityReasons: qualityReasons(reasons), includedInDefault: false,
       gazeMissing: true, attemptMethod: 'presentation_attempts.v1', originalIndex: entries.length + index });
   });
+  const mappedIds = new Set(mapped.map(entry => entry.presentationId).filter(id => id !== null));
+  for (const [id, record] of planById) {
+    if (mappedIds.has(id) || !record || record.status !== 'interrupted') continue;
+    const reasons = record.deviations?.includes('page_reloaded') ? ['page_reloaded'] : ['trial_result_missing'];
+    mapped.push({ blockId: text(record.blockId), trialId: text(record.trialId), stimulusId: text(record.stimulusId),
+      presentationId: id, attempt: number(record.attempt), sourceTrialIndex: number(record.sourceIndex),
+      presentationIndex: number(record.sequence),
+      presentationStartMs: number(record.stimulusOnEpochMs) !== null && number(record.sessionStartEpochMs) !== null
+        ? record.stimulusOnEpochMs - record.sessionStartEpochMs : null,
+      condition: text(planned.get(record.planItemId)?.condition),
+      attemptStatus: 'interrupted', qualityValid: null, qualityIssueCodes: reasons, qualityReasons: qualityReasons(reasons),
+      includedInDefault: false, gazeMissing: true, attemptMethod: 'presentation_attempts.v1', originalIndex: mapped.length });
+  }
   return mapped.sort((a, b) => (a.presentationStartMs ?? Infinity) - (b.presentationStartMs ?? Infinity)
     || a.originalIndex - b.originalIndex)
     .map((entry, index) => ({ ...entry, presentationIndex: entry.presentationIndex ?? index + 1 }));
 }
 
 function attemptMetadata(entry) {
-  return Object.fromEntries(['presentationId', 'trialId', 'attempt', 'sourceTrialIndex', 'presentationIndex',
-    'presentationStartMs', 'attemptStatus', 'qualityValid', 'qualityIssueCodes', 'qualityReasons', 'includedInDefault', 'attemptMethod']
+  const metadata = Object.fromEntries(['presentationId', 'trialId', 'attempt', 'sourceTrialIndex', 'presentationIndex',
+    'presentationStartMs', 'attemptStatus', 'qualityValid', 'qualityIssueCodes', 'qualityReasons', 'includedInDefault', 'attemptMethod',
+    'validTimePresent', 'validTime', 'actualDurationMs', 'validTimeReason']
     .map(key => [key, entry?.[key] ?? null]));
+  const id = Number.isSafeInteger(entry?.sourceTrialIndex) ? entry.sourceTrialIndex + 1 : entry?.trialId ?? '';
+  return { ...metadata, trialLabel: { ru: `Проба ${id}`, en: `Trial ${id}` } };
 }
 
 function trialSummary(row, query, presentations = presentationAttempts(row)) {
@@ -149,14 +187,16 @@ function trialSummary(row, query, presentations = presentationAttempts(row)) {
     }
   }
   const excluded = selected.filter(({ result }) => result.qualityValid === false);
+  const interrupted = presentations.filter(entry => entry.attemptStatus === 'interrupted' && matchesTrialFilters(entry, query));
   return {
-    counts: { valid: selected.length - excluded.length, excluded: excluded.length, total: selected.length },
-    exclusions: excluded.map(({ result, index }) => {
+    counts: { valid: selected.length - excluded.length, excluded: excluded.length, total: selected.length,
+      ...(interrupted.length ? { interrupted: interrupted.length } : {}) },
+    exclusions: [...excluded.map(({ result, index }) => {
       const field = result.presentationId != null ? 'presentationId' : 'attempt';
       const matches = keyed.get(key(result, field)) || [];
       const match = matches.length === 1 && matches[0].attemptStatus !== 'ambiguous' ? matches[0] : null;
       const issueCodes = codes(result);
-      return { ...attemptMetadata(match), attemptStatus: 'excluded', qualityValid: false, includedInDefault: false,
+      return { ...attemptMetadata(match), ...validTimeMetadata(result), attemptStatus: 'excluded', qualityValid: false, includedInDefault: false,
         presentationId: text(result.presentationId) ?? match?.presentationId ?? null,
         presentationIndex: number(result.presentationIndex) ?? match?.presentationIndex ?? null,
         presentationStartMs: number(result.onsetMs) ?? match?.presentationStartMs ?? null,
@@ -165,8 +205,23 @@ function trialSummary(row, query, presentations = presentationAttempts(row)) {
         attempt: number(result.attempt), sourceTrialIndex: number(result.sourceTrialIndex),
         qualityIssueCodes: issueCodes, qualityReasons: qualityReasons(issueCodes.length ? issueCodes : ['quality_invalid']),
         reasonCode: issueCodes[0] || 'quality_invalid', channel: 'task' };
-    }),
+    }), ...interrupted.map(entry => ({ ...attemptMetadata(entry), level: 'trial', entityId: entry.trialId ?? entry.presentationId,
+      blockId: entry.blockId, stimulusId: entry.stimulusId, reasonCode: entry.qualityIssueCodes[0], channel: 'task' }))],
   };
 }
 
-module.exports = { presentationAttempts, attemptMetadata, trialSummary, taskTrials: trials, matchesTrialFilters };
+function trialAttemptDetails(row, query) {
+  const { taskObservationDuration, taskObservationIndex } = require('./task-observations');
+  const records = taskObservationIndex(row);
+  return trials(row, query).map(trial => {
+    const duration = taskObservationDuration(row, [trial], records);
+    const reasons = codes(trial);
+    return { ...attemptMetadata(trial), ...validTimeMetadata(trial),
+      actualDurationMs: duration, observationDurationMs: duration,
+      blockId: text(trial.blockId ?? trial.block), stimulusId: text(trial.stimulusId), condition: text(trial.condition),
+      attemptStatus: trial.qualityValid === false ? 'excluded' : trial.qualityValid === true ? 'accepted' : 'unknown',
+      qualityIssueCodes: reasons, qualityReasons: qualityReasons(reasons), includedInDefault: trial.qualityValid !== false };
+  });
+}
+
+module.exports = { presentationAttempts, attemptMetadata, trialSummary, trialAttemptDetails, taskTrials: trials, matchesTrialFilters };

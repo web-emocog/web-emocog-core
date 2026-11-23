@@ -31,6 +31,48 @@
 
 Каталог версии 1.1 содержит 39 записей, но это не означает 39 карточек на экране. В него входят визуализация heatmap, пользовательские outcomes, дополнительные export-показатели и обязательный технический QC-контекст. Конструктор группирует показатели в компактные пакеты; фоновым сигналам соответствует пакет continuous_signals.
 
+## Task attempt semantics (2026-11-19)
+
+`task-performance` version `1.1.0` excludes passive viewing (`responseMode=none`
+or `task_id=passive_viewing`) from RT, correctness and response-rate outcomes.
+Passive presentations still count as recorded trials. A correct No-Go response
+withholding is not an omission. Omission rates use only trials requiring a
+response; a purely passive selection has `null / not_applicable`, not zero
+performance. Missing legacy response metadata retains legacy RT semantics.
+
+Observation duration uses matching presentation identity and actual monotonic
+on/off endpoints. Instructions, calibration, reload gaps and the server session
+lifetime are not substituted for presentation duration. Missing or conflicting
+timing remains null.
+
+`trialCounts.interrupted` is optional and separate from completed `total`,
+`valid`, and `excluded` counts. A saved interrupted presentation without a task
+result has `attemptStatus=interrupted`, no invented response/RT, and is excluded
+from default metrics. This also applies when no gaze context was recorded.
+
+Detailed level-1 JSON/CSV export includes `sourceKind=task_attempt` rows for
+recorded RT, correctness and response presence, plus identity, quality reasons,
+`includedInDefault`, `responseRequired` and observed duration. These rows are not
+created for an AOI-only selection: a whole-trial response is not an AOI-scoped
+measurement. More than 25,000 attempt rows return 413 `export_output_limit`
+instead of silently dropping attempts. Researcher-wide participant CSV remains
+the participant-by-metric table; long attempt rows belong to the detailed export.
+
+## Physiology method compatibility (2026-11-22)
+
+Group estimates, custom
+comparisons and extended model features abstain with
+`physiology_methods_mixed` when contributing records have different method
+versions or already carry a mixed-method marker. Known and legacy/unknown
+methods are not silently pooled. Single-method participant-equal weighting is
+unchanged. Separate session measurements and recorded interval rows retain
+their provenance; a method tag alone never establishes independent validation.
+
+Resumed signal summaries preserve counts but have null pooled mean/range when
+methods differ. A lost shoulder stream cannot be extrapolated to fill a new
+respiration window. These are data-integrity checks, not new scientific
+thresholds or evidence of physiological accuracy.
+
 ## Gaze spatial QC extension (2026-11-06)
 
 `qcResult.spatialAccuracy` is optional and versioned as `gaze_spatial_qc.v1`.
@@ -344,6 +386,22 @@ Backend отвечает на `GET /analytics/v1/exports` и обязатель�
 - Старый `/analytics/group` не соответствует этому контракту; рекомендуется новая versioned API-группа `/analytics/v1`.
 
 ## Проверка файлов
+
+### Статичный пассивный просмотр с добором времени
+
+`cognitiveResults[].validTime` (`passive_valid_time.v1`) содержит целевую,
+принятую и фактическую длительность, deadline и полное разбиение интервалов.
+Session response предоставляет `trialAttempts`; карточки и JSON/CSV сохраняют
+принятые, исключённые и незавершённые попытки с отдельной идентичностью.
+Фактическое время не заменяется принятым и не обрезается до deadline.
+
+Gaze/AOI и heatmap используют целые фиксации внутри принятых участков;
+пересекающая разрыв фиксация не делится на выдуманные измерения. Разные
+участки не соединяются в AOI visits/transitions. Если детализации недостаточно,
+число/время и карта недоступны, а не равны нулю. Доступная длительность
+фиксаций не равна всему принятому времени таймера. У минутной и блочной
+физиологии исключения остаются пропусками покрытия. Старые записи без
+настройки не пересчитываются этим правилом.
 
 Минимальная синтаксическая проверка из `apps/web`:
 

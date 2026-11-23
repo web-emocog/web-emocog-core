@@ -66,7 +66,7 @@ test('offline metadata on final reload cannot replace the pinned invitation or f
   await page.evaluate(async version => {
     const shared = (window as any).__WECOG_STATE__;
     shared.sessionData.cognitiveResults = [{ rt: 425, blockId: 'accepted', correct: true }];
-    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=${version}`, location.href).href);
+    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261122-validtime1`, location.href).href);
     await finishSession();
   }, version);
   await expect(page.locator('#retryUploadBtn')).toBeVisible();
@@ -111,7 +111,7 @@ test('a false HTTP 200 cannot finish upload; the next valid acknowledgement uses
     const shared = (window as any).__WECOG_STATE__;
     shared.sessionData.ids.session ||= 'false-success-audit';
     shared.sessionData.ids.participant ||= 'audit-participant';
-    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=${version}`, location.href).href);
+    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261122-validtime1`, location.href).href);
     (window as any).__finish = finishSession();
   }, version);
   await expect.poll(() => bodies.length).toBe(2);
@@ -144,7 +144,7 @@ for (const kind of ['image', 'video']) {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.runtime.invitationStimuliMap = { '42': { id: '42', mime_type: kind === 'video' ? 'video/webm' : 'image/png',
         metadata: { source_url: `${location.origin}/audit-hang-source` } } };
-      const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=${version}`, location.href).href);
+      const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261122-validtime1`, location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: '1', blocks: [{ id: 'media', type: 'cognitive_task', taskType: 'simple_rt',
         blockConfig: { useFixation: false, rtWindow: 5000 }, trials: [{ stimulusId: '42', duration: 5000, action: 'Space' },
           { stimulusId: 'std_simple_black_square', duration: 5000, action: 'Space' }] }] } });
@@ -187,7 +187,7 @@ test('a video decode error after onset interrupts only that presentation; its he
     };
     s.runtime.invitationStimuliMap = { '42': { id: '42', mime_type: 'video/webm',
       metadata: { source_url: location.origin + '/audit-late-video' } } };
-    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=${version}`, location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261122-validtime1`, location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: '1', blocks: [{ id: 'media', type: 'cognitive_task', taskType: 'simple_rt',
       blockConfig: { useFixation: false, showFeedback: false, rtWindow: 5000 },
       trials: [{ id: 'video-fail', stimulusId: '42', duration: 5000, action: 'Space' },

@@ -7,9 +7,9 @@
 import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import { state, recordSessionEvent } from './state.js?v=20261025-1';
 import { translations } from '../../translations.js?v=20261110-integration1';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261114-assigned1';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261122-validtime1';
 import { measureRenderFPS } from './camera.js?v=20261104-4';
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261112-emotion2';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261122-validtime1';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { getParticipantShell } from './protocol-invite-utils.js?v=20260915-1';
 import { primeParticipantSession } from '../session-runtime/ingest-transport.mjs?v=20261110-integration1';
@@ -75,7 +75,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261114-assigned1');
+        const mod = await import('./tests-updated.js?v=20261122-validtime1');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             return (await mod.continueInvitationSessionAfterShell()) !== false;
         }
@@ -814,6 +814,9 @@ export function updateFinalStepWithQC(qcSummary, options = {}) {
         } else {
             const issues = [];
             if (qcSummary?.checks) {
+                if (qcSummary.checks.historyComplete === false) issues.push(lang === 'ru'
+                    ? 'часть истории качества до перезагрузки недоступна'
+                    : 'part of the quality history before reload is unavailable');
                 if (!qcSummary.checks.duration) issues.push(t.issue_short_duration);
                 if (!qcSummary.checks.faceVisible) issues.push(t.issue_low_face_visible);
                 if (!qcSummary.checks.faceOk) issues.push(t.issue_low_face_ok_pct);

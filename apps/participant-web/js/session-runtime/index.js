@@ -8,7 +8,7 @@ import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261110-integration1';
 import { LongSessionContinuity } from './long-session-continuity.mjs';
 import { SessionRuntimeUI } from './runtime-ui.js?v=20261114-assigned1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261114-assigned1';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261122-validtime1';
 import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261110-integration1';
@@ -16,13 +16,13 @@ import { SessionAudioCollector } from '../audio/session-audio.js?v=20261110-inte
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
 import { SessionDelivery } from './delivery.mjs?v=20261025-1';
-import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261102-1';
-import { combineSignalSummaries } from './signal-history.mjs?v=20261107-resp1';
-import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261107-provenance1';
-import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261112-emotion2';
+import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261122-validtime1';
+import { combineSignalSummaries } from './signal-history.mjs?v=20261122-validtime1';
+import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261122-validtime1';
+import { CheckpointBuilder } from './checkpoint-builder.mjs?v=20261122-validtime1';
 import { showPersistenceNotice } from './persistence-ui.mjs?v=20261110-integration1';
 import { recordedConsentReceipt, sendSessionFeature } from './ingest-transport.mjs?v=20261110-integration1';
-import '../../../shared/protocol-quality.js?v=20261114-assigned1';
+import '../../../shared/protocol-quality.js?v=20261122-validtime1';
 
 const CHECKPOINT_INTERVAL_MS = 5000;
 
@@ -52,15 +52,16 @@ class ParticipantSessionRuntime {
         this.delivery = new SessionDelivery({
             sessionData: state.sessionData,
             build: async () => {
+                state.runtime.captureValidTimeTrial?.();
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.capturePhysiologyIntervals();
-                const current = state.runtime.qcMetrics?.getCurrentMetrics?.();
+                const current = state.runtime.qcMetrics?.getSummary?.();
                 const bpm = this.getBpmSnapshot();
                 return this.checkpointBuilder.build({ ...state.sessionData,
                     ...(bpm.ready ? { bpm, continuousSignalState: bpm,
                         bpmRuns: this.framePipeline?.bpm?.finalized ? (state.sessionData.bpmRuns || [])
                             : [...(state.sessionData.bpmRuns || []), { samples: this.framePipeline?.bpm?.samples || [] }] } : {})
-                }, current);
+                }, current, { activeMeasurement: this.machine.currentBlock?.stage === 'trial' });
             },
             send: packet => sendSessionFeature(packet, { retries: 2, backoffMs: 500,
                 consentReceipt: recordedConsentReceipt(state.sessionData, packet.ids.session) }),
@@ -250,7 +251,7 @@ class ParticipantSessionRuntime {
             this.finalRetryTimer = null;
             this.finalRetryListener = null;
             if (this.pageExited) return;
-            import('../web-page/tests-updated.js?v=20261114-assigned1')
+            import('../web-page/tests-updated.js?v=20261122-validtime1')
                 .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };
@@ -318,7 +319,8 @@ class ParticipantSessionRuntime {
             reason: transition.reason,
             details: transition.details
         });
-        this.ui.updateState(snapshot);
+        this.ui.updateState(state.runtime.validTimeBlock && this.machine.currentBlock?.stage === 'trial'
+            ? { ...snapshot, state: SESSION_STATES.RUNNING } : snapshot);
         this.saveCheckpoint();
     }
 
@@ -364,7 +366,12 @@ class ParticipantSessionRuntime {
         }
         if (!state.sessionData.experimentMeta?.protocolProgress || [SESSION_STATES.COMPLETED, SESSION_STATES.FINISHING, SESSION_STATES.PAUSED].includes(this.machine.state)
             || !metrics || metrics.durationMs < 10000 || metrics.totalFrames < 10) return;
-        const report = globalThis.WecogProtocolQuality.evaluate(state.runtime.invitationProtocolDefinition, metrics);
+        const definition = state.runtime.invitationProtocolDefinition;
+        if (!this.protocolQualityEvaluator || this.protocolQualityDefinition !== definition) {
+            this.protocolQualityDefinition = definition;
+            this.protocolQualityEvaluator = globalThis.WecogProtocolQuality.createEvaluator(definition);
+        }
+        const report = this.protocolQualityEvaluator(metrics);
         if (!report) return;
         state.sessionData.protocolQc = report;
         for (const [key, check] of Object.entries(report.checks)) {
@@ -381,7 +388,9 @@ class ParticipantSessionRuntime {
                     durationMs: metrics.durationMs, totalFrames: metrics.totalFrames,
                     ...(key === 'fpsStable' ? { fpsDiagnostics: metrics.fpsDiagnostics || null } : {}) },
                 recoverable: true });
-            if (check.hardStop && !this.pendingQualityStop) this.pendingQualityStop = { reason: 'quality_stopped', metric: key, threshold: check.threshold, value: check.value };
+            // Opt-in passive trials account for excluded intervals and decide at
+            // their own bounded deadline; ordinary trials retain hard-stop policy.
+            if (check.hardStop && !this.pendingQualityStop && !state.runtime.validTimeBlock) this.pendingQualityStop = { reason: 'quality_stopped', metric: key, threshold: check.threshold, value: check.value };
             if (this.pendingQualityStop) state.sessionData.pendingQualityStop = { ...this.pendingQualityStop };
         }
     }
@@ -406,9 +415,12 @@ class ParticipantSessionRuntime {
                 this.checkpointRequested = false;
                 const currentSessionId = state.sessionData?.ids?.session;
                 if (!currentSessionId || this.machine.state === SESSION_STATES.COMPLETED) continue;
+                state.runtime.captureValidTimeTrial?.();
                 captureGazeHistory(state.sessionData, state.runtime);
                 this.getBpmSnapshot();
                 this.capturePhysiologyIntervals();
+                const qc = state.runtime.qcMetrics?.getSummary?.();
+                if (qc) state.sessionData.qcSummary = qc;
                 await this.checkpoints.save(
                     currentSessionId,
                     state.sessionData,
@@ -471,8 +483,9 @@ class ParticipantSessionRuntime {
     }
 
     getActiveIssues() {
-        return this.machine.snapshot().activeIssues
-            .filter(issue => issue.invalidatesBlock !== false);
+        return [...this.machine.activeIssues.values()]
+            .filter(issue => issue.invalidatesBlock !== false)
+            .map(issue => JSON.parse(JSON.stringify(issue)));
     }
 
     pause() {
@@ -526,7 +539,7 @@ class ParticipantSessionRuntime {
         const duringTrial = created.invalidatesBlock !== false && this.machine.currentBlock?.stage === 'trial';
         // Keep QC active but avoid altering stimuli or distracting the participant.
         // The repeat dialog uses the recorded cause even if the rate recovers.
-        if (!duringTrial || created.code !== 'protocol_qc_fpsStable') {
+        if (!state.runtime.validTimeTrial && (!duringTrial || created.code !== 'protocol_qc_fpsStable')) {
             this.ui.showIssue(created, duringTrial, this.machine.currentBlock?.blockType);
         }
         return created;

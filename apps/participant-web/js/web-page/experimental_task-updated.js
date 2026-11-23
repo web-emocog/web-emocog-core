@@ -8,7 +8,7 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { finishSession } from './tests-updated.js?v=20261114-assigned1';
+import { finishSession } from './tests-updated.js?v=20261122-validtime1';
 import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
@@ -26,11 +26,12 @@ import { fetchMediaWithDeadline, mediaAbortError } from '../session-runtime/medi
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261114-assigned1';
+} from '../session-runtime/index.js?v=20261122-validtime1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues
 } from '../session-runtime/trial-quality.mjs';
+import { PassiveValidTime, RECOVERABLE_VALID_TIME_CODES } from '../session-runtime/passive-valid-time.mjs?v=20261122-validtime1';
 import {
     RtResponseCollector,
     normalizeResponseMode,
@@ -1351,6 +1352,7 @@ export function stopCognitiveStimulusPlayback() {
     pendingBlockStart = null;
     pendingPhotodiodeTaskStart = null;
     cleanupTrial();
+    state.runtime.validTimeBlock = false;
     resetStimulusViews();
     mediaPreparation?.releaseBlock();
     blockMediaLease = null;
@@ -2402,6 +2404,7 @@ async function startTaskBlock(block, trialPlan = null) {
         : buildTrialPlan(block);
     const durationMs = Math.max(0, Number(block?.blockConfig?.protocolDurationMs) || 0);
     activeBlockDeadlinePerf = durationMs > 0 ? performance.now() + durationMs : null;
+    state.runtime.validTimeBlock = !!globalThis.WecogPassiveValidTime.policyFor(block);
     setStimulusLayout(block, true);
     const sessionBlock = getSessionRuntime()?.beginBlock({
         blockId: block?.id || `cognitive_${currentBlockIndex}`,
@@ -2601,6 +2604,39 @@ async function runTrial() {
             qualityContext: activeTrialQualityContext
         };
 
+        const validTimePolicy = globalThis.WecogPassiveValidTime.policyFor(block);
+        if (validTimePolicy) {
+            const metadata = state.runtime.invitationStimuliMap?.[String(trial?.stimulus?.stimulusId || '').replace(/^api:/, '')];
+            if (!globalThis.WecogPassiveValidTime.validateBlock(block)
+                || !globalThis.WecogPassiveValidTime.eligibleTrial(trial, metadata)) {
+                finishCognitiveTask('error', 'valid_time_static_passive_required');
+                return;
+            }
+            const validTime = new PassiveValidTime({ startMs: stimulusOnPerf, targetMs: Math.round(stimulusDuration),
+                ...validTimePolicy, onBreak: () => {
+                    runtime?.physiologyIntervals?.breakContinuity();
+                    state.runtime.gazeHistory?.accumulator?.breakContinuity?.();
+                } });
+            state.runtime.validTimeTrial = validTime;
+            const presentationId = state.runtime.taskContext?.presentationId;
+            const partial = {
+                trialId, presentationId, presentationIndex: state.sessionData.experimentMeta.presentationSequence,
+                onsetMs: getRelativeSessionTimeMs(activeTrialRuntime.stimulusOnEpoch),
+                block: block.id, blockId: block.id, task_id: 'passive_viewing',
+                stimulusId: trial?.stimulus?.stimulusId ?? trialId, stimulusType,
+                expectedResponse: null, rt: null, response: null, condition: trial.condition,
+                responseMode: 'none', correct: false, attempt: currentBlockAttempt, qualityValid: false,
+                qualityIssueCodes: ['valid_time_incomplete'], qualityIssues: [],
+                sourceTrialIndex: planItem.sourceIndex, repeatSequenceIndex: currentTrialIndex, timestamp: Date.now()
+            };
+            state.sessionData.cognitiveResults.push(partial);
+            state.runtime.captureValidTimeTrial = () => {
+                partial.validTime = validTime.snapshot(performance.now());
+                partial.timestamp = Date.now();
+            };
+            state.runtime.captureValidTimeTrial();
+        }
+
         setSessionPhase('cognitive_stimulus', { source: 'stimulus_on' });
         const isGo = conditionToIsGo(trial?.condition);
         const rtWindowMs = config.rtWindow || config.stimulusDuration || 1000;
@@ -2620,7 +2656,7 @@ async function runTrial() {
         trialPhase = 'stimulus';
         stimulusTimeoutRemainingMs = stimulusDuration;
         stimulusTimerStartPerf = performance.now();
-        responseCollector.arm((decision) => {
+        if (!validTimePolicy) responseCollector.arm((decision) => {
             if (responded) return;
             responded = true;
             handleResponse(decision.rtMs, decision.response, decision);
@@ -2652,13 +2688,26 @@ async function runTrial() {
                 });
             }
         };
-        trialTimeout = setTimeout(pendingStimulusTimeoutCallback, stimulusDuration);
+        if (validTimePolicy) {
+            const generation = mediaRunGeneration;
+            const checkValidTime = () => {
+                if (generation !== mediaRunGeneration || cognitiveFinished || trialPhase !== 'stimulus') return;
+                const tracker = state.runtime.validTimeTrial;
+                if (!tracker) return;
+                if (tracker.done(performance.now())) pendingStimulusTimeoutCallback?.();
+                else trialTimeout = setTimeout(checkValidTime, Math.min(100,
+                    Math.max(1, tracker.startMs + tracker.maxDurationMs - performance.now())));
+            };
+            trialTimeout = setTimeout(checkValidTime, Math.min(100, stimulusDuration));
+        } else trialTimeout = setTimeout(pendingStimulusTimeoutCallback, stimulusDuration);
     };
 
     fixationTimeout = setTimeout(pendingFixationCallback, fixationDuration);
 }
 
 function handleResponse(rt, key, decision = {}) {
+    const validTimeSegmentLimit = state.runtime.validTimeTrial?.overflow === true;
+    const validTime = state.runtime.validTimeTrial?.snapshot(performance.now(), true) || null;
     cleanupTrial();
 
     const block = experimentProtocol.blocks[currentBlockIndex];
@@ -2666,10 +2715,15 @@ function handleResponse(rt, key, decision = {}) {
     const trial = planItem.trial;
     const config = block.blockConfig || {};
     const runtime = getSessionRuntime();
-    const qualityIssues = trialQualityIssues(
+    let qualityIssues = trialQualityIssues(
         runtime,
         activeTrialRuntime?.qualityContext || activeTrialQualityContext
     );
+    if (validTime) {
+        qualityIssues = qualityIssues.filter(issue => !RECOVERABLE_VALID_TIME_CODES.has(issue.code));
+        if (validTime.acceptedMs < validTime.targetMs) qualityIssues.push({
+            code: validTimeSegmentLimit ? 'valid_time_segment_limit' : validTime.limitReached ? 'valid_time_limit_reached' : 'valid_time_incomplete', kind: 'quality' });
+    }
     if (decision.skippedMedia) {
         const code = decision.mediaPlaybackFailed ? 'stimulus_media_playback_failed' : 'stimulus_media_load_failed';
         if (!qualityIssues.some(issue => issue.code === code)) qualityIssues.push({ code, kind: 'technical' });
@@ -2704,7 +2758,7 @@ function handleResponse(rt, key, decision = {}) {
 
     const isCorrect = !decision.skippedMedia && trial.correctResponse === key;
 
-    state.sessionData.cognitiveResults.push({
+    const result = {
         trialId: planItem.trialId,
         presentationId: state.runtime.taskContext?.presentationId ?? null,
         presentationIndex: state.sessionData.experimentMeta?.presentationSequence ?? null,
@@ -2731,8 +2785,12 @@ function handleResponse(rt, key, decision = {}) {
         qualityIssues,
         sourceTrialIndex: planItem.sourceIndex,
         repeatSequenceIndex: currentTrialIndex,
-        timestamp: Date.now()
-    });
+        timestamp: Date.now(),
+        ...(validTime ? { validTime } : {})
+    };
+    const partial = validTime && state.sessionData.cognitiveResults.find(row => row.presentationId === result.presentationId);
+    if (partial) Object.assign(partial, result);
+    else state.sessionData.cognitiveResults.push(result);
 
     emitTaskEvent('trial_end', {
         trialIndex: currentTrialIndex,
@@ -2770,6 +2828,7 @@ function handleResponse(rt, key, decision = {}) {
 async function finishTaskBlockAttempt(block) {
     const generation = mediaRunGeneration;
     const runtime = getSessionRuntime();
+    state.runtime.validTimeBlock = false;
     const blockId = String(block?.id || '');
     // Leave the stimulus layout before any completion/repeat modal can block this flow.
     setStimulusLayout(block, false);
@@ -2862,6 +2921,16 @@ function moveToNextTrial() {
 }
 
 function cleanupTrial() {
+    if (state.runtime.validTimeTrial) {
+        state.runtime.captureValidTimeTrial?.();
+        state.runtime.validTimeTrial.closed = true;
+        state.runtime.validTimeTrial.pendingGaze = [];
+        state.runtime.validTimeTrial.queuedGaze = [];
+        state.runtime.validTimeTrial = null;
+        state.runtime.captureValidTimeTrial = null;
+        getSessionRuntime()?.framePipeline?.bpm?.setValidTimeContext?.(null);
+        getSessionRuntime()?.physiologyIntervals?.breakContinuity();
+    }
     clearTimeout(feedbackTimeout); feedbackTimeout = null;
     clearTimeout(interTrialTimeout); interTrialTimeout = null;
     responseCollector?.dispose();

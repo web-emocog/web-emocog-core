@@ -57,6 +57,24 @@ coverage, наличие принятых benchmark samples для каждой 
 checkpoint не заменяется. Legacy summaries без новых полей совместимы; миграций
 БД нет. Методика и ограничения: [gaze methods](../research/gaze-blink-body-methods.md).
 
+## QC continuity after reload (2026-11-19)
+
+Checkpoints and interim/final packets capture `QCMetrics.getSummary()`, including
+raw counters and completed analysis-FPS windows. A new calibration segment can
+restore that summary without averaging rounded percentages or segment means.
+Elapsed QC time is the sum of monotonic segment durations; time with the page
+closed is not observed time. Current camera/analysis FPS and validation results
+are reacquired, not restored as if freshly measured.
+
+Optional `qcSummary.continuity` uses `qc_continuity.v1`, `segmentCount`, and
+`historyComplete`. Missing counters, incompatible FPS thresholds/window history,
+or unsupported continuity versions make history incomplete. Such recordings
+remain stored, but cannot pass overall session QC. The quality assessment marks
+recording integrity partial and protocol quality unknown. Legacy packets without
+this optional field remain ingest-compatible; their missing history is not
+reconstructed from rounded percentages. JSON Schema, TypeScript, producer,
+consumer and browser/database regression tests cover the extension.
+
 ## Назначение
 
 `apps/participant-web/js/session-runtime/` управляет единой измерительной
@@ -580,6 +598,49 @@ multimodal-синхронизацию и допустимое влияние а�
   raw series по-прежнему явно помечены. При исчерпании всех хранилищ остаются
   действующие предупреждение, финальная отправка и JSON download. Удалённые
   исторические raw точки восстановить задним числом невозможно.
+
+## Добор пригодного времени статичного показа (#177)
+
+Опубликованный блок может содержать `blockConfig.validTime` (либо равную копию
+`content.validTime`): `{schemaVersion: "passive_valid_time.v1", enabled: true,
+maxExtensionRatio: 0.5, minSegmentMs: 1000}`. Отсутствие настройки сохраняет
+прежнее поведение. Разрешён только статичный пассивный просмотр; ответ, RT,
+видео, аудио, ручная смена и общий deadline блока несовместимы с режимом.
+Сервер проверяет фактически закреплённые MIME/метаданные, доступ и checksum.
+JPEG/BMP и подтверждённый статичный PNG поддерживаются; неизвестная анимация,
+GIF/WebP/SVG-файлы не становятся статичными по клиентской подписи.
+
+Стимул не меняется и не перекрывается подсказками. Таймер набирает время
+только по свежим пригодным кадрам, с непрерывными участками от одной секунды.
+Цель 180 с при пределе +50% имеет deadline 270 с. Недобор ведёт к прежнему
+ограниченному повтору, а не к успешному нулю. Если браузер опоздал выполнить
+таймер, фактическая длительность сохраняется честно, а время после deadline
+исключается. Слишком много разрывов даёт явный незачёт, без обрезания истории.
+
+В `cognitiveResults[].validTime` сохраняются `targetMs`, `acceptedMs`,
+`actualMs`, `maxDurationMs`, `extended`, `limitReached`, `acceptedSegments`
+и `excludedSegments` с кодами причин. Границы целочисленные относительно
+монотонного начала предъявления; обе серии вместе образуют полное разбиение
+`[0, actualMs]`. Schema и server consistency checks запрещают пересечения,
+дырки, неверные суммы и неразрешённые опубликованным протоколом значения.
+Незавершённая попытка сохраняется уже во время показа и не становится принятой
+после reload. Следующая попытка начинает счёт заново.
+
+Gaze/eye samples сначала ожидают подтверждения непрерывного участка. Они
+попадают в накопитель только после приёмки, без склеивания фиксаций через
+исключения. При обработке сохранённых агрегатов используется только целиком
+принадлежащая принятому участку фиксация; отсутствующая/обрезанная детализация
+даёт missing, не реконструированное измерение. Допуск 1 мс соответствует
+целочисленной точности границ, без обрезания/интерполяции самих фиксаций.
+Физиология сбрасывает окна при разрыве: не менее 10 с свежих данных для ЧСС
+и 20 с для дыхания; исключённое время остаётся пропуском покрытия.
+
+Промежуточная серверная копия во время активного измерения явно обозначена
+`active_measurement_summary`: без повторного клонирования/пересчёта растущих
+eye series и без выдачи старых attention/blink/perclos за текущие. Полные
+производные ряды сохраняются прежними локальными delta chunks; финальный
+расчёт не облегчается этим режимом. Это не гарантия памяти для многочасовой
+записи и не доказательство исправления FPS на Windows.
 
 ## Незакрытые production gates
 

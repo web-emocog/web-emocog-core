@@ -2,7 +2,7 @@ import { extractEyeSignalSample } from '../web-page/eye-signal.js';
 import { updateFromMetrics as updateQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { SessionQualityDetector } from './quality-detector.mjs?v=20261110-integration1';
 import { ERROR_KINDS } from './contracts.mjs';
-import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261107-resp2';
+import { ContinuousBpmCollector } from './continuous-bpm.js?v=20261122-validtime1';
 import {
     appendEmotionSample,
     endEmotionSession,
@@ -12,12 +12,13 @@ import {
     startEmotionSession
 } from '../emotion-stub-new.js?v=20261112-emotion2';
 import { NeutralCalibration } from '../emotion/neutral-calibration.mjs?v=20261112-emotion1';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261114-assigned1';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261120-methods1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
 import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
 import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
+import { validTimeFrameReasons } from './passive-valid-time.mjs?v=20261122-validtime1';
 
 const SAME_FRAME_RETRY_MS = 8;
 // Native callbacks jitter around the requested cadence. Avoid an extra timer
@@ -105,7 +106,9 @@ export class SessionFramePipeline {
                 return Number.isFinite(fps) && fps > 0 ? fps : 30;
             },
             onError: error => this._reportBpmError(error),
-            onRecovered: () => this._recoverBpm()
+            onRecovered: () => this._recoverBpm(),
+            // Методы ЧСС и дыхания сборщик берёт из определения протокола сам.
+            definition: options.definition || this.state.runtime.invitationProtocolDefinition
         });
         this.bodyPose = new ContinuousBodyPoseCollector({
             state: this.state,
@@ -116,6 +119,8 @@ export class SessionFramePipeline {
                 this.controller.setModuleStatus('bodyPose', 'running');
             },
             enabled: this.controller.featureFlags?.bodyMovement !== false,
+            // Плечи нужны только методу дыхания по движению; иначе recordShoulders ничего не делает.
+            onShoulders: (timestamp, left, right) => this.bpm.recordShoulders?.(timestamp, left, right),
             gamerMode: this.controller.featureFlags?.gamerMode === true,
             clock: this.controller.sessionClock
         });
@@ -304,11 +309,12 @@ export class SessionFramePipeline {
 
             const segmentation = this._currentSegmentation();
             if (!segmentation) this.diagnostics.segmentationUnavailableFrames = (this.diagnostics.segmentationUnavailableFrames || 0) + 1;
+            let metrics = null;
             if (this.state.runtime.qcMetrics?.isRunning?.()) {
                 this.state.runtime.qcMetrics.processFrame(frame, segmentation);
-                const metrics = this.state.runtime.qcMetrics.getCurrentMetrics();
+                metrics = this.state.runtime.qcMetrics.getCurrentMetrics();
                 this.controller.updateProtocolQuality?.(metrics);
-                updateQcOverlay(metrics, frame);
+                if (!this.state.runtime.validTimeTrial) updateQcOverlay(metrics, frame);
             }
 
             const qualityChanges = this.qualityDetector.update(
@@ -319,13 +325,19 @@ export class SessionFramePipeline {
             );
             for (const issue of qualityChanges.raised) this.controller.reportIssue(issue);
             for (const code of qualityChanges.resolved) this.controller.resolveIssue(code);
+            const validTime = this.state.runtime.validTimeTrial;
+            if (validTime) validTime.observe(frame.timestamp, validTimeFrameReasons({ frame, segmentation, gaze, metrics,
+                definition: this.state.runtime.invitationProtocolDefinition, viewport: getContentViewport(),
+                issues: this.controller.getActiveIssues?.() || [] }));
+            const validContext = validTime?.context(performance.now()) || null;
+            this.bpm.setValidTimeContext?.(validContext);
             const qualityDone = performance.now();
 
             const hasLandmarks = Array.isArray(frame?.landmarks) && frame.landmarks.length >= 468;
-            const sample = hasLandmarks
+            const sample = hasLandmarks && (!validContext || validContext.allowed)
                 ? this.bpm.process(this.video, frame.landmarks, frame.timestamp, getFramePixels(frame), frame.wallTimestamp)
                 : null;
-            this.controller.recordPhysiologyFrame?.(frame?.timestamp, sample, this.bpm.engine?.cfg, hasLandmarks);
+            this.controller.recordPhysiologyFrame?.(frame?.timestamp, sample, this.bpm.engine?.cfg, hasLandmarks && (!validContext || validContext.allowed));
             const bpmDone = performance.now();
             this._scheduleAuxiliary(frame, multimodalSample);
             const finished = performance.now();
