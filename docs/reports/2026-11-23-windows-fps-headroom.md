@@ -91,7 +91,14 @@ and visibility agreed, but exact confidence compatibility did not. The final
 implementation retains just the used GPU confidence clone (one rather than
 seven output clones). No tolerance or QC threshold was relaxed. The ten initial
 benchmark runs above measure the earlier revision, not this corrected final
-implementation; a new long run is required and recorded separately below.
+implementation. The corrected `a7dad7d` implementation was then measured for
+five continuous minutes: 8700/8700 source frames processed, 29.00 FPS, primary
+mean/p95/p99/max 12.16/16.30/19.00/28.00 ms, UI p95 2.40 ms, zero module errors
+and zero full-second windows below 25 FPS. All 60 complete five-second windows
+remained at 29 FPS. The face and segmentation delegates were GPU Workers, with
+unchanged reference/model hashes and no source modifications during the run.
+This is still an Apple M4 Pro/macOS measurement, not a Windows speedup result.
+The evidence JSON separates it as `corrected-compatible-long`.
 
 Windows smoke also found that Python's system MIME associations made `.mjs`
 files non-executable despite HTTP 200. The loopback test handler now explicitly
@@ -110,6 +117,19 @@ runtime/browser matrix 312 passed; FPS diagnostics 84 passed; #177 integration
 upgrade passed. The skipped API cases need separate PostgreSQL/HTTP, converter,
 Linux or nginx environments; they are not counted as passed tests. Hosted
 PostgreSQL/migration/ingest and API/security checks passed on the initial commit.
+
+Corrected-revision verification:
+
+- Full local API: 1396 passed, 10 skipped, zero failures (1406 tests).
+- Exact mask/QC equality and fewer clones: three browser engines, including
+  software GL; no numeric tolerance introduced. New ownership tests cover
+  successful analysis, read failure, and clone failure without resource leaks.
+- MIME regression: a poisoned OS/extension map is overridden; JavaScript/WASM
+  HTTP HEAD checks pass in all three engines.
+- [Windows hosted smoke](https://github.com/web-emocog/web-emocog-core/actions/runs/45192335932)
+  passed on `a7dad7d`: 58 FPS/QC checks and 34 staff HTTP checks in Chromium/
+  Firefox, plus one classic-scrollbar calibration check. It uses no affected
+  MateBook hardware and is not camera/inference performance acceptance.
 
 Reproduce the benchmark from a private licensed reference cache and a frozen
 develop snapshot (including `apps/shared/`), outside the webroot:
