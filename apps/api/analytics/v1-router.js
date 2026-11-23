@@ -33,7 +33,7 @@ const {
   buildSessionVisuals,
   channelQc,
 } = require('./metrics');
-const { trialSummary } = require('./attempts');
+const { trialSummary, trialAttemptDetails } = require('./attempts');
 const extended = require('./extended-service');
 const { participantCsv } = require('./participant-csv');
 
@@ -519,6 +519,7 @@ router.get('/sessions/:sessionRef/summary', async (req, res) => {
       qcChannels: hydrated.snapshot.queryEcho.filters.qcChannels.map(channel => channelQc(row, channel)),
       metrics: buildSessionMetrics(row, hydrated.snapshot.queryEcho),
       trialCounts: trials.counts,
+      trialAttempts: trialAttemptDetails(row, hydrated.snapshot.queryEcho),
       exclusions: trials.exclusions,
     };
     return res.json(envelope('session_summary', hydrated.snapshot, data));
@@ -753,6 +754,8 @@ function exportCsv(bundle) {
       sourceTrialIndex: metric.sourceTrialIndex, attemptStatus: metric.attemptStatus,
       qualityValid: metric.qualityValid, qualityIssueCodes: metric.qualityIssueCodes,
       qualityReasons: metric.qualityReasons,
+      trialLabel: metric.trialLabel, validTimePresent: metric.validTimePresent, validTime: metric.validTime,
+      actualDurationMs: metric.actualDurationMs, validTimeReason: metric.validTimeReason,
       includedInDefault: metric.includedInDefault, observationDurationMs: metric.observationDurationMs,
       responseRequired: metric.responseRequired,
       presentationCoverage: metric.presentationCoverage,

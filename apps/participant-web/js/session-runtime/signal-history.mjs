@@ -1,4 +1,4 @@
-import '../../../shared/passive-metrics.js?v=20261122-integrity1';
+import '../../../shared/passive-metrics.js?v=20261122-validtime1';
 
 export function combineSignalSummaries(previous = {}, current = {}) {
     const count = key => Math.max(0, previous[key] || 0) + Math.max(0, current[key] || 0);

@@ -110,6 +110,44 @@ function safeBuilderMediaUrl(value, type) {
   return '';
 }
 
+function builderPassiveValidTimeEligible(block, trials, stimuli = []) {
+  if (block?.type !== 'passive' || !Array.isArray(trials) || !trials.length
+    || block.content?.useRT === true || (block.content?.responseMode && block.content.responseMode !== 'none')
+    || (block.content?.taskType && block.content.taskType !== 'passive_viewing')
+    || (block.content?.rt_task && block.content.rt_task !== 'passive_viewing')
+    || (block.content?.slideChangeMode && block.content.slideChangeMode !== 'timer')) return false;
+  return trials.every(entry => {
+    const trial = entry && typeof entry === 'object' ? entry : { stimulusId: entry };
+    const id = String(trial.stimulusId ?? trial.id ?? '').replace(/^api:/, '');
+    if (trial.useRT === true || (trial.responseMode && trial.responseMode !== 'none') || trial.action || trial.correctResponse || trial.cue
+      || trial.responseWindow || [trial.type, trial.stimulusType, trial.mediaType, trial.stimulus?.type]
+        .some(type => type && !['image', 'slides', 'shape', 'text', 'color', 'background'].includes(type))) return false;
+    if (id.startsWith('std_')) return !!globalThis.StandardStimuli?.resolveStandardStimulus(id);
+    const media = stimuli.find(item => String(item.id).replace(/^api:/, '') === id);
+    const mime = media?.mimeType ?? media?.mime_type;
+    return !!media && ['image', 'slides'].includes(media.type) && ['image/jpeg', 'image/png', 'image/bmp'].includes(mime)
+      && (mime !== 'image/png' || (media.codec ?? media.metadata?.codec) === 'png')
+      && !media.animated && !media.metadata?.animated && !media.metadata?.isAnimated;
+  });
+}
+
+function builderPassiveValidTimeConfig(enabled, percent) {
+  if (!enabled) return null;
+  if (percent === '' || !Number.isFinite(Number(percent)) || Number(percent) < 0 || Number(percent) > 50) return null;
+  return { schemaVersion: 'passive_valid_time.v1', enabled: true, maxExtensionRatio: Number(percent) / 100, minSegmentMs: 1000 };
+}
+
+function builderPassiveValidTimePreview(block, lang = 'en') {
+  const config = block?.content?.validTime;
+  if (block?.type !== 'passive' || config?.enabled !== true || config.schemaVersion !== 'passive_valid_time.v1'
+    || typeof config.maxExtensionRatio !== 'number' || !Number.isFinite(config.maxExtensionRatio)
+    || config.maxExtensionRatio < 0 || config.maxExtensionRatio > 0.5 || config.minSegmentMs !== 1000) return '';
+  const percent = Math.round(config.maxExtensionRatio * 10000) / 100;
+  return lang === 'ru'
+    ? `Возможное продление: до +${percent}%. Валидные сегменты от 1 с; предпросмотр идёт по исходному таймеру, условие и RT не меняются.`
+    : `Possible extension: up to +${percent}%. Valid segments start at 1 s; preview uses the original timer, condition and RT are unchanged.`;
+}
+
 function normalizePersistedBuilderBlock(block) {
   if (!block || typeof block !== 'object') return block;
   const content = block.content && typeof block.content === 'object' ? block.content : {};
@@ -1318,6 +1356,17 @@ function ExperimentBuilderView(options = {}) {
             <input type="checkbox" id="trialAoiCb" ${block.content.useAOI ? 'checked' : ''} style="accent-color:var(--accent);">
             <span style="font-weight:600;">AOI (${trb('области интереса', 'areas of interest')})</span>
           </label>
+          <div style="border-top:1px solid var(--stroke);padding-top:10px;display:flex;flex-direction:column;gap:7px;">
+            <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;">
+              <input type="checkbox" id="passiveValidTimeCb" ${isPassive && block.content.validTime?.enabled === true ? 'checked' : ''} aria-describedby="passiveValidTimeHint">
+              <span>${trb('Набирать валидное время просмотра', 'Collect valid viewing time')}</span>
+            </label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span>${trb('Максимальное продление', 'Maximum extension')}</span>
+              <input type="number" id="passiveValidTimePercent" min="0" max="50" step="any" value="${previewEscape(isPassive && typeof block.content.validTime?.maxExtensionRatio === 'number' ? block.content.validTime.maxExtensionRatio * 100 : 50)}" style="width:65px;"> <span>% (0–50)</span>
+            </label>
+            <div id="passiveValidTimeHint" role="status" style="font-size:10px;color:var(--muted);line-height:1.45;"></div>
+          </div>
         </div>
 
         <div style="padding:12px 14px;border:1px solid var(--stroke);border-radius:12px;background:var(--card-bg);display:flex;flex-direction:column;gap:10px;">
@@ -1478,6 +1527,21 @@ function ExperimentBuilderView(options = {}) {
       if (trialCountBadge) trialCountBadge.textContent = String(currentTrials.length);
     }
 
+    const validTimeCb = modal.querySelector('#passiveValidTimeCb');
+    const validTimePercent = modal.querySelector('#passiveValidTimePercent');
+    function refreshValidTimeControls() {
+      const eligible = builderPassiveValidTimeEligible(block, currentTrials, stimuliList);
+      validTimeCb.disabled = !eligible && !validTimeCb.checked;
+      validTimePercent.disabled = !eligible || !validTimeCb.checked;
+      modal.querySelector('#passiveValidTimeHint').textContent = eligible
+        ? trb('Выключено по умолчанию. Только статический пассивный просмотр. Засчитываются непрерывные валидные сегменты от 1 секунды; показ может продлеваться до выбранного предела. Условие и время реакции не меняются.',
+          'Off by default. Static passive viewing only. Continuous valid segments of at least 1 second count; display may extend up to the selected limit. Condition and reaction time are unchanged.')
+        : trb('Недоступно для когнитивных/RT-задач, аудио, видео, смешанных или неподтверждённых медиа. Для PNG нужна проверка отсутствия анимации; иначе используйте JPEG/BMP или встроенные статические стимулы.',
+          'Unavailable for cognitive/RT tasks, audio, video, mixed or unverified media. PNG requires verified static decoding; otherwise use JPEG/BMP or built-in static stimuli.');
+    }
+    validTimeCb.addEventListener('change', () => { markDirty(); refreshValidTimeControls(); });
+    validTimePercent.addEventListener('input', markDirty);
+
     const fixCb = modal.querySelector('#useFixationCb');
     const fixInput = modal.querySelector('#fixationDuration');
     fixCb.addEventListener('change', () => { fixInput.disabled = !fixCb.checked; });
@@ -1545,6 +1609,7 @@ function ExperimentBuilderView(options = {}) {
 
     function renderRows() {
       updateTrialCountBadge();
+      refreshValidTimeControls();
       const eligible = currentTrials.reduce((n, trial) => n + Number(Boolean(trial.stimulusId)), 0);
       const selected = [...selectedTrials].filter(index => currentTrials[index]?.stimulusId).length;
       const selectAll = modal.querySelector('#selectAllTrials');
@@ -1669,6 +1734,7 @@ function ExperimentBuilderView(options = {}) {
         };
         markDirty();
         highlightInvalidRows();
+        refreshValidTimeControls();
       }
     });
 
@@ -1797,6 +1863,18 @@ function ExperimentBuilderView(options = {}) {
     modal.querySelector('#trialCancelBtn').addEventListener('click', close);
 
     modal.querySelector('#trialSaveBtn').addEventListener('click', () => {
+      const validTime = builderPassiveValidTimeConfig(validTimeCb.checked, validTimePercent.value);
+      if (validTimeCb.checked && (!validTime || !builderPassiveValidTimeEligible(block, currentTrials, stimuliList))) {
+        toast(trb('Для валидного времени нужны только статические пассивные стимулы и продление от 0 до 50%.',
+          'Valid time requires only static passive stimuli and an extension from 0 to 50%.'));
+        return;
+      }
+      if (validTime && currentTrials.some(trial => Number(trial.duration) < 1000
+        || Math.floor(Number(trial.duration) * (1 + validTime.maxExtensionRatio)) > 86400000)) {
+        toast(trb('Для валидного времени длительность должна быть от 1000 мс и с продлением не превышать 24 часа.',
+          'Valid-time duration must be at least 1000 ms and, including extension, no more than 24 hours.'));
+        return;
+      }
       if (!currentTrials.length) {
         highlightInvalidRows();
         toast('Добавьте хотя бы одну пробу со стимулом');
@@ -1885,10 +1963,19 @@ function ExperimentBuilderView(options = {}) {
         block.content.selected_metrics = autoRtMetricsForTaskType(block.content.taskType, block.content);
       }
 
-      const nextBlocks = experimentBlocks.map(item => item === sourceBlock ? { ...item, content: block.content } : item);
+      if (validTime) block.content.validTime = validTime;
+      else delete block.content.validTime;
+      const nextBlock = { ...sourceBlock, content: block.content };
+      if (sourceBlock.blockConfig && Object.hasOwn(sourceBlock.blockConfig, 'validTime')) {
+        nextBlock.blockConfig = { ...sourceBlock.blockConfig };
+        if (validTime) nextBlock.blockConfig.validTime = { ...validTime };
+        else delete nextBlock.blockConfig.validTime;
+      }
+      const nextBlocks = experimentBlocks.map(item => item === sourceBlock ? nextBlock : item);
       try { localStorage.setItem('emocog_protocol_blocks', JSON.stringify(nextBlocks)); }
       catch (_) { return toast(trb('Не удалось сохранить настройки в браузере. Изменения остаются в открытой таблице.', 'Browser storage could not save the settings. Your edits remain in the open table.'), 'error'); }
       sourceBlock.content = block.content;
+      if (nextBlock.blockConfig) sourceBlock.blockConfig = nextBlock.blockConfig;
       dirty = false;
       close();
       toast('Настройки логики сохранены ✓');
@@ -4041,6 +4128,7 @@ function ExperimentBuilderView(options = {}) {
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px;line-height:1.45;">
             <div>
               ${screen.trial ? `${trb('Стимул:','Stimulus:')} ${previewEscape(stimulusNameById(screen.trial.stimulusId))}${screen.block?.type === 'passive' ? '' : ` · ${trb('Условие:','Condition:')} ${previewEscape(screen.trial.condition || '—')} · ${trb('Ответ:','Response:')} ${previewEscape(previewActionLabel(screen.trial.action || screen.trial.correctResponse))}`}` : trb('Системные обязательные блоки в этом предпросмотре не показываются.','Required system blocks are not shown in this preview.')}
+              ${screen.kind === 'stimulus' && builderPassiveValidTimePreview(screen.block, CURRENT_LANG) ? `<div data-passive-valid-time-preview style="margin-top:5px;">${previewEscape(builderPassiveValidTimePreview(screen.block, CURRENT_LANG))}</div>` : ''}
             </div>
             <div style="white-space:nowrap;">${isTimed ? `${screen.duration} ${trb('мс','ms')}${speed > 1 ? ` · ${speed}x` : ''}` : trb('ручной переход','manual transition')}</div>
           </div>
@@ -4914,6 +5002,8 @@ function ExperimentBuilderView(options = {}) {
           delete out.content.aoiDefinitions;
           delete out.content.aoiSchemaVersion;
           out.trials = passiveTrials;
+          if (b.content?.validTime?.enabled === true) out.blockConfig.validTime = { ...b.content.validTime };
+          else if (b.content?.validTime?.enabled === false) delete out.content.validTime;
           attachBlockAois(out.blockConfig, b.content, passiveTrials);
         } else if (b.type === 'rest') {
           out.content = {
@@ -4941,7 +5031,7 @@ function ExperimentBuilderView(options = {}) {
     // Validate the actual exported runtime definition, not incomplete builder cards.
     // Drafts remain editable; neither a failed preflight nor Cancel overwrites a live link.
     if (!draftOnly) {
-      const { inspectProtocolPreflight } = await import('../shared/protocol-preflight.mjs?v=20261120-methods1');
+      const { inspectProtocolPreflight } = await import('../shared/protocol-preflight.mjs?v=20261122-validtime1');
       const report = inspectProtocolPreflight(json);
       const aoiValidation = globalThis.EmocogAoiProtocol?.validateProtocolAois(json);
       if (aoiValidation && !aoiValidation.ok) {

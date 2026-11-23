@@ -260,7 +260,7 @@ async function start() {
       nuisanceGateMode ? import('./gaze-eye-patch-gate.mjs?v=20261110-143u') : null,
       geometryGateMode ? import('./gaze-eye-patch-geometry-gate.mjs?v=20261110-143u') : null,
       aoiMode ? Promise.all([import('./gaze-continuous-aoi.mjs?v=20261113-gaze1'),
-        import('../../participant-web/js/web-page/heatmap.js?v=20261102-1')])
+        import('../../participant-web/js/web-page/heatmap.js?v=20261122-validtime1')])
         .then(([aoi, heatmap]) => ({ ...aoi, createHeatmapAccumulator: heatmap.createHeatmapAccumulator })) : null,
       eyeGateMode || aoiMode ? import('./gaze-eye-gate-probe.mjs?v=20261110-integration1') : null,
     ]), 45000, owned);

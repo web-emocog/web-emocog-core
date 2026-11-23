@@ -9,11 +9,11 @@
  */
 
 import { createThresholds, VIDEO_ELEMENT_IDS } from './constants.js';
-import { VideoFpsMonitor } from './fps-monitor.js?v=20261122-integrity1';
+import { VideoFpsMonitor } from './fps-monitor.js?v=20261122-validtime1';
 import { createGazeState, addGazePoint, accumulateGazeTime } from './gaze-tracking.js';
 import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261025-1';
 import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
-import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261122-integrity1';
+import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261122-validtime1';
 import { participantDebug as dbg } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class QCMetrics {

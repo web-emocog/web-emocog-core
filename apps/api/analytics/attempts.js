@@ -1,3 +1,5 @@
+const { validTimeMetadata, filterPresentation } = require('./valid-time');
+
 // Identity is session-local. Never infer an attempt from a suffix in a trial ID.
 const text = value => value == null ? null : String(value);
 const same = (a, b) => a != null && b != null && String(a) === String(b);
@@ -25,6 +27,10 @@ const reasonLabels = new Map([
     ['trial_result_missing', ['Попытка не завершена', 'Attempt is incomplete']],
     ['page_reloaded', ['Попытка прервана перезагрузкой страницы', 'Attempt was interrupted by a page reload']],
     ['quality_invalid', ['Не выполнено правило качества', 'Quality rule was not met']],
+    ['valid_time_limit_reached', ['Недостаточно принятого времени до предела показа', 'Insufficient accepted time before the presentation limit']],
+    ['valid_time_incomplete', ['Проба завершена до набора принятого времени', 'Trial ended before the accepted-time target was met']],
+    ['valid_time_invalid', ['Некорректное разбиение времени показа', 'Invalid presentation time partition']],
+    ['valid_time_deadline', ['Время после предельной длительности исключено', 'Time after the presentation deadline was excluded']],
 ]);
 function qualityReasons(values) {
   return values.map(code => { const pair = reasonLabels.get(code.toLowerCase());
@@ -42,7 +48,9 @@ function matchesTrialFilters(entry, query) {
 function trials(row, query) {
   return (Array.isArray(row.features_payload?.cognitiveResults) ? row.features_payload.cognitiveResults : [])
     .filter(result => result && typeof result === 'object' && !Array.isArray(result)
-      && matchesTrialFilters(result, query));
+      && matchesTrialFilters(result, query))
+    .map(result => validTimeMetadata(result).validTimeReason
+      ? { ...result, qualityValid: false, qualityIssueCodes: [...codes(result), 'valid_time_invalid'] } : result);
 }
 
 function presentationAttempts(row) {
@@ -109,7 +117,7 @@ function presentationAttempts(row) {
     const qualityIssueCodes = ambiguous ? ['presentation_attempt_ambiguous'] : interrupted
       ? record.deviations?.includes('page_reloaded') ? ['page_reloaded'] : ['trial_result_missing'] : incomplete ? ['trial_result_missing']
       : qualityValid === false && !codes(result).length ? ['quality_invalid'] : codes(result);
-    return { ...entry, presentationId: text(entry.presentationId), trialId: text(entry.trialId),
+    return { ...filterPresentation(entry, result), presentationId: text(entry.presentationId), trialId: text(entry.trialId),
       condition: text(result?.condition ?? planned.get(record?.planItemId)?.condition),
       attempt: number(entry.attempt) ?? number(result?.attempt),
       sourceTrialIndex: number(result?.sourceTrialIndex),
@@ -125,7 +133,7 @@ function presentationAttempts(row) {
       || result.stimulusId == null || (result.blockId ?? result.block) == null) return;
     const qualityValid = typeof result.qualityValid === 'boolean' ? result.qualityValid : null;
     const reasons = codes(result);
-    mapped.push({ blockId: text(result.blockId ?? result.block), trialId: text(result.trialId),
+    mapped.push({ ...validTimeMetadata(result), blockId: text(result.blockId ?? result.block), trialId: text(result.trialId),
       condition: text(result.condition),
       stimulusId: text(result.stimulusId), presentationId: text(result.presentationId) ?? `no-gaze-result-${index + 1}`,
       attempt: number(result.attempt), sourceTrialIndex: number(result.sourceTrialIndex),
@@ -153,9 +161,12 @@ function presentationAttempts(row) {
 }
 
 function attemptMetadata(entry) {
-  return Object.fromEntries(['presentationId', 'trialId', 'attempt', 'sourceTrialIndex', 'presentationIndex',
-    'presentationStartMs', 'attemptStatus', 'qualityValid', 'qualityIssueCodes', 'qualityReasons', 'includedInDefault', 'attemptMethod']
+  const metadata = Object.fromEntries(['presentationId', 'trialId', 'attempt', 'sourceTrialIndex', 'presentationIndex',
+    'presentationStartMs', 'attemptStatus', 'qualityValid', 'qualityIssueCodes', 'qualityReasons', 'includedInDefault', 'attemptMethod',
+    'validTimePresent', 'validTime', 'actualDurationMs', 'validTimeReason']
     .map(key => [key, entry?.[key] ?? null]));
+  const id = Number.isSafeInteger(entry?.sourceTrialIndex) ? entry.sourceTrialIndex + 1 : entry?.trialId ?? '';
+  return { ...metadata, trialLabel: { ru: `Проба ${id}`, en: `Trial ${id}` } };
 }
 
 function trialSummary(row, query, presentations = presentationAttempts(row)) {
@@ -185,7 +196,7 @@ function trialSummary(row, query, presentations = presentationAttempts(row)) {
       const matches = keyed.get(key(result, field)) || [];
       const match = matches.length === 1 && matches[0].attemptStatus !== 'ambiguous' ? matches[0] : null;
       const issueCodes = codes(result);
-      return { ...attemptMetadata(match), attemptStatus: 'excluded', qualityValid: false, includedInDefault: false,
+      return { ...attemptMetadata(match), ...validTimeMetadata(result), attemptStatus: 'excluded', qualityValid: false, includedInDefault: false,
         presentationId: text(result.presentationId) ?? match?.presentationId ?? null,
         presentationIndex: number(result.presentationIndex) ?? match?.presentationIndex ?? null,
         presentationStartMs: number(result.onsetMs) ?? match?.presentationStartMs ?? null,
@@ -199,4 +210,18 @@ function trialSummary(row, query, presentations = presentationAttempts(row)) {
   };
 }
 
-module.exports = { presentationAttempts, attemptMetadata, trialSummary, taskTrials: trials, matchesTrialFilters };
+function trialAttemptDetails(row, query) {
+  const { taskObservationDuration, taskObservationIndex } = require('./task-observations');
+  const records = taskObservationIndex(row);
+  return trials(row, query).map(trial => {
+    const duration = taskObservationDuration(row, [trial], records);
+    const reasons = codes(trial);
+    return { ...attemptMetadata(trial), ...validTimeMetadata(trial),
+      actualDurationMs: duration, observationDurationMs: duration,
+      blockId: text(trial.blockId ?? trial.block), stimulusId: text(trial.stimulusId), condition: text(trial.condition),
+      attemptStatus: trial.qualityValid === false ? 'excluded' : trial.qualityValid === true ? 'accepted' : 'unknown',
+      qualityIssueCodes: reasons, qualityReasons: qualityReasons(reasons), includedInDefault: trial.qualityValid !== false };
+  });
+}
+
+module.exports = { presentationAttempts, attemptMetadata, trialSummary, trialAttemptDetails, taskTrials: trials, matchesTrialFilters };

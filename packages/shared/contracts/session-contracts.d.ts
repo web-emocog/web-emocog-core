@@ -165,6 +165,50 @@ export interface GazeValidationSummary extends Record<string, unknown> {
   };
 }
 
+/** All times are integer milliseconds relative to this presentation's onset. */
+export interface PassiveValidTimeV1 {
+  schemaVersion: 'passive_valid_time.v1';
+  targetMs: number;
+  acceptedMs: number;
+  actualMs: number;
+  maxDurationMs: number;
+  extended: boolean;
+  limitReached: boolean;
+  acceptedSegments: Array<{ startMs: number; endMs: number }>;
+  excludedSegments: Array<{ startMs: number; endMs: number; reasons: string[] }>;
+}
+
+export interface CognitiveResultV1 {
+  trialId?: string | number | null;
+  presentationId?: string | number | null;
+  block?: string | number | null;
+  blockId?: string | number | null;
+  stimulusId?: string | number | null;
+  presentationIndex?: number | null;
+  onsetMs?: number | null;
+  rt?: number | null;
+  attempt?: number | null;
+  decisionTimestampMs?: number | null;
+  sourceTrialIndex?: number | null;
+  repeatSequenceIndex?: number | null;
+  timestamp?: number | null;
+  task_id?: string | number | null;
+  stimulusType?: string | number | null;
+  expectedResponse?: string | number | null;
+  condition?: string | number | null;
+  response?: string | number | null;
+  responseMode?: string | number | null;
+  inputType?: string | number | null;
+  correct?: boolean | null;
+  qualityValid?: boolean | null;
+  skippedMedia?: boolean | null;
+  pointerSummary?: Record<string, unknown> | null;
+  qualityIssueCodes?: Array<string | null>;
+  qualityIssues?: Array<Record<string, unknown> | null>;
+  validTime?: PassiveValidTimeV1;
+  invalidationReason?: 'page_reloaded';
+}
+
 export interface SessionFeatureV1 {
   delivery?: SessionDeliveryV1;
   schemaVersion: 'session_feature.v1';
@@ -195,9 +239,9 @@ export interface SessionFeatureV1 {
   bpm_summary?: Record<string, unknown> | null;
   rppg_summary?: Record<string, unknown> | null;
   respiration_summary?: Record<string, unknown> | null;
-  experimentMeta?: Record<string, unknown> | null;
+  experimentMeta?: (Record<string, unknown> & { backupScope?: 'light_summary_without_signal_series' }) | null;
   blocks?: Array<Record<string, unknown>>;
-  cognitiveResults?: Array<Record<string, unknown>>;
+  cognitiveResults?: Array<CognitiveResultV1 | null>;
   gazeValidation?: GazeValidationSummary | null;
   gaze_analytics?: {
     schemaVersion: 'gaze_analytics.v1';
