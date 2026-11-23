@@ -51,6 +51,8 @@ test('#169 resumed QC continuity remains typed and is accepted without changing 
 test('#169 compatibility does not allow unknown keys, wrong types or raw measurement data', () => {
   for (const details of [{ targeted: 'true' }, { targeted: 1 }, { targeted: null },
     { stimulusName: {} }, { stimulusName: [] }, { stimulusName: 'x'.repeat(2001) },
+    { stimulusName: 'synthetic-private@example.test' },
+    { stimulusName: 'data:video/mp4;base64,cHJpdmF0ZQ==' },
     { arbitraryLegacyField: true }, { targeted: true, rawVideo: 'data:video/mp4;base64,cHJpdmF0ZQ==' }]) {
     assert.ok(validateSessionFeaturePayload(packet([event('calibration_viewport_changed', details)])).length);
   }
