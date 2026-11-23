@@ -166,7 +166,7 @@ test('release path: admission, interrupted delivery, finish replay, scoped expor
   assert.equal(exported.sessions[0].qualityAssessment.independentlyValidated, false);
   const rt = exported.rows.filter(item => item.metric === 'task.rt_ms');
   assert.deepEqual(rt.map(x => [x.attempt, x.attempt_status, x.value]).sort((a,b) => a[0] - b[0]),
-    [[1, 'excluded', 100], [2, 'incomplete', null], [3, 'accepted', 300]]);
+    [[1, 'excluded', 100], [2, 'interrupted', null], [3, 'accepted', 300]]);
   assert.ok(!JSON.stringify(exported).includes('synthetic-a'));
   await pool.query('DELETE FROM user_projects WHERE user_id=$1 AND project_id=$2', [analyst.id, owner.project]);
   await request(exportPath, 403, { token: analyst.token });

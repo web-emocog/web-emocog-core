@@ -1,5 +1,5 @@
-import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261112-emotion2';
-import { buildCheckpointHeatmaps } from './gaze-history.mjs?v=20261102-1';
+import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261122-validtime1';
+import { buildCheckpointHeatmaps } from './gaze-history.mjs?v=20261122-validtime1';
 import { buildAttentionMetrics } from '../gaze-tracker/attention-metrics.js?v=20261025-2';
 import { isCheckpointRequest, isLegacyCheckpointRequest } from './checkpoint-messages.mjs?v=20261025-1';
 
@@ -17,10 +17,14 @@ if (typeof DedicatedWorkerGlobalScope !== 'undefined' && self instanceof Dedicat
             source.heatmaps = buildCheckpointHeatmaps(source, { gridWidth: 32, gridHeight: 18,
                 screenWidth: source.checkpointViewport.width, screenHeight: source.checkpointViewport.height,
                 validationRmsPx: source.gazeValidation?.metrics?.accuracyPx ?? null });
-            source.attentionMetrics = buildAttentionMetrics(source);
-            source.blinkSummary = source.attentionMetrics?.global?.blinkDynamics || source.blinkSummary;
-            source.perclosSummary = source.attentionMetrics?.global?.perclos || source.perclosSummary;
-            self.postMessage({ ...reply, packet: buildAggregatesPayload(source, { forIngest: true }) });
+            if (!source.activeMeasurementBackup) {
+                source.attentionMetrics = buildAttentionMetrics(source);
+                source.blinkSummary = source.attentionMetrics?.global?.blinkDynamics || source.blinkSummary;
+                source.perclosSummary = source.attentionMetrics?.global?.perclos || source.perclosSummary;
+            }
+            const packet = buildAggregatesPayload(source, { forIngest: true });
+            if (source.activeMeasurementBackup) delete packet.rt_alignment;
+            self.postMessage({ ...reply, packet });
         } catch (_) { self.postMessage({ ...reply, error: 'checkpoint_prepare_failed' }); }
     };
 }

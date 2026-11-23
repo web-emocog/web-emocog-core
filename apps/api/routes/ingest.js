@@ -40,6 +40,7 @@ const { withTransaction, lockSessionKey } = require('../db/transaction');
 const { HttpError } = require('../security/http-error');
 const { requireSessionFeaturePayload } = require('../security/payload-policy');
 const { assertPublishedSurveyResponses } = require('../security/survey-admission');
+const { assertPublishedPassiveValidTime } = require('../security/passive-valid-time');
 const { build: assessMetricQuality } = require('../../shared/metric-quality');
 const protocolQuality = require('../../shared/protocol-quality');
 const { createHash } = require('node:crypto');
@@ -558,6 +559,7 @@ async function resolveIngestContext(client, req, raw, idempotency, locked = fals
   }
 
   assertPublishedSurveyResponses(raw.events, protocolDefinition);
+  assertPublishedPassiveValidTime(raw, protocolDefinition);
   return { storedSession, invitation, scope, protocolDefinition };
 }
 

@@ -134,10 +134,14 @@ export class PhysiologyIntervals {
         this.active = null;
     }
 
-    record(ms, sample, heartWindowMs, respirationWindowMs, maxEstimateGapMs = MAX_GAP_MS) {
+    record(ms, sample, heartWindowMs, respirationWindowMs, maxEstimateGapMs = MAX_GAP_MS, measurementAllowed = true) {
         if (!Number.isSafeInteger(ms) || ms < 0 || ms >= MAX_MS
             || ms < this.throughMs || (this.lastRecordedMs !== null && ms <= this.lastRecordedMs)) return;
         this.advance(ms);
+        if (measurementAllowed !== true) {
+            this.breakContinuity();
+            return;
+        }
         this.lastRecordedMs = ms;
         const index = Math.floor(ms / MINUTE_MS);
         const minute = index < MAX_MINUTES ? (this.minutes[index] ||= channels()) : null;

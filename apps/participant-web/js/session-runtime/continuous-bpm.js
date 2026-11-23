@@ -1,4 +1,5 @@
 import { BpmPublicationGate } from './bpm-publication-gate.mjs';
+import { HEART_RATE_METHODS, RESPIRATION_METHODS, resolvePhysiologyMethods } from '../../../shared/physiology-methods.mjs?v=20261120-methods1';
 
 const SAMPLE_CAP = 7200;
 const stats = () => ({ n: 0, sum: 0, min: null, max: null });
@@ -16,8 +17,25 @@ export function publishedRespiration(features = {}) {
         ? features.respRate : null;
 }
 
+// Выход метода motion подменяет поля дыхания движка; дыхание по яркости кожи
+// при этом не публикуется, чтобы в сессии был ровно один метод.
+export function motionFeatures(features, motion) {
+    return {
+        ...features,
+        respRate: motion?.published ? motion.rate : null,
+        respRateRaw: motion?.rate ?? null,
+        respConf: Number.isFinite(motion?.conf) ? motion.conf : 0,
+        respPublished: motion?.published === true,
+        respHeld: false,
+        respReason: motion?.reason ?? null,
+        respMotionAgreeing: motion?.agreeing ?? 0,
+        respMotionThirdSource: motion?.thirdSource ?? null,
+        respMethodVersion: RESPIRATION_METHODS.motion.methodVersion
+    };
+}
+
 const MODULE_URL = new URL(
-    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261107-resp1',
+    '../../../../lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/index.js?v=20261122-validtime1',
     import.meta.url
 );
 
@@ -56,6 +74,14 @@ function copyLandmarks(landmarks, target) {
 export class ContinuousBpmCollector {
     constructor(options = {}) {
         this.getFps = options.getFps || (() => 30);
+        // Методы из настроек протокола (options.definition) или явных опций; неизвестное значение = прежний метод.
+        const fromProtocol = resolvePhysiologyMethods(options.definition || null);
+        const heartRate = options.heartRateMethod ?? fromProtocol.heartRate;
+        const respiration = options.respirationMethod ?? fromProtocol.respiration;
+        this.heartRateMethod = Object.hasOwn(HEART_RATE_METHODS, heartRate) ? heartRate : 'pos';
+        this.respirationMethod = Object.hasOwn(RESPIRATION_METHODS, respiration) ? respiration : 'luma';
+        this.bpmMethodVersion = HEART_RATE_METHODS[this.heartRateMethod].methodVersion;
+        this.motionRespiration = null;
         this.onError = options.onError || (() => {});
         this.onRecovered = options.onRecovered || (() => {});
         this.engine = null;
@@ -75,6 +101,9 @@ export class ContinuousBpmCollector {
         this.lastFrameTimestamp = null;
         this.bpmStats = stats(); this.respStats = stats();
         this.respMethodVersion = null;
+        this.validTimeContext = null;
+        this.freshWindowRequired = false;
+        this.freshWindowStartMs = null;
         updateDiagnostics({
             moduleLoaded: false,
             reporterAvailable: false,
@@ -100,7 +129,10 @@ export class ContinuousBpmCollector {
             try {
                 const module = await import(importUrl);
                 if (this.finalized) return false;
-                this.engine = new module.RppgEngine({ algorithm: 'pos', mode: 'safe' });
+                this.engine = new module.RppgEngine({ algorithm: HEART_RATE_METHODS[this.heartRateMethod].algorithm, mode: 'safe' });
+                this.motionRespiration = this.respirationMethod === 'motion' && module.MotionRespirationEstimator
+                    ? new module.MotionRespirationEstimator() : null;
+                if (this.respirationMethod === 'motion' && !this.motionRespiration) throw new Error('Motion respiration module unavailable');
                 this.reporter = module.SessionReporter ? new module.SessionReporter({ maxSamples: SAMPLE_CAP }) : null;
                 this.canvas = document.createElement('canvas');
                 this.context = this.canvas.getContext('2d', { willReadFrequently: true });
@@ -126,7 +158,45 @@ export class ContinuousBpmCollector {
         return false;
     }
 
+    setValidTimeContext(context) {
+        if (this.finalized) return;
+        const next = context == null ? null : {
+            allowed: context.allowed === true && Number.isFinite(context.segmentStartMs) && context.segmentStartMs >= 0,
+            segmentStartMs: Number.isFinite(context.segmentStartMs) ? context.segmentStartMs : null
+        };
+        const previous = this.validTimeContext;
+        const changed = (previous === null) !== (next === null)
+            || (previous && next && (previous.allowed !== next.allowed
+                || (next.allowed && previous.segmentStartMs !== next.segmentStartMs)));
+        this.validTimeContext = next;
+        if (changed) this._resetMeasurementSegment();
+    }
+
+    _resetMeasurementSegment() {
+        this.freshWindowRequired = true;
+        this.freshWindowStartMs = null;
+        this.lastFrameTimestamp = null;
+        this.lastSample = null;
+        this.publicationGate.reset();
+        this.motionRespiration?.reset();
+        // Clear only reporter hold state, not the accepted history or its statistics.
+        if (this.reporter) this.reporter._lastPublished = null;
+        try {
+            if (this.engine) {
+                const Engine = this.engine.constructor;
+                if (Engine === Object) throw new Error('physiology_engine_reset_unavailable');
+                this.engine = new Engine(this.engine.cfg);
+            }
+        } catch (error) {
+            this.engine = null;
+            this.ready = false;
+            this.onError(error);
+        }
+        updateDiagnostics({ bpmEstimate: null, signalQuality: null, confidence: null });
+    }
+
     process(video, landmarks, timestampMs = performance.now(), sharedPixels = null, captureWallTime = null) {
+        if (this.validTimeContext && (!this.validTimeContext.allowed || timestampMs < this.validTimeContext.segmentStartMs)) return null;
         if (this.finalized || !this.ready || !this.engine || !this.context || !Array.isArray(landmarks)) return null;
         if (!Number.isFinite(timestampMs) || (this.lastFrameTimestamp !== null && timestampMs <= this.lastFrameTimestamp)) return null;
         const wallTime = Number.isFinite(captureWallTime) ? captureWallTime : Date.now();
@@ -134,8 +204,13 @@ export class ContinuousBpmCollector {
         const height = sharedPixels?.height || video?.videoHeight || 0;
         if (!width || !height || landmarks.length < 468) return null;
         // Confirmation must describe consecutive capture, not two bursts around a stall.
-        if (this.lastFrameTimestamp !== null && timestampMs - this.lastFrameTimestamp > 250) this.publicationGate.reset();
+        if (this.lastFrameTimestamp !== null && timestampMs - this.lastFrameTimestamp > 250) {
+            if (this.freshWindowRequired) this._resetMeasurementSegment();
+            else this.publicationGate.reset();
+        }
+        if (!this.engine) return null;
         this.lastFrameTimestamp = timestampMs;
+        if (this.freshWindowRequired && this.freshWindowStartMs === null) this.freshWindowStartMs = timestampMs;
 
         try {
             let imageData = sharedPixels;
@@ -150,12 +225,15 @@ export class ContinuousBpmCollector {
             // MediaPipe may expose immutable landmark objects (notably in WebKit).
             // rPPG receives an owned plain-data snapshot so downstream processing
             // cannot trip over readonly host objects.
+            const ownedLandmarks = copyLandmarks(landmarks, this.landmarkBuffer);
+            // Движение головы копится на каждом кадре с лицом, независимо от выхода rPPG.
+            this.motionRespiration?.pushFace(timestampMs, ownedLandmarks, imageData, width, height);
             const output = this.engine.update({
                 timestampMs,
                 frameW: width,
                 frameH: height,
                 imageData,
-                landmarks: copyLandmarks(landmarks, this.landmarkBuffer),
+                landmarks: ownedLandmarks,
                 fps: this.getFps()
             });
             const recovered = this.consecutiveErrors > 0;
@@ -166,9 +244,20 @@ export class ContinuousBpmCollector {
                 return null;
             }
 
-            const features = output.features || {};
+            let features = this.motionRespiration
+                ? motionFeatures(output.features || {}, this.motionRespiration.estimate(timestampMs))
+                : (output.features || {});
             this.respMethodVersion = features.respMethodVersion || this.respMethodVersion;
-            const publication = this.publicationGate.evaluate(output);
+            const freshMs = this.freshWindowRequired ? timestampMs - this.freshWindowStartMs : Infinity;
+            const heartReady = !this.freshWindowRequired
+                || freshMs >= Math.max(10000, (this.engine.cfg?.windowSec ?? 10) * 1000);
+            const respirationReady = !this.freshWindowRequired
+                || freshMs >= Math.max(20000, (this.engine.cfg?.respiration?.windowSec ?? 20) * 1000,
+                    (this.motionRespiration?.cfg?.windowSec ?? 20) * 1000);
+            if (!heartReady && !respirationReady) return null;
+            if (!respirationReady) features = { ...features, respRate: null, respConf: 0, respPublished: false, respHeld: false };
+            const publication = heartReady ? this.publicationGate.evaluate(output)
+                : { accepted: false, bpm: null, reason: 'valid_time_warmup' };
             const measuredBpm = publication.accepted && publication.held !== true;
             const respiration = publishedRespiration(features);
             if (!publication.accepted) this.rejectedSampleCount += 1;
@@ -177,6 +266,7 @@ export class ContinuousBpmCollector {
                     ...output,
                     published: measuredBpm,
                     bpmPublished: measuredBpm ? publication.bpm : null,
+                    ...(!heartReady ? { bpmSmoothed: null } : {}),
                     features: { ...features, respRate: respiration },
                     publishReason: publication.reason
                 }, timestampMs);
@@ -191,7 +281,7 @@ export class ContinuousBpmCollector {
                 classification: publication.classification || null,
                 confidence: Number.isFinite(output.confidence) ? output.confidence : null,
                 respRate: respiration,
-                bpmMethodVersion: 'continuous_signals.v2',
+                bpmMethodVersion: this.bpmMethodVersion,
                 respMethodVersion: this.respMethodVersion,
                 respConf: Number.isFinite(features.respConf) ? features.respConf : null
             };
@@ -218,7 +308,8 @@ export class ContinuousBpmCollector {
             });
             return sample;
         } catch (error) {
-            this.publicationGate.reset();
+            if (this.freshWindowRequired) this._resetMeasurementSegment();
+            else this.publicationGate.reset();
             this.consecutiveErrors += 1;
             updateDiagnostics({
                 lastError: error?.message || String(error),
@@ -229,10 +320,19 @@ export class ContinuousBpmCollector {
         }
     }
 
+    // Плечи из модели позы (если модуль корпуса включён); используются только методом motion.
+    recordShoulders(timestampMs, left, right) {
+        if (this.finalized || !this.motionRespiration) return false;
+        if (this.validTimeContext && (!this.validTimeContext.allowed || !Number.isFinite(timestampMs)
+            || timestampMs < this.validTimeContext.segmentStartMs)) return false;
+        if (this.freshWindowRequired && (this.freshWindowStartMs === null || timestampMs < this.freshWindowStartMs)) return false;
+        return this.motionRespiration.pushShoulders(timestampMs, left, right);
+    }
+
     snapshot() {
         return {
             ready: this.ready,
-            methodVersion: 'continuous_signals.v2',
+            methodVersion: this.bpmMethodVersion,
             respMethodVersion: this.respMethodVersion,
             sampleCount: this.sampleCount,
             retainedSampleCount: this.samples.length,
@@ -255,7 +355,7 @@ export class ContinuousBpmCollector {
         const summary = this.snapshot();
         return {
             mode: 'continuous_session',
-            methodVersion: 'continuous_signals.v2',
+            methodVersion: this.bpmMethodVersion,
             reason,
             startedAt: this.startedAt,
             completedAt: Date.now(),

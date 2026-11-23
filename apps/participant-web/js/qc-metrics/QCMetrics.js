@@ -9,11 +9,11 @@
  */
 
 import { createThresholds, VIDEO_ELEMENT_IDS } from './constants.js';
-import { VideoFpsMonitor } from './fps-monitor.js?v=20261114-assigned1';
+import { VideoFpsMonitor } from './fps-monitor.js?v=20261122-validtime1';
 import { createGazeState, addGazePoint, accumulateGazeTime } from './gaze-tracking.js';
 import { createInstrumentCounters, computeFrameFlags, updateInstrumentCounters } from './frame-analysis.js?v=20261025-1';
 import { createValidationState, setValidationData, createTrackingDeviationState, setTrackingDeviationData } from './validation.js';
-import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261114-assigned1';
+import { getCurrentMetrics, getSummary } from './metrics-calculator.js?v=20261122-validtime1';
 import { participantDebug as dbg } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 
 class QCMetrics {
@@ -32,30 +32,78 @@ class QCMetrics {
         this._lastFrameTime = 0;
         this._isRunning = false;
         this._useRealCameraFps = options.useRealCameraFps || false;
+        this._durationOffset = 0;
+        this._segmentStartTime = performance.now();
+        this._stoppedTime = this._segmentStartTime;
+        this._gazeBaseline = null;
+        this._continuity = { schemaVersion: 'qc_continuity.v1', segmentCount: 1, historyComplete: true };
 
         // Callbacks
         this.onMetricsUpdate = options.onMetricsUpdate || null;
     }
 
     start(options = {}) {
+        if (this._isRunning) this.stop();
         this._startTime = Date.now();
         this._lastFrameTime = performance.now();
+        this._segmentStartTime = this._lastFrameTime;
         this._isRunning = true;
 
         this._counters = createInstrumentCounters();
         this._gazeState = createGazeState();
         this._validationState = createValidationState();
         this._trackingDeviationState = createTrackingDeviationState();
+        this._durationOffset = 0;
+        this._stoppedTime = null;
+        this._gazeBaseline = null;
+        this._continuity = { schemaVersion: 'qc_continuity.v1', segmentCount: 1, historyComplete: true };
 
         const useRealFps = options.useRealCameraFps ?? this._useRealCameraFps;
 
         this._fpsMonitor.findVideoElement(this.videoElementIdCandidates);
         this._fpsMonitor.start(useRealFps, options.analysisFpsThreshold);
 
+        const previous = options.previousSummary;
+        if (previous) {
+            const values = previous.counters;
+            const keys = Object.keys(this._counters);
+            const restorable = values && keys.every(key => Number.isFinite(values[key]) && values[key] >= 0)
+                && keys.filter(key => !key.endsWith('Ms')).every(key => Number.isSafeInteger(values[key]))
+                && ['faceVisible', 'faceOk', 'poseOk', 'illuminationOk', 'eyesOpen', 'occlusionDetected', 'lowFpsFrames']
+                    .every(key => values[key] <= values.totalFrames)
+                && values.gazeValid <= values.gazeTotal && values.gazeOnScreen <= values.gazeTotal
+                && Number.isFinite(previous.durationMs) && previous.durationMs >= 0;
+            const segmentCount = Number.isSafeInteger(previous.continuity?.segmentCount)
+                && previous.continuity.segmentCount > 0 && previous.continuity.segmentCount < 1000000
+                ? previous.continuity.segmentCount : 1;
+            this._continuity = { schemaVersion: 'qc_continuity.v1', segmentCount: segmentCount + 1,
+                historyComplete: Boolean(restorable) && previous.continuity?.historyComplete !== false
+                    && (!previous.continuity || previous.continuity.schemaVersion === 'qc_continuity.v1'
+                        && segmentCount === previous.continuity.segmentCount)
+                    && [previous.gazeValidTimeMs, previous.gazeOnScreenTimeMs]
+                        .every(value => Number.isFinite(value) && value >= 0) };
+            if (restorable) {
+                this._counters = Object.fromEntries(keys.map(key => [key, values[key]]));
+                this._counters.consecutiveLowFpsMs = 0;
+                this._durationOffset = previous.durationMs;
+                for (const key of ['validTimeMs', 'onScreenTimeMs']) {
+                    const value = previous[key === 'validTimeMs' ? 'gazeValidTimeMs' : 'gazeOnScreenTimeMs'];
+                    this._gazeState[key] = Number.isFinite(value) && value >= 0 ? value : 0;
+                }
+                if (!this._fpsMonitor.restoreAnalysisSession(previous.fpsDiagnostics?.analysisSession)) {
+                    this._continuity.historyComplete = false;
+                }
+            }
+        }
+        this._gazeBaseline = { gazeTotal: this._counters.gazeTotal, gazeValid: this._counters.gazeValid,
+            gazeOnScreen: this._counters.gazeOnScreen, validTimeMs: this._gazeState.validTimeMs,
+            onScreenTimeMs: this._gazeState.onScreenTimeMs };
+
         dbg('qc', 'metrics:start', { realCameraFps: useRealFps === true });
     }
 
     stop() {
+        if (this._isRunning) this._stoppedTime = performance.now();
         this._isRunning = false;
         this._fpsMonitor.stop();
         dbg('qc', 'metrics:stop');
@@ -117,10 +165,10 @@ class QCMetrics {
     }
 
     resetGazeAvailability() {
-        this._counters.gazeTotal = 0;
-        this._counters.gazeValid = 0;
-        this._counters.gazeOnScreen = 0;
+        for (const key of ['gazeTotal', 'gazeValid', 'gazeOnScreen']) this._counters[key] = this._gazeBaseline?.[key] || 0;
         this._gazeState = createGazeState();
+        this._gazeState.validTimeMs = this._gazeBaseline?.validTimeMs || 0;
+        this._gazeState.onScreenTimeMs = this._gazeBaseline?.onScreenTimeMs || 0;
     }
 
     setTrackingDeviationData(samples) {
@@ -132,26 +180,37 @@ class QCMetrics {
     }
 
     getCurrentMetrics() {
-        return getCurrentMetrics(
+        return { ...getCurrentMetrics(
             this._counters,
             this._gazeState,
             this._fpsMonitor,
             this._startTime,
             this.thresholds,
-            this._validationState
-        );
+            this._validationState,
+            this._elapsedMs()
+        ), continuity: { ...this._continuity } };
     }
 
     getSummary() {
-        return getSummary(
+        const summary = getSummary(
             this._counters,
             this._gazeState,
             this._validationState,
             this._trackingDeviationState,
             this._fpsMonitor,
             this._startTime,
-            this.thresholds
+            this.thresholds,
+            this._elapsedMs()
         );
+        const checks = this._continuity.historyComplete ? summary.checks : { ...summary.checks, historyComplete: false };
+        return { ...summary, continuity: { ...this._continuity }, checks,
+            passedChecks: Object.values(checks).filter(value => value === true).length,
+            totalChecks: Object.keys(checks).length,
+            overallPass: summary.overallPass && this._continuity.historyComplete };
+    }
+
+    _elapsedMs() {
+        return this._durationOffset + Math.max(0, (this._stoppedTime ?? performance.now()) - this._segmentStartTime);
     }
 
     reset() {
@@ -163,6 +222,11 @@ class QCMetrics {
         this._startTime = 0;
         this._lastFrameTime = 0;
         this._isRunning = false;
+        this._durationOffset = 0;
+        this._gazeBaseline = null;
+        this._segmentStartTime = performance.now();
+        this._stoppedTime = this._segmentStartTime;
+        this._continuity = { schemaVersion: 'qc_continuity.v1', segmentCount: 1, historyComplete: true };
     }
 
     isRunning() {

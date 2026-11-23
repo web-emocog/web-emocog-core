@@ -103,8 +103,8 @@ test('respiration peak refinement is identical in the browser engine and preserv
   const result = await page.evaluate(async () => {
     const base = location.origin + '/lib/rppg_alg_qc_test_web_alg_test_v10/rppg_alg/';
     const { estimateRespirationRate, RESPIRATION_METHOD_VERSION } = await import(base + 'signal/respiration.js?v=20261107-resp1');
-    const { publishedRespiration } = await import(location.origin + '/apps/participant-web/js/session-runtime/continuous-bpm.js?v=20261107-resp2');
-    const { RppgEngine } = await import(base + 'index.js?v=20261107-resp1');
+    const { publishedRespiration } = await import(location.origin + '/apps/participant-web/js/session-runtime/continuous-bpm.js?v=20261122-validtime1');
+    const { RppgEngine } = await import(base + 'index.js?v=20261122-validtime1');
     const { RppgEngine: Direct } = await import(base + 'RppgEngine.js?v=20261107-resp1');
     const estimate = estimateRespirationRate(Array.from({ length: 200 }, (_, i) => Math.sin(2 * Math.PI * 9 / 60 * i / 10)), 10);
     const features = { respRate: estimate.bpm, respConf: estimate.conf, respPublished: true };

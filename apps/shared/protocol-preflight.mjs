@@ -1,6 +1,9 @@
 import * as registryModule from './rt-registry.js';
 import * as stimulusModule from './standard-stimuli.js';
+import * as passiveValidTimeModule from './passive-valid-time.js?v=20261122-validtime1';
+import * as qualityModule from './protocol-quality.js?v=20261122-validtime1';
 import './keyboard-responses.js?v=20261025-1';
+import { physiologyMethodsSource, validatePhysiologyMethods, RESPIRATION_METHODS, HEART_RATE_METHODS } from './physiology-methods.mjs';
 
 export const PREFLIGHT_VERSION = 'protocol_preflight.v1';
 // Transport/runtime bounds, not scientific acceptance thresholds.
@@ -12,6 +15,9 @@ const types = new Set(['consent', 'questionnaire', 'precheck', 'calibration', 'i
 const shellTypes = new Set(['consent', 'questionnaire', 'precheck', 'calibration']);
 const tasks = registryModule.default?.RT_TASKS || globalThis.RtRegistry?.RT_TASKS;
 const standard = stimulusModule.default || globalThis.StandardStimuli;
+const quality = qualityModule.default || globalThis.WecogProtocolQuality;
+const passiveValidTime = passiveValidTimeModule.default || globalThis.WecogPassiveValidTime;
+export const inspectPassiveValidTimeBlock = quality.inspectPassiveValidTimeBlock;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const number = value => (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))
   && Number.isFinite(Number(value));
@@ -39,6 +45,11 @@ export function inspectProtocolPreflight(definition, { mediaReport = null } = {}
   if (profile != null && !['protocol_signals.v1', 'protocol_signals.v2'].includes(profile)) {
     fail('signal_profile_unsupported', '/settings/signalProfileId', 'Неизвестный профиль измерений.', 'Unsupported signal profile.');
   }
+  const physiologyMethods = physiologyMethodsSource(definition);
+  if (validatePhysiologyMethods(physiologyMethods).length)
+    fail('physiology_method_unsupported', '/settings/physiologyMethods', 'Неизвестный метод оценки ЧСС или дыхания.', 'Unsupported heart-rate or respiration method.');
+  else if (HEART_RATE_METHODS[physiologyMethods?.heartRate]?.experimental || RESPIRATION_METHODS[physiologyMethods?.respiration]?.experimental)
+    warn('physiology_method_experimental', '/settings/physiologyMethods', 'Выбран экспериментальный метод ЧСС или дыхания: он не валидирован против ЭКГ и дыхательного пояса.', 'An experimental heart-rate or respiration method is selected; it is not validated against ECG or a respiration belt.');
   if (definition.testHubMetrics != null && (!Array.isArray(definition.testHubMetrics)
     || definition.testHubMetrics.some(id => !['rt', 'tracking', 'vpc', 'visuospatial'].includes(id))))
     fail('hub_test_unsupported', '/testHubMetrics', 'Выбран неподдерживаемый тест.', 'An unsupported hub test is selected.');
@@ -78,6 +89,14 @@ export function inspectProtocolPreflight(definition, { mediaReport = null } = {}
         fail('block_id_invalid', path + '/id', 'Укажите непустой уникальный ID блока.', 'Use a non-empty unique block ID.');
       ids.add(block.id);
     }
+    const validTime = quality.inspectPassiveValidTimeBlock(block, { mediaManifest: { ...definition.mediaManifest, ...mediaReport?.validTimeMedia },
+      allowUnresolvedMedia: mediaReport === null });
+    if (!validTime.ok) fail('passive_valid_time_invalid', path + '/blockConfig/validTime',
+      'Валидное время доступно только для статического пассивного просмотра без ответа: версия v1, продление 0–50%, непрерывный сегмент 1000 мс. Проверьте настройки и типы всех файлов.',
+      'Valid time requires static passive viewing without responses: v1, extension 0–50%, continuous segment 1000 ms. Check the settings and every media file type.');
+    if (validTime.config) warn('passive_valid_time_extension', path,
+      `Статический стимул может показываться до ${Math.round(validTime.config.maxExtensionRatio * 100)}% дольше. Учитываются непрерывные валидные сегменты от 1 с; условие и RT не меняются.`,
+      `Static stimuli may remain visible up to ${Math.round(validTime.config.maxExtensionRatio * 100)}% longer. Only continuous valid segments of at least 1 s count; condition and RT are unchanged.`);
     if (shellTypes.has(block.type)) continue;
     const content = v2 ? (block.content || {}) : (block.params || {});
     const config = block.type === 'passive' ? { ...content, ...block.blockConfig } : (block.blockConfig || block.params || {});
@@ -132,6 +151,8 @@ export function inspectProtocolPreflight(definition, { mediaReport = null } = {}
       const repetitions = trial.repetitions == null ? 1 : time(trial.repetitions, p + '/repetitions', { max: PUBLICATION_LIMITS.trials });
       blockTrialCount += repetitions;
       const duration = time(trial.duration, p + '/duration', { fallback: Number(config.slideDuration || config.stimulusDuration || config.stimulus_ms || (config.duration_sec ? config.duration_sec * 1000 : 1000)) });
+      if (validTime.config && duration < 1000) fail('passive_valid_time_duration', p + '/duration',
+        'Для валидного времени показ должен длиться минимум 1000 мс.', 'Valid-time presentations must last at least 1000 ms.');
       const fixation = config.useFixation === false ? 0 : time(trial.fixationMax ?? config.fixation?.duration ?? config.fixation_ms,
         p + '/fixationMax', { zero: true, fallback: block.type === 'passive' && config.useFixation !== true ? 0 : 500 });
       const iti = time(config.randomInterStimulus === true ? config.interStimulusMaxMs : trial.randomItiMax,
@@ -150,7 +171,10 @@ export function inspectProtocolPreflight(definition, { mediaReport = null } = {}
       if (action && !globalThis.WecogKeyboardResponses.normalize(action)
         && !['Click', 'mouse_click', 'PointerIntent', 'pointer_intent', 'mouse_intent'].includes(action))
         fail('response_key_unsupported', p + '/action', 'Выбранная клавиша не поддерживается обработчиком ответов.', 'The response key is not supported by the input collector.');
-      maximumMs += repetitions * (duration + fixation + iti + betweenTrials + (config.showFeedback || config.feedbackConfig ? time(trial.feedbackDuration, p + '/feedbackDuration', { zero: true, fallback: 500 }) : 0));
+      const maximumStimulusMs = validTime.config ? Math.floor(duration * (1 + validTime.config.maxExtensionRatio)) : duration;
+      if (maximumStimulusMs > (validTime.config ? Math.min(PUBLICATION_LIMITS.timerMs, passiveValidTime.MAX_MS) : PUBLICATION_LIMITS.timerMs)) fail('timing_invalid', p + '/duration',
+        'Длительность с продлением превышает предел таймера.', 'Duration including extension exceeds the timer limit.');
+      maximumMs += repetitions * (maximumStimulusMs + fixation + iti + betweenTrials + (config.showFeedback || config.feedbackConfig ? time(trial.feedbackDuration, p + '/feedbackDuration', { zero: true, fallback: 500 }) : 0));
     }
     let residentBytes = 0;
     for (const size of [...mediaSizes.values()].sort((a, b) => b - a)) {
