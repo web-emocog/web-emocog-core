@@ -209,3 +209,17 @@ Before updating a runtime or model:
 3. Record source URL and SHA-256 for vendored files.
 4. Run API, browser smoke and baseline-versus-new gaze benchmark.
 5. Update this file in the same pull request.
+
+## WECog facial atlas pilot addition
+
+The research atlas from issue #181 is included under its supplied Apache-2.0
+license. Source: https://github.com/web-emocog/web-emocog-core/issues/181
+Archive SHA-256: `2b5ec7efe009ac8ee630175d078a08fc06368932a2c40d43f77a55ea3dc6b677`.
+Catalogue: `wecog-au-atlas/1.0.0`; adapted engine: `wecog-facial-atlas/1.0.1-pilot`.
+The supplied NOTICE and full license are retained in
+`apps/participant-web/js/emotion/atlas/`. This includes the MediaPipe canonical
+face projection and reflection lookup (source blob
+`0e666d1c4e75949d1639c2bcf347a38da4834164`, copyright The MediaPipe Authors).
+Adaptations add diagnostic readiness, bounded recording and UI; no model weights,
+articles or FACS manual are redistributed by this addition. The standalone map is
+`apps/web/developer/facial-atlas-reference.html`.

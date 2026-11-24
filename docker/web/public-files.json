@@ -24,6 +24,7 @@
       "apps/web/developer/body-pose-test.html",
       "apps/web/developer/bpm-test.html",
       "apps/web/developer/emotion-test.html",
+      "apps/web/developer/facial-atlas-test.html",
       "apps/web/developer/rt-test.html",
       "apps/participant-web/tools/gaze-benchmark.html"
     ],
@@ -35,6 +36,17 @@
     "apps/web/researcher-analytics-preview-fixture.js"
   ],
   "files": [
+    "apps/participant-web/js/emotion/atlas/catalog.json",
+    "apps/participant-web/js/emotion/atlas/engine.mjs",
+    "apps/participant-web/js/emotion/atlas/regions.mjs",
+    "apps/participant-web/js/emotion/atlas/mesh-mirror.mjs",
+    "apps/participant-web/js/emotion/atlas/wecog-frame.mjs",
+    "apps/participant-web/js/emotion/atlas/NOTICE.txt",
+    "apps/participant-web/js/emotion/atlas/LICENSE-Apache-2.0.txt",
+    "apps/web/developer/facial-atlas-test.html",
+    "apps/web/developer/facial-atlas-test.js",
+    "apps/web/developer/facial-atlas-panel.mjs",
+    "apps/web/developer/facial-atlas-reference.html",
     "Audio_detection/browser/open-vocal-biomarkers.mjs",
     "apps/participant-web/assets/vpc/felidae/caracal.jpg",
     "apps/participant-web/assets/vpc/felidae/cheetah.jpg",

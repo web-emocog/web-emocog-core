@@ -1,0 +1,12 @@
+WECog facial action atlas — research implementation, 2026.
+The integration patch adapts files in web-emocog/web-emocog-core, revision
+1c1e571507e0891330276133d8dc2d255fc6cd80. Original project and model licences
+continue to apply. The package includes no model weights.
+
+The static face projection and the 468 left–right index correspondences were
+derived from the MediaPipe canonical face model. Copyright The MediaPipe Authors.
+Source: https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/modules/face_geometry/data/canonical_face_model.obj
+Source Git blob: 0e666d1c4e75949d1639c2bcf347a38da4834164
+Changes: XY projection and reflection lookup for a frontal schema.
+See LICENSE-Apache-2.0.txt. Articles and the FACS manual are not redistributed.
+For anatomical sources and the scope of each correspondence see atlas/catalog.json.

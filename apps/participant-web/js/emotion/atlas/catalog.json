@@ -1,0 +1,2227 @@
+{
+  "version": "wecog-au-atlas/1.0.0",
+  "channels": [
+    {
+      "index": 0,
+      "name": "_neutral",
+      "zone": "face",
+      "side": "none",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "unmapped",
+      "status": "ignore",
+      "movement_ru": "Служебная категория графа",
+      "caveat_ru": "Исключить из физиологических расчётов. Нейтральную базу определяют по временному отрезку калибровки.",
+      "sources": [
+        "MP_GRAPH",
+        "MP_CARD"
+      ]
+    },
+    {
+      "index": 1,
+      "name": "browDownLeft",
+      "zone": "brow_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU4",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Бровь опускается",
+      "caveat_ru": "Сближение медиальных концов бровей оценивают отдельно. Наклон головы может менять проекцию.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 2,
+      "name": "browDownRight",
+      "zone": "brow_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU4",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Бровь опускается",
+      "caveat_ru": "Сближение медиальных концов бровей оценивают отдельно. Наклон головы может менять проекцию.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 3,
+      "name": "browInnerUp",
+      "zone": "brow_medial",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": "AU1",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Внутренние концы бровей поднимаются",
+      "caveat_ru": "Модель выдаёт одно значение. Правило не позволяет установить сторону и степень симметрии.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 4,
+      "name": "browOuterUpLeft",
+      "zone": "brow_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU2",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Наружный конец брови поднимается",
+      "caveat_ru": "Учитывать положение головы, край кадра и волосы над бровью.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 5,
+      "name": "browOuterUpRight",
+      "zone": "brow_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU2",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Наружный конец брови поднимается",
+      "caveat_ru": "Учитывать положение головы, край кадра и волосы над бровью.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 6,
+      "name": "cheekPuff",
+      "zone": "cheeks",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Щёки выпячиваются",
+      "caveat_ru": "Наполнение воздухом зависит от внутриротового давления и смыкания губ. AU13 обозначает другое движение.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 7,
+      "name": "cheekSquintLeft",
+      "zone": "cheek_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU6",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Поднимается ткань щеки под глазом",
+      "caveat_ru": "Можно спутать с сужением глазной щели при AU7; совместные AU6 и AU7 возможны.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 8,
+      "name": "cheekSquintRight",
+      "zone": "cheek_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU6",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Поднимается ткань щеки под глазом",
+      "caveat_ru": "Можно спутать с сужением глазной щели при AU7; совместные AU6 и AU7 возможны.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 9,
+      "name": "eyeBlinkLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "event_input",
+      "movement_ru": "Веки сближаются или смыкаются",
+      "caveat_ru": "Для AU45 требуется событие закрытия и последующего открытия. Один кадр совместим с длительным закрытием, прищуриванием или подмигиванием.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 10,
+      "name": "eyeBlinkRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "event_input",
+      "movement_ru": "Веки сближаются или смыкаются",
+      "caveat_ru": "Для AU45 требуется событие закрытия и последующего открытия. Один кадр совместим с длительным закрытием, прищуриванием или подмигиванием.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 11,
+      "name": "eyeLookDownLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Опускание взгляда по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 12,
+      "name": "eyeLookDownRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Опускание взгляда по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 13,
+      "name": "eyeLookInLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Смещение взгляда к носу по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 14,
+      "name": "eyeLookInRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Смещение взгляда к носу по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 15,
+      "name": "eyeLookOutLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Смещение взгляда к виску по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 16,
+      "name": "eyeLookOutRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Смещение взгляда к виску по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 17,
+      "name": "eyeLookUpLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Подъём взгляда по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 18,
+      "name": "eyeLookUpRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Подъём взгляда по конфигурации области глаза",
+      "caveat_ru": "Учитывать в оценке век. Коэффициент не определяет абсолютную точку взора, движение глазного яблока или активность глазодвигательного нерва.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 19,
+      "name": "eyeSquintLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU7",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Сужается глазная щель",
+      "caveat_ru": "Оценивать отдельно от AU6 и закрытия век. Сквозь этот канал трудно различить движение нижнего и верхнего века.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 20,
+      "name": "eyeSquintRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU7",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Сужается глазная щель",
+      "caveat_ru": "Оценивать отдельно от AU6 и закрытия век. Сквозь этот канал трудно различить движение нижнего и верхнего века.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 21,
+      "name": "eyeWideLeft",
+      "zone": "eye_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU5",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Увеличивается высота глазной щели",
+      "caveat_ru": "Для AU5 нужен подъём верхнего века. Сопоставлять с направлением взгляда и исходной шириной глазной щели.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 22,
+      "name": "eyeWideRight",
+      "zone": "eye_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU5",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Увеличивается высота глазной щели",
+      "caveat_ru": "Для AU5 нужен подъём верхнего века. Сопоставлять с направлением взгляда и исходной шириной глазной щели.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 23,
+      "name": "jawForward",
+      "zone": "jaw",
+      "side": "midline",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Нижняя челюсть выдвигается вперёд",
+      "caveat_ru": "Глубину трудно оценить одной фронтальной камерой; возможна примесь наклона головы.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 24,
+      "name": "jawLeft",
+      "zone": "jaw",
+      "side": "midline",
+      "direction": "left",
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Нижняя челюсть смещается влево",
+      "caveat_ru": "Сторона описывает направление всей челюсти. По ней нельзя выбрать активную мышцу.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 25,
+      "name": "jawOpen",
+      "zone": "jaw",
+      "side": "midline",
+      "direction": null,
+      "actionUnit": "AU26",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Нижняя челюсть опускается",
+      "caveat_ru": "AU26 и активное широкое раскрытие AU27 могут выглядеть сходно. Расхождение губ AU25 оценивается отдельно.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 26,
+      "name": "jawRight",
+      "zone": "jaw",
+      "side": "midline",
+      "direction": "right",
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Нижняя челюсть смещается вправо",
+      "caveat_ru": "Сторона описывает направление всей челюсти. По ней нельзя выбрать активную мышцу.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 27,
+      "name": "mouthClose",
+      "zone": "lips",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Губы смыкаются при различном положении челюсти",
+      "caveat_ru": "Смыкание само по себе не устанавливает AU24. Дополнение 1 − mouthClose не является оценкой AU25.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 28,
+      "name": "mouthDimpleLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU14",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта втягивается кзади",
+      "caveat_ru": "Проверять локальное втяжение тканей у комиссуры; латеральное растяжение AU20 может выглядеть сходно.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 29,
+      "name": "mouthDimpleRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU14",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта втягивается кзади",
+      "caveat_ru": "Проверять локальное втяжение тканей у комиссуры; латеральное растяжение AU20 может выглядеть сходно.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 30,
+      "name": "mouthFrownLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU15",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта опускается",
+      "caveat_ru": "Сопоставлять с положением нижней губы и челюсти; одна точка не разделяет все компоненты.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 31,
+      "name": "mouthFrownRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU15",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта опускается",
+      "caveat_ru": "Сопоставлять с положением нижней губы и челюсти; одна точка не разделяет все компоненты.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 32,
+      "name": "mouthFunnel",
+      "zone": "lips",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": "AU22",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Губы округляются вокруг ротового отверстия",
+      "caveat_ru": "Форма рта при артикуляции может давать тот же рисунок. Учитывать состояние губ и челюсти.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 33,
+      "name": "mouthLeft",
+      "zone": "lips",
+      "side": "bilateral",
+      "direction": "left",
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Обе губы смещаются влево",
+      "caveat_ru": "Это направление целого рта; активность мышц левой стороны из него не следует.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 34,
+      "name": "mouthLowerDownLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU16",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Опускается часть нижней губы",
+      "caveat_ru": "При речи и открывании челюсти губа также движется вниз; оценивать движение относительно подбородка.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 35,
+      "name": "mouthLowerDownRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU16",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Опускается часть нижней губы",
+      "caveat_ru": "При речи и открывании челюсти губа также движется вниз; оценивать движение относительно подбородка.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 36,
+      "name": "mouthPressLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU24",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Видно сжатие губ на одной стороне",
+      "caveat_ru": "Камера показывает изменение формы, не силу давления. Сходная конфигурация возможна при напряжении губ.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 37,
+      "name": "mouthPressRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU24",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Видно сжатие губ на одной стороне",
+      "caveat_ru": "Камера показывает изменение формы, не силу давления. Сходная конфигурация возможна при напряжении губ.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 38,
+      "name": "mouthPucker",
+      "zone": "lips",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": "AU18",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Губы собираются и выдвигаются",
+      "caveat_ru": "Оценивать совместно с округлением и открыванием рта, особенно во время речи.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 39,
+      "name": "mouthRight",
+      "zone": "lips",
+      "side": "bilateral",
+      "direction": "right",
+      "actionUnit": null,
+      "proxy": "auxiliary",
+      "status": "context_only",
+      "movement_ru": "Обе губы смещаются вправо",
+      "caveat_ru": "Это направление целого рта; активность мышц правой стороны из него не следует.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE"
+      ]
+    },
+    {
+      "index": 40,
+      "name": "mouthRollLower",
+      "zone": "lower_lip",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "unmapped",
+      "status": "unresolved",
+      "movement_ru": "Нижняя губа подворачивается внутрь",
+      "caveat_ru": "Возможный компонент AU28. Один такой канал не устанавливает втягивание губ по критериям FACS.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 41,
+      "name": "mouthRollUpper",
+      "zone": "upper_lip",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "unmapped",
+      "status": "unresolved",
+      "movement_ru": "Верхняя губа подворачивается внутрь",
+      "caveat_ru": "Возможный компонент AU28. Один такой канал не устанавливает втягивание губ по критериям FACS.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 42,
+      "name": "mouthShrugLower",
+      "zone": "lower_lip",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "unmapped",
+      "status": "unresolved",
+      "movement_ru": "Нижняя губа выступает наружу",
+      "caveat_ru": "AU17 требует признаков подъёма подбородка. Канал описывает губу; соответствие AU17 не назначено.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 43,
+      "name": "mouthShrugUpper",
+      "zone": "upper_lip",
+      "side": "bilateral",
+      "direction": null,
+      "actionUnit": null,
+      "proxy": "unmapped",
+      "status": "unresolved",
+      "movement_ru": "Верхняя губа выступает наружу",
+      "caveat_ru": "Выдвижение и подъём верхней губы различны. Однозначной привязки к AU10 или AU17 нет.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 44,
+      "name": "mouthSmileLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU12",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта поднимается",
+      "caveat_ru": "Для AU12 важно также наружное смещение. Слово Smile в имени поля не задаёт эмоциональную метку.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 45,
+      "name": "mouthSmileRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU12",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта поднимается",
+      "caveat_ru": "Для AU12 важно также наружное смещение. Слово Smile в имени поля не задаёт эмоциональную метку.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 46,
+      "name": "mouthStretchLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU20",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта оттягивается в сторону",
+      "caveat_ru": "Оценивать направление движения отдельно от подъёма угла рта, артикуляции и поворота головы.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 47,
+      "name": "mouthStretchRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU20",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Угол рта оттягивается в сторону",
+      "caveat_ru": "Оценивать направление движения отдельно от подъёма угла рта, артикуляции и поворота головы.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 48,
+      "name": "mouthUpperUpLeft",
+      "zone": "mouth_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU10",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Поднимается часть верхней губы",
+      "caveat_ru": "Отделять подъём губы от движения крыла носа и AU9; оба движения могут сочетаться.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 49,
+      "name": "mouthUpperUpRight",
+      "zone": "mouth_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU10",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Поднимается часть верхней губы",
+      "caveat_ru": "Отделять подъём губы от движения крыла носа и AU9; оба движения могут сочетаться.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 50,
+      "name": "noseSneerLeft",
+      "zone": "nose_left",
+      "side": "left",
+      "direction": null,
+      "actionUnit": "AU9",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Поднимается область крыла носа",
+      "caveat_ru": "Морщины на спинке носа и боковой поверхности помогают разметке AU9; коэффициент передаёт только часть признаков.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    },
+    {
+      "index": 51,
+      "name": "noseSneerRight",
+      "zone": "nose_right",
+      "side": "right",
+      "direction": null,
+      "actionUnit": "AU9",
+      "proxy": "candidate",
+      "status": "au_candidate",
+      "movement_ru": "Поднимается область крыла носа",
+      "caveat_ru": "Морщины на спинке носа и боковой поверхности помогают разметке AU9; коэффициент передаёт только часть признаков.",
+      "sources": [
+        "MP_GRAPH",
+        "APPLE",
+        "FACS_REVIEW"
+      ]
+    }
+  ],
+  "zones": [
+    {
+      "id": "face",
+      "side": "none",
+      "label_ru": "Овал лица",
+      "anchors": [
+        10,
+        338,
+        332,
+        356,
+        454,
+        361,
+        397,
+        152,
+        172,
+        132,
+        234,
+        127,
+        103,
+        109
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Опорная область для масштаба и проверки границ кадра.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "brow_left",
+      "side": "left",
+      "label_ru": "Левая бровь",
+      "anchors": [
+        276,
+        283,
+        282,
+        295,
+        285,
+        336,
+        296,
+        334,
+        293,
+        300
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Внутренние и наружные ориентиры левой брови.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "brow_right",
+      "side": "right",
+      "label_ru": "Правая бровь",
+      "anchors": [
+        46,
+        53,
+        52,
+        65,
+        55,
+        107,
+        66,
+        105,
+        63,
+        70
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Внутренние и наружные ориентиры правой брови.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "brow_medial",
+      "side": "bilateral",
+      "label_ru": "Внутренние концы обеих бровей",
+      "anchors": [
+        55,
+        65,
+        66,
+        107,
+        285,
+        295,
+        296,
+        336
+      ],
+      "method": "union_of_projected_hulls",
+      "description_ru": "Раздельные участки медиальных концов бровей. Один общий коэффициент не определяет асимметрию.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ],
+      "anchorGroups": [
+        [
+          55,
+          65,
+          66,
+          107
+        ],
+        [
+          285,
+          295,
+          296,
+          336
+        ]
+      ]
+    },
+    {
+      "id": "cheek_left",
+      "side": "left",
+      "label_ru": "Левая щека",
+      "anchors": [
+        263,
+        374,
+        362,
+        327,
+        291,
+        454
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Проектная область под глазом между крылом носа, углом рта и боковой границей лица. Граница мышцы неизвестна.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "cheek_right",
+      "side": "right",
+      "label_ru": "Правая щека",
+      "anchors": [
+        33,
+        145,
+        133,
+        98,
+        61,
+        234
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Проектная область под глазом между крылом носа, углом рта и боковой границей лица. Граница мышцы неизвестна.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "cheeks",
+      "side": "bilateral",
+      "label_ru": "Обе щеки",
+      "anchors": [
+        263,
+        374,
+        362,
+        327,
+        291,
+        454,
+        33,
+        145,
+        133,
+        98,
+        61,
+        234
+      ],
+      "method": "union_of_projected_hulls",
+      "description_ru": "Две отдельные области для общего сигнала наполнения щёк.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ],
+      "anchorGroups": [
+        [
+          263,
+          374,
+          362,
+          327,
+          291,
+          454
+        ],
+        [
+          33,
+          145,
+          133,
+          98,
+          61,
+          234
+        ]
+      ]
+    },
+    {
+      "id": "eye_left",
+      "side": "left",
+      "label_ru": "Левые веки",
+      "anchors": [
+        263,
+        249,
+        390,
+        373,
+        374,
+        380,
+        381,
+        382,
+        362,
+        398,
+        384,
+        385,
+        386,
+        387,
+        388,
+        466
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Контур двух век. Область служит ориентиром и сужается при закрытии глаза.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "eye_right",
+      "side": "right",
+      "label_ru": "Правые веки",
+      "anchors": [
+        33,
+        7,
+        163,
+        144,
+        145,
+        153,
+        154,
+        155,
+        133,
+        173,
+        157,
+        158,
+        159,
+        160,
+        161,
+        246
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Контур двух век. Область служит ориентиром и сужается при закрытии глаза.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "nose_left",
+      "side": "left",
+      "label_ru": "Левое крыло носа",
+      "anchors": [
+        327,
+        294,
+        278,
+        344,
+        440,
+        275,
+        4,
+        2,
+        326
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Ориентиры левого крыла и кончика носа.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "nose_right",
+      "side": "right",
+      "label_ru": "Правое крыло носа",
+      "anchors": [
+        98,
+        64,
+        48,
+        115,
+        220,
+        45,
+        4,
+        2,
+        97
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Ориентиры правого крыла и кончика носа.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "mouth_left",
+      "side": "left",
+      "label_ru": "Левая половина губ",
+      "anchors": [
+        0,
+        267,
+        269,
+        270,
+        409,
+        291,
+        375,
+        321,
+        405,
+        314,
+        17,
+        13,
+        14,
+        308
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Левая половина контура губ, включая левую комиссуру 291. Участок служит ориентиром видимого движения.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "mouth_right",
+      "side": "right",
+      "label_ru": "Правая половина губ",
+      "anchors": [
+        0,
+        37,
+        39,
+        40,
+        185,
+        61,
+        146,
+        91,
+        181,
+        84,
+        17,
+        13,
+        14,
+        78
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Правая половина контура губ, включая правую комиссуру 61. Участок служит ориентиром видимого движения.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "lips",
+      "side": "bilateral",
+      "label_ru": "Обе губы",
+      "anchors": [
+        61,
+        185,
+        40,
+        39,
+        37,
+        0,
+        267,
+        269,
+        270,
+        409,
+        291,
+        375,
+        321,
+        405,
+        314,
+        17,
+        84,
+        181,
+        91,
+        146
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Внешний контур рта. Расстояние между внутренними краями губ проверяют отдельно по 13 и 14.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "upper_lip",
+      "side": "bilateral",
+      "label_ru": "Верхняя губа",
+      "anchors": [
+        61,
+        185,
+        40,
+        39,
+        37,
+        0,
+        267,
+        269,
+        270,
+        409,
+        291,
+        308,
+        312,
+        13,
+        82,
+        78
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Опорный участок верхней губы целиком.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "lower_lip",
+      "side": "bilateral",
+      "label_ru": "Нижняя губа",
+      "anchors": [
+        61,
+        146,
+        91,
+        181,
+        84,
+        17,
+        314,
+        405,
+        321,
+        375,
+        291,
+        308,
+        317,
+        14,
+        87,
+        78
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Опорный участок нижней губы целиком.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "chin",
+      "side": "midline",
+      "label_ru": "Подбородок",
+      "anchors": [
+        17,
+        84,
+        148,
+        152,
+        377,
+        314
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Проектная область между нижней губой и контуром подбородка.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    },
+    {
+      "id": "jaw",
+      "side": "midline",
+      "label_ru": "Нижняя челюсть",
+      "anchors": [
+        61,
+        291,
+        397,
+        365,
+        377,
+        152,
+        148,
+        136,
+        172
+      ],
+      "method": "projected_anchor_hull",
+      "description_ru": "Проектная область нижней трети лица. Движение подбородка оценивают относительно стабильных ориентиров верхней части лица.",
+      "sources": [
+        "MP_MESH",
+        "MP_TASKS"
+      ]
+    }
+  ],
+  "anatomy": [
+    {
+      "au": "AU01",
+      "name_en": "Inner brow raiser",
+      "action_ru": "Подъём внутренней части брови",
+      "roi_ru": "Медиальная бровь и прилежащий лоб",
+      "sign_ru": "Внутренний участок брови смещается вверх относительно внутреннего угла глаза.",
+      "muscles_la": "Frontalis, pars medialis",
+      "muscles_ru": "Медиальная часть лобного брюшка затылочно-лобной мышцы",
+      "motor_nerve": "VII",
+      "branch_ru": "Височные ветви VII, типичная территория",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Один общий канал подъёма внутренних бровей сохраняют без стороны. Наклон головы и компенсаторный подъём брови требуют отдельного учёта.",
+      "source_ids": [
+        "W06",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU02",
+      "name_en": "Outer brow raiser",
+      "action_ru": "Подъём наружной части брови",
+      "roi_ru": "Латеральная бровь и прилежащий лоб",
+      "sign_ru": "Наружный участок брови приподнимается относительно наружного угла глаза.",
+      "muscles_la": "Frontalis, pars lateralis",
+      "muscles_ru": "Латеральная часть лобного брюшка затылочно-лобной мышцы",
+      "motor_nerve": "VII",
+      "branch_ru": "Височные ветви VII, типичная территория",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Вторую бровь оценивают отдельно. Исходный изгиб и разная высота бровей влияют на абсолютные координаты.",
+      "source_ids": [
+        "W06",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU04",
+      "name_en": "Brow lowerer",
+      "action_ru": "Опускание и сведение бровей",
+      "roi_ru": "Медиальная бровь и межбровье",
+      "sign_ru": "Медиальные концы бровей сближаются и/или опускаются. Вертикальное и медиальное смещения рассматривают раздельно.",
+      "muscles_la": "Corrugator supercilii; depressor supercilii; procerus",
+      "muscles_ru": "Мышца, сморщивающая бровь; мышца, опускающая бровь; мышца гордецов",
+      "motor_nerve": "VII",
+      "branch_ru": "Височные ветви VII, типичная территория",
+      "evidence": "Составное движение",
+      "caveat_ru": "Вклад отдельных мышц различается. При стимуляции corrugator у людей наблюдали также медиальный подъём и поворот брови. Постоянная складка не свидетельствует о новом движении.",
+      "source_ids": [
+        "W06",
+        "V07",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU05",
+      "name_en": "Upper lid raiser",
+      "action_ru": "Подъём верхнего века",
+      "roi_ru": "Верхнее веко и радужка",
+      "sign_ru": "Край верхнего века приподнимается относительно радужки при неизменном направлении взгляда.",
+      "muscles_la": "Levator palpebrae superioris",
+      "muscles_ru": "Мышца, поднимающая верхнее веко",
+      "motor_nerve": "III",
+      "branch_ru": "Верхняя ветвь глазодвигательного нерва (III)",
+      "evidence": "Анатомическое соответствие",
+      "caveat_ru": "Взгляд вверх физиологически поднимает веко. Верхняя тарзальная мышца поддерживает тонус и получает симпатические волокна. Вклад симпатической системы по ширине глазной щели не определяется.",
+      "source_ids": [
+        "B19",
+        "K24"
+      ]
+    },
+    {
+      "au": "AU06",
+      "name_en": "Cheek raiser",
+      "action_ru": "Подъём щеки",
+      "roi_ru": "Латеральная периорбитальная область и верхняя часть щеки",
+      "sign_ru": "Мягкие ткани верхней части щеки поднимаются к глазнице. У наружного угла глаза может измениться рельеф.",
+      "muscles_la": "Orbicularis oculi, pars orbitalis",
+      "muscles_ru": "Глазничная часть круговой мышцы глаза",
+      "motor_nerve": "VII",
+      "branch_ru": "Височные и скуловые ветви VII, с региональным перекрытием",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Периорбитальные морщины в покое не кодируют реакцию. AU12 может приподнимать щёку. AU06 вместе с AU12 описывают конфигурацию улыбки, а переживание требует отдельной оценки.",
+      "source_ids": [
+        "W06",
+        "B19",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU07",
+      "name_en": "Lid tightener",
+      "action_ru": "Напряжение век",
+      "roi_ru": "Нижнее и верхнее веки",
+      "sign_ru": "Глазная щель сужается, нижнее веко приподнимается или меняет контур при сохранении видимой щели.",
+      "muscles_la": "Orbicularis oculi, pars palpebralis",
+      "muscles_ru": "Вековая часть круговой мышцы глаза",
+      "motor_nerve": "VII",
+      "branch_ru": "Височные и скуловые ветви VII, с региональным перекрытием",
+      "evidence": "Анатомическое соответствие",
+      "caveat_ru": "Учитывают положение взора, подъём щеки и фазу мигания. Для AU07 в исследовании Waller вековую часть непосредственно не стимулировали.",
+      "source_ids": [
+        "V07",
+        "W06",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU09",
+      "name_en": "Nose wrinkler",
+      "action_ru": "Сморщивание носа",
+      "roi_ru": "Боковая поверхность и спинка носа, крыло носа",
+      "sign_ru": "Кожа у крыла и боковой поверхности носа смещается кверху; возможны складки на носу.",
+      "muscles_la": "Levator labii superioris alaeque nasi; nasalis (partial sign)",
+      "muscles_ru": "Мышца, поднимающая верхнюю губу и крыло носа; носовая мышца может формировать часть складок",
+      "motor_nerve": "VII",
+      "branch_ru": "Средняя зона лица, скуловые и/или щёчные ветви VII. Индивидуальная ветвь не установлена",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Носовая мышца может дать только часть картины. При подъёме одной верхней губы различимость AU09 и AU10 ограничена.",
+      "source_ids": [
+        "W06",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU10",
+      "name_en": "Upper lip raiser",
+      "action_ru": "Подъём верхней губы",
+      "roi_ru": "Верхняя губа и прилежащая носогубная область",
+      "sign_ru": "Верхняя губа поднимается относительно основания носа; меняется её контур.",
+      "muscles_la": "Levator labii superioris",
+      "muscles_ru": "Мышца, поднимающая верхнюю губу",
+      "motor_nerve": "VII",
+      "branch_ru": "Средняя зона лица, скуловые и/или щёчные ветви VII. Индивидуальная ветвь не установлена",
+      "evidence": "Анатомическое соответствие",
+      "caveat_ru": "Сходное изменение возникает при AU09 и при артикуляции. У Waller отдельную стимуляцию этой мышцы у человека не проводили.",
+      "source_ids": [
+        "W06",
+        "V07",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU11",
+      "name_en": "Nasolabial furrow deepener",
+      "action_ru": "Углубление носогубной складки",
+      "roi_ru": "Носогубная складка",
+      "sign_ru": "Складка меняется по глубине и форме относительно индивидуального покоя.",
+      "muscles_la": "Zygomaticus minor (putative)",
+      "muscles_ru": "Малая скуловая мышца, предполагаемый вклад",
+      "motor_nerve": "VII",
+      "branch_ru": "Средняя зона лица, скуловые и/или щёчные ветви VII. Индивидуальная ветвь не установлена",
+      "evidence": "Предполагаемое соответствие",
+      "caveat_ru": "Мышечная основа обсуждается. Одна статическая складка, боковой свет или изменение AU10/AU12 не позволяют изолировать AU11.",
+      "source_ids": [
+        "V07",
+        "B19",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU12",
+      "name_en": "Lip corner puller",
+      "action_ru": "Подъём и отведение угла рта",
+      "roi_ru": "Угол рта и скуловая область",
+      "sign_ru": "Угол рта смещается вверх и латерально.",
+      "muscles_la": "Zygomaticus major",
+      "muscles_ru": "Большая скуловая мышца",
+      "motor_nerve": "VII",
+      "branch_ru": "Средняя зона лица, скуловые и/или щёчные ветви VII. Индивидуальная ветвь не установлена",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Подходит для описания улыбочного движения на одной или обеих сторонах. Оно встречается и при произвольной позе, речи и разных переживаниях.",
+      "source_ids": [
+        "W06",
+        "B19",
+        "N26",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU13",
+      "name_en": "Sharp lip puller",
+      "action_ru": "Крутой подъём угла рта",
+      "roi_ru": "Угол рта и участок щеки над ним",
+      "sign_ru": "Угол рта резко приподнимается по крутой траектории, ткани над ним выпячиваются.",
+      "muscles_la": "Levator anguli oris (caninus)",
+      "muscles_ru": "Мышца, поднимающая угол рта",
+      "motor_nerve": "VII",
+      "branch_ru": "Средняя зона лица, скуловые и/или щёчные ветви VII. Индивидуальная ветвь не установлена",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Отличают от AU12 и надувания щёк воздухом. Канал cheekPuff отражает другую форму и сам по себе не подходит для AU13.",
+      "source_ids": [
+        "W06",
+        "V07",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU14",
+      "name_en": "Dimpler",
+      "action_ru": "Втягивание кожи у угла рта",
+      "roi_ru": "Щека сразу латеральнее угла рта",
+      "sign_ru": "На коже рядом с углом рта появляется или углубляется локальное втяжение.",
+      "muscles_la": "Buccinator",
+      "muscles_ru": "Щёчная мышца",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные двигательные ветви VII. Щёчный нерв V3 имеет чувствительную функцию в этой области.",
+      "evidence": "Анатомическое соответствие",
+      "caveat_ru": "Индивидуальные ямочки, артикуляция и улыбка меняют рельеф этой области. Подтверждают локальную динамику относительно покоя.",
+      "source_ids": [
+        "W06",
+        "V07",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU15",
+      "name_en": "Lip corner depressor",
+      "action_ru": "Опускание угла рта",
+      "roi_ru": "Угол рта и прилежащая нижняя часть щеки",
+      "sign_ru": "Угол рта опускается относительно верхней губы и подбородка.",
+      "muscles_la": "Depressor anguli oris",
+      "muscles_ru": "Мышца, опускающая угол рта",
+      "motor_nerve": "VII",
+      "branch_ru": "Преимущественно краевая ветвь нижней челюсти VII",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Опускание нижней челюсти и движение головы способны сместить оба угла рта. Статический наклон линии губ часто индивидуален.",
+      "source_ids": [
+        "W06",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU16",
+      "name_en": "Lower lip depressor",
+      "action_ru": "Опускание нижней губы",
+      "roi_ru": "Нижняя губа между средней линией и углом рта",
+      "sign_ru": "Нижняя губа смещается вниз относительно подбородка. Иногда становятся видны нижние резцы.",
+      "muscles_la": "Depressor labii inferioris",
+      "muscles_ru": "Мышца, опускающая нижнюю губу",
+      "motor_nerve": "VII",
+      "branch_ru": "Преимущественно краевая ветвь нижней челюсти VII",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Движение губы отделяют от опускания нижней челюсти. Видимость зубов зависит от исходной анатомии и артикуляции.",
+      "source_ids": [
+        "W06",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU17",
+      "name_en": "Chin raiser",
+      "action_ru": "Подъём мягких тканей подбородка",
+      "roi_ru": "Подбородок и подбородочно-губная борозда",
+      "sign_ru": "Кожа подбородка смещается вверх и может собираться в мелкие неровности. Часто меняется положение нижней губы.",
+      "muscles_la": "Mentalis",
+      "muscles_ru": "Подбородочная мышца",
+      "motor_nerve": "VII",
+      "branch_ru": "Преимущественно краевая ветвь нижней челюсти VII",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Подъём одной нижней губы неоднозначен. Для выделения AU17 наблюдают движение кожи подбородка.",
+      "source_ids": [
+        "W06",
+        "H23",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU18",
+      "name_en": "Lip pucker",
+      "action_ru": "Вытягивание губ с сужением ротовой щели",
+      "roi_ru": "Губы и оба угла рта",
+      "sign_ru": "Углы рта сближаются, губы вытягиваются вперёд и отверстие рта сужается.",
+      "muscles_la": "Orbicularis oris; incisivus labii superioris et inferioris (proposed)",
+      "muscles_ru": "Круговая мышца рта и предполагаемый вклад резцовых мышц обеих губ",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные ветви VII в верхней губе, краевая ветвь нижней челюсти VII в нижней губе. Территории варьируют",
+      "evidence": "Предполагаемое соответствие",
+      "caveat_ru": "Вклад отдельных пучков при этом движении остаётся неопределённым. Фронтальная камера ограниченно различает выступание губ вперёд и раскрытие воронкой при AU22.",
+      "source_ids": [
+        "V07",
+        "B19",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU20",
+      "name_en": "Lip stretcher",
+      "action_ru": "Горизонтальное растяжение губ",
+      "roi_ru": "Углы рта и боковые части губ",
+      "sign_ru": "Угол рта отводится в сторону, ширина ротовой щели увеличивается.",
+      "muscles_la": "Risorius; platysma (possible co-contraction)",
+      "muscles_ru": "Мышца смеха; возможна коактивация подкожной мышцы шеи",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные ветви VII для risorius; шейная ветвь VII для platysma",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "У Waller оценка стимуляции risorius у кодировщиков расходилась. Направление движения важно для отличия от AU12. Речевые движения часто растягивают губы.",
+      "source_ids": [
+        "W06",
+        "B19",
+        "H23",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU22",
+      "name_en": "Lip funneler",
+      "action_ru": "Выпячивание и округление губ воронкой",
+      "roi_ru": "Красная кайма верхней и нижней губы",
+      "sign_ru": "Края губ выворачиваются вперёд, отверстие рта принимает округлую форму.",
+      "muscles_la": "Orbicularis oris",
+      "muscles_ru": "Круговая мышца рта",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные ветви VII в верхней губе, краевая ветвь нижней челюсти VII в нижней губе. Территории варьируют",
+      "evidence": "Анатомическое соответствие",
+      "caveat_ru": "Отличается по выворачиванию губ от AU18. Выступание губ трудно оценить по одной фронтальной проекции. Округлённые гласные дают сходную картину.",
+      "source_ids": [
+        "V07",
+        "W06",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU23",
+      "name_en": "Lip tightener",
+      "action_ru": "Стягивание губ",
+      "roi_ru": "Верхняя и нижняя губа",
+      "sign_ru": "Красная кайма сужается, губы приобретают более тонкий, напряжённый вид.",
+      "muscles_la": "Orbicularis oris",
+      "muscles_ru": "Круговая мышца рта",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные ветви VII в верхней губе, краевая ветвь нижней челюсти VII в нижней губе. Территории варьируют",
+      "evidence": "Стимуляция у людей",
+      "caveat_ru": "Сила сокращения и давление между губами по изображению недоступны. Смыкание губ и стягивание между собой различают отдельно.",
+      "source_ids": [
+        "W06",
+        "B19",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU24",
+      "name_en": "Lip pressor",
+      "action_ru": "Прижатие губ друг к другу",
+      "roi_ru": "Линия контакта верхней и нижней губы",
+      "sign_ru": "Губы соприкасаются и меняют форму вдоль линии контакта.",
+      "muscles_la": "Orbicularis oris",
+      "muscles_ru": "Круговая мышца рта",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные ветви VII в верхней губе, краевая ветвь нижней челюсти VII в нижней губе. Территории варьируют",
+      "evidence": "Анатомическое соответствие",
+      "caveat_ru": "Состояние сомкнутых губ в покое недостаточно для AU24. Изображение показывает деформацию тканей; давление потребовало бы отдельного датчика.",
+      "source_ids": [
+        "V07",
+        "W06",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU25",
+      "name_en": "Lips part",
+      "action_ru": "Размыкание губ",
+      "roi_ru": "Внутренний контур губ",
+      "sign_ru": "Появляется щель между губами; её высоту можно измерить относительно индивидуального покоя.",
+      "muscles_la": "Multiple mechanisms; relaxation of lip closure and/or lip/jaw movement",
+      "muscles_ru": "Ослабление смыкания губ, их активное движение и/или движение челюсти",
+      "motor_nerve": "Неоднозначно",
+      "branch_ru": "Единственная моторная ветвь по этому движению не определяется",
+      "evidence": "Составное движение",
+      "caveat_ru": "Губы расходятся при движениях челюсти, речи и дыхании. Одно измерение щели не показывает, какая мышца сократилась или расслабилась.",
+      "source_ids": [
+        "B19",
+        "V07"
+      ]
+    },
+    {
+      "au": "AU26",
+      "name_en": "Jaw drop",
+      "action_ru": "Свободное опускание нижней челюсти",
+      "roi_ru": "Нижняя челюсть и подбородок относительно верхней части лица",
+      "sign_ru": "Подбородок опускается вместе с нижней челюстью. Возможен вклад расслабления её поднимателей.",
+      "muscles_la": "Masseter, temporalis, pterygoideus medialis (possible relaxation); jaw-opening synergists",
+      "muscles_ru": "Возможное снижение тонуса жевательной, височной и медиальной крыловидной мышц; возможен вклад открывателей",
+      "motor_nerve": "Многокомпонентно",
+      "branch_ru": "V3 иннервирует основные жевательные мышцы. По наблюдаемому открыванию их активация и вклад отдельных ветвей не определяются.",
+      "evidence": "Составное движение",
+      "caveat_ru": "Челюсть может опуститься при снижении тонуса поднимателей. Один jawOpen не различает пассивное опускание, активное растяжение AU27 и речь.",
+      "source_ids": [
+        "B19",
+        "K25",
+        "L80",
+        "H23"
+      ]
+    },
+    {
+      "au": "AU27",
+      "name_en": "Mouth stretch",
+      "action_ru": "Активное широкое открывание рта",
+      "roi_ru": "Подбородок, углы рта и челюсть",
+      "sign_ru": "Челюсть опускается выраженно, сопровождаясь растяжением тканей вокруг рта.",
+      "muscles_la": "Pterygoideus lateralis; venter anterior digastrici; mylohyoideus; geniohyoideus (possible contributors)",
+      "muscles_ru": "Латеральная крыловидная и надподъязычные мышцы, включая переднее брюшко двубрюшной, челюстно- и подбородочно-подъязычную мышцы",
+      "motor_nerve": "V3; возможен C1",
+      "branch_ru": "V3 для латеральной крыловидной и через челюстно-подъязычный нерв для mylohyoideus и переднего брюшка digastricus. К geniohyoideus волокна C1 идут с XII нервом.",
+      "evidence": "Составное движение",
+      "caveat_ru": "Амплитуда открытия без данных об усилии неоднозначна. Изолированные вклады мышц и их активацию за кадром определить нельзя.",
+      "source_ids": [
+        "B19",
+        "K25",
+        "L80"
+      ]
+    },
+    {
+      "au": "AU28",
+      "name_en": "Lip suck",
+      "action_ru": "Подворачивание губ внутрь",
+      "roi_ru": "Красная кайма губ",
+      "sign_ru": "Видимая кайма уменьшается, поскольку губа заворачивается внутрь рта.",
+      "muscles_la": "Orbicularis oris (candidate); oral coordination",
+      "muscles_ru": "Предполагаемое участие круговой мышцы рта, координация губ с другими структурами полости рта",
+      "motor_nerve": "VII",
+      "branch_ru": "Щёчные ветви VII в верхней губе, краевая ветвь нижней челюсти VII в нижней губе. Территории варьируют",
+      "evidence": "Предполагаемое соответствие",
+      "caveat_ru": "Прикус губы, артикуляция и частичное закрытие рукой могут выглядеть сходно. Сила и величина внутриротового разрежения не определяются.",
+      "source_ids": [
+        "B19",
+        "N26",
+        "T24"
+      ]
+    },
+    {
+      "au": "AU43",
+      "name_en": "Eyes closed",
+      "action_ru": "Закрытые глаза",
+      "roi_ru": "Контуры верхнего и нижнего века",
+      "sign_ru": "Видимое смыкание век сохраняется на последовательности пригодных кадров.",
+      "muscles_la": "Orbicularis oculi; levator palpebrae superioris (reduced activity)",
+      "muscles_ru": "Круговая мышца глаза; снижение активности мышцы, поднимающей верхнее веко",
+      "motor_nerve": "VII / III",
+      "branch_ru": "VII иннервирует круговую мышцу, III — леватор. Их индивидуальные вклады по видео не разделяются.",
+      "evidence": "Составное движение",
+      "caveat_ru": "Один кадр не позволяет отделить закрытые глаза от мигания. Широкая тень, блики на очках и выпадение трекинга требуют контроля.",
+      "source_ids": [
+        "B19",
+        "B24",
+        "K24",
+        "N26"
+      ]
+    },
+    {
+      "au": "AU45",
+      "name_en": "Blink",
+      "action_ru": "Мигание",
+      "roi_ru": "Оба глаза, наблюдаемые во времени",
+      "sign_ru": "Последовательно регистрируют закрытие и повторное открытие век с двух сторон.",
+      "muscles_la": "Orbicularis oculi; levator palpebrae superioris (reciprocal control)",
+      "muscles_ru": "Круговая мышца глаза и мышца, поднимающая верхнее веко; последовательное изменение активности",
+      "motor_nerve": "VII / III",
+      "branch_ru": "Двигательная система VII закрывает веки, III участвует в последующем подъёме верхнего века. Афферентная дуга по видео не определяется.",
+      "evidence": "Составное движение",
+      "caveat_ru": "Для события требуются наблюдаемые фазы закрытия и открытия. Спонтанное, произвольное и рефлекторное мигание требуют дополнительного контекста. Частота кадров ограничивает определение латентности.",
+      "source_ids": [
+        "B19",
+        "B24",
+        "K24",
+        "N26"
+      ]
+    },
+    {
+      "au": "AU46",
+      "name_en": "Wink",
+      "action_ru": "Одностороннее смыкание век",
+      "roi_ru": "Оба глаза, оцениваемые раздельно",
+      "sign_ru": "Один глаз закрывается и открывается, второй остаётся видимым и открытым.",
+      "muscles_la": "Orbicularis oculi; levator palpebrae superioris",
+      "muscles_ru": "Круговая мышца глаза и мышца, поднимающая верхнее веко",
+      "motor_nerve": "VII / III",
+      "branch_ru": "Смыкание связано с VII, последующий подъём века — с III. Сторону определяют в системе координат участника.",
+      "evidence": "Составное движение",
+      "caveat_ru": "Окклюзия второго глаза препятствует кодированию одностороннего движения. По видеозаписи нельзя приписать жесту намерение без контекста.",
+      "source_ids": [
+        "B19",
+        "B24",
+        "K24",
+        "N26"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "W06",
+      "apa": "Waller, B. M., Vick, S.-J., Parr, L. A., Bard, K. A., Smith Pasqualini, M. C., Gothard, K. M., & Fuglevand, A. J. (2006). Intramuscular electrical stimulation of facial muscles in humans and chimpanzees: Duchenne revisited and extended. Emotion, 6(3), 367–382.",
+      "url": "https://doi.org/10.1037/1528-3542.6.3.367",
+      "scope_ru": "Эксперимент у людей, таблицы 1–2. Результаты указаны для отдельных мышц. Данные человека отделены от результатов у шимпанзе."
+    },
+    {
+      "id": "V07",
+      "apa": "Vick, S.-J., Waller, B. M., Parr, L. A., Smith Pasqualini, M. C., & Bard, K. A. (2007). A cross-species comparison of facial morphology and movement in humans and chimpanzees using the Facial Action Coding System (FACS). Journal of Nonverbal Behavior, 31(1), 1–20.",
+      "url": "https://doi.org/10.1007/s10919-006-0017-z",
+      "scope_ru": "Текст разделов о человеке и таблица 1. Для AU05 использован профильный анатомический источник K24. По AU11 и AU18 авторы указывают ограничения мышечной интерпретации."
+    },
+    {
+      "id": "B19",
+      "apa": "Barrett, L. F., Adolphs, R., Marsella, S., Martinez, A. M., & Pollak, S. D. (2019). Emotional expressions reconsidered: Challenges to inferring emotion from human facial movements. Psychological Science in the Public Interest, 20(1), 1–68.",
+      "url": "https://doi.org/10.1177/1529100619832930",
+      "scope_ru": "Таблица 3 и раздел о наблюдении движений лица. Один паттерн допускает несколько аффективных и неаффективных объяснений."
+    },
+    {
+      "id": "H23",
+      "apa": "Hohman, M. H., & De Jesus, O. (2023). Facial nerve repair. In StatPearls. StatPearls Publishing.",
+      "url": "https://www.ncbi.nlm.nih.gov/books/NBK560623/",
+      "scope_ru": "Раздел Anatomy and Physiology. Типичная периферическая иннервация, перекрытие ветвей и вариации между людьми."
+    },
+    {
+      "id": "T24",
+      "apa": "Triantafyllou, G., Tsiouris, C., Chrysanthou, I., Paschopoulos, I., Tsakotos, G., Kalamatianos, T., & Piagkou, M. (2024). Extratemporal facial nerve interconnections and trunk’s variability: A systematic review with meta-analysis. Diagnostics, 14(17), 1862.",
+      "url": "https://doi.org/10.3390/diagnostics14171862",
+      "scope_ru": "Систематический обзор и метаанализ анатомической вариабельности и межветвевых соединений лицевого нерва."
+    },
+    {
+      "id": "N26",
+      "apa": "Nem, S., Yoo, H., & Omole, A. E. (2026). Neuroanatomy, facial colliculus. In StatPearls. StatPearls Publishing.",
+      "url": "https://www.ncbi.nlm.nih.gov/books/NBK555907/",
+      "scope_ru": "Раздел Muscles. Региональная иннервация лобной, круговых мышц, большой скуловой, щёчной мышц и платизмы."
+    },
+    {
+      "id": "K24",
+      "apa": "Knight, B., Fakoya, A. O., Lopez, M. J., & Patel, B. C. (2024). Anatomy, head and neck: Levator palpebrae superioris muscle. In StatPearls. StatPearls Publishing.",
+      "url": "https://www.ncbi.nlm.nih.gov/books/NBK536921/",
+      "scope_ru": "Разделы Nerves и Muscles. Верхняя ветвь III нерва, связь с вертикальным взором, тоническая роль верхней тарзальной мышцы."
+    },
+    {
+      "id": "B24",
+      "apa": "Bologna, M., Paparella, G., Valls-Solé, J., Hallett, M., & Berardelli, A. (2024). Neural control of blinking. Clinical Neurophysiology, 161, 59–68.",
+      "url": "https://doi.org/10.1016/j.clinph.2024.02.023",
+      "scope_ru": "Фазы мигания и взаимная активация круговой мышцы и леватора века. Рефлекторные, спонтанные и произвольные движения."
+    },
+    {
+      "id": "K25",
+      "apa": "Khan, Y. S., Fakoya, A. O., & Bordoni, B. (2025). Anatomy, head and neck: Suprahyoid muscle. In StatPearls. StatPearls Publishing.",
+      "url": "https://www.ncbi.nlm.nih.gov/books/NBK546710/",
+      "scope_ru": "Переднее брюшко двубрюшной мышцы и челюстно-подъязычная мышца получают волокна V3. Подбородочно-подъязычная мышца получает волокна C1, идущие вместе с XII нервом."
+    },
+    {
+      "id": "L80",
+      "apa": "Lehr, R. P., Jr., & Owens, S. E., Jr. (1980). An electromyographic study of the human lateral pterygoid muscles. The Anatomical Record, 196(4), 441–448.",
+      "url": "https://doi.org/10.1002/ar.1091960409",
+      "scope_ru": "Электромиографические данные об участии латеральной крыловидной мышцы в движениях челюсти."
+    },
+    {
+      "id": "MP_TASKS",
+      "apa": "Google AI Edge. (2026). Face Landmarker.",
+      "url": "https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker",
+      "scope_ru": "Выходной формат, нормированные координаты, сторона обследуемого и отражение входного кадра."
+    },
+    {
+      "id": "MP_GRAPH",
+      "apa": "The MediaPipe Authors. (n.d.). Face Landmarker graph [Source code]. GitHub.",
+      "url": "https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/cc/vision/face_landmarker/face_landmarker_graph.cc",
+      "scope_ru": "Индекс и имя каждого из 52 фактических полей графа Tasks. Нулевая категория служебная."
+    },
+    {
+      "id": "MP_CARD",
+      "apa": "Grishchenko, I., Yan, G., Zanfir, A., & Bazavan, E. G. (2022, November 11). Model card: Blendshape V2. Google.",
+      "url": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf",
+      "scope_ru": "Модель, 146 общих опорных точек, диапазон 0–1, обучение и ограничения. Имена экспортируемых полей проверяют по графу Tasks."
+    },
+    {
+      "id": "APPLE",
+      "apa": "Apple. (n.d.). ARFaceAnchor.BlendShapeLocation. Apple Developer Documentation.",
+      "url": "https://developer.apple.com/documentation/arkit/arfaceanchor/blendshapelocation",
+      "scope_ru": "Значение одноимённых деформаций и сторона лица. Сходство названий не доказывает численную эквивалентность двух экстракторов."
+    },
+    {
+      "id": "FACS_REVIEW",
+      "apa": "Clark, E. A., Kessinger, J., Duncan, S. E., Bell, M. A., Lahne, J., Gallagher, D. L., & O’Keefe, S. F. (2020). The Facial Action Coding System for characterization of human affective response to consumer product-based stimuli: A systematic review. Frontiers in Psychology, 11, 920.",
+      "url": "https://doi.org/10.3389/fpsyg.2020.00920",
+      "scope_ru": "Названия и описания AU, таблица 1. Привязка величин MediaPipe к AU — инженерная гипотеза атласа."
+    },
+    {
+      "id": "MP_MESH",
+      "apa": "The MediaPipe Authors. (n.d.). Face mesh connections [Source code]. GitHub.",
+      "url": "https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/python/solutions/face_mesh_connections.py",
+      "scope_ru": "Топология контуров глаз, бровей, носа, губ и овала. Границы прикладных зон щёк и подбородка определены проектом."
+    },
+    {
+      "id": "T26",
+      "apa": "Turrisi, R., Iacono Isidoro, S., Bruschetta, R., Famà, F., Campisi, A., Aiello, S., Cusimano, G., Ruta, L., Pioggia, G., & Tartarisco, G. (2026). Blendshape features meet action units: A clinical mapping for enhancing facial expression analysis. Computers in Human Behavior Reports, 22, 101125.",
+      "url": "https://doi.org/10.1016/j.chbr.2026.101125",
+      "scope_ru": "Экспертное согласие при сопоставлении типов движений. Это независимая работа об интерпретации словаря; покадровая точность этой реализации в ней не измерялась."
+    }
+  ],
+  "reactionEvidence": [
+    {
+      "pattern": "AU06 + AU12",
+      "reaction": "Улыбочное движение с подъёмом щеки",
+      "context": "В исследовании участники смотрели забавный материал или улыбались по инструкции. Оба условия давали сходное количество улыбок с периорбитальным компонентом.",
+      "measure": "Валидировать одновременное присутствие двух AU по независимой разметке. Для вопроса об удовольствии собирать отдельную оценку участника.",
+      "limit": "Совпадение двух каналов не измеряет удовольствие, искренность или намерение.",
+      "apa": "Krumhuber, E. G., & Manstead, A. S. R. (2009). Can Duchenne smiles be feigned? New evidence on felt and false smiles. Emotion, 9(6), 807–820.",
+      "url": "https://doi.org/10.1037/a0017844"
+    },
+    {
+      "pattern": "AU01/AU02; AU05; AU25/AU26",
+      "reaction": "Подъём бровей, расширение глазной щели, открывание рта как отдельные реакции на неожиданное событие",
+      "context": "В восьми экспериментах мимические признаки удивления присутствовали у 4–25% участников; полного сочетания трёх компонентов исследователи не видели.",
+      "measure": "Сопоставлять каждый компонент отдельно с меткой события, поведением и отчётом об удивлении.",
+      "limit": "Отсутствие одного или всех компонентов не исключает субъективного удивления.",
+      "apa": "Reisenzein, R., Bördgen, S., Holtbernd, T., & Matz, D. (2006). Evidence for strong dissociation between emotion and facial displays: The case of surprise. Journal of Personality and Social Psychology, 91(2), 295–315.",
+      "url": "https://doi.org/10.1037/0022-3514.91.2.295"
+    },
+    {
+      "pattern": "Зоны AU04 и AU12",
+      "reaction": "Мимический ответ при восприятии эмоционального лица",
+      "context": "В трёх экспериментах различия между условиями предъявления сердитых и радостных лиц обнаруживались по региональной ЭМГ скуловой и межбровной областей через 300–400 мс.",
+      "measure": "В отдельной выборке сравнить динамику оптических прокси с синхронной ЭМГ и контрастом условий. Раздельно хранить эмоцию на стимуле, ответ участника и его собственное состояние.",
+      "limit": "Срок обнаружения в ЭМГ не задаёт порог времени оптического детектора. Слабый мышечный ответ может оставаться визуально неразличимым.",
+      "apa": "Dimberg, U., & Thunberg, M. (1998). Rapid facial reactions to emotional facial expressions. Scandinavian Journal of Psychology, 39(1), 39–45.",
+      "url": "https://doi.org/10.1111/1467-9450.00054"
+    },
+    {
+      "pattern": "AU45",
+      "reaction": "Мигание относительно внешнего стимула",
+      "context": "В парадигме стартл-рефлекса регистрируют ответ круговой мышцы глаза на стимул по синхронизированной ЭМГ.",
+      "measure": "Для видеозаписи считать события закрытие–открытие с указанием временной дискретности и сопоставлять со стимулом и ЭМГ отдельно.",
+      "limit": "По спонтанному миганию неизвестна причина. При 20 кадрах/с шаг равен 50 мс; канал 5 Гц имеет шаг 200 мс. Такая запись не воспроизводит электромиографическую латентность стартл-ответа.",
+      "apa": "Blumenthal, T. D., Cuthbert, B. N., Filion, D. L., Hackley, S., Lipp, O. V., & van Boxtel, A. (2005). Committee report: Guidelines for human startle eyeblink electromyographic studies. Psychophysiology, 42(1), 1–15.",
+      "url": "https://doi.org/10.1111/j.1469-8986.2005.00271.x"
+    },
+    {
+      "pattern": "AU04; AU06/AU07; AU09/AU10; AU43",
+      "reaction": "Сочетания движений лица при экспериментально вызванной боли",
+      "context": "В исследовании разных болевых воздействий с болью ассоциировались опускание бровей, напряжение и смыкание век, сморщивание носа или подъём верхней губы.",
+      "measure": "При наличии соответствующего исследовательского протокола анализировать разметку каждого движения по отдельности и сопоставлять с субъективной оценкой.",
+      "limit": "Сходные движения встречаются при других состояниях; данная таблица не задаёт баллы боли, диагностическую шкалу или порог.",
+      "apa": "Prkachin, K. M. (1992). The consistency of facial expressions of pain: A comparison across modalities. Pain, 51(3), 297–306.",
+      "url": "https://doi.org/10.1016/0304-3959(92)90213-U"
+    }
+  ],
+  "patterns": [
+    {
+      "id": "corner_raise_left",
+      "title_ru": "Подъём угла рта слева",
+      "channels": [
+        "mouthSmileLeft"
+      ],
+      "below_channels": [],
+      "context_ru": "Улыбочное движение, произвольная поза или артикуляция.",
+      "limit_ru": "Оценивается один угол рта. Другая сторона может двигаться одновременно.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "corner_raise_only_left",
+      "title_ru": "Подъём угла рта только слева по критерию двух каналов",
+      "channels": [
+        "mouthSmileLeft"
+      ],
+      "below_channels": [
+        "mouthSmileRight"
+      ],
+      "context_ru": "Одностороннее движение или разные амплитуды движения на двух сторонах.",
+      "limit_ru": "Для противоположной стороны требуется пригодный сигнал ниже её собственного порога. Субпороговое движение возможно.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "cheek_corner_raise_left",
+      "title_ru": "Одновременный подъём щеки и угла рта слева",
+      "channels": [
+        "cheekSquintLeft",
+        "mouthSmileLeft"
+      ],
+      "below_channels": [],
+      "context_ru": "Улыбочное движение с периорбитальным компонентом. Возможно при спонтанной и произвольной улыбке.",
+      "limit_ru": "Совпадение двух прокси не устанавливает искренность или переживание. Движение угла рта может само сместить щёку.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "brow_lid_raise_left",
+      "title_ru": "Подъём наружной брови и раскрытие глаза слева",
+      "channels": [
+        "browOuterUpLeft",
+        "eyeWideLeft"
+      ],
+      "below_channels": [],
+      "context_ru": "Подъём брови вместе с веком встречается при смене взора или намеренном движении и может наблюдаться в ответ на неожиданное событие.",
+      "limit_ru": "Оценивают направление взгляда и масштаб движения головы. Общий канал внутренних бровей не позволяет определить их сторону.",
+      "source_ids": [
+        "W06",
+        "K24",
+        "B19"
+      ]
+    },
+    {
+      "id": "brow_lower_lid_narrow_left",
+      "title_ru": "Опускание брови и сужение глазной щели слева",
+      "channels": [
+        "browDownLeft",
+        "eyeSquintLeft"
+      ],
+      "below_channels": [],
+      "context_ru": "Такое движение возможно при прищуривании или во время предъявления эмоционально значимого стимула.",
+      "limit_ru": "Фаза мигания, направление взгляда и вклад соседних мышц создают сходную картину.",
+      "source_ids": [
+        "V07",
+        "B24",
+        "B19"
+      ]
+    },
+    {
+      "id": "nose_upper_lip_left",
+      "title_ru": "Подъём тканей у крыла носа и верхней губы слева",
+      "channels": [
+        "noseSneerLeft",
+        "mouthUpperUpLeft"
+      ],
+      "below_channels": [],
+      "context_ru": "Сочетание носового и губного компонентов встречается в произвольной мимике и меняется во время речи.",
+      "limit_ru": "В обоих признаках возможно одно и то же движение тканей. Два канала не устанавливают независимую активацию двух мышц.",
+      "source_ids": [
+        "W06",
+        "V07",
+        "B19"
+      ]
+    },
+    {
+      "id": "corner_raise_right",
+      "title_ru": "Подъём угла рта справа",
+      "channels": [
+        "mouthSmileRight"
+      ],
+      "below_channels": [],
+      "context_ru": "Улыбочное движение, произвольная поза или артикуляция.",
+      "limit_ru": "Оценивается один угол рта. Другая сторона может двигаться одновременно.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "corner_raise_only_right",
+      "title_ru": "Подъём угла рта только справа по критерию двух каналов",
+      "channels": [
+        "mouthSmileRight"
+      ],
+      "below_channels": [
+        "mouthSmileLeft"
+      ],
+      "context_ru": "Одностороннее движение или разные амплитуды движения на двух сторонах.",
+      "limit_ru": "Для противоположной стороны требуется пригодный сигнал ниже её собственного порога. Субпороговое движение возможно.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "cheek_corner_raise_right",
+      "title_ru": "Одновременный подъём щеки и угла рта справа",
+      "channels": [
+        "cheekSquintRight",
+        "mouthSmileRight"
+      ],
+      "below_channels": [],
+      "context_ru": "Улыбочное движение с периорбитальным компонентом. Возможно при спонтанной и произвольной улыбке.",
+      "limit_ru": "Совпадение двух прокси не устанавливает искренность или переживание. Движение угла рта может само сместить щёку.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "brow_lid_raise_right",
+      "title_ru": "Подъём наружной брови и раскрытие глаза справа",
+      "channels": [
+        "browOuterUpRight",
+        "eyeWideRight"
+      ],
+      "below_channels": [],
+      "context_ru": "Подъём брови вместе с веком встречается при смене взора или намеренном движении и может наблюдаться в ответ на неожиданное событие.",
+      "limit_ru": "Оценивают направление взгляда и масштаб движения головы. Общий канал внутренних бровей не позволяет определить их сторону.",
+      "source_ids": [
+        "W06",
+        "K24",
+        "B19"
+      ]
+    },
+    {
+      "id": "brow_lower_lid_narrow_right",
+      "title_ru": "Опускание брови и сужение глазной щели справа",
+      "channels": [
+        "browDownRight",
+        "eyeSquintRight"
+      ],
+      "below_channels": [],
+      "context_ru": "Такое движение возможно при прищуривании или во время предъявления эмоционально значимого стимула.",
+      "limit_ru": "Фаза мигания, направление взгляда и вклад соседних мышц создают сходную картину.",
+      "source_ids": [
+        "V07",
+        "B24",
+        "B19"
+      ]
+    },
+    {
+      "id": "nose_upper_lip_right",
+      "title_ru": "Подъём тканей у крыла носа и верхней губы справа",
+      "channels": [
+        "noseSneerRight",
+        "mouthUpperUpRight"
+      ],
+      "below_channels": [],
+      "context_ru": "Сочетание носового и губного компонентов встречается в произвольной мимике и меняется во время речи.",
+      "limit_ru": "В обоих признаках возможно одно и то же движение тканей. Два канала не устанавливают независимую активацию двух мышц.",
+      "source_ids": [
+        "W06",
+        "V07",
+        "B19"
+      ]
+    },
+    {
+      "id": "corner_raise_bilateral",
+      "title_ru": "Подъём обоих углов рта",
+      "channels": [
+        "mouthSmileLeft",
+        "mouthSmileRight"
+      ],
+      "below_channels": [],
+      "context_ru": "Двусторонняя улыбочная конфигурация, позирование или речь.",
+      "limit_ru": "Достижение порогов на двух сторонах допускает разные амплитуды и разные моменты начала движений.",
+      "source_ids": [
+        "W06",
+        "B19"
+      ]
+    },
+    {
+      "id": "jaw_open_lip_funnel",
+      "title_ru": "Опускание челюсти с округлением губ",
+      "channels": [
+        "jawOpen",
+        "mouthFunnel"
+      ],
+      "below_channels": [],
+      "context_ru": "Возможен сопровождающий речь артикуляционный жест или выполнение инструкции открыть рот и округлить губы.",
+      "limit_ru": "Конфигурация не позволяет установить отдельно силу жевательных мышц или причину открывания рта.",
+      "source_ids": [
+        "B19",
+        "V07",
+        "K25"
+      ]
+    }
+  ]
+}

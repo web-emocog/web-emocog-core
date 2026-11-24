@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wecog — атлас мимики</title>
+  <link rel="icon" href="../assets/wecog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/wecog-foundation.css?v=20260820-1">
+  <script src="../assets/wecog-theme.js?v=20260820-1"></script>
+  <style>
+    :root { --bg:#0f0f1a; --card:#16213e; --text:#e8e8f0; --muted:#94a3b8; --accent:#5C66BD; --border:rgba(92,102,189,.25); --ok:#10B981; --warn:#F59E0B; --danger:#ef4444; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
+    .top a { color:var(--muted); text-decoration:none; font-size:14px; }
+    .top a:hover { color:var(--accent); }
+    .layout { display:grid; grid-template-columns:minmax(320px,480px) minmax(360px,1fr); gap:16px; max-width:1200px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; }
+    h1 { font-size:1.35rem; }
+    h2 { font-size:1rem; margin-bottom:10px; }
+    .video-wrap { position:relative; border-radius:12px; overflow:hidden; background:#000; border:1px solid var(--border); }
+    video { width:100%; display:block; aspect-ratio:4/3; object-fit:cover; transform:scaleX(-1); }
+    .metrics { display:grid; grid-template-columns:repeat(2,minmax(140px,1fr)); gap:10px; margin-top:10px; }
+    .metric { border:1px solid var(--border); border-radius:10px; padding:10px; background:rgba(0,0,0,.2); }
+    .metric .k { color:var(--muted); font-size:12px; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
+    .metric .v { font-size:1.25rem; font-weight:700; }
+    .metric .hint { font-size:11px; color:var(--muted); margin-top:4px; }
+    .controls { display:flex; gap:10px; margin-top:12px; }
+    button { border:none; background:var(--accent); color:#fff; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:600; }
+    button.secondary { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .status { margin-top:10px; font-size:13px; min-height:1.2em; color:var(--muted); }
+    .status.err { color:var(--danger); }
+    .timeline { width:100%; height:220px; border:1px solid var(--border); border-radius:10px; background:rgba(0,0,0,.18); }
+    .legend { font-size:12px; color:var(--muted); margin-top:8px; display:flex; gap:14px; }
+    .legend-marker { display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  </style>
+  <link rel="stylesheet" href="../assets/developer-redesign.css?v=20260820-2">
+  <script src="../assets/developer-shell.js?v=20260820-1"></script>
+</head>
+<body>
+  <script src="../api-base.js?v=20260819-1"></script>
+  <script src="../http-client.js?v=20261110-integration1"></script>
+  <script src="../account-storage.js?v=20261019-5"></script>
+  <script src="../staff-session.js?v=20261027-1"></script>
+  <script src="../auth-guard.js?v=20261027-1"></script>
+  <script>
+    (function () {
+      if (!window.EmocogAuthGuard) {
+        window.location.replace('login.html');
+        return;
+      }
+      window.WecogDiagnosticAccess = window.EmocogAuthGuard.ensureProtectedPage({
+        loginPath: 'login.html',
+        allowedRoles: ['admin', 'developer'],
+        preserveAuthOnRoleDenied: true,
+        roleDeniedRedirect: '../researcher.html'
+      });
+    })();
+  </script>
+  <main>
+    <div class="top"><h1>Атлас мимики — исследовательский пилот</h1><a href="emotion-test.html">Прежняя диагностика семи эмоций</a></div>
+    <p>Отдельные движения лица и изменения относительно своей нейтрали. Коэффициенты не измеряют активность мышц, нервов или переживаемую эмоцию.</p>
+    <section class="card" style="max-width:640px;margin:16px 0">
+      <div class="video-wrap"><video id="video" autoplay muted playsinline></video></div>
+      <div class="controls"><button id="btnStart">Запустить камеру</button><button id="btnStop">Остановить камеру</button></div>
+      <p id="status" role="status"></p>
+    </section>
+    <section id="atlasPanel" class="card"><h2>Запись каналов атласа</h2>
+      <p>Сначала пройдите подготовку общего pipeline. Затем ниже проверьте стороны и выполните отдельную нейтраль атласа. Все каналы выбранных зон обязательны для начала пробы.</p>
+      <p id="atlasLoadStatus" role="status">Загрузка справочника…</p>
+      <p><a href="facial-atlas-reference.html" target="_blank" rel="noopener">Открыть справочную карту 18 зон</a> — отдельная анатомическая справка, без данных вашей записи.</p>
+    </section>
+  </main>
+  <script type="module" src="facial-atlas-test.js"></script>
+</body></html>

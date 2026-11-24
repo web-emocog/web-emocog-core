@@ -809,6 +809,15 @@ finalize; после finalize нельзя повторно добавлять �
 
 ### 8.4 Emotion / FACS
 
+Отдельный исследовательский пилот атласа: `apps/web/developer/facial-atlas-test.html`.
+Он использует штатный staff guard и общий pipeline, без нового camera/inference loop.
+`emotion/atlas/` хранит версионированные blendshape-прокси отдельно от старых AU/семи эмоций.
+Запись включается явно; все каналы выбранных зон обязательны для перехода к пробе.
+Параметры нейтрали и частоты — пилотные, фиксируются до блока; пропуски не нули,
+delta знаковая. JSONL только локальный, bounded (1200 кадров / 24 МиБ сериализованных
+строк); нет participant ingest, автоматических эмоций, эпизодов или асимметрии.
+Справочная карта не отображает активность мышц. См. `docs/research/facial-atlas-pilot.md`.
+
 Код: `apps/participant-web/js/emotion/` и `frame-pipeline.js`.
 
 Модуль формирует Action Unit/proxy, valence/arousal и confidence summary

@@ -62,6 +62,7 @@ export class SessionFramePipeline {
         this.state = options.state;
         this.controller = options.controller;
         this.video = options.video;
+        this.onAtlasFrame = null;
         this.profile = resolveSignalProfile(options.definition || this.state.runtime.invitationProtocolDefinition);
         this.schedule = this.profile.schedule;
         this.neutralCalibration = this.profile.emotionCalibration.method === 'explicit-neutral.v2'
@@ -308,6 +309,14 @@ export class SessionFramePipeline {
             const multimodalDone = performance.now();
 
             const segmentation = this._currentSegmentation();
+            // Opt-in developer recording consumes the same capture, never a second inference.
+            if (this.onAtlasFrame) {
+                try { this.onAtlasFrame(frame, segmentation?.isComplete === true); }
+                catch (_) {
+                    this.onAtlasFrame = null;
+                    this.diagnostics.atlasObserverErrors = (this.diagnostics.atlasObserverErrors || 0) + 1;
+                }
+            }
             if (!segmentation) this.diagnostics.segmentationUnavailableFrames = (this.diagnostics.segmentationUnavailableFrames || 0) + 1;
             let metrics = null;
             if (this.state.runtime.qcMetrics?.isRunning?.()) {
@@ -549,6 +558,7 @@ export class SessionFramePipeline {
     }
 
     stop(reason = 'session_finish') {
+        this.onAtlasFrame = null;
         if (!this.active && this.bpm.finalized) return null;
         this.active = false;
         this.videoFrameObserver?.stop();
