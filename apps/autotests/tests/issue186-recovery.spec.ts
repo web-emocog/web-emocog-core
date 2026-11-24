@@ -30,9 +30,12 @@ test('face loss persists a calibration gate after face returns, without interrup
 });
 
 for (const passed of [true, false]) test(`independent validation ${passed ? 'resumes only the pending runner' : 'cannot resume through a hidden continue button'}`, async ({ page }) => {
-  test.setTimeout(90000);
+  // Playwright yields through a native timer for every virtual poll. Host timer
+  // throttling can slow macOS yields; this is not a processing/FPS assertion.
+  test.setTimeout(process.platform === 'darwin' ? 180000 : 90000);
   await page.clock.install({ time: new Date('2026-11-24T12:00:00Z') });
   await page.goto(getPageUrl(), { waitUntil: 'load' });
+  await page.bringToFront();
   await page.waitForFunction(() => !!(window as any).__WECOG_STATE__?.runtime.sessionRuntime);
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.evaluate(async passed => {
@@ -46,33 +49,49 @@ for (const passed of [true, false]) test(`independent validation ${passed ? 'res
     const { startGazeValidation } = await import(new URL('js/web-page/tests-updated.js?v=20261124-recovery1', location.href).href);
     startGazeValidation();
     document.getElementById('validationIntroStartBtn')!.click();
+    const previous = Object.getOwnPropertyDescriptor(s.runtime, 'currentGazePrediction');
     let target = '', x = 100, y = 100;
-    (window as any).__gazeOracle = setInterval(() => {
+    Object.defineProperty(s.runtime, 'currentGazePrediction', { configurable: true, get() {
       const point = document.getElementById('fullscreenCalibPoint')!;
       const key = point.style.left + ':' + point.style.top;
-      // The target has no transition. Read geometry once per target, but keep
-      // publishing distinct capture clocks at the original 67 ms cadence.
+      // A 67 ms synthetic source clock still makes adjacent 33 ms polls share
+      // captures, without another timer/real-time yield in Playwright's clock.
       if (passed && key !== target) {
         target = key;
         const rect = point.getBoundingClientRect();
         x = rect.left + rect.width / 2; y = rect.top + rect.height / 2;
       }
-      s.runtime.currentGazePrediction = { rawX: x, rawY: y, correctedX: x, correctedY: y,
-        frameTimestamp: performance.now(), timestamp: Date.now(), valid: passed };
-    }, 67);
+      const frame = Math.floor(performance.now() / 67) * 67;
+      return { rawX: x, rawY: y, correctedX: x, correctedY: y,
+        frameTimestamp: frame, timestamp: Date.now() - (performance.now() - frame), valid: passed };
+    } });
+    (window as any).__restoreGazeOracle = () => {
+      if (previous) Object.defineProperty(s.runtime, 'currentGazePrediction', previous);
+      else delete s.runtime.currentGazePrediction;
+    };
   }, passed);
   await page.clock.runFor(46000);
   const result = await page.evaluate(() => {
-    clearInterval((window as any).__gazeOracle);
+    (window as any).__restoreGazeOracle();
     const s = (window as any).__WECOG_STATE__;
     document.getElementById('continueAfterValidationBtn')!.click();
     return { passed: s.sessionData.gazeValidation.passed, resumed: (window as any).__resumed,
       restored: (window as any).__layoutRestored,
+      coverage: s.sessionData.gazeValidation.coverage,
+      sampling: s.sessionData.gazeValidation.sampling,
       rows: s.sessionData.cognitiveResults, phase: s.runtime.currentPhase };
   });
   expect(result.passed).toBe(passed);
   expect(result.resumed).toBe(passed ? 1 : 0);
   expect(result.restored).toBe(passed);
+  expect(result.coverage.complete).toBe(passed);
+  expect(result.sampling.length).toBe(14);
+  if (passed) for (const sample of result.sampling) {
+    expect(sample.attempted).toBe(60);
+    expect(sample.accepted).toBeGreaterThanOrEqual(28);
+    expect(sample.accepted).toBeLessThanOrEqual(31);
+    expect(sample.duplicate).toBeGreaterThan(0);
+  }
   expect(result.rows).toEqual([{ trialId: 'sentinel', qualityValid: true, rt: 321 }]);
   if (passed) expect(result.phase).toBe('cognitive_instruction');
 });

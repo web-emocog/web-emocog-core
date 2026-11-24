@@ -90,6 +90,23 @@ tag `20261124-recovery1` and are included in the public asset manifest.
 - Builder regression: 21 passed across Chromium, Firefox and WebKit.
 - Warm-cache upgrade: all four entry/dependency combinations passed.
 - Release audit passed; further final suite results are recorded below/in PR.
+- Recovery scenarios: 15 passed across Chromium/Firefox/WebKit. The virtual
+  source is quantized at 67 ms; the actual sampler still polls at 33 ms and
+  explicitly checks distinct captures, duplicate rejection and all 14 targets.
+  macOS-only functional-test wall timeout accommodates native timer yields;
+  processing/FPS gates and participant sampling are unchanged. A separate local
+  broad Worker run was intentionally interrupted (12 passed, remainder not
+  counted); the required Linux matrix supplies the independent full run.
+
+The first follow-up CI reached green API, database and CodeQL gates, but both
+browser jobs failed before tests: the bounded 360 s audio-package install still
+downloaded from the observed slow EC2 mirror. The runner uses
+`mirror+file:/etc/apt/apt-mirrors.txt`, not only direct APT source URIs. The action
+now also routes that mirror list (and its security-list sibling if present),
+with a regression test for priority tokens and unchanged publisher keys/suites.
+No unauthenticated packages, third-party mirror, disabled test or unbounded wait.
+Windows smoke also includes the new device-free recovery tests; a hosted VM is
+not a substitute for the researcher's laptop.
 
 The first unrestricted local API run had three timing failures under heavy host
 load (mock container startup, abort timing and bounded media output), and one

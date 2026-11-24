@@ -31,3 +31,22 @@ deb http://us-east-2.ec2.archive.ubuntu.com.evil.example/ubuntu stable main
   assert.match(source, /Acquire::Retries "1"/);
   assert.doesNotMatch(source, /allow-unauthenticated|trusted=yes|Verify-Peer.*false|continue-on-error/);
 });
+
+test('APT mirror+file lists keep priorities and security/vendor origins while routing the observed slow EC2 host', () => {
+  const input = `http://us-east-2.ec2.archive.ubuntu.com/ubuntu/ priority:1
+https://archive.ubuntu.com/ubuntu priority:2
+http://security.ubuntu.com/ubuntu priority:1
+https://packages.microsoft.com/ubuntu priority:2
+URIs: mirror+file:/etc/apt/apt-mirrors.txt
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+`;
+  const result = spawnSync('sed', ['-E', '-f', path.join(action, 'ubuntu-origin.sed')],
+    { input, encoding: 'utf8', timeout: 5000 });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, input.replace('http://us-east-2.ec2.archive.ubuntu.com/ubuntu/',
+    'https://archive.ubuntu.com/ubuntu/'));
+  const source = fs.readFileSync(path.join(action, 'action.yml'), 'utf8');
+  for (const file of ['/etc/apt/apt-mirrors.txt', '/etc/apt/apt-mirrors-security.txt']) assert.ok(source.includes(file));
+  assert.match(source, /if \[\[ -f "\$source" \]\]/);
+});
