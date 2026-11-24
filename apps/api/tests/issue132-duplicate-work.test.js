@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { protocolCameraConstraints } = require('../../participant-web/js/session-runtime/protocol-profile.mjs');
+const { FrameLatency, assessFrameHeadroom } = require('../../participant-web/js/session-runtime/frame-latency.mjs');
 const { participantDebug: dbg, participantDebugError: dbgErr } = require('../../participant-web/js/session-runtime/participant-diagnostic.mjs');
 
 function load(file, context, exports) {
@@ -39,6 +40,7 @@ function precheckFixture(file = 'precheck-updated.js') {
     faceSegmenter: { segmentFrame: async () => ({ isComplete: true, faceVisibility: {} }) } }, sessionData: { tech: {} }, currentLang: 'en' };
   const context = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state, performance,
     translations: { en: {} }, window: {}, AbortController, DOMException, protocolCameraConstraints, dbg, dbgErr,
+    FrameLatency, assessFrameHeadroom,
     WecogProtocolQuality: require('../../shared/protocol-quality'),
     getFramePixels: frame => frame?.fixturePixels,
     document: { getElementById: id => id === 'precheck-layout-fix-v1' ? {} : node(id), querySelector: node },

@@ -17,7 +17,9 @@
     "timestamp": { "type": "number" },
     "tRelMs": { "type": ["number", "null"], "minimum": 0 },
     "blockId": { "type": ["string", "number", "null"] },
-    "trialId": { "type": ["string", "number", "null"] }
+    "trialId": { "type": ["string", "number", "null"] },
+    "targeted": { "type": "boolean" },
+    "stimulusName": { "type": ["string", "null"], "maxLength": 2000 }
   },
   "additionalProperties": true
 }

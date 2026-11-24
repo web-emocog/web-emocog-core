@@ -12,20 +12,21 @@ import {
     startEmotionSession
 } from '../emotion-stub-new.js?v=20261112-emotion2';
 import { NeutralCalibration } from '../emotion/neutral-calibration.mjs?v=20261112-emotion1';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261120-methods1';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261124-load2';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
 import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
 import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
 import { validTimeFrameReasons } from './passive-valid-time.mjs?v=20261122-validtime1';
+import { FrameLatency, assessFrameHeadroom } from './frame-latency.mjs?v=20261124-load2';
 
 const SAME_FRAME_RETRY_MS = 8;
 // Native callbacks jitter around the requested cadence. Avoid an extra timer
 // hop for small early arrivals; still process at most one result per frame.
 const FRAME_CALLBACK_TOLERANCE_MS = 2;
 const PRIMARY_STAGES = ['face', 'guideGazeEyes', 'emotionMultimodal', 'quality', 'bpm', 'auxiliaryDispatch'];
-const FACE_TIMINGS = ['modelCallMs', 'bitmapCaptureMs', 'workerRoundTripMs', 'workerWorkMs'];
+const FACE_TIMINGS = ['modelCallMs', 'bitmapCaptureMs', 'workerRoundTripMs', 'workerWorkMs', 'pixelDrawMs', 'pixelReadMs', 'derivedMs'];
 
 function recordTiming(stage, durationMs) {
     stage.frames++;
@@ -97,6 +98,7 @@ export class SessionFramePipeline {
             stages: Object.fromEntries(PRIMARY_STAGES.map(name => [name, { frames: 0, totalMs: 0, maxMs: 0 }])),
             faceTimings: Object.fromEntries(FACE_TIMINGS.map(name => [name, { frames: 0, totalMs: 0, maxMs: 0 }])) };
         this.diagnosticsPublishedAt = null;
+        this.primaryLatency = new FrameLatency();
         this.qualityDetector = new SessionQualityDetector();
         this.bpmErrorReported = false;
         this.analysisErrorReported = false;
@@ -292,7 +294,8 @@ export class SessionFramePipeline {
                     pose: frame.pose,
                     frameSize: frame.frameSize
                 });
-                if (gaze && window.handleGazeUpdate) window.handleGazeUpdate(gaze);
+                if (this.controller.requiresGazeCalibration?.() && !['calibration', 'validation'].includes(context.phase)) gaze = null;
+                if (window.handleGazeUpdate) window.handleGazeUpdate(gaze);
             } else if (window.handleGazeUpdate) {
                 window.handleGazeUpdate(null);
             }
@@ -344,6 +347,7 @@ export class SessionFramePipeline {
             const elapsed = finished - started;
             this.diagnostics.frames++;
             this.diagnostics.primaryMsTotal += elapsed;
+            this.primaryLatency.record(elapsed);
             this.diagnostics.primaryMsMax = Math.max(this.diagnostics.primaryMsMax, elapsed);
             const stages = this.diagnostics.stages;
             recordTiming(stages.face, faceDone - started);
@@ -393,7 +397,10 @@ export class SessionFramePipeline {
         if (!force && this.diagnosticsPublishedAt !== null && now - this.diagnosticsPublishedAt < 1000) return;
         this.diagnosticsPublishedAt = now;
         if (!this.state.sessionData.tech) this.state.sessionData.tech = {};
+        const primary = this.primaryLatency.snapshot();
         this.state.sessionData.tech.framePipeline = { ...this.diagnostics,
+            latency: { schemaVersion: 'frame_latency.v1', scope: 'completed_primary_frames',
+                primary, headroom: assessFrameHeadroom(primary) },
             profileId: this.profile.id, schedule: this.schedule,
             budget: frameBudget({ sourceFps: this.state.cameraFpsState?.currentFps,
                 primaryMs: this.diagnostics.frames > 0 ? this.diagnostics.primaryMsTotal / this.diagnostics.frames : null,
@@ -405,6 +412,9 @@ export class SessionFramePipeline {
             faceTimings: Object.fromEntries(FACE_TIMINGS.map(name => [name, { ...this.diagnostics.faceTimings[name] }])),
             faceBackend: this.state.runtime.localAnalyzer?.backend || 'legacy_main',
             faceDelegate: this.state.runtime.localAnalyzer?.inferenceDelegate || null,
+            faceOutputPolicy: this.state.runtime.localAnalyzer?.outputFaceBlendshapes === false ? 'landmarks_matrix.v1'
+                : this.state.runtime.localAnalyzer?.outputFaceBlendshapes === true ? 'sdk_full.v1' : null,
+            faceDelegateProbe: this.state.runtime.localAnalyzer?.delegateProbeSummary || null,
             faceDelegateFallbackReason: this.state.runtime.localAnalyzer?.cpuFallbackReason || null,
             segmentBackend: this.state.runtime.faceSegmenter?.backend || 'legacy_main',
             segmentDelegate: this.state.runtime.faceSegmenter?.inferenceDelegate || null,

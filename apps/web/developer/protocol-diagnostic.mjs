@@ -1,7 +1,7 @@
-import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1';
-import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261114-assigned1';
+import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2';
+import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261124-load2';
 import { QCMetrics } from '../../participant-web/js/qc-metrics/index.js?v=20261122-validtime1';
-import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261122-validtime1';
+import { SessionFramePipeline } from '../../participant-web/js/session-runtime/frame-pipeline.js?v=20261124-load2';
 import { MultimodalSessionCollector } from '../../participant-web/js/multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../packages/shared/multimodal/timebase.mjs';
 import { resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints, frameBudget } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
@@ -60,7 +60,8 @@ export class ProtocolDiagnostic {
             run.check();
             Object.assign(window, { FilesetResolver: vision.FilesetResolver, FaceLandmarker: vision.FaceLandmarker,
                 ImageSegmenter: vision.ImageSegmenter, PoseLandmarker: vision.PoseLandmarker });
-            const analyzer = new PrecheckAnalyzer(), segmenter = new FaceSegmenter();
+            const analyzer = new PrecheckAnalyzer({ outputFaceBlendshapes: resolveSignalProfile(this.definition).id !== 'protocol_signals.v2' }),
+                segmenter = new FaceSegmenter();
             run.onStop(() => analyzer.dispose()); run.onStop(() => segmenter.dispose());
             await this.models.request(run, async () => {
                 if (!await analyzer.initialize() || !await segmenter.initialize()) throw new Error('Diagnostic models unavailable');

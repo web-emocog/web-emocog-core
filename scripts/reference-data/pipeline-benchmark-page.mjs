@@ -25,7 +25,7 @@ export async function benchmarkPipeline({ profile, body, warmupMs, durationMs, c
     const debug = probe?.getExtension('WEBGL_debug_renderer_info');
     const renderer = debug ? probe.getParameter(debug.UNMASKED_RENDERER_WEBGL) : null;
     probe?.getExtension('WEBGL_lose_context')?.loseContext();
-    let stream, pipeline, multimodal, qc, observer, timer, primingTimer, raf, running = true;
+    let stream, pipeline, multimodal, qc, observer, timer, primingTimer, raf, running = true, loopSource = false;
     const measurement = { active: false };
     const startedAt = performance.now();
     const active = { face: 0, segment: 0, pose: 0 };
@@ -70,8 +70,11 @@ export async function benchmarkPipeline({ profile, body, warmupMs, durationMs, c
     analyzer.analyzeFrame = async (...args) => {
         const result = await originalAnalyze(...args);
         if (measurement.active && result.face?.detected) decodedFaceFrames++;
+        const timing = analyzer.lastFrameTiming;
+        const stages = result.replayStageMs || { pixels: timing?.pixelDrawMs + timing?.pixelReadMs,
+            inference: timing?.modelCallMs, derived: timing?.derivedMs };
         if (measurement.active) for (const [name, values] of Object.entries(faceStages)) {
-            if (Number.isFinite(result.replayStageMs?.[name])) values.push(result.replayStageMs[name]);
+            if (Number.isFinite(stages[name])) values.push(stages[name]);
         }
         if (result.error) errors.set('face_result_error', (errors.get('face_result_error') || 0) + 1);
         return result;
@@ -83,6 +86,9 @@ export async function benchmarkPipeline({ profile, body, warmupMs, durationMs, c
         instrument(analyzer.worker, 'face'); instrument(segmenter.worker, 'segment');
         let deliver = () => {};
         if (cameraInput === 'fake-file') {
+            // Chromium's file-backed camera repeats its finite input. Its
+            // continuous stream clock must not be reported as source clip PTS.
+            loopSource = true;
             source.removeAttribute('src'); source.load();
             // Only selected by the Node harness with Chromium's mandatory
             // fake-device + file-capture flags, never a participant option.
@@ -93,6 +99,8 @@ export async function benchmarkPipeline({ profile, body, warmupMs, durationMs, c
         } else {
             window.__pipelineBenchmarkPhase = 'file_playback';
             await source.play();
+            loopSource = durationMs + warmupMs + 5000 > source.duration * 1000;
+            source.loop = loopSource;
             await new Promise(resolve => source.requestVideoFrameCallback(resolve));
             source.pause(); source.currentTime = 0;
             await Promise.race([new Promise(resolve => source.addEventListener('seeked', resolve, { once: true })), sleep(250)]);
@@ -200,12 +208,19 @@ export async function benchmarkPipeline({ profile, body, warmupMs, durationMs, c
         const bpm = pipeline.bpm.snapshot();
         const frames = after.frames - before.frames;
         const take = key => after[key] - before[key];
-        const output = { elapsedMs, initializationMs, mediaElapsedMs: (mediaTime() - mediaStart) * 1000,
+        const output = { elapsedMs, initializationMs, mediaElapsedMs: loopSource ? null : (mediaTime() - mediaStart) * 1000,
+            repeatedReferenceClip: loopSource,
             analysisFps: frames * 1000 / elapsedMs, cameraDeliveryFps: sourceFrames * 1000 / elapsedMs,
             renderFps: renders * 1000 / elapsedMs, frames, faceFrames: decodedFaceFrames,
             faceCoverage: decodedFaceFrames / Math.max(1, frames), uiTicks, hiddenTicks,
             uiTimerLatenessMs: distribution(lateness), syntheticInputLatenessMs: distribution(inputLateness),
             primaryMs: distribution(pendingFrame), fpsWindows: fpsWindows(completed, elapsedMs),
+            timeWindows: Array.from({ length: Math.ceil(elapsedMs / 5000) }, (_, index) => {
+                const beginMs = index * 5000, endMs = Math.min(elapsedMs, beginMs + 5000);
+                const values = pendingFrame.filter((_value, i) => completed[i] >= beginMs && completed[i] < endMs);
+                return { beginMs, endMs, frames: values.length, analysisFps: values.length * 1000 / (endMs - beginMs),
+                    primaryMs: distribution(values) };
+            }),
             faceStagesMs: Object.fromEntries(Object.entries(faceStages).map(([name, values]) => [name, distribution(values)])),
             bitmapCaptures: Object.fromEntries(Object.entries(captures).map(([name, values]) => [name, distribution(values)])),
             workers: { face: analyzer.backend, segment: segmenter.backend, pose: pipeline.bodyPose.backend,

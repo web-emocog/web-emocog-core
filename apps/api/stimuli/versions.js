@@ -91,8 +91,12 @@ function manifestEntry(row, version) {
   const metadata = { ...row.metadata };
   delete metadata.content_path;
   delete metadata.contentPath;
+  const info = version.media_info;
+  const mediaInfo = info?.validated_sha256 === version.sha256 ? Object.fromEntries(
+    ['codec', 'duration_ms', 'frame_count', 'animated'].filter(key => info[key] !== undefined).map(key => [key, info[key]])) : null;
   return { versionId: version.id, sha256: version.sha256, mimeType: version.mime_type,
-    sizeBytes: Number(version.size_bytes), name: row.name, metadata };
+    sizeBytes: Number(version.size_bytes), name: row.name, metadata,
+    ...(mediaInfo ? { media_info: mediaInfo } : {}) };
 }
 
 async function pinProtocolMedia(client, projectId, definition, user, options = {}) {
@@ -109,8 +113,8 @@ async function pinProtocolMedia(client, projectId, definition, user, options = {
       throw new HttpError(422, 'Protocol stimulus is unavailable or private', 'protocol_stimulus_unavailable');
     }
     const version = await ensureStimulusVersion(client, row, options);
-    await ensurePlayableVersion(client, version, options.uploadsRoot || uploadsRoot);
-    pinned.mediaManifest[String(id)] = manifestEntry(row, version);
+    const inspected = await ensurePlayableVersion(client, version, options.uploadsRoot || uploadsRoot);
+    pinned.mediaManifest[String(id)] = manifestEntry(row, inspected);
   }
   return pinned;
 }
