@@ -76,3 +76,24 @@ closure, not rewriting author history or changing QC thresholds.
 
 - [MediaPipe Face Landmarker options](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker/web_js): optional blendshape classifier output, distinct from landmarks and transformation matrices.
 - [Microsoft local CIM queries](https://learn.microsoft.com/en-us/powershell/module/cimcmdlets/get-ciminstance): read-only local counter access and operation timeout.
+
+## Safari Layout Follow-up (November 25)
+
+The optional native macOS run on `7299301` passed models, FPS, calibration and
+most UI suites, but failed the analytics mobile-resize assertion: the shell
+retained desktop grid tracks (264 + 126 px) at a 390 px viewport, leaving a
+44 px chart. The mandatory Linux release gate and Windows smoke were green;
+the additional macOS failure was not ignored or retried into a purported pass.
+
+Mobile now uses a single block shell with the existing fixed sidebar drawer
+and a full-height center panel. Desktop retains its grid. The unnecessary
+grid `will-change` hint is removed. The CSS URL has a fresh cache token.
+The regression preserves minimum chart width and zero-overflow requirements,
+adds an upper viewport-width bound, checks the collapsed sidebar and a full
+mobile/desktop/mobile round trip. All layout conditions are polled together
+because WebKit commits a viewport resize asynchronously; a stale desktop width
+can no longer accidentally satisfy the old lower-width-only assertion.
+
+Local repeated targeted checks: 15 passed (five per Chromium/Firefox/WebKit).
+Fresh full CI results are recorded in the PR, not inferred from `7299301`.
+No measurement, API/schema, access control or camera behavior changed here.
