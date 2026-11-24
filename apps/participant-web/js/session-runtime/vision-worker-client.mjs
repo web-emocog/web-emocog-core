@@ -1,4 +1,4 @@
-const WORKER_URL = new URL('./vision-worker.js?v=20261123-fps1', import.meta.url);
+const WORKER_URL = new URL('./vision-worker.js?v=20261124-recovery1', import.meta.url);
 
 export class VisionWorkerClient {
     static supported() {

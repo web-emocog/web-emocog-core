@@ -282,7 +282,7 @@ test('real face model starts on CPU after a GPU initialization failure, then rel
       if (options.baseOptions.delegate === 'GPU') throw new Error('Synthetic GPU initialization failure');
       return original.call(vision.FaceLandmarker, files, options);
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261123-fps1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-recovery1');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       const ready = await analyzer.initialize();
@@ -325,7 +325,7 @@ test('face runtime GPU loss retries once on CPU with the same capture clocks and
       model.close = () => { closes++; close(); };
       return model;
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261123-fps1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-recovery1');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       await analyzer.initialize();
@@ -356,7 +356,7 @@ test('unavailable face delegates produce technical failure without repeated mode
     vision.FaceLandmarker.createFromOptions = async (_files: any, options: any) => {
       attempts.push(options.baseOptions.delegate); throw Error('synthetic_no_graphics_backend');
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261123-fps1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-recovery1');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       const ready = await analyzer.initialize();
@@ -389,7 +389,7 @@ test('actual face task without any WebGL contexts either works on CPU or fails e
     vision.FaceLandmarker.createFromOptions = async (files: any, options: any) => {
       attempts.push(options.baseOptions.delegate); return original.call(vision.FaceLandmarker, files, options);
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261123-fps1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-recovery1');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       await analyzer.initialize();
@@ -437,9 +437,9 @@ test('auxiliary main-thread fallback accepts the shared ImageData frame', async 
 
 test('real auxiliary models reuse shared pixels without bitmap conversion and preserve same-image output', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261123-fps1';
+    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261124-recovery1';
     const { FaceSegmenter } = await import(modulePath);
-    const clientPath = '/apps/participant-web/js/session-runtime/vision-worker-client.mjs?v=20261123-fps1';
+    const clientPath = '/apps/participant-web/js/session-runtime/vision-worker-client.mjs?v=20261124-recovery1';
     const { VisionWorkerClient } = await import(clientPath);
     const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
     const { faceVisibilityFixture } = await import(fixturePath);
@@ -546,8 +546,8 @@ for (const kind of ['face', 'segment'] as const) for (const mode of ['throw', 'r
     page.on('pageerror', error => errors.push(error.message));
     page.on('worker', worker => workers.push(worker.url()));
     const result = await page.evaluate(async ({ kind, mode }) => {
-      const path = kind === 'face' ? '/apps/participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261123-fps1'
-        : '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261123-fps1';
+      const path = kind === 'face' ? '/apps/participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261124-recovery1'
+        : '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261124-recovery1';
       const module = await import(path);
       const Analyzer = module.PrecheckAnalyzer || module.FaceSegmenter;
       const events: any[] = [];

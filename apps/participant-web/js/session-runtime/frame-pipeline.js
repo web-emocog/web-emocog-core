@@ -12,14 +12,14 @@ import {
     startEmotionSession
 } from '../emotion-stub-new.js?v=20261112-emotion2';
 import { NeutralCalibration } from '../emotion/neutral-calibration.mjs?v=20261112-emotion1';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261123-fps1';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261124-recovery1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
 import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
 import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
 import { validTimeFrameReasons } from './passive-valid-time.mjs?v=20261122-validtime1';
-import { FrameLatency, assessFrameHeadroom } from './frame-latency.mjs?v=20261123-fps1';
+import { FrameLatency, assessFrameHeadroom } from './frame-latency.mjs?v=20261124-recovery1';
 
 const SAME_FRAME_RETRY_MS = 8;
 // Native callbacks jitter around the requested cadence. Avoid an extra timer
@@ -294,7 +294,8 @@ export class SessionFramePipeline {
                     pose: frame.pose,
                     frameSize: frame.frameSize
                 });
-                if (gaze && window.handleGazeUpdate) window.handleGazeUpdate(gaze);
+                if (this.controller.requiresGazeCalibration?.() && !['calibration', 'validation'].includes(context.phase)) gaze = null;
+                if (window.handleGazeUpdate) window.handleGazeUpdate(gaze);
             } else if (window.handleGazeUpdate) {
                 window.handleGazeUpdate(null);
             }
@@ -411,6 +412,7 @@ export class SessionFramePipeline {
             faceTimings: Object.fromEntries(FACE_TIMINGS.map(name => [name, { ...this.diagnostics.faceTimings[name] }])),
             faceBackend: this.state.runtime.localAnalyzer?.backend || 'legacy_main',
             faceDelegate: this.state.runtime.localAnalyzer?.inferenceDelegate || null,
+            faceDelegateProbe: this.state.runtime.localAnalyzer?.delegateProbeSummary || null,
             faceDelegateFallbackReason: this.state.runtime.localAnalyzer?.cpuFallbackReason || null,
             segmentBackend: this.state.runtime.faceSegmenter?.backend || 'legacy_main',
             segmentDelegate: this.state.runtime.faceSegmenter?.inferenceDelegate || null,

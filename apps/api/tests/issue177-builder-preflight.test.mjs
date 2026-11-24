@@ -11,7 +11,7 @@ const protocol = (validTime = policy()) => ({ version: 'v2', blocks: [{ id: 'pas
   blockConfig: { ...(validTime === undefined ? {} : { validTime }), useFixation: false },
   trials: [{ stimulusId: 'std_simple_black_square', duration: 2000, repetitions: 2, condition: 'original' }] }] });
 const codes = result => result.errors.map(error => error.code);
-const builderSource = fs.readFileSync(new URL('../../web/researcher-builder.js', import.meta.url), 'utf8');
+const builderSource = fs.readFileSync(new URL('../../web/researcher-builder.js?v=20261124-recovery1', import.meta.url), 'utf8');
 const context = vm.createContext({ StandardStimuli: standard });
 vm.runInContext(builderSource, context);
 
@@ -112,7 +112,7 @@ test('#177 extended duration follows the accumulator bound and rejects subsecond
 });
 
 test('#177 real publication assertion rejects invalid policies without mutating conditions or RT', async () => {
-  const { default: router } = await import('../routes/protocols_new.js');
+  const { default: router } = await import('../routes/protocols_new.js?v=20261124-recovery1');
   const p = protocol(), before = JSON.stringify(p);
   assert.equal((await router.assertProtocolPublishable(p, { ok: true })).ok, true);
   assert.equal(JSON.stringify(p), before);

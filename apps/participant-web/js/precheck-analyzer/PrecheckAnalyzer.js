@@ -10,13 +10,14 @@
 import { LANDMARKS, EYE_LANDMARK_INDICES } from './constants.js';
 import { createThresholds, HISTORY_SIZE } from './thresholds.js';
 import { createFaceModel } from './face-model.mjs';
+import { FaceDelegateProbe } from './delegate-probe.mjs';
 import { analyzeIllumination } from './illumination.js';
 import { parseFaceResults, extractBlendShapes } from './face-parser.js';
 import { analyzePose, checkStability, checkEyesCentering, addToHistory } from './pose-analyzer.js';
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261123-fps1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-recovery1';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
     notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
@@ -49,6 +50,7 @@ class PrecheckAnalyzer {
         this.backend = 'uninitialized';
         this.initializationFailed = false;
         this.inferenceFailures = 0;
+        this.delegateProbe = new FaceDelegateProbe();
     }
 
     async initialize() {
@@ -96,13 +98,21 @@ class PrecheckAnalyzer {
                 import.meta.url
             ).href;
             
-            const initialized = await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options), {
+            const modelOptions = {
                 baseOptions: {
                     modelAssetPath: modelPath
                 },
                 runningMode: this.runningMode,
                 ...(typeof document === 'undefined' ? { canvas: createAnalysisCanvas() } : {})
-            }, () => generation === this.generation, Boolean(this.cpuFallbackReason));
+            };
+            this.createCpuCandidate = async () => {
+                const probeGeneration = this.generation;
+                return (await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options),
+                    { ...modelOptions, canvas: createAnalysisCanvas() },
+                    () => probeGeneration === this.generation, true))?.model;
+            };
+            const initialized = await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options), modelOptions,
+                () => generation === this.generation, Boolean(this.cpuFallbackReason));
             if (!initialized) return false;
             this.faceLandmarker = initialized.model;
             this.inferenceDelegate = initialized.delegate;
@@ -156,6 +166,8 @@ class PrecheckAnalyzer {
                 this.lastFrameTiming = { ...timing, ...worker.lastFrameTiming };
                 if (['GPU', 'CPU'].includes(frame.inferenceDelegate)) this.inferenceDelegate = frame.inferenceDelegate;
                 this.cpuFallbackReason = frame.delegateFallbackReason || this.cpuFallbackReason || null;
+                if (frame.delegateProbe) this.delegateProbeSummary = frame.delegateProbe;
+                delete frame.delegateProbe;
                 this.lastResult = rememberFramePixels(frame, imageData);
                 return this.lastResult;
             } catch (_) {
@@ -195,6 +207,19 @@ class PrecheckAnalyzer {
             const modelStart = performance.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
             const modelDone = performance.now();
+            if (typeof document === 'undefined' && capture.allowDelegateProbe === true && this.inferenceDelegate === 'GPU') {
+                this.delegateProbe.observe(modelDone - modelStart, mpResults.faceLandmarks?.[0]?.length >= 468);
+                const gpu = this.faceLandmarker;
+                const candidate = await this.delegateProbe.compare({ gpu, createCpu: this.createCpuCandidate,
+                    source: videoElement, timestamp, isCurrent: () => generation === this.generation && this.faceLandmarker === gpu });
+                if (candidate) {
+                    this.faceLandmarker = candidate;
+                    this.inferenceDelegate = 'CPU';
+                    try { gpu.close(); } catch (_) { /* The selected CPU remains usable after a lost GPU context. */ }
+                }
+                this.delegateProbeSummary = this.delegateProbe.summary;
+                if (generation !== this.generation) return this._createErrorResult('Analysis interrupted');
+            }
 
             const faceData = parseFaceResults(mpResults, width, height, this.thresholds.face);
             const eyes = analyzeEyes(mpResults, width, height, this.thresholds.eyes);

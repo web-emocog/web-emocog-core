@@ -5,15 +5,16 @@ export function profileFaceStages(source, faceInput = 'bitmap', faceOutputs = 'f
   if (!['full', 'used'].includes(faceOutputs)) throw new Error('invalid_reference_face_outputs');
   if (!['default', 'compute'].includes(faceCanvas)) throw new Error('invalid_reference_face_canvas');
   if (faceCanvas === 'compute') {
-    const original = 'canvas: createAnalysisCanvas()';
+    const modelCanvas = "...(typeof document === 'undefined' ? { canvas: createAnalysisCanvas() } : {})";
+    const original = source.includes(modelCanvas) ? modelCanvas : 'canvas: createAnalysisCanvas()';
     if (source.split(original).length !== 2) throw new Error('reference_profile_source_changed');
-    source = source.replace(original, `canvas: (() => {
+    source = source.replace(original, original.replace('createAnalysisCanvas()', `(() => {
       const canvas = createAnalysisCanvas();
       if (!canvas.getContext('webgl2', { antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false })) {
         throw new Error('reference_compute_context_unavailable');
       }
       return canvas;
-    })()`);
+    })()`));
   }
   if (faceOutputs === 'used') {
     const original = source.includes('outputFaceBlendshapes: true,')

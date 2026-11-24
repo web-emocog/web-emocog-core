@@ -116,7 +116,7 @@ test('media preflight uses verified manifests and cold cache workspace; budgets 
 });
 
 test('actual publication assertion returns warnings, throws typed 422 on hard errors, and leaves definitions immutable', async () => {
-  const { default: router } = await import('../routes/protocols_new.js');
+  const { default: router } = await import('../routes/protocols_new.js?v=20261124-recovery1');
   const p = base(), before = JSON.stringify(p);
   const report = await router.assertProtocolPublishable(p, { ok: true });
   assert.equal(report.ok, true); assert.equal(report.mediaCheck, 'passed'); assert.equal(JSON.stringify(p), before);

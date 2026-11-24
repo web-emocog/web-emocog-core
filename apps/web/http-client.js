@@ -117,6 +117,17 @@
     if (!detail && Array.isArray(body?.errors)) detail = body.errors.map(function (item) { return item.msg || item.message; }).filter(Boolean).join('; ');
     var error = new Error(response.status + (detail ? ' — ' + String(detail).slice(0, 1500) : ' ' + response.statusText));
     error.status = response.status; error.code = typeof body?.code === 'string' ? body.code : null;
+    if (error.code === 'protocol_preflight_failed' && body?.preflight?.schemaVersion === 'protocol_preflight.v1') {
+      var issues = function (items) { return (Array.isArray(items) ? items : []).slice(0, 50).filter(function (item) {
+        return item && typeof item.code === 'string' && typeof item.path === 'string'
+          && typeof item.message?.ru === 'string' && typeof item.message?.en === 'string';
+      }).map(function (item) { return { code: item.code.slice(0, 128), path: item.path.slice(0, 256),
+        message: { ru: item.message.ru.slice(0, 1000), en: item.message.en.slice(0, 1000) } }; }); };
+      error.preflight = { schemaVersion: 'protocol_preflight.v1', ok: false,
+        errors: issues(body.preflight.errors), warnings: issues(body.preflight.warnings),
+        duration: { plannedMaximumMs: Number.isFinite(body.preflight.duration?.plannedMaximumMs)
+          ? Math.max(0, body.preflight.duration.plannedMaximumMs) : 0 } };
+    }
     var retryAfter = response.headers?.get('Retry-After');
     if (retryAfter) {
       var retryMs = /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();

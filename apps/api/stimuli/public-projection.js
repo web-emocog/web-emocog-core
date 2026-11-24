@@ -25,6 +25,10 @@ function publicProtocolDefinition(definition, options = {}) {
         versionId: entry.versionId, sha256: entry.sha256, mimeType: entry.mimeType,
         sizeBytes: entry.sizeBytes, name: entry.name,
         metadata: publicStimulusMetadata(entry.metadata),
+        ...(entry.media_info ? { media_info: Object.fromEntries(Object.entries(entry.media_info).filter(([key, value]) =>
+          key === 'codec' ? typeof value === 'string' && value.length <= 64
+            : key === 'animated' ? typeof value === 'boolean'
+              : ['duration_ms', 'frame_count'].includes(key) && Number.isSafeInteger(value) && value >= 0 && value <= 2147483647)) } : {}),
       };
     }
   }

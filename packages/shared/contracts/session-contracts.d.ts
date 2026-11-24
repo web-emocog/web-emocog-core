@@ -226,6 +226,17 @@ export interface FrameLatencyV1 {
 
 export interface FrameTimingV1 { frames: number; totalMs: number; maxMs: number }
 
+export interface FaceDelegateProbeV1 {
+  schemaVersion: 'face_delegate_probe.v1';
+  scope: 'precheck_same_frame';
+  decision: 'cpu_selected' | 'gpu_kept' | 'probe_unavailable' | 'probe_cancelled';
+  samples: number;
+  gpuMeanMs: number | null;
+  cpuMeanMs: number | null;
+  cpuMaxMs: number | null;
+  modelBudgetMs: 20;
+}
+
 export interface SessionFeatureV1 {
   delivery?: SessionDeliveryV1;
   schemaVersion: 'session_feature.v1';
@@ -239,7 +250,7 @@ export interface SessionFeatureV1 {
   events: SessionEventV1[];
   meta?: (Record<string, unknown> & {
     tech?: (Record<string, unknown> & { gazeFeatureMethod?: 'same_eye_iris.v2'; gazeCalibrationSampling?: 'open_eye_calibration.v1'; gazeQcSignalMethod?: 'corrected_validity.v1';
-      framePipeline?: Record<string, unknown> & { latency?: FrameLatencyV1; faceTimings?: Partial<Record<
+      framePipeline?: Record<string, unknown> & { latency?: FrameLatencyV1; faceDelegateProbe?: FaceDelegateProbeV1 | null; faceTimings?: Partial<Record<
         'modelCallMs' | 'bitmapCaptureMs' | 'workerRoundTripMs' | 'workerWorkMs' | 'pixelDrawMs' | 'pixelReadMs' | 'derivedMs', FrameTimingV1>> }
     }) | null;
   }) | null;

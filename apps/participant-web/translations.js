@@ -1196,6 +1196,22 @@ for (const [locale, messages] of Object.entries(calibrationCaptureMessages)) {
         translations[locale].calibration_capture_blocked, translations[locale].calibration_camera_action] = messages;
 }
 
+const faceRecoveryText = {
+    ru: ['Проверим калибровку взгляда', 'Лицо надолго исчезало из кадра. До следующего задания пройдите короткую калибровку и независимую проверку. Предыдущие результаты сохранятся; повреждённые измерения не станут валидными задним числом.'],
+    en: ['Check gaze calibration', 'Your face was out of frame for a sustained period. Complete a short calibration and independent check before the next task. Previous results are retained; invalid measurements will not become valid retroactively.'],
+    zh: ['检查视线校准', '您的面部曾持续离开画面。下一项任务前，请完成简短校准和独立检查。之前的结果会保留，无效测量不会因此变为有效。'],
+    es: ['Comprobar la calibración de la mirada', 'Su rostro estuvo fuera de cuadro durante un tiempo prolongado. Antes de la siguiente tarea, complete una calibración breve y una comprobación independiente. Se conservan los resultados anteriores; las mediciones inválidas no se validan retroactivamente.'],
+    hi: ['दृष्टि अंशांकन की जाँच करें', 'आपका चेहरा कुछ समय तक फ़्रेम से बाहर था। अगले कार्य से पहले संक्षिप्त अंशांकन और स्वतंत्र जाँच पूरी करें। पुराने परिणाम सुरक्षित रहेंगे; अमान्य माप पीछे से मान्य नहीं होंगे।'],
+    ar: ['تحقق من معايرة النظر', 'غاب وجهك عن الإطار لفترة متواصلة. أكمل معايرة قصيرة وفحصاً مستقلاً قبل المهمة التالية. تُحفظ النتائج السابقة ولا تصبح القياسات غير الصالحة صالحة بأثر رجعي.'],
+    fr: ['Vérifier le calibrage du regard', 'Votre visage est resté hors du cadre. Avant la tâche suivante, effectuez un calibrage court et une vérification indépendante. Les résultats précédents sont conservés ; les mesures invalides ne deviennent pas valides rétroactivement.'],
+    bn: ['দৃষ্টির ক্যালিব্রেশন পরীক্ষা করুন', 'আপনার মুখ কিছুক্ষণ ফ্রেমের বাইরে ছিল। পরের কাজের আগে সংক্ষিপ্ত ক্যালিব্রেশন ও স্বাধীন পরীক্ষা সম্পন্ন করুন। আগের ফলাফল থাকবে; অবৈধ পরিমাপ পরে বৈধ হবে না।'],
+    pt: ['Verificar a calibração do olhar', 'O seu rosto esteve fora do enquadramento por um período prolongado. Antes da próxima tarefa, conclua uma calibração breve e uma verificação independente. Os resultados anteriores são mantidos; medições inválidas não se tornam válidas retroativamente.'],
+    ur: ['نظر کی کیلیبریشن جانچیں', 'آپ کا چہرہ کچھ دیر فریم سے باہر رہا۔ اگلے کام سے پہلے مختصر کیلیبریشن اور الگ جانچ مکمل کریں۔ سابقہ نتائج محفوظ رہیں گے؛ غلط پیمائشیں بعد میں درست قرار نہیں دی جائیں گی۔']
+};
+for (const [locale, [title, body]] of Object.entries(faceRecoveryText)) Object.assign(translations[locale], {
+    runtime_face_recovery_title: title, runtime_face_recovery_body: body
+});
+
 export const participantLocales = ['ru', 'en', 'zh', 'es', 'hi', 'ar', 'fr', 'bn', 'pt', 'ur'];
 
 const validationMissingTargets = {

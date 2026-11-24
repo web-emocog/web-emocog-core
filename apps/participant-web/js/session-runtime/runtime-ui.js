@@ -1,6 +1,6 @@
 import { ERROR_KINDS, SESSION_STATES } from './contracts.mjs';
 import { setHeadPoseGuideMode } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
-import { translations } from '../../translations.js?v=20261110-integration1';
+import { translations } from '../../translations.js?v=20261124-recovery1';
 
 const POLICY_TEXT = {
     ru: {
@@ -84,6 +84,7 @@ const ISSUE_TRANSLATION_KEYS = Object.freeze({
     frame_analysis_failed: 'runtime_generic_technical',
     frame_pipeline_exception: 'runtime_generic_technical',
     face_missing: 'tip_face_not_found',
+    gaze_recalibration_required: 'runtime_face_recovery_title',
     low_light: 'tip_light_dark',
     head_pose: 'tip_pose_unstable',
     face_occluded: 'tip_face_occluded',
@@ -273,6 +274,14 @@ export class SessionRuntimeUI {
             note: text.note,
             action: text.continue
         });
+    }
+
+    async showCalibrationRecovery() {
+        const text = langText(this.getLanguage);
+        const pack = translations[text.lang] || translations.en;
+        return this._showModal({ title: pack.runtime_face_recovery_title || translations.en.runtime_face_recovery_title,
+            body: pack.runtime_face_recovery_body || translations.en.runtime_face_recovery_body,
+            note: text.note, action: pack.runtime_recalibrate || translations.en.runtime_recalibrate });
     }
 
     async showRepeat(repeat) {

@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData 
-} from './ui.js?v=20261104-4';
+} from './ui.js?v=20261124-recovery1';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck.js?v=20261104-4';
+} from './precheck.js?v=20261124-recovery1';
 
 import { 
     startCalibration, 
     finishSession 
-} from './tests.js?v=20261112-emotion2';
+} from './tests.js?v=20261124-recovery1';
 
 // Функции доступные для HTML
 window.setLanguage = setLanguage;

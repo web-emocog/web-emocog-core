@@ -1,5 +1,5 @@
 import { state, CONSTANTS, LOCAL_ANALYSIS_CONFIG } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js';
+import { translations } from '../../translations.js?v=20261124-recovery1';
 import { measureCameraFPS } from './camera.js?v=20261104-4';
 
 export async function startPreCheck() {

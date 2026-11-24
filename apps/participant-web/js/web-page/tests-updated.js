@@ -6,12 +6,12 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261110-integration1';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261123-fps1';
-import { stopPreCheck } from './precheck-updated.js?v=20261123-fps1';
+import { translations } from '../../translations.js?v=20261124-recovery1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261124-recovery1';
+import { stopPreCheck } from './precheck-updated.js?v=20261124-recovery1';
 import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261123-fps1';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261124-recovery1';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -23,8 +23,8 @@ import {
     runProtocolTestSequence,
     startTestHub,
     stopHubEmotionPreview
-} from '../gaze-tracker/gaze-tests/index.js?v=20261123-fps1';
-import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261123-fps1';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261124-recovery1';
+import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261124-recovery1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
     CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
@@ -49,7 +49,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261123-fps1';
+} from '../session-runtime/index.js?v=20261124-recovery1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,
@@ -449,6 +449,33 @@ function calibrationGeometry() {
     return { ...getContentViewport(), dpr: window.devicePixelRatio };
 }
 
+export function runBoundaryRecalibration() {
+    if (state.runtime.calibrationRecoveryContinuation) return state.runtime.calibrationRecoveryContinuation.promise;
+    const runtime = getSessionRuntime();
+    if (runtime?.machine?.currentBlock?.stage === 'trial') return Promise.reject(new Error('calibration_requires_trial_boundary'));
+    const phase = state.runtime.currentPhase || 'protocol_instruction';
+    const layout = ['.container', '.top-bar', '#precheckContainer', '#startPrecheckBtn', '#startCalibBtn']
+        .map(selector => document.querySelector(selector)).filter(Boolean)
+        .map(element => ({ element, display: element.style.display }));
+    const restoreLayout = () => {
+        for (const { element, display } of layout) if (element.isConnected) element.style.display = display;
+    };
+    let resolve, reject;
+    const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+    state.runtime.calibrationRecoveryContinuation = { promise, resolve, reject, phase, restoreLayout };
+    void startCalibration({ targetedPositions: [{ x: 20, y: 20 }, { x: 80, y: 20 }, { x: 50, y: 80 }] })
+        .then(() => {
+            if (state.runtime.currentPhase !== 'calibration' && state.runtime.calibrationRecoveryContinuation?.promise === promise) {
+                delete state.runtime.calibrationRecoveryContinuation;
+                reject(new Error('calibration_recovery_not_started'));
+            }
+        }, () => {
+            if (state.runtime.calibrationRecoveryContinuation?.promise === promise) delete state.runtime.calibrationRecoveryContinuation;
+            reject(new Error('calibration_recovery_not_started'));
+        });
+    return promise;
+}
+
 export function startCalibration(options = {}) {
     if (calibrationSetup) return calibrationSetup;
     const pending = prepareCalibration(options).finally(() => {
@@ -483,6 +510,11 @@ async function prepareCalibration(options) {
         await continueInvitationSessionAfterShell();
         return;
     }
+    // A precheck-only delegate probe must finish before calibration owns the
+    // analyzer. Stopping the loop alone does not cancel its in-flight Worker.
+    if (state.flags.isPrecheckRunning) stopPreCheck();
+    await state.runtime.localAnalyzer?.pendingFrame?.catch(() => {});
+    if (state.runtime.participantPageExited || generation !== calibrationGeneration) return;
     setSessionPhase('calibration', { source: 'startCalibration' });
     recordSessionEvent(targeted ? 'calibration_targeted_start' : 'calibration_start', {
         targetCount: targeted ? targetedPositions.length : 25,
@@ -543,10 +575,6 @@ async function prepareCalibration(options) {
     document.getElementById('startPrecheckBtn').style.display = 'none';
     document.getElementById('startCalibBtn').style.display = 'none';
     
-    if (state.flags.isPrecheckRunning) {
-        stopPreCheck();
-    }
-
     // С этого момента один frame pipeline ведёт gaze/blinks/emotion/BPM/body
     // без параллельных analyzeFrame loops. До камеры/пречека измерений нет.
     state.flags.isRecording = true;
@@ -1385,6 +1413,7 @@ export function startGazeValidation() {
         point.style.cursor = 'pointer';
         
         const proceedToProtocol = () => {
+            if (!validationPassed) return;
             if (calibrationActions) calibrationActions.style.display = 'none';
             if (validationResult) validationResult.hidden = true;
             if (recalibrateButton) recalibrateButton.onclick = null;
@@ -1393,7 +1422,14 @@ export function startGazeValidation() {
             showCalibrationHeadPoseGuide(false);
             state.runtime.validationRepairAttempt = 0;
             state.runtime.qcMetrics?.resetGazeAvailability?.();
-            continueInvitationSessionAfterShell();
+            const recovery = state.runtime.calibrationRecoveryContinuation;
+            if (recovery) {
+                delete state.runtime.calibrationRecoveryContinuation;
+                recovery.restoreLayout?.();
+                clearTaskContext();
+                setSessionPhase(recovery.phase, { source: 'calibration_recovery_complete' });
+                recovery.resolve(true);
+            } else continueInvitationSessionAfterShell();
         };
 
         const worstTargets = coverage.complete ? getWorstValidationTargets(selectedPoints, validationViewport, 4) : [];
@@ -1803,6 +1839,11 @@ let finishSessionPromise = null;
 export function stopParticipantTestLoops() {
     calibrationGeneration++;
     state.runtime.cancelCalibrationIntro?.();
+    const recovery = state.runtime.calibrationRecoveryContinuation;
+    if (recovery) {
+        delete state.runtime.calibrationRecoveryContinuation;
+        recovery.reject(new Error('calibration_recovery_cancelled'));
+    }
     state.runtime.cancelVisuospatialTest?.();
     state.runtime.stopValidationSampling?.();
     stopGazeTestsAnalysisLoop();

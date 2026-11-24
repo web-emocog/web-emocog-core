@@ -326,6 +326,14 @@ performance pass по одной средней. Precheck использует �
 только для подсказки. При публикации telemetry сначала обновить API contract.
 Локальный CPU/GPU benchmark не разрешает автоматическую смену delegate на всех
 Windows и не заменяет длительную приёмку на проблемном устройстве.
+Только Worker-пречек может однократно сравнить CPU с медленным GPU на одном
+неизменном кадре после 8 реальных face timings >20 ms в среднем. Принимать CPU
+только при mean <=20 ms, max <=25 ms и выигрыше >=3 ms / >=20%; те же веса,
+отдельный canvas, общий deadline 1200 ms и cleanup поздней модели обязательны.
+Пробные повторные inference не являются participant samples. Во время
+калибровки/протокола сравнение запрещено; diagnostic summary ограничен typed
+`face_delegate_probe.v1`, не кадрами. Это инженерный выбор перед персональной
+калибровкой, а не смягчение QC или доказательство Windows FPS acceptance.
 См. `docs/reports/2026-11-23-windows-fps-headroom.md`.
 
 Поздний ответ/ошибка Worker после reset/stop не изменяет новую generation.
@@ -369,6 +377,13 @@ sample и не ретайминг принятого PTS. WebKit/Chromium не �
 и не даёт performance pass. Старые отчёты не пересчитывать автоматически.
 
 - не создавать второй `requestAnimationFrame`/MediaPipe loop;
+- sustained `face_missing` после персональной калибровки сохраняет локальный
+  `calibrationRecovery.pending` в checkpoint. Возврат лица не снимает gate:
+  до новой независимой validation gaze/valid-time не засчитываются. Не прерывать
+  активную пробу скрытой паузой; предложить короткий repair (3 точки по 3 клика)
+  на ближайшей инструкции/перед повтором, с полной калибровкой при смене геометрии.
+  Возобновлять только ожидающий runner, не весь протокол; отмена/ошибка записи
+  сохраняет gate и очередь повторов, принятые результаты не пересоздаются.
 - precheck camera setup и подготовка калибровки single-flight: повторный вызов
   разделяет текущий promise. Отмена precheck закрывает поздно полученный stream,
   metadata/playback wait и FPS sampler; успешный переход к калибровке сохраняет
@@ -956,6 +971,16 @@ API: Node.js 22+, Express 4, PostgreSQL, прямой параметризова
 | `/stimuli` | stimulus metadata/content и document conversion |
 | `/contracts` | опубликованные JSON Schema |
 | `/health`, `/ready` | liveness и DB readiness |
+
+Публикация сначала сохраняет structural/AOI/access gates, затем закрепляет и
+декодирует immutable media, и только после этого проверяет допустимость добора
+валидного времени. При проверке статичности PNG нельзя терять decoder facts
+между публикацией, invitation snapshot и participant QC: manifest содержит
+только codec/duration/frame_count/animated из проверки того же SHA-256;
+публичная проекция исключает пути, исходные ошибки и произвольные поля.
+Client manifest не выбирает серверную версию, старые invitations не меняются.
+Отказ preflight в конструкторе показывает bounded typed причины понятным языком
+и сохраняет черновик/прежнее приглашение; не заменять отказ успешной публикацией.
 
 Canonical contracts:
 

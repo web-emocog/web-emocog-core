@@ -7347,6 +7347,75 @@
           ],
           "maxLength": 256
         },
+        "faceDelegateProbe": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "const": "face_delegate_probe.v1"
+                },
+                "scope": {
+                  "const": "precheck_same_frame"
+                },
+                "decision": {
+                  "enum": [
+                    "cpu_selected",
+                    "gpu_kept",
+                    "probe_unavailable",
+                    "probe_cancelled"
+                  ]
+                },
+                "samples": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "gpuMeanMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                "cpuMeanMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                "cpuMaxMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                "modelBudgetMs": {
+                  "const": 20
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "scope",
+                "decision",
+                "samples",
+                "gpuMeanMs",
+                "cpuMeanMs",
+                "cpuMaxMs",
+                "modelBudgetMs"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "faceDelegate": {
           "type": [
             "string",
