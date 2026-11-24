@@ -7416,6 +7416,9 @@
             }
           ]
         },
+        "faceOutputPolicy": {
+          "enum": ["landmarks_matrix.v1", "sdk_full.v1", null]
+        },
         "faceDelegate": {
           "type": [
             "string",

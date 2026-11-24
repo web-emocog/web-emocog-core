@@ -38,6 +38,7 @@ class PrecheckAnalyzerInline {
         this._canvas = null;
         this._ctx = null;
         this.runningMode = "VIDEO";
+        this.outputFaceBlendshapes = options.outputFaceBlendshapes !== false;
     }
 
     async initialize() {
@@ -66,7 +67,7 @@ class PrecheckAnalyzerInline {
                 minFaceDetectionConfidence: 0.5,
                 minFacePresenceConfidence: 0.5,
                 minTrackingConfidence: 0.5,
-                outputFaceBlendshapes: true,
+                outputFaceBlendshapes: this.outputFaceBlendshapes,
                 outputFacialTransformationMatrixes: true
             });
             if (generation !== this.generation) { model.close(); return false; }
@@ -394,7 +395,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof window !== 'undefined') {
     window.PrecheckAnalyzer = PrecheckAnalyzerInline;
-    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261124-recovery1')
+    window.PrecheckAnalyzerReady = import('./precheck-analyzer/index.js?v=20261124-load2')
         .then(module => {
             const Model = module.PrecheckAnalyzer || module.default;
             if (typeof Model !== 'function') throw new Error('face_export_missing');

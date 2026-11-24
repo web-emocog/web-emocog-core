@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { participantDebug, participantDebugError, participantDebugErrorOnce,
     resetParticipantDiagnostics, notifyParticipantCallback } from '../../participant-web/js/session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
-import { translations, participantLocales } from '../../participant-web/translations.js?v=20261124-recovery1';
+import { translations, participantLocales } from '../../participant-web/translations.js?v=20261124-load2';
 
 test('camera access errors offer an actionable explanation in every participant locale', () => {
     for (const locale of participantLocales) {

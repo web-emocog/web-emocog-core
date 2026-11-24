@@ -11,17 +11,23 @@ test('face loss persists a calibration gate after face returns, without interrup
     s.runtime.gazeTracker = { isCalibrated: () => true };
     s.runtime.currentPhase = 'cognitive_task';
     r.beginBlock({ blockId: 'b', blockType: 'cognitive_task' });
-    r.reportIssue({ code: 'face_missing', kind: 'quality', recoverable: true });
-    r.resolveIssue('face_missing');
+    const { SessionQualityDetector } = await import(new URL('js/session-runtime/quality-detector.mjs', location.href).href);
+    const detector = new SessionQualityDetector();
+    const absent = { face: { detected: false } };
+    const premature = detector.update(absent, null, 1000).raised.length
+      + detector.update(absent, null, 2499).raised.length;
+    for (const issue of detector.update(absent, null, 2500).raised) r.reportIssue(issue);
+    for (const code of detector.update({ face: { detected: true } }, null, 2600).resolved) r.resolveIssue(code);
     const during = { current: r.machine.currentBlock.blockId, required: r.requiresGazeCalibration() };
     let rejected = false;
     try { await r.ensureGazeCalibration(); } catch (_) { rejected = true; }
     r.completeBlock({ success: false });
     (window as any).__recoveryRepeat = r.promptRepeat('b').catch(() => {});
-    return { during, rejected, results: s.sessionData.cognitiveResults, queue: r.machine.repeatQueue.length,
+    return { during, rejected, premature, results: s.sessionData.cognitiveResults, queue: r.machine.repeatQueue.length,
       issues: r.getActiveIssues().map((issue: any) => issue.code) };
   });
   expect(result.during).toEqual({ current: 'b', required: true });
+  expect(result.premature).toBe(0);
   expect(result.rejected).toBe(true);
   expect(result.queue).toBe(1);
   expect(result.results).toEqual([{ trialId: 'accepted', qualityValid: true, rt: 321 }]);
@@ -46,7 +52,7 @@ for (const passed of [true, false]) test(`independent validation ${passed ? 'res
     s.runtime.calibrationRecoveryContinuation = { phase: 'cognitive_instruction',
       restoreLayout: () => { (window as any).__layoutRestored = true; },
       resolve: () => { (window as any).__resumed++; }, reject() {} };
-    const { startGazeValidation } = await import(new URL('js/web-page/tests-updated.js?v=20261124-recovery1', location.href).href);
+    const { startGazeValidation } = await import(new URL('js/web-page/tests-updated.js?v=20261124-load2', location.href).href);
     startGazeValidation();
     document.getElementById('validationIntroStartBtn')!.click();
     const previous = Object.getOwnPropertyDescriptor(s.runtime, 'currentGazePrediction');
@@ -136,7 +142,7 @@ test('short recalibration requires a saved boundary and cancellation keeps its g
     const plan = { points: w.__gazeCalibrationDebug.points, clicks: w.__gazeCalibrationDebug.clicksPerPoint };
     s.runtime.calibrationRecoveryContinuation.restoreLayout();
     const layout = ['.container', '.top-bar'].map(selector => (document.querySelector(selector) as HTMLElement).style.display);
-    const { stopParticipantTestLoops } = await import(new URL('js/web-page/tests-updated.js?v=20261124-recovery1', location.href).href);
+    const { stopParticipantTestLoops } = await import(new URL('js/web-page/tests-updated.js?v=20261124-load2', location.href).href);
     stopParticipantTestLoops(); await w.pendingCalibration;
     return { plan, layout, cancelled: w.recoveryCancelled, required: s.runtime.sessionRuntime.requiresGazeCalibration(),
       rows: s.sessionData.cognitiveResults };
@@ -155,7 +161,8 @@ test('real Worker limits delegate selection to precheck and creates a separate c
       try {
         self.FilesetResolver = { forVisionTasks: async () => ({}) };
         self.FaceLandmarker = { createFromOptions: async (_files, options) => {
-          allocations.push({ delegate: options.baseOptions.delegate, canvas: options.canvas });
+          allocations.push({ delegate: options.baseOptions.delegate, canvas: options.canvas,
+            blendshapes: options.outputFaceBlendshapes, matrix: options.outputFacialTransformationMatrixes });
           const delegate = options.baseOptions.delegate;
           return { close() { closed.push(delegate); }, detectForVideo() {
             const until = performance.now() + (delegate === 'GPU' ? 35 : 5);
@@ -165,14 +172,15 @@ test('real Worker limits delegate selection to precheck and creates a separate c
           } };
         } };
         const {PrecheckAnalyzer} = await import(${JSON.stringify(root + 'PrecheckAnalyzer.js')});
-        analyzer = new PrecheckAnalyzer({worker:false});
+        analyzer = new PrecheckAnalyzer({worker:false, outputFaceBlendshapes:false});
         await analyzer.initialize(); analyzer.reset();
         const canvas = new OffscreenCanvas(640,480);
         for(let i=0;i<8;i++) await analyzer.analyzeFrame(canvas, {timestamp:performance.now(), allowDelegateProbe:false});
         const before = {delegate:analyzer.inferenceDelegate, probe:analyzer.delegateProbeSummary || null};
         for(let i=0;i<8;i++) await analyzer.analyzeFrame(canvas, {timestamp:performance.now(), allowDelegateProbe:true});
         const after = {delegate:analyzer.inferenceDelegate, probe:analyzer.delegateProbeSummary,
-          separate:allocations.length===2 && allocations[0].canvas!==allocations[1].canvas};
+          separate:allocations.length===2 && allocations[0].canvas!==allocations[1].canvas,
+          outputs:allocations.map(options => ({blendshapes:options.blendshapes,matrix:options.matrix}))};
         analyzer.dispose(); analyzer=null;
         self.postMessage({before,after,closed});
       } catch(e) { analyzer?.dispose(); self.postMessage({error:String(e)}); }
@@ -192,6 +200,7 @@ test('real Worker limits delegate selection to precheck and creates a separate c
   expect(result.before).toEqual({ delegate: 'GPU', probe: null });
   expect(result.after.delegate).toBe('CPU');
   expect(result.after.separate).toBe(true);
+  expect(result.after.outputs).toEqual([{ blendshapes: false, matrix: true }, { blendshapes: false, matrix: true }]);
   expect(result.after.probe).toMatchObject({ scope: 'precheck_same_frame', decision: 'cpu_selected', samples: 8, modelBudgetMs: 20 });
   expect(result.closed).toEqual(['GPU', 'CPU']);
 });

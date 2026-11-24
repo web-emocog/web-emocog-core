@@ -69,7 +69,7 @@ test('a high delivered FPS alone cannot satisfy the latency headroom or long-run
 });
 
 test('precheck warns about processing headroom without changing camera QC or admission', () => {
-    const source = fs.readFileSync(new URL('../../participant-web/js/web-page/precheck-updated.js?v=20261124-recovery1', import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL('../../participant-web/js/web-page/precheck-updated.js?v=20261124-load2', import.meta.url), 'utf8');
     const start = source.indexOf('function renderCameraCadence(');
     const end = source.indexOf('\nexport function startPreCheck', start);
     assert.ok(start >= 0 && end > start);

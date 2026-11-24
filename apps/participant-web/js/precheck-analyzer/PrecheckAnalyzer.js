@@ -17,7 +17,7 @@ import { analyzePose, checkStability, checkEyesCentering, addToHistory } from '.
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-recovery1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-load2';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
     notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
@@ -35,6 +35,7 @@ class PrecheckAnalyzer {
         this.lastFaceTime = 0;
         
         this.thresholds = createThresholds(options);
+        this.outputFaceBlendshapes = options.outputFaceBlendshapes !== false;
         this.LANDMARKS = LANDMARKS;
         
         this.onInitialized = options.onInitialized || null;
@@ -66,7 +67,8 @@ class PrecheckAnalyzer {
             const worker = new VisionWorkerClient('face');
             this.worker = worker;
             try {
-                const initialized = await worker.start({ thresholds: this.thresholds });
+                const initialized = await worker.start({ thresholds: this.thresholds,
+                    outputFaceBlendshapes: this.outputFaceBlendshapes });
                 if (generation !== this.generation) { worker.dispose(); return false; }
                 this.backend = 'worker';
                 this.inferenceDelegate = initialized?.inferenceDelegate || null;
@@ -103,6 +105,7 @@ class PrecheckAnalyzer {
                     modelAssetPath: modelPath
                 },
                 runningMode: this.runningMode,
+                outputFaceBlendshapes: this.outputFaceBlendshapes,
                 ...(typeof document === 'undefined' ? { canvas: createAnalysisCanvas() } : {})
             };
             this.createCpuCandidate = async () => {

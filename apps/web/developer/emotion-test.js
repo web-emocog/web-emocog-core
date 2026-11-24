@@ -1,2 +1,2 @@
-import { mountProtocolDiagnostic } from './protocol-diagnostic-page.mjs?v=20261124-recovery1';
+import { mountProtocolDiagnostic } from './protocol-diagnostic-page.mjs?v=20261124-load2';
 mountProtocolDiagnostic('emotion');

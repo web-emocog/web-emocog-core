@@ -250,7 +250,7 @@ async function start() {
     status('Подготовка локальной модели…');
     const [{ default: Analyzer }, { observeVideoFrames }, vision, { extractFeatureGroups }, maskedEye, patchRows,
       nuisanceFit, gateModule, geometryModule, aoiModule, eyeGateModule] = await deadline(Promise.all([
-      import('../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261124-recovery1'),
+      import('../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2'),
       import('../../participant-web/js/session-runtime/video-frames.mjs?v=20261104-4'),
       import('../../participant-web/js/vendor/mediapipe/vision_bundle.mjs'),
       import('../../participant-web/js/gaze-tracker/features.js?v=20261110-integration1'),

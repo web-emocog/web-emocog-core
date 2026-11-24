@@ -36,3 +36,11 @@ jobs:
         run: npx playwright test -c playwright.issue143.config.ts --project=chromium --grep "native classic scrollbar"
       - name: Verify face-loss recovery without physical capture
         run: npx playwright test -c playwright.issue186.config.ts --project=chromium --project=firefox
+      - name: Verify read-only Windows load sampler
+        working-directory: .
+        shell: pwsh
+        run: ./scripts/windows/load-sample.test.ps1
+      - name: Verify Windows PowerShell 5.1 compatibility
+        working-directory: .
+        shell: powershell
+        run: ./scripts/windows/load-sample.test.ps1

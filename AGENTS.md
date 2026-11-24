@@ -431,6 +431,19 @@ sample и не ретайминг принятого PTS. WebKit/Chromium не �
   опубликованные thresholds или принимать реальный low FPS;
 - повторять минимальную единицу, которую определяет протокол;
 - checkpoint writes сериализовать и дожидаться in-flight save перед clear;
+- известный schema 422 промежуточного ingest не пересобирать/отправлять каждые
+  30 с: локальный durable checkpoint продолжается, server backup остаётся
+  failed, повторная проверка через 5 минут допускает обновление API. Финальный
+  ingest не блокируется; не менять сохранённый пакет ради обхода валидации;
+- в `protocol_signals.v2` face analyzer не запрашивает неиспользуемый SDK
+  blendshape classifier. Landmarks/matrices, QC и landmark-based emotion/FACS
+  сохраняются. Default/legacy и диагностический eye-gate probe оставляют SDK
+  scores. Выбор передаётся Worker/CPU candidate/inline fallback одинаково и
+  отмечается bounded `faceOutputPolicy`; API schema обновляется до клиента;
+- `scripts/windows/load-sample.ps1` только читает агрегаты нагрузки локально.
+  Не добавлять управление приоритетами/реестром/таймерами, захват медиа, upload,
+  PID/account/serial/IP в отчёт. Недоступный счётчик обозначать null, GPU engines
+  не суммировать как проценты общей загрузки. Инвентарь не доказывает нагрузку;
 - восстановленная активная попытка считается прерванной и требует повтора;
 - финальный экран показывать только после teardown camera/module handles;
 - итоговый blink count и остальные summaries строить до очистки accumulators.

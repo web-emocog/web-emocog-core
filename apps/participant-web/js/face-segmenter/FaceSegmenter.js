@@ -33,7 +33,7 @@ import { analyzeMasks } from './mask-analyzer.js?v=20261104-4';
 import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261110-integration1';
 import { createVisualizationMask } from './visualization.js?v=20261104-4';
 import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-recovery1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-load2';
 import { segmentationDelegate } from './delegate-policy.mjs';
 import { MaskReader } from './mask-reader.mjs';
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,

@@ -17,8 +17,9 @@ export function profileFaceStages(source, faceInput = 'bitmap', faceOutputs = 'f
     })()`));
   }
   if (faceOutputs === 'used') {
-    const original = source.includes('outputFaceBlendshapes: true,')
-      ? 'outputFaceBlendshapes: true,' : 'runningMode: this.runningMode,';
+    const original = source.includes('outputFaceBlendshapes: this.outputFaceBlendshapes,')
+      ? 'outputFaceBlendshapes: this.outputFaceBlendshapes,' : source.includes('outputFaceBlendshapes: true,')
+        ? 'outputFaceBlendshapes: true,' : 'runningMode: this.runningMode,';
     if (source.split(original).length !== 2) throw new Error('reference_profile_source_changed');
     source = source.replace(original, original.startsWith('runningMode')
       ? original + '\n                outputFaceBlendshapes: false,' : 'outputFaceBlendshapes: false,');

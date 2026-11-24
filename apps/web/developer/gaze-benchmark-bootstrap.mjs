@@ -6,7 +6,7 @@ const cancel = () => run.stop();
 addEventListener('pagehide', cancel, { once: true });
 try {
   const { mountDeveloperGazeBenchmark } = await run.wait(
-    () => import('./gaze-benchmark-page.mjs?v=20261124-recovery1'), { timeoutMs: 30000 });
+    () => import('./gaze-benchmark-page.mjs?v=20261124-load2'), { timeoutMs: 30000 });
   run.check();
   await mountDeveloperGazeBenchmark();
 } catch (_) {

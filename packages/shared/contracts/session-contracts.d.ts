@@ -250,7 +250,7 @@ export interface SessionFeatureV1 {
   events: SessionEventV1[];
   meta?: (Record<string, unknown> & {
     tech?: (Record<string, unknown> & { gazeFeatureMethod?: 'same_eye_iris.v2'; gazeCalibrationSampling?: 'open_eye_calibration.v1'; gazeQcSignalMethod?: 'corrected_validity.v1';
-      framePipeline?: Record<string, unknown> & { latency?: FrameLatencyV1; faceDelegateProbe?: FaceDelegateProbeV1 | null; faceTimings?: Partial<Record<
+      framePipeline?: Record<string, unknown> & { latency?: FrameLatencyV1; faceOutputPolicy?: 'landmarks_matrix.v1' | 'sdk_full.v1' | null; faceDelegateProbe?: FaceDelegateProbeV1 | null; faceTimings?: Partial<Record<
         'modelCallMs' | 'bitmapCaptureMs' | 'workerRoundTripMs' | 'workerWorkMs' | 'pixelDrawMs' | 'pixelReadMs' | 'derivedMs', FrameTimingV1>> }
     }) | null;
   }) | null;

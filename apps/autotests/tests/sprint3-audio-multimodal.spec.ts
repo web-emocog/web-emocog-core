@@ -199,7 +199,7 @@ test('15-minute gaze retention stays bounded', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const [{ appendGazeSample }, { state }] = await Promise.all([
       // @ts-expect-error Production browser module intentionally has no .d.ts.
-      import('/apps/participant-web/js/web-page/app-updated.js?v=20261124-recovery1'),
+      import('/apps/participant-web/js/web-page/app-updated.js?v=20261124-load2'),
       // @ts-expect-error Production browser module intentionally has no .d.ts.
       import('/apps/participant-web/js/web-page/state.js?v=20261025-1'),
     ]);
