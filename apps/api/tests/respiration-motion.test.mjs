@@ -147,7 +147,7 @@ test('preflight blocks unknown methods and warns about experimental ones', () =>
 });
 
 test('builder options match the shared method list', () => {
-  const source = readFileSync(new URL('../../web/researcher-builder.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../web/researcher-builder.js?v=20261124-load2', import.meta.url), 'utf8');
   const ids = (name) => [...source.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`))[1].matchAll(/id: '([a-z]+)'/g)].map(m => m[1]);
   assert.deepEqual(ids('BUILDER_HEART_RATE_METHODS'), Object.keys(HEART_RATE_METHODS));
   assert.deepEqual(ids('BUILDER_RESPIRATION_METHODS'), Object.keys(RESPIRATION_METHODS));

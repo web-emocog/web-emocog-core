@@ -253,14 +253,14 @@ jobs:
           git fetch --no-tags --depth=1 origin "$CACHE_UPGRADE_FROM"
           node apps/autotests/scripts/check-emotion-cache-upgrade.mjs FETCH_HEAD
       - name: Provide a local audio output for native media tests
-        timeout-minutes: 4
+        timeout-minutes: 8
         run: |
           if ! command -v pulseaudio >/dev/null || ! command -v pactl >/dev/null; then
-            sudo apt-get install -y --no-install-recommends pulseaudio
+            timeout 360s sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils
           fi
-          pulseaudio --start --exit-idle-time=-1
-          pactl load-module module-null-sink sink_name=wecog_ci
-          pactl set-default-sink wecog_ci
+          timeout 15s pulseaudio --start --exit-idle-time=-1
+          timeout 15s pactl load-module module-null-sink sink_name=wecog_ci
+          timeout 15s pactl set-default-sink wecog_ci
       - name: Run browser regression
         working-directory: apps/autotests
         run: npm test -- --project=${{ matrix.browser }}

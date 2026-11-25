@@ -5172,6 +5172,9 @@ function ExperimentBuilderView(options = {}) {
         if (canvasCol.isConnected) clearExperimentBuilderDraft();
       } catch (e) {
         var apiErr = e?.message || String(e);
+        if (e?.code === 'protocol_preflight_failed' && e.preflight?.errors?.length) {
+          apiErr = e.preflight.errors.slice(0, 3).map(item => item.message[CURRENT_LANG === 'ru' ? 'ru' : 'en']).join('; ');
+        }
         if (e?.code === 'protocol_aoi_invalid') apiErr = trb(
           'Не удалось проверить зоны интереса. Откройте шаг «Зоны интереса / Цели», проверьте активные зоны и повторите публикацию. Аудиофайлам экранные AOI не нужны.',
           'Areas of interest could not be validated. Review active areas in Areas of Interest / Targets and publish again. Audio does not need spatial AOIs.');
@@ -5214,6 +5217,9 @@ function ExperimentBuilderView(options = {}) {
           ) + apiErr;
         }
         toast(toastMain);
+        if (e?.code === 'protocol_preflight_failed' && e.preflight?.errors?.length) {
+          await confirmProtocolPreflight(e.preflight, CURRENT_LANG, json.blocks);
+        }
         return;
       }
     } else {

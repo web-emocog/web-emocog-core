@@ -15,7 +15,7 @@ for (const exhausted of [false, true]) {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.sessionData.startTime = Date.now();
       const { loadAndStartCognitiveTask } = await import(new URL(
-        'js/web-page/experimental_task-updated.js?v=20261122-validtime1', location.href).href);
+        'js/web-page/experimental_task-updated.js?v=20261124-load2', location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: {
         version: 'v2.0-valid-time-test', blocks: [{ id: 'rest-static', type: 'passive',
           content: { useFixation: false, slideDuration: 180000,
@@ -77,7 +77,7 @@ test('leaving an extended passive trial retains a partial failed attempt, not a 
     const shared = (window as any).__WECOG_STATE__;
     shared.runtime.sessionRuntime.policyShown = true;
     const { loadAndStartCognitiveTask } = await import(new URL(
-      'js/web-page/experimental_task-updated.js?v=20261122-validtime1', location.href).href);
+      'js/web-page/experimental_task-updated.js?v=20261124-load2', location.href).href);
     await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2.0-valid-time-test',
       blocks: [{ id: 'rest-static', type: 'passive', content: { useFixation: false, slideDuration: 180000,
         validTime: { schemaVersion: 'passive_valid_time.v1', enabled: true, maxExtensionRatio: .5, minSegmentMs: 1000 },
@@ -88,7 +88,7 @@ test('leaving an extended passive trial retains a partial failed attempt, not a 
   const result = await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__;
     const { stopCognitiveStimulusPlayback } = await import(new URL(
-      'js/web-page/experimental_task-updated.js?v=20261122-validtime1', location.href).href);
+      'js/web-page/experimental_task-updated.js?v=20261124-load2', location.href).href);
     stopCognitiveStimulusPlayback();
     return { result: shared.sessionData.cognitiveResults[0], active: shared.runtime.validTimeTrial };
   });
@@ -104,7 +104,7 @@ test('the real frame pipeline gates by capture time, current FPS and available f
   const result = await page.evaluate(async () => {
     const shared = (window as any).__WECOG_STATE__;
     const base = new URL('js/session-runtime/', location.href);
-    const { SessionFramePipeline } = await import(new URL('frame-pipeline.js?v=20261122-validtime1', base).href);
+    const { SessionFramePipeline } = await import(new URL('frame-pipeline.js?v=20261124-load2', base).href);
     const { PassiveValidTime } = await import(new URL('passive-valid-time.mjs?v=20261122-validtime1', base).href);
     const contexts: any[] = [], measured: boolean[] = [];
     const origin = performance.now() - 30;

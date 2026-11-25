@@ -12,7 +12,7 @@ for (const exhausted of [false, true]) {
       shared.runtime.sessionRuntime.policyShown = true;
       shared.sessionData.startTime = Date.now();
       const { loadAndStartCognitiveTask } = await import(new URL(
-        'js/web-page/experimental_task-updated.js?v=20261122-validtime1', location.href).href);
+        'js/web-page/experimental_task-updated.js?v=20261124-load2', location.href).href);
       await loadAndStartCognitiveTask({ autoFinishSession: false, protocol: { version: 'v2.0-quality-recovery-fixture',
         blocks: [{ id: 'rest', type: 'passive', content: { useFixation: false, slideDuration: 5000,
           validTime: { schemaVersion: 'passive_valid_time.v1', enabled: true, maxExtensionRatio: .5, minSegmentMs: 1000 },

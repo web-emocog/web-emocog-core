@@ -1728,6 +1728,16 @@
               "not_inferred",
               null
             ]
+          },
+          "targeted": {
+            "type": "boolean"
+          },
+          "stimulusName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
           }
         },
         "additionalProperties": false
@@ -7337,6 +7347,78 @@
           ],
           "maxLength": 256
         },
+        "faceDelegateProbe": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "const": "face_delegate_probe.v1"
+                },
+                "scope": {
+                  "const": "precheck_same_frame"
+                },
+                "decision": {
+                  "enum": [
+                    "cpu_selected",
+                    "gpu_kept",
+                    "probe_unavailable",
+                    "probe_cancelled"
+                  ]
+                },
+                "samples": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "gpuMeanMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                "cpuMeanMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                "cpuMaxMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                "modelBudgetMs": {
+                  "const": 20
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "scope",
+                "decision",
+                "samples",
+                "gpuMeanMs",
+                "cpuMeanMs",
+                "cpuMaxMs",
+                "modelBudgetMs"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "faceOutputPolicy": {
+          "enum": ["landmarks_matrix.v1", "sdk_full.v1", null]
+        },
         "faceDelegate": {
           "type": [
             "string",
@@ -7534,7 +7616,41 @@
             },
             "workerWorkMs": {
               "$ref": "#/$defs/timing"
+            },
+            "pixelDrawMs": {
+              "$ref": "#/$defs/timing"
+            },
+            "pixelReadMs": {
+              "$ref": "#/$defs/timing"
+            },
+            "derivedMs": {
+              "$ref": "#/$defs/timing"
             }
+          },
+          "additionalProperties": false
+        },
+        "latency": {
+          "$ref": "#/$defs/frameLatency"
+        }
+      },
+      "additionalProperties": false
+    },
+    "frameLatency": {
+      "type": "object",
+      "required": ["schemaVersion", "scope", "primary", "headroom"],
+      "properties": {
+        "schemaVersion": { "const": "frame_latency.v1" },
+        "scope": { "const": "completed_primary_frames" },
+        "headroom": { "enum": ["not_measured", "within_budget", "over_budget"] },
+        "primary": {
+          "type": "object",
+          "required": ["samples", "meanMs", "p95Ms", "p99Ms", "maxMs"],
+          "properties": {
+            "samples": { "type": "integer", "minimum": 0, "maximum": 1000000000000 },
+            "meanMs": { "type": ["number", "null"], "minimum": 0 },
+            "p95Ms": { "type": ["number", "null"], "minimum": 0 },
+            "p99Ms": { "type": ["number", "null"], "minimum": 0 },
+            "maxMs": { "type": ["number", "null"], "minimum": 0 }
           },
           "additionalProperties": false
         }

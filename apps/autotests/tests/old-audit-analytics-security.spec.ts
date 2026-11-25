@@ -242,9 +242,22 @@ test('interactive session chart keeps missing values, block attempts and PDF sel
   await dashboard.locator('#abMode').selectOption('trials');
   await expect(dashboard.locator('.ab-detail')).toContainText('220');
   await expect(dashboard.locator('#abPoint option:checked')).toHaveText('Проба 1 · Чёрный квадрат');
+  const mobileFits = async () => {
+    await expect.poll(() => dashboard.evaluate(node => ({
+      fits: node.clientWidth > 250 && node.clientWidth <= innerWidth,
+      overflow: node.scrollWidth - node.clientWidth > 1,
+      shell: getComputedStyle(document.getElementById('app')!).display,
+    }))).toEqual({ fits: true, overflow: false, shell: 'block' });
+  };
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect.poll(() => dashboard.evaluate(node => node.clientWidth)).toBeGreaterThan(250);
-  expect(await dashboard.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+  await mobileFits();
+  await page.locator('#app').evaluate(node => node.classList.add('sidebar-collapsed'));
+  await mobileFits();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator('#app')).toHaveCSS('display', 'grid');
+  await page.locator('#app').evaluate(node => node.classList.remove('sidebar-collapsed'));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mobileFits();
   await inert(page);
   await apply(page, 'data-quality');
   await expect(page.locator('#analyticsChannelQuality meter')).toHaveAttribute('value', '0');

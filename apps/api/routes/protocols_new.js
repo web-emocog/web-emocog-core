@@ -173,14 +173,14 @@ router.post(
         if (!(await lockProjectWriteAccess(client, project_id, req.user, OPERATIONS.PROTOCOL_WRITE))) throw new HttpError(403, 'Not member of project', 'project_access_denied');
         if (!definition.isDraft) {
           await assertProtocolPublishable(definition);
-          const report = await inspectProtocolStimuli(client, project_id, definition, { user: req.user });
-          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
-          preflight = await assertProtocolPublishable(definition, report);
         }
         if (definition.isDraft) await checkDraftStimulusAccess(client, project_id, definition, req.user);
         const pinned = definition.isDraft ? definition : await pinProtocolMedia(client, project_id, definition, req.user);
-        if (!definition.isDraft) preflight = await assertProtocolPublishable(pinned,
-          await inspectProtocolStimuli(client, project_id, pinned, { user: req.user }));
+        if (!definition.isDraft) {
+          const report = await inspectProtocolStimuli(client, project_id, pinned, { user: req.user });
+          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
+          preflight = await assertProtocolPublishable(pinned, report);
+        }
         return client.query(
         `INSERT INTO protocols (project_id, name, definition) VALUES ($1, $2, $3)
          RETURNING id, project_id, name, definition, created_at, updated_at`,
@@ -275,14 +275,14 @@ router.patch('/:id', requireRole('admin', 'PI', 'researcher', 'analyst', 'assist
         }
         if (definition && !definition.isDraft) {
           await assertProtocolPublishable(definition);
-          const report = await inspectProtocolStimuli(client, current.project_id, definition, { user: req.user });
-          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
-          preflight = await assertProtocolPublishable(definition, report);
         }
         if (definition?.isDraft) await checkDraftStimulusAccess(client, current.project_id, definition, req.user);
         const pinned = definition ? (definition.isDraft ? definition : await pinProtocolMedia(client, current.project_id, definition, req.user)) : current.definition;
-        if (definition && !definition.isDraft) preflight = await assertProtocolPublishable(pinned,
-          await inspectProtocolStimuli(client, current.project_id, pinned, { user: req.user }));
+        if (definition && !definition.isDraft) {
+          const report = await inspectProtocolStimuli(client, current.project_id, pinned, { user: req.user });
+          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
+          preflight = await assertProtocolPublishable(pinned, report);
+        }
         return (await client.query(`UPDATE protocols SET name = $1, definition = $2::jsonb, updated_at = current_timestamp
            WHERE id = $3 RETURNING id, project_id, name, definition, updated_at`,
           [req.body.name === undefined ? current.name : req.body.name, JSON.stringify(pinned), current.id])).rows[0];

@@ -312,6 +312,30 @@ Firefox/WebKit используют GPU, при ошибке есть однок
 Результаты трёх движков и ограничения: `docs/reports/2026-10-26-cross-browser-fps-audit.md`.
 Успешный Worker с ответом медленнее 1000 ms не доказывает свежесть сегментации.
 
+Сегментация читает заимствованные MPMask только внутри синхронного callback
+`segmentForVideo`: return-value overload клонирует все выходные маски.
+Не закрывать borrowed masks вручную и не сохранять их за пределами callback.
+Одна используемая GPU confidence map клонируется и закрывается внутри callback:
+это сохраняет округление прежнего clone/readback на software GL. Остальные
+выходы не клонируются; сохраняются category bytes и производные оценки.
+Переход на CPU разрешён после выхода из callback и cleanup vendor.
+`frame_latency.v1` содержит сводку ограниченной гистограммы завершённых primary
+frames, не историю кадров. Инженерный запас: mean <=25 ms, p95 <=30 ms,
+p99 <=33 ms при >=60 samples; это не изменение опубликованного QC и не
+performance pass по одной средней. Precheck использует более короткое окно
+только для подсказки. При публикации telemetry сначала обновить API contract.
+Локальный CPU/GPU benchmark не разрешает автоматическую смену delegate на всех
+Windows и не заменяет длительную приёмку на проблемном устройстве.
+Только Worker-пречек может однократно сравнить CPU с медленным GPU на одном
+неизменном кадре после 8 реальных face timings >20 ms в среднем. Принимать CPU
+только при mean <=20 ms, max <=25 ms и выигрыше >=3 ms / >=20%; те же веса,
+отдельный canvas, общий deadline 1200 ms и cleanup поздней модели обязательны.
+Пробные повторные inference не являются participant samples. Во время
+калибровки/протокола сравнение запрещено; diagnostic summary ограничен typed
+`face_delegate_probe.v1`, не кадрами. Это инженерный выбор перед персональной
+калибровкой, а не смягчение QC или доказательство Windows FPS acceptance.
+См. `docs/reports/2026-11-23-windows-fps-headroom.md`.
+
 Поздний ответ/ошибка Worker после reset/stop не изменяет новую generation.
 Primary scheduling использует `frame-notification.v1`: уведомление нового
 кадра, один in-flight inference, только последний pending frame, бюджет 33 ms
@@ -353,6 +377,13 @@ sample и не ретайминг принятого PTS. WebKit/Chromium не �
 и не даёт performance pass. Старые отчёты не пересчитывать автоматически.
 
 - не создавать второй `requestAnimationFrame`/MediaPipe loop;
+- sustained `face_missing` после персональной калибровки сохраняет локальный
+  `calibrationRecovery.pending` в checkpoint. Возврат лица не снимает gate:
+  до новой независимой validation gaze/valid-time не засчитываются. Не прерывать
+  активную пробу скрытой паузой; предложить короткий repair (3 точки по 3 клика)
+  на ближайшей инструкции/перед повтором, с полной калибровкой при смене геометрии.
+  Возобновлять только ожидающий runner, не весь протокол; отмена/ошибка записи
+  сохраняет gate и очередь повторов, принятые результаты не пересоздаются.
 - precheck camera setup и подготовка калибровки single-flight: повторный вызов
   разделяет текущий promise. Отмена precheck закрывает поздно полученный stream,
   metadata/playback wait и FPS sampler; успешный переход к калибровке сохраняет
@@ -400,6 +431,23 @@ sample и не ретайминг принятого PTS. WebKit/Chromium не �
   опубликованные thresholds или принимать реальный low FPS;
 - повторять минимальную единицу, которую определяет протокол;
 - checkpoint writes сериализовать и дожидаться in-flight save перед clear;
+- известный schema 422 промежуточного ingest не пересобирать/отправлять каждые
+  30 с: локальный durable checkpoint продолжается, server backup остаётся
+  failed, повторная проверка через 5 минут допускает обновление API. Финальный
+  ingest не блокируется; не менять сохранённый пакет ради обхода валидации;
+- в `protocol_signals.v2` face analyzer не запрашивает неиспользуемый SDK
+  blendshape classifier. Landmarks/matrices, QC и landmark-based emotion/FACS
+  сохраняются. Default/legacy и диагностический eye-gate probe оставляют SDK
+  scores. Выбор передаётся Worker/CPU candidate/inline fallback одинаково и
+  отмечается bounded `faceOutputPolicy`; API schema обновляется до клиента;
+- `scripts/windows/load-sample.ps1` только читает агрегаты нагрузки локально.
+  Не добавлять управление приоритетами/реестром/таймерами, захват медиа, upload,
+  PID/account/serial/IP в отчёт. Недоступный счётчик обозначать null, GPU engines
+  не суммировать как проценты общей загрузки. Инвентарь не доказывает нагрузку;
+- мобильная researcher shell использует block layout и fixed sidebar drawer,
+  не сохранённую десктопную grid-колонку. В resize tests проверять ширину и
+  отсутствие overflow вместе после layout commit; одна нижняя граница ширины
+  может ошибочно принять ещё не обновлённую десктопную раскладку;
 - восстановленная активная попытка считается прерванной и требует повтора;
 - финальный экран показывать только после teardown camera/module handles;
 - итоговый blink count и остальные summaries строить до очистки accumulators.
@@ -941,6 +989,16 @@ API: Node.js 22+, Express 4, PostgreSQL, прямой параметризова
 | `/contracts` | опубликованные JSON Schema |
 | `/health`, `/ready` | liveness и DB readiness |
 
+Публикация сначала сохраняет structural/AOI/access gates, затем закрепляет и
+декодирует immutable media, и только после этого проверяет допустимость добора
+валидного времени. При проверке статичности PNG нельзя терять decoder facts
+между публикацией, invitation snapshot и participant QC: manifest содержит
+только codec/duration/frame_count/animated из проверки того же SHA-256;
+публичная проекция исключает пути, исходные ошибки и произвольные поля.
+Client manifest не выбирает серверную версию, старые invitations не меняются.
+Отказ preflight в конструкторе показывает bounded typed причины понятным языком
+и сохраняет черновик/прежнее приглашение; не заменять отказ успешной публикацией.
+
 Canonical contracts:
 
 - `packages/shared/contracts/session-feature.v1.schema.json`;
@@ -957,6 +1015,12 @@ Contract change procedure:
 4. Добавить positive, negative, oversized и PII tests.
 5. Проверить researcher analytics/export consumer.
 6. Обновить `docs/api/` и mini-report.
+
+Совместимость сохранённых итоговых пакетов включает boolean `events[].targeted`,
+nullable label `events[].stimulusName` (до 2000 символов) и типизированный
+`qcSummary.continuity` версии `qc_continuity.v1`. Это поля существующих producers,
+не разрешение произвольных event/QC properties. Серверная проверка не удаляет
+эти поля, не пересчитывает измерения и не превращает низкий FPS в успешный QC.
 
 Сейчас top-level SessionFeature строго ограничен, но ряд summary/event объектов
 намеренно допускает расширяемое внутреннее содержимое. Это риск contract drift:
@@ -1356,6 +1420,14 @@ persistence suites. Обязательный frame-pipeline job также вы�
 правках камеры, MediaPipe, обработки кадров или совместимости с Safari.
 Не переносить модельные Worker tests обратно в Linux headless WebKit без
 подтверждённого Worker WebGL2 и отдельной приёмки.
+Loopback-сервер тестов явно задаёт MIME `.js`/`.mjs` и WASM, независимо от
+ассоциаций реестра Windows. Oracle владения масками сравнивает один результат
+инференса через одинаковый MaskReader; численные допуски не заменяют сохранение
+QC. Подготовка звукового sink в CI ограничена по времени, включая установку
+пакетов; таймаут сети не ограничивает общую длительность медленной загрузки.
+После повторных зависаний EC2 APT-зеркала CI использует HTTPS origin Ubuntu
+только для этих Ubuntu URI. Не менять suites/components/Signed-By, сторонние
+репозитории или проверку подписей. Загрузка пакетов не является тестом продукта.
 
 Дополнительно перед передачей:
 

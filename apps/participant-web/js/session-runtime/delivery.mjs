@@ -1,4 +1,6 @@
 // One cumulative snapshot in flight; final ingest always supersedes checkpoints.
+export const SCHEMA_RETRY_DELAY_MS = 5 * 60 * 1000;
+
 export class SessionDelivery {
     constructor({ sessionData, build, send, changed = () => {}, now = () => Date.now() }) {
         Object.assign(this, { sessionData, build, send, changed, now });
@@ -13,6 +15,13 @@ export class SessionDelivery {
     checkpoint() {
         if (this.closed || this.sessionData.admissionPending || !this.sessionData.consent?.informed_consent?.accepted || !this.sessionData.ids?.invitationCode) return Promise.resolve(null);
         if (this.pending) return this.pending;
+        const backup = this.sessionData.serverBackup;
+        const remaining = backup?.schemaRetryAt - this.now();
+        if (backup?.errorCode === 'payload_schema_invalid' && backup.httpStatus === 422
+            && Number.isFinite(remaining) && remaining > 0 && remaining <= SCHEMA_RETRY_DELAY_MS) {
+            return Promise.resolve({ ok: false, code: 'payload_schema_invalid', status: 422,
+                deferred: true, retryAfterMs: remaining });
+        }
         this.pending = Promise.resolve().then(async () => {
             const packet = await this.build();
             if (this.closed) return null;
@@ -25,7 +34,9 @@ export class SessionDelivery {
             if (!this.closed) {
                 this.sessionData.serverBackup = { ...(this.sessionData.serverBackup || {}), status: result.ok ? 'saved' : 'failed',
                     sequence, lastSuccessAt: result.ok ? this.now() : this.sessionData.serverBackup?.lastSuccessAt || null,
-                    errorCode: result.ok ? null : result.code || 'network', httpStatus: result.status || null };
+                    errorCode: result.ok ? null : result.code || 'network', httpStatus: result.status || null,
+                    schemaRetryAt: !result.ok && result.status === 422 && result.code === 'payload_schema_invalid'
+                        ? this.now() + SCHEMA_RETRY_DELAY_MS : null };
                 await Promise.resolve().then(() => this.changed(this.sessionData.serverBackup)).catch(() => {});
             }
             return result;

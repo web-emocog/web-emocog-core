@@ -1,9 +1,12 @@
+import { FRAME_HEADROOM, assessFrameHeadroom } from '../../apps/participant-web/js/session-runtime/frame-latency.mjs';
+
 export function distribution(values) {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   return { n: sorted.length,
     mean: sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : null,
     p50: sorted.length ? sorted[Math.floor((sorted.length - 1) * .5)] : null,
     p95: sorted.length ? sorted[Math.floor((sorted.length - 1) * .95)] : null,
+    p99: sorted.length ? sorted[Math.ceil(sorted.length * .99) - 1] : null,
     max: sorted.length ? sorted.at(-1) : null };
 }
 
@@ -46,8 +49,8 @@ export function frameCadencePerformance({ sourceFrames, processedFrames, elapsed
 // Include empty windows; a fast burst must not hide a stall. Exclude only the
 // final partial second, whose duration is explicitly retained in the report.
 export function fpsWindows(frameTimesMs, elapsedMs) {
-  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > 240000
-      || !Array.isArray(frameTimesMs) || frameTimesMs.length > 10000
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > 610000
+      || !Array.isArray(frameTimesMs) || frameTimesMs.length > 60000
       || frameTimesMs.some((t, i) => !Number.isFinite(t) || t < 0 || t > elapsedMs
         || (i > 0 && t < frameTimesMs[i - 1]))) throw new Error('invalid_performance_clock');
   const counts = Array(Math.floor(elapsedMs / 1000)).fill(0);
@@ -59,6 +62,23 @@ export function fpsWindows(frameTimesMs, elapsedMs) {
     distribution: distribution(counts), below25Windows: counts.filter(n => n < 25).length,
     longestBelow25RunMs: longest * 1000,
     interpretation: 'diagnostic_25fps_reference_not_protocol_qc_override' };
+}
+
+export function assessPipelinePerformance(result) {
+  const p = result?.primaryMs;
+  const headroom = assessFrameHeadroom({ samples: p?.n, meanMs: p?.mean, p95Ms: p?.p95, p99Ms: p?.p99 });
+  const reasons = [];
+  if (headroom !== 'within_budget') reasons.push(headroom === 'not_measured' ? 'missing_primary_latency' : 'primary_headroom');
+  if (!Number.isFinite(p?.max) || p.max > 250) reasons.push('primary_stall');
+  if (!Number.isFinite(result?.analysisFps) || result.analysisFps < 25) reasons.push('analysis_below_target');
+  if (!Number.isFinite(result?.cameraDeliveryFps) || result.cameraDeliveryFps < 25) reasons.push('source_below_target');
+  if (!Number.isFinite(result?.uiTimerLatenessMs?.p95) || result.uiTimerLatenessMs.p95 > 10) reasons.push('ui_timer_late');
+  if (!Number.isFinite(result?.fpsWindows?.longestBelow25RunMs) || result.fpsWindows.longestBelow25RunMs >= 3000) reasons.push('sustained_analysis_drop');
+  if (!Number.isFinite(result?.faceCoverage) || result.faceCoverage < .95) reasons.push('missing_face_workload');
+  if (result?.workers?.face !== 'worker' || result?.workers?.segment !== 'worker') reasons.push('main_thread_fallback');
+  if (!result?.errors || Object.values(result.errors).some(count => count > 0)) reasons.push('module_failure');
+  return { status: reasons.length ? 'fail' : 'pass', reasons, headroomCriteria: FRAME_HEADROOM,
+    scope: 'this_host_clip_engine_only_not_windows_or_scientific_acceptance' };
 }
 
 export function assessReplayPerformance(result) {

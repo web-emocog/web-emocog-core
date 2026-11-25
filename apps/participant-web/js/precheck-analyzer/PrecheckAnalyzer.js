@@ -10,13 +10,14 @@
 import { LANDMARKS, EYE_LANDMARK_INDICES } from './constants.js';
 import { createThresholds, HISTORY_SIZE } from './thresholds.js';
 import { createFaceModel } from './face-model.mjs';
+import { FaceDelegateProbe } from './delegate-probe.mjs';
 import { analyzeIllumination } from './illumination.js';
 import { parseFaceResults, extractBlendShapes } from './face-parser.js';
 import { analyzePose, checkStability, checkEyesCentering, addToHistory } from './pose-analyzer.js';
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261114-assigned1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-load2';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
     notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
@@ -34,6 +35,7 @@ class PrecheckAnalyzer {
         this.lastFaceTime = 0;
         
         this.thresholds = createThresholds(options);
+        this.outputFaceBlendshapes = options.outputFaceBlendshapes !== false;
         this.LANDMARKS = LANDMARKS;
         
         this.onInitialized = options.onInitialized || null;
@@ -49,6 +51,7 @@ class PrecheckAnalyzer {
         this.backend = 'uninitialized';
         this.initializationFailed = false;
         this.inferenceFailures = 0;
+        this.delegateProbe = new FaceDelegateProbe();
     }
 
     async initialize() {
@@ -64,7 +67,8 @@ class PrecheckAnalyzer {
             const worker = new VisionWorkerClient('face');
             this.worker = worker;
             try {
-                const initialized = await worker.start({ thresholds: this.thresholds });
+                const initialized = await worker.start({ thresholds: this.thresholds,
+                    outputFaceBlendshapes: this.outputFaceBlendshapes });
                 if (generation !== this.generation) { worker.dispose(); return false; }
                 this.backend = 'worker';
                 this.inferenceDelegate = initialized?.inferenceDelegate || null;
@@ -96,13 +100,22 @@ class PrecheckAnalyzer {
                 import.meta.url
             ).href;
             
-            const initialized = await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options), {
+            const modelOptions = {
                 baseOptions: {
                     modelAssetPath: modelPath
                 },
                 runningMode: this.runningMode,
+                outputFaceBlendshapes: this.outputFaceBlendshapes,
                 ...(typeof document === 'undefined' ? { canvas: createAnalysisCanvas() } : {})
-            }, () => generation === this.generation, Boolean(this.cpuFallbackReason));
+            };
+            this.createCpuCandidate = async () => {
+                const probeGeneration = this.generation;
+                return (await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options),
+                    { ...modelOptions, canvas: createAnalysisCanvas() },
+                    () => probeGeneration === this.generation, true))?.model;
+            };
+            const initialized = await createFaceModel(options => FaceLandmarker.createFromOptions(vision, options), modelOptions,
+                () => generation === this.generation, Boolean(this.cpuFallbackReason));
             if (!initialized) return false;
             this.faceLandmarker = initialized.model;
             this.inferenceDelegate = initialized.delegate;
@@ -156,6 +169,8 @@ class PrecheckAnalyzer {
                 this.lastFrameTiming = { ...timing, ...worker.lastFrameTiming };
                 if (['GPU', 'CPU'].includes(frame.inferenceDelegate)) this.inferenceDelegate = frame.inferenceDelegate;
                 this.cpuFallbackReason = frame.delegateFallbackReason || this.cpuFallbackReason || null;
+                if (frame.delegateProbe) this.delegateProbeSummary = frame.delegateProbe;
+                delete frame.delegateProbe;
                 this.lastResult = rememberFramePixels(frame, imageData);
                 return this.lastResult;
             } catch (_) {
@@ -183,15 +198,31 @@ class PrecheckAnalyzer {
             }
             if (this._canvas.width !== width) this._canvas.width = width;
             if (this._canvas.height !== height) this._canvas.height = height;
+            const pixelStart = performance.now();
             this._ctx.drawImage(videoElement, 0, 0, width, height);
+            const pixelsDrawn = performance.now();
             const imageData = this._ctx.getImageData(0, 0, width, height);
+            const pixelsRead = performance.now();
 
             // Сначала запускаем MediaPipe — нужны landmarks, чтобы illumination
             // считался по face ROI, а не по всему кадру (тёмный/светлый фон не должен
             // штрафовать пользователя при нормальном освещении лица).
             const modelStart = performance.now();
             const mpResults = this.faceLandmarker.detectForVideo(videoElement, timestamp);
-            this.lastFrameTiming = { modelCallMs: performance.now() - modelStart };
+            const modelDone = performance.now();
+            if (typeof document === 'undefined' && capture.allowDelegateProbe === true && this.inferenceDelegate === 'GPU') {
+                this.delegateProbe.observe(modelDone - modelStart, mpResults.faceLandmarks?.[0]?.length >= 468);
+                const gpu = this.faceLandmarker;
+                const candidate = await this.delegateProbe.compare({ gpu, createCpu: this.createCpuCandidate,
+                    source: videoElement, timestamp, isCurrent: () => generation === this.generation && this.faceLandmarker === gpu });
+                if (candidate) {
+                    this.faceLandmarker = candidate;
+                    this.inferenceDelegate = 'CPU';
+                    try { gpu.close(); } catch (_) { /* The selected CPU remains usable after a lost GPU context. */ }
+                }
+                this.delegateProbeSummary = this.delegateProbe.summary;
+                if (generation !== this.generation) return this._createErrorResult('Analysis interrupted');
+            }
 
             const faceData = parseFaceResults(mpResults, width, height, this.thresholds.face);
             const eyes = analyzeEyes(mpResults, width, height, this.thresholds.eyes);
@@ -235,6 +266,8 @@ class PrecheckAnalyzer {
             const mouth = analyzeMouth(mpResults);
             const analysisTime = performance.now() - startTime;
             const blendShapes = extractBlendShapes(mpResults);
+            this.lastFrameTiming = { pixelDrawMs: pixelsDrawn - pixelStart, pixelReadMs: pixelsRead - pixelsDrawn,
+                modelCallMs: modelDone - modelStart, derivedMs: performance.now() - modelDone };
 
             this.lastResult = {
                 illumination, face: faceData, pose, eyes, mouth,

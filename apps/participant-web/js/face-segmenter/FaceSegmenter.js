@@ -33,7 +33,7 @@ import { analyzeMasks } from './mask-analyzer.js?v=20261104-4';
 import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261110-integration1';
 import { createVisualizationMask } from './visualization.js?v=20261104-4';
 import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261114-assigned1';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-load2';
 import { segmentationDelegate } from './delegate-policy.mjs';
 import { MaskReader } from './mask-reader.mjs';
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
@@ -229,20 +229,31 @@ class FaceSegmenter {
         }
 
         const startTime = performance.now();
-        let segmentationResult;
         try {
             const width = videoElement.videoWidth || videoElement.width || 640;
             const height = videoElement.videoHeight || videoElement.height || 480;
             
             // Выполняем сегментацию
             const timestamp = captureTimestamp;
-            segmentationResult = this.imageSegmenter.segmentForVideo(videoElement, timestamp);
-            
-            // Обрабатываем маски
-            const maskAnalysis = analyzeMasks(segmentationResult, width, height, faceLandmarks, this.maskReader);
-            
-            // Анализируем видимость областей лица
-            const faceVisibility = analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, width, height, this.thresholds);
+            let maskAnalysis, faceVisibility;
+            // Avoid cloning every output. Keep one GPU confidence clone to
+            // preserve the old copy/readback rounding, including software GL.
+            this.imageSegmenter.segmentForVideo(videoElement, timestamp, masks => {
+                let ownedConfidence;
+                try {
+                    let input = masks;
+                    const faceSkin = masks.confidenceMasks?.[CLASS_INDICES.FACE_SKIN];
+                    if (faceSkin?.hasWebGLTexture?.()) {
+                        ownedConfidence = faceSkin.clone();
+                        const confidenceMasks = masks.confidenceMasks.slice();
+                        confidenceMasks[CLASS_INDICES.FACE_SKIN] = ownedConfidence;
+                        input = { categoryMask: masks.categoryMask, confidenceMasks };
+                    }
+                    maskAnalysis = analyzeMasks(input, width, height, faceLandmarks, this.maskReader);
+                    faceVisibility = analyzeFaceRegionsVisibility(maskAnalysis, faceLandmarks, width, height, this.thresholds);
+                } finally { ownedConfidence?.close(); }
+            });
+            if (!maskAnalysis || !faceVisibility) throw new Error('segment_callback_missing');
             
             const analysisTime = performance.now() - startTime;
             
@@ -261,11 +272,8 @@ class FaceSegmenter {
             
         } catch (error) {
             if (this.inferenceDelegate === 'GPU' && !this.cpuFallbackReason && generation === this.generation) {
-                // Release every owned mask before closing its GL context. Retry
-                // once on CPU inside the same worker, preserving capture time.
-                segmentationResult?.categoryMask?.close();
-                segmentationResult?.confidenceMasks?.forEach(mask => mask.close());
-                segmentationResult = null;
+                // MediaPipe releases borrowed masks when the callback unwinds,
+                // including on failure. Retry only after that cleanup completes.
                 this.maskReader.dispose();
                 this.imageSegmenter.close(); this.imageSegmenter = null;
                 this.isInitialized = false;
@@ -274,9 +282,6 @@ class FaceSegmenter {
             }
             dbgErrorOnce(this, 'segment', 'inference:failed');
             return this._createErrorResult('segment_inference_failed');
-        } finally {
-            segmentationResult?.categoryMask?.close();
-            segmentationResult?.confidenceMasks?.forEach(mask => mask.close());
         }
     }
 

@@ -7,15 +7,15 @@ import {
 import { SessionStateMachine } from './session-state-machine.mjs';
 import { SessionCheckpointStore, CheckpointConflictError, matchesCheckpointInvitation } from './checkpoint-store.mjs?v=20261110-integration1';
 import { LongSessionContinuity } from './long-session-continuity.mjs';
-import { SessionRuntimeUI } from './runtime-ui.js?v=20261114-assigned1';
-import { SessionFramePipeline } from './frame-pipeline.js?v=20261122-validtime1';
+import { SessionRuntimeUI } from './runtime-ui.js?v=20261124-load2';
+import { SessionFramePipeline } from './frame-pipeline.js?v=20261124-load2';
 import { prepareNeutralCalibration } from './neutral-calibration-ui.js';
 import { ensureMeasurementStart } from './measurement-clock.mjs';
 import { resolveSessionFeatureFlags } from './feature-flags.mjs?v=20261110-integration1';
 import { SessionAudioCollector } from '../audio/session-audio.js?v=20261110-integration1';
 import { MultimodalSessionCollector } from '../multimodal/session-collector.js';
 import { createMonotonicClock } from '../../../../packages/shared/multimodal/timebase.mjs';
-import { SessionDelivery } from './delivery.mjs?v=20261025-1';
+import { SessionDelivery } from './delivery.mjs?v=20261124-load2';
 import { captureGazeHistory, validateGazeHistory } from './gaze-history.mjs?v=20261122-validtime1';
 import { combineSignalSummaries } from './signal-history.mjs?v=20261122-validtime1';
 import { PhysiologyIntervals } from './physiology-intervals.mjs?v=20261122-validtime1';
@@ -251,7 +251,7 @@ class ParticipantSessionRuntime {
             this.finalRetryTimer = null;
             this.finalRetryListener = null;
             if (this.pageExited) return;
-            import('../web-page/tests-updated.js?v=20261122-validtime1')
+            import('../web-page/tests-updated.js?v=20261124-load2')
                 .then(module => this.pageExited ? null : module.finishSession())
                 .catch(error => console.warn('[SessionRuntime] final upload retry failed:', error));
         };
@@ -483,9 +483,35 @@ class ParticipantSessionRuntime {
     }
 
     getActiveIssues() {
-        return [...this.machine.activeIssues.values()]
+        const issues = [...this.machine.activeIssues.values()]
             .filter(issue => issue.invalidatesBlock !== false)
             .map(issue => JSON.parse(JSON.stringify(issue)));
+        if (this.requiresGazeCalibration()) issues.push({ code: 'gaze_recalibration_required', invalidatesBlock: true });
+        return issues;
+    }
+
+    requiresGazeCalibration() {
+        return state.sessionData.calibrationRecovery?.pending === true;
+    }
+
+    async ensureGazeCalibration() {
+        if (!this.requiresGazeCalibration()) return true;
+        if (this.machine.currentBlock?.stage === 'trial') throw new Error('calibration_requires_trial_boundary');
+        if (this.calibrationRecoveryPromise) return this.calibrationRecoveryPromise;
+        const pending = (async () => {
+            if (!(await this.saveCheckpoint())) throw new Error('calibration_checkpoint_unavailable');
+            await this.ui.showCalibrationRecovery();
+            if (this.pageExited || state.runtime.participantPageExited) throw new Error('calibration_recovery_cancelled');
+            const { runBoundaryRecalibration } = await import('../web-page/tests-updated.js?v=20261124-load2');
+            if (await runBoundaryRecalibration() !== true) throw new Error('calibration_recovery_incomplete');
+            state.sessionData.calibrationRecovery = { ...state.sessionData.calibrationRecovery, pending: false,
+                completedAt: Date.now() };
+            await this.saveCheckpoint();
+            return true;
+        })();
+        this.calibrationRecoveryPromise = pending;
+        try { return await pending; }
+        finally { if (this.calibrationRecoveryPromise === pending) this.calibrationRecoveryPromise = null; }
     }
 
     pause() {
@@ -529,6 +555,13 @@ class ParticipantSessionRuntime {
         if (existing) return existing;
         const created = this.machine.reportIssue(issue);
         if (!created) return null;
+        if (created.code === 'face_missing' && state.runtime.gazeTracker?.isCalibrated?.()
+            && !['precheck', 'calibration', 'validation'].includes(state.runtime.currentPhase)) {
+            const recovery = state.sessionData.calibrationRecovery || {};
+            state.sessionData.calibrationRecovery = { pending: true, reason: 'face_missing',
+                requestedAt: recovery.pending ? recovery.requestedAt : Date.now() };
+            void this.saveCheckpoint();
+        }
         recordSessionEvent('session_issue_raised', {
             category: created.kind === ERROR_KINDS.TECHNICAL
                 ? EVENT_CATEGORIES.TECHNICAL
@@ -576,6 +609,7 @@ class ParticipantSessionRuntime {
             blockId: details.blockId || null,
             blockType: details.blockType || null
         });
+        await this.ensureGazeCalibration();
         await this.ui.showBlockInstruction(details);
         recordSessionEvent('session_block_instruction_acknowledged', {
             category: EVENT_CATEGORIES.BLOCK,
@@ -602,10 +636,12 @@ class ParticipantSessionRuntime {
     }
 
     async promptRepeat(blockId) {
-        const repeat = this.machine.consumeRepeat(blockId);
+        const repeat = this.machine.snapshot().repeatQueue.find(item => item.blockId === String(blockId));
         if (!repeat) return false;
         this.enterInstruction({ source: 'block_repeat', blockId });
+        await this.ensureGazeCalibration();
         await this.ui.showRepeat(repeat);
+        this.machine.consumeRepeat(blockId);
         recordSessionEvent('session_block_repeat_acknowledged', {
             category: EVENT_CATEGORIES.BLOCK,
             blockId,

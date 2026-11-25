@@ -157,3 +157,24 @@ test('#177 builder publication serializes policy in both canonical locations, re
   expect(published.content.validTime).toEqual(policy);
   expect(published.trials[0]).toMatchObject({ condition: 'original', duration: 12000 });
 });
+
+test('#186 server publication errors explain the rejected block and retain the draft without issuing an invitation', async ({ page, baseURL }) => {
+  await page.route(api + '/protocols', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    mutations.push({ path: '/protocols', body: route.request().postDataJSON() });
+    return route.fulfill({ status: 422, headers: { 'Access-Control-Allow-Origin': baseURL!, 'Access-Control-Allow-Credentials': 'true' },
+      json: { error: 'Protocol preflight failed', code: 'protocol_preflight_failed', preflight: {
+        schemaVersion: 'protocol_preflight.v1', ok: false, warnings: [], duration: { plannedMaximumMs: 12000 },
+        errors: [{ code: 'passive_valid_time_invalid', path: '/blocks/4/blockConfig/validTime',
+          message: { ru: 'Выберите статичное изображение без анимации.', en: 'Choose a verified static image without animation.' } }]
+      } } });
+  });
+  await mount(page, passive({ validTime: policy }), 8, 'en');
+  await page.locator('#finishSaveProtocolBtn').click();
+  await page.locator('[data-preflight-continue]').click();
+  await expect(page.locator('[data-protocol-preflight]')).toContainText('Choose a verified static image');
+  await expect(page.locator('#protocolSaveStatus')).not.toContainText('Protocol preflight failed');
+  expect(mutations.filter(item => item.path === '/invitations')).toHaveLength(0);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_my_experiments')!).find((entry: any) => entry.id === 'issue177-builder'));
+  expect(saved.status).toBe('draft');
+});

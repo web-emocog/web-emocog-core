@@ -108,6 +108,7 @@ test('real pinned face model runs in a Worker with identical no-face/lighting ou
     const result = { ready, backend: analyzer.backend, error: frame.error || null,
       faceDetected: frame.face.detected, lighting: frame.illumination,
       dimensions: frame.frameSize, pixelLength: pixels?.data.length,
+      timing: analyzer.lastFrameTiming,
       hasPixelsInJson: JSON.stringify(frame).includes('"data"'),
       fallbackReason: analyzer.workerFallbackReason || null };
     analyzer.dispose();
@@ -119,6 +120,14 @@ test('real pinned face model runs in a Worker with identical no-face/lighting ou
   expect(result.dimensions).toEqual({ width: 640, height: 480 });
   expect(result.pixelLength).toBe(640 * 480 * 4);
   expect(result.hasPixelsInJson).toBe(false);
+  for (const key of ['pixelDrawMs', 'pixelReadMs', 'modelCallMs', 'derivedMs']) {
+    expect(Number.isFinite(result.timing?.[key])).toBe(true);
+    expect(result.timing[key]).toBeGreaterThanOrEqual(0);
+  }
+  if (result.backend === 'worker') {
+    expect(result.timing.workerWorkMs).toBeGreaterThanOrEqual(
+      result.timing.pixelDrawMs + result.timing.pixelReadMs + result.timing.modelCallMs + result.timing.derivedMs);
+  }
   if (info.project.name === 'chromium') expect(result.backend).toBe('worker');
   await info.attach('backend', { body: JSON.stringify(result), contentType: 'application/json' });
 });
@@ -158,22 +167,44 @@ test('same-frame segmentation preserves owned mask and QC output after releasing
     gradient.addColorStop(0, '#bba08a'); gradient.addColorStop(1, '#304659');
     ctx.fillStyle = gradient; ctx.fillRect(0, 0, 320, 240);
     const analyzer = new FaceSegmenter({ worker: false });
-    let owned;
+    let owned, clones = 0, borrowedCopies = 0, referenceCopies = 0, requiredCopies = 0;
+    const originalClone = vision.MPMask.prototype.clone;
+    vision.MPMask.prototype.clone = function() { clones++; return originalClone.call(this); };
     try {
       if (!await analyzer.initialize()) throw new Error('segmenter_not_initialized');
+      const infer = analyzer.imageSegmenter.segmentForVideo.bind(analyzer.imageSegmenter);
+      // Compare from ONE inference, with exactly the old return overload's
+      // clone operations as the oracle, rather than re-running the GPU graph.
+      analyzer.imageSegmenter.segmentForVideo = (image, timestamp, callback) => infer(image, timestamp, masks => {
+        const before = clones;
+        owned = { categoryMask: masks.categoryMask.clone(),
+          confidenceMasks: masks.confidenceMasks.map(mask => mask.clone()) };
+        referenceCopies = clones - before;
+        requiredCopies = masks.confidenceMasks[3].hasWebGLTexture() ? 1 : 0;
+        const callbackStart = clones;
+        callback(masks);
+        borrowedCopies = clones - callbackStart;
+      });
       const actual = await analyzer.segmentFrame(canvas, null, 100);
-      owned = analyzer.imageSegmenter.segmentForVideo(canvas, 200);
-      const masks = analyzeMasks(owned, 320, 240, null);
+      // Keep the production readback path identical: native RED/FLOAT readback
+      // is not equivalent to MaskReader's portable RGBA/FLOAT on software GL.
+      const masks = analyzeMasks(owned, 320, 240, null, analyzer.maskReader);
       const visibility = analyzeFaceRegionsVisibility(masks, null, 320, 240, analyzer.thresholds);
       return { error: actual.error || null, hasData: actual.maskAnalysis?.hasData,
+        borrowedCopies, requiredCopies, ownedCopies: referenceCopies,
         sameMask: JSON.stringify(actual.maskAnalysis) === JSON.stringify(masks),
+        actualMasks: actual.maskAnalysis, ownedMasks: masks,
         sameVisibility: JSON.stringify(actual.faceVisibility) === JSON.stringify(visibility) };
     } finally {
+      vision.MPMask.prototype.clone = originalClone;
       owned?.categoryMask?.close(); owned?.confidenceMasks?.forEach(mask => mask.close());
       analyzer.dispose();
     }
   });
-  expect(result).toEqual({ error: null, hasData: true, sameMask: true, sameVisibility: true });
+  expect(result.actualMasks).toEqual(result.ownedMasks);
+  expect(result).toMatchObject({ error: null, hasData: true, sameMask: true, sameVisibility: true });
+  expect(result.borrowedCopies).toBe(result.requiredCopies);
+  expect(result.borrowedCopies).toBeLessThan(result.ownedCopies);
 });
 
 test('real auxiliary models use workers or a verified compatible fallback', async ({ page }, info) => {
@@ -251,7 +282,7 @@ test('real face model starts on CPU after a GPU initialization failure, then rel
       if (options.baseOptions.delegate === 'GPU') throw new Error('Synthetic GPU initialization failure');
       return original.call(vision.FaceLandmarker, files, options);
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       const ready = await analyzer.initialize();
@@ -294,7 +325,7 @@ test('face runtime GPU loss retries once on CPU with the same capture clocks and
       model.close = () => { closes++; close(); };
       return model;
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       await analyzer.initialize();
@@ -325,7 +356,7 @@ test('unavailable face delegates produce technical failure without repeated mode
     vision.FaceLandmarker.createFromOptions = async (_files: any, options: any) => {
       attempts.push(options.baseOptions.delegate); throw Error('synthetic_no_graphics_backend');
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       const ready = await analyzer.initialize();
@@ -358,7 +389,7 @@ test('actual face task without any WebGL contexts either works on CPU or fails e
     vision.FaceLandmarker.createFromOptions = async (files: any, options: any) => {
       attempts.push(options.baseOptions.delegate); return original.call(vision.FaceLandmarker, files, options);
     };
-    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1');
+    const { PrecheckAnalyzer } = await import(root + 'precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2');
     const analyzer = new PrecheckAnalyzer({ worker: false });
     try {
       await analyzer.initialize();
@@ -406,9 +437,9 @@ test('auxiliary main-thread fallback accepts the shared ImageData frame', async 
 
 test('real auxiliary models reuse shared pixels without bitmap conversion and preserve same-image output', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261114-assigned1';
+    const modulePath = '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261124-load2';
     const { FaceSegmenter } = await import(modulePath);
-    const clientPath = '/apps/participant-web/js/session-runtime/vision-worker-client.mjs?v=20261110-integration1';
+    const clientPath = '/apps/participant-web/js/session-runtime/vision-worker-client.mjs?v=20261124-load2';
     const { VisionWorkerClient } = await import(clientPath);
     const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
     const { faceVisibilityFixture } = await import(fixturePath);
@@ -515,8 +546,8 @@ for (const kind of ['face', 'segment'] as const) for (const mode of ['throw', 'r
     page.on('pageerror', error => errors.push(error.message));
     page.on('worker', worker => workers.push(worker.url()));
     const result = await page.evaluate(async ({ kind, mode }) => {
-      const path = kind === 'face' ? '/apps/participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261114-assigned1'
-        : '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261114-assigned1';
+      const path = kind === 'face' ? '/apps/participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2'
+        : '/apps/participant-web/js/face-segmenter/FaceSegmenter.js?v=20261124-load2';
       const module = await import(path);
       const Analyzer = module.PrecheckAnalyzer || module.FaceSegmenter;
       const events: any[] = [];
