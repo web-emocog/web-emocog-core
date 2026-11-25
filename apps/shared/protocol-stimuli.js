@@ -43,6 +43,8 @@
       }
       if (value.stimulus && typeof value.stimulus === 'object') add(value.stimulus);
       Object.entries(value).forEach(([key, nested]) => {
+        // Pinned file metadata describes a resource; it cannot add trials/files.
+        if (key === 'mediaManifest') return;
         if (key === 'builderState' && !options.includeBuilderState) return;
         visit(nested);
       });

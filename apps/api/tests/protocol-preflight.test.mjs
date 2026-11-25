@@ -11,6 +11,23 @@ const base = () => ({ version: 'v2.0_universal', title: 'Test', testHubMetrics: 
     trials: [{ stimulusId: 'std_simple_black_square', action: 'KeyD', duration: 1000, repetitions: 2 }] }] });
 const codes = report => report.errors.map(item => item.code);
 
+test('#186 media failures have localized reasons without raw metadata, filenames or decoder output', () => {
+  const reasons = ['passive_valid_time_media_unsupported', 'stimulus_record_missing', 'stimulus_not_saved_on_server',
+    'stimulus_media_type_unsupported', 'audio_spatial_aoi_unsupported', 'stimulus_checksum_mismatch'];
+  for (const code of [...reasons, 'content_file_missing', 'constructor', '__proto__', 'private-decoder-output']) {
+    const report = inspect(base(), { mediaReport: { ok: false, unavailable: [
+      { code, name: 'private-filename', path: '/private/storage', message: 'private-decoder-output' },
+      { code, name: 'another-private-filename' },
+    ] } });
+    assert.equal(report.ok, false);
+    assert.deepEqual(codes(report), [reasons.includes(code) ? code : 'media_unavailable']);
+    assert.doesNotMatch(JSON.stringify(report), /private-|\/private\/|constructor|__proto__/);
+    assert.ok(report.errors.every(item => item.message.ru && item.message.en));
+  }
+  assert.deepEqual(codes(inspect(base(), { mediaReport: { ok: false, unavailable: [] } })), ['media_unavailable']);
+  assert.deepEqual(codes(inspect(base(), { mediaReport: { ok: false, unavailable: 'malformed' } })), ['media_unavailable']);
+});
+
 test('preflight is pure, uses real registry keys, reports limitations rather than scientific pass', () => {
   const input = base(), before = JSON.stringify(input), report = inspect(input);
   assert.equal(report.ok, true); assert.equal(report.scientificValidation, 'not_established');
