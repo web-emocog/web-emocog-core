@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const { createHttpClient } = require('../../web/http-client');
 const { validateSessionFeaturePayload: validate } = require('../security/payload-policy');
 
-test('#186 publication errors keep bounded typed preflight details, not arbitrary response data', async () => {
+for (const code of ['protocol_preflight_failed', 'protocol_stimulus_unavailable']) test(`#186 ${code} keeps bounded typed preflight details, not arbitrary response data`, async () => {
   const client = createHttpClient({ fetch: async () => {}, context: () => ({ owner: 'synthetic', key: 'fixture' }) });
   const response = { status: 422, headers: { get: () => null }, json: async () => ({ error: 'Protocol preflight failed',
-    code: 'protocol_preflight_failed', privateValue: 'secret-not-for-ui', preflight: { schemaVersion: 'protocol_preflight.v1',
+    code, privateValue: 'secret-not-for-ui', preflight: { schemaVersion: 'protocol_preflight.v1',
       errors: Array.from({ length: 80 }, () => ({ code: 'passive_valid_time_invalid', path: '/blocks/0',
         privateValue: 'secret-not-for-ui', message: { ru: 'Проверьте статичное изображение', en: 'Check static image' } })),
       warnings: [], duration: { plannedMaximumMs: 2000 }, privateValue: 'secret-not-for-ui' } }) };

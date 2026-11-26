@@ -5031,7 +5031,7 @@ function ExperimentBuilderView(options = {}) {
     // Validate the actual exported runtime definition, not incomplete builder cards.
     // Drafts remain editable; neither a failed preflight nor Cancel overwrites a live link.
     if (!draftOnly) {
-      const { inspectProtocolPreflight } = await import('../shared/protocol-preflight.mjs?v=20261122-validtime1');
+      const { inspectProtocolPreflight } = await import('../shared/protocol-preflight.mjs?v=20261125-publication1');
       const report = inspectProtocolPreflight(json);
       const aoiValidation = globalThis.EmocogAoiProtocol?.validateProtocolAois(json);
       if (aoiValidation && !aoiValidation.ok) {
@@ -5172,7 +5172,11 @@ function ExperimentBuilderView(options = {}) {
         if (canvasCol.isConnected) clearExperimentBuilderDraft();
       } catch (e) {
         var apiErr = e?.message || String(e);
-        if (e?.code === 'protocol_preflight_failed' && e.preflight?.errors?.length) {
+        const publicationCheckFailed = ['protocol_preflight_failed', 'protocol_stimulus_unavailable'].includes(e?.code);
+        if (e?.code === 'protocol_stimulus_unavailable') apiErr = trb(
+          'Файл стимула не найден в этом проекте или недоступен вашей учётной записи. Проверьте выбор стимула и доступ в библиотеке; прежняя ссылка не изменена.',
+          'The stimulus file is not in this project or is not accessible to your account. Check the selected stimulus and library access; the previous link is unchanged.');
+        if (publicationCheckFailed && e.preflight?.errors?.length) {
           apiErr = e.preflight.errors.slice(0, 3).map(item => item.message[CURRENT_LANG === 'ru' ? 'ru' : 'en']).join('; ');
         }
         if (e?.code === 'protocol_aoi_invalid') apiErr = trb(
@@ -5217,7 +5221,7 @@ function ExperimentBuilderView(options = {}) {
           ) + apiErr;
         }
         toast(toastMain);
-        if (e?.code === 'protocol_preflight_failed' && e.preflight?.errors?.length) {
+        if (publicationCheckFailed && e.preflight?.errors?.length) {
           await confirmProtocolPreflight(e.preflight, CURRENT_LANG, json.blocks);
         }
         return;

@@ -89,6 +89,30 @@ test('constructor-only media selections never expand a participant invitation ma
   assert.equal(report.ok, true);
 });
 
+test('#186 pinned-file metadata cannot introduce additional runtime stimulus references', async t => {
+  const uploadsRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wecog-manifest-references-'));
+  t.after(() => fs.promises.rm(uploadsRoot, { recursive: true, force: true }));
+  await fs.promises.writeFile(path.join(uploadsRoot, 'image.jpg'), 'synthetic-image');
+  const definition = { blocks: [{ type: 'passive', trials: [{ stimulusId: 31, duration: 2000 }] }],
+    mediaManifest: { 31: { versionId: 'synthetic-version', mimeType: 'image/jpeg', metadata: {
+      source: { stimulusId: 'legacy-browser-id', slides: [99], trials: [{ stimulus_id: 100 }] },
+    } } }, builderState: { blocks: [{ content: { slides: [32] } }] } };
+  assert.deepEqual(referencedStimulusIds(definition), ['31']);
+  assert.deepEqual(referencedDatabaseStimulusIds(definition, { includeBuilderState: true }), [31, 32]);
+  const db = { query: async (sql, params) => {
+    if (sql.includes('FROM stimuli')) {
+      assert.deepEqual(params, [7, [31]]);
+      return { rows: [{ id: 31, project_id: 7, mime_type: 'image/jpeg', metadata: {} }] };
+    }
+    return { rows: [{ id: 'synthetic-version', stimulus_id: 31, mime_type: 'image/jpeg',
+      content_path: 'image.jpg', media_info: {} }] };
+  } };
+  assert.equal((await inspectProtocolStimuli(db, 7, definition, { uploadsRoot })).ok, true);
+  definition.blocks[0].trials.push({ stimulusId: 'unsaved-runtime-file', duration: 2000 });
+  assert.equal((await inspectProtocolStimuli(db, 7, definition, { uploadsRoot })).ok, false,
+    'real unsaved trial references must still fail');
+});
+
 test('rejects browser-only stimulus IDs instead of publishing a broken session', async () => {
   const queryable = { query: async () => assert.fail('browser-only files must not query the database') };
   const report = await inspectProtocolStimuli(queryable, 1, {

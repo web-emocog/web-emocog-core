@@ -39,7 +39,8 @@ router.use(requireAuth);
 async function assertProtocolPublishable(definition, mediaReport = null) {
   const { inspectProtocolPreflight } = await import('../../shared/protocol-preflight.mjs');
   const report = inspectProtocolPreflight(definition, { mediaReport });
-  if (!report.ok) throw new HttpError(422, 'Protocol preflight failed', 'protocol_preflight_failed', report);
+  if (!report.ok) throw new HttpError(422, 'Protocol preflight failed',
+    mediaReport && !mediaReport.ok ? 'protocol_stimulus_unavailable' : 'protocol_preflight_failed', report);
   return report;
 }
 
@@ -178,7 +179,6 @@ router.post(
         const pinned = definition.isDraft ? definition : await pinProtocolMedia(client, project_id, definition, req.user);
         if (!definition.isDraft) {
           const report = await inspectProtocolStimuli(client, project_id, pinned, { user: req.user });
-          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
           preflight = await assertProtocolPublishable(pinned, report);
         }
         return client.query(
@@ -189,7 +189,8 @@ router.post(
       });
       res.status(201).json({ ...publicProtocol(r.rows[0]), ...(preflight ? { preflight } : {}) });
     } catch (err) {
-      if (err.code === 'protocol_preflight_failed') return res.status(422).json({ error: err.message, code: err.code, preflight: err.details });
+      if (['protocol_preflight_failed', 'protocol_stimulus_unavailable'].includes(err.code) && err.details?.schemaVersion === 'protocol_preflight.v1')
+        return res.status(422).json({ error: err.message, code: err.code, preflight: err.details });
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
       if (err.code === '23503') return res.status(400).json({ error: 'Project not found' });
       if (err.code === '23505') return rejectProtocolConflict(res, err);
@@ -280,7 +281,6 @@ router.patch('/:id', requireRole('admin', 'PI', 'researcher', 'analyst', 'assist
         const pinned = definition ? (definition.isDraft ? definition : await pinProtocolMedia(client, current.project_id, definition, req.user)) : current.definition;
         if (definition && !definition.isDraft) {
           const report = await inspectProtocolStimuli(client, current.project_id, pinned, { user: req.user });
-          if (!report.ok) throw new HttpError(422, 'Protocol references unavailable or private stimulus files', 'protocol_stimulus_unavailable');
           preflight = await assertProtocolPublishable(pinned, report);
         }
         return (await client.query(`UPDATE protocols SET name = $1, definition = $2::jsonb, updated_at = current_timestamp
@@ -289,7 +289,8 @@ router.patch('/:id', requireRole('admin', 'PI', 'researcher', 'analyst', 'assist
       });
       return res.json({ ...publicProtocol(row), ...(preflight ? { preflight } : {}) });
     } catch (error) {
-      if (error.code === 'protocol_preflight_failed') return res.status(422).json({ error: error.message, code: error.code, preflight: error.details });
+      if (['protocol_preflight_failed', 'protocol_stimulus_unavailable'].includes(error.code) && error.details?.schemaVersion === 'protocol_preflight.v1')
+        return res.status(422).json({ error: error.message, code: error.code, preflight: error.details });
       if (error instanceof HttpError) return res.status(error.status).json({ error: error.message, code: error.code });
       if (error.code === '23505') return rejectProtocolConflict(res, error);
       return res.status(500).json({ error: 'Update failed' });

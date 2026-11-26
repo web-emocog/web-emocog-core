@@ -37,6 +37,30 @@ The builder copies `public_code`, never the newly generated snapshot code.
 Failed publication preserves local edits and any previously verified link.
 Retry targets the same protocol ID, never an unrelated duplicate.
 
+### Media Validation Failures
+
+Runtime stimulus references exclude `mediaManifest`, including arbitrary library
+metadata nested inside it. Archival `stimulusId`, `slides` or `trials` keys do not
+add presentations, require access to extra files or expand invitation manifests.
+Runtime block/trial references and optional constructor-only references remain
+checked. Client-supplied manifests never authorize or select a server version.
+
+After pinning, a failed media check returns HTTP 422 with the existing
+`protocol_stimulus_unavailable` code and a `protocol_preflight.v1` report, just
+like structural `protocol_preflight_failed` errors. Known reasons distinguish
+unsupported valid-time images, unsupported media, audio screen areas and integrity
+failures. Unknown reasons use a safe generic message. Raw library metadata,
+filenames, storage paths and decoder output are not included in this report.
+The browser bounds typed report fields for both error codes, renders messages as
+text and preserves the draft and previous link on rejection.
+
+Pinning can reject an inaccessible/missing project file before a media report
+exists. Its existing error code is preserved; the builder then shows a localized
+library/access hint without disclosing whether another user's private file exists.
+No error path grants access, substitutes a file, publishes an invalid definition
+or changes an already issued invitation. Static-image requirements for valid-time
+extension remain unchanged.
+
 `GET /invitations/by-code/:public_code` resolves the latest published invitation,
 returning its immutable `code`, `invitation_id` and `publication_version`.
 If `session_id` belongs to an already admitted session of this protocol, the
