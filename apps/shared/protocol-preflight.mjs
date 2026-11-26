@@ -209,8 +209,34 @@ export function inspectProtocolPreflight(definition, { mediaReport = null } = {}
     fail('trial_limit', '/blocks', 'Превышен лимит 5000 результатов проб. Разделите протокол.', 'The plan exceeds 5000 trial results. Split the protocol.');
   else if (trialCount * 3 > PUBLICATION_LIMITS.trials)
     warn('retry_payload_capacity', '/blocks', 'Повторные попытки могут превысить лимит итогового пакета 5000 проб. Разделите протокол.', 'Retries may exceed the final packet limit of 5000 trials. Split the protocol.');
-  if (mediaReport && !mediaReport.ok)
-    fail('media_unavailable', '/blocks', 'Файлы недоступны, повреждены или не разрешены текущему исследователю.', 'Media files are unavailable, corrupt or not accessible to this researcher.');
+  if (mediaReport && !mediaReport.ok) {
+    // Only known reasons cross the API boundary; never forward names, paths or decoder errors.
+    const reasons = {
+      passive_valid_time_media_unsupported: ['Для добора валидного времени выберите статичное изображение PNG, JPEG или BMP либо отключите добор в этом блоке.',
+        'For valid-time extension, select a static PNG, JPEG or BMP image, or disable extension in this block.'],
+      stimulus_record_missing: ['Файл не найден в этом проекте или недоступен вашей учётной записи. Проверьте выбор стимула и доступ в библиотеке.',
+        'The file is not in this project or is not accessible to your account. Check the selected stimulus and library access.'],
+      stimulus_not_saved_on_server: ['Стимул сохранён только в браузере. Загрузите его в библиотеку проекта и выберите повторно.',
+        'The stimulus is stored only in the browser. Upload it to the project library and select it again.'],
+      stimulus_media_type_unsupported: ['Этот тип файла нельзя предъявить участнику. Выберите изображение, видео или аудио.',
+        'This file type cannot be presented to participants. Select an image, video or audio file.'],
+      audio_spatial_aoi_unsupported: ['У аудиофайла не может быть экранных зон интереса. Уберите зоны в этом блоке; удалять аудиофайл не нужно.',
+        'Audio cannot have screen areas of interest. Remove these areas from the block; the audio file need not be deleted.'],
+      stimulus_checksum_mismatch: ['Проверка целостности файла не пройдена. Обратитесь в поддержку для восстановления; прежнее приглашение не изменено.',
+        'The file integrity check failed. Contact support to restore it; the previous invitation is unchanged.'],
+    };
+    const reported = new Set();
+    for (const item of (Array.isArray(mediaReport.unavailable) ? mediaReport.unavailable : []).slice(0, 50)) {
+      const code = Object.hasOwn(reasons, item?.code) ? item.code : 'media_unavailable';
+      if (reported.has(code)) continue;
+      reported.add(code);
+      const message = reasons[code] || ['Не удалось прочитать или проверить файл стимула. Обратитесь в поддержку, указав проект и время ошибки; прежнее приглашение не изменено.',
+        'The stimulus file could not be read or verified. Contact support with the project and error time; the previous invitation is unchanged.'];
+      fail(code, '/blocks', ...message);
+    }
+    if (!reported.size) fail('media_unavailable', '/blocks',
+      'Файлы недоступны, повреждены или не разрешены текущему исследователю.', 'Media files are unavailable, corrupt or not accessible to this researcher.');
+  }
   warn('report_retention_limits', '/blocks', 'В отчётах сохраняется до 200 попыток RT для связности, 480 минут и 400 попыток блоков для физиологии. Повторы и паузы могут приблизить эти пределы.',
     'Reports retain up to 200 RT attempts for connectedness and 480 minutes and 400 block attempts for physiology. Retries and pauses may reach these limits sooner.');
   if (trialCount > 200) warn('result_packet_size', '/blocks', 'Число проб — не гарантия загрузки. На размер итогового пакета влияют повторы и включённые каналы. Проверьте полный тестовый прогон до набора участников.',

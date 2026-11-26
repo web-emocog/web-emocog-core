@@ -50,6 +50,7 @@ for (const failure of [
   { name: 'temporary server error', message: '503 — invitation temporarily unavailable', status: 503, code: '', retryAfterMs: 0, expected: 'temporarily unavailable' },
   { name: 'legacy inventory', message: '503 — Media inventory needs validation before uploading', status: 503, code: 'media_inventory_unmeasured', retryAfterMs: 0, expected: 'ранее загруженных файлов' },
   { name: 'request throttling', message: '429 — Too many requests', status: 429, code: 'rate_limit_exceeded', retryAfterMs: 42000, expected: '42 с' },
+  { name: 'unavailable file without details', message: '422 — Protocol stimulus is unavailable or private', status: 422, code: 'protocol_stimulus_unavailable', retryAfterMs: 0, expected: 'библиотеке' },
 ]) test(`failed publication retains the old link and edits; retry updates the same protocol, without duplicate creation: ${failure.name}`, async ({ page }) => {
   await page.goto(`${BASE}#/analytics/session-card`);
   await page.evaluate(failure => {
@@ -84,6 +85,50 @@ for (const failure of [
   await expect(page.locator('#participantLinkInput')).toHaveValue(/new-published-code/);
   const writes = await page.evaluate(() => ({ patches: (window as any).__patches.length, creates: (window as any).__creates }));
   expect(writes).toEqual({ patches: 2, creates: 0 });
+});
+
+for (const code of ['protocol_stimulus_unavailable', 'protocol_preflight_failed']) test(`#186 localized server rejection preserves edits/link and allows retry: ${code}`, async ({ page }) => {
+  await page.goto(`${BASE}#/analytics/session-card`);
+  const message = 'Для добора выберите статичное изображение PNG, JPEG или BMP. <img src=x onerror="window.__unexpectedMedia=true">';
+  await page.evaluate(({ code, message }) => {
+    const w = window as any;
+    localStorage.setItem('emocog_selected_project_id', '1');
+    const old = { id: 'rejected-file', apiProtocolId: 502, projectId: 1, title: 'Revised', protocolId: 'rejected-file', status: 'active',
+      invitationCode: 'previous-code', participantLink: 'http://127.0.0.1:4173/apps/participant-web/run_new.html?code=previous-code',
+      metadata: { title: 'Revised', protocolId: 'rejected-file', estimatedDuration: '2 minutes' },
+      blocks: [{ id: 'instruction', type: 'instruction', content: { title: 'Edited title', text: 'Edited text', buttonText: 'Start' } }] };
+    localStorage.setItem('emocog_my_experiments', JSON.stringify([old]));
+    w.hasResearcherApiToken = () => true;
+    w.__patches = 0; w.__invitations = 0;
+    const client = w.WecogHttp;
+    w.apiPatch = async () => {
+      if (++w.__patches === 1) throw await client.httpError(new Response(JSON.stringify({ error: 'Protocol preflight failed', code,
+        preflight: { schemaVersion: 'protocol_preflight.v1', errors: [{ code: 'passive_valid_time_media_unsupported', path: '/blocks/0',
+          message: { ru: message, en: 'Select a static image' } }], warnings: [], duration: { plannedMaximumMs: 2000 } } }), { status: 422 }));
+      return { id: 502, project_id: 1, updated_at: new Date().toISOString() };
+    };
+    w.apiPost = async (path: string) => {
+      if (path !== '/invitations') throw new Error('Unexpected duplicate protocol');
+      w.__invitations++; return { code: 'republished-code' };
+    };
+    document.getElementById('view')!.replaceChildren(w.ExperimentBuilderView({ experimentId: old.id, startStep: 8 }));
+  }, { code, message });
+  await page.locator('#finishSaveProtocolBtn').click();
+  await page.locator('[data-preflight-continue]').click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText(message);
+  await expect(dialog.locator('img')).toHaveCount(0);
+  await expect(page.locator('#protocolSaveStatus')).toContainText('PNG, JPEG или BMP');
+  await expect(page.locator('#protocolSaveStatus')).not.toContainText('Protocol preflight failed');
+  await expect(page.locator('#participantLinkInput')).toHaveValue(/previous-code/);
+  expect(await page.evaluate(() => (window as any).__invitations)).toBe(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('emocog_my_experiments')!)[0].blocks[0].content.text)).toBe('Edited text');
+  await dialog.getByRole('button', { name: 'Вернуться к редактированию' }).click();
+  await page.locator('#finishSaveProtocolBtn').click();
+  await page.locator('[data-preflight-continue]').click();
+  await expect(page.locator('#participantLinkInput')).toHaveValue(/republished-code/);
+  expect(await page.evaluate(() => ({ patches: (window as any).__patches, invitations: (window as any).__invitations,
+    unexpectedMedia: Boolean((window as any).__unexpectedMedia) }))).toEqual({ patches: 2, invitations: 1, unexpectedMedia: false });
 });
 
 test('API deletion is awaited; a failed deletion does not remove a protocol from the list', async ({ page }) => {

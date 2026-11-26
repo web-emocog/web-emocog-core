@@ -117,7 +117,7 @@
     if (!detail && Array.isArray(body?.errors)) detail = body.errors.map(function (item) { return item.msg || item.message; }).filter(Boolean).join('; ');
     var error = new Error(response.status + (detail ? ' — ' + String(detail).slice(0, 1500) : ' ' + response.statusText));
     error.status = response.status; error.code = typeof body?.code === 'string' ? body.code : null;
-    if (error.code === 'protocol_preflight_failed' && body?.preflight?.schemaVersion === 'protocol_preflight.v1') {
+    if (['protocol_preflight_failed', 'protocol_stimulus_unavailable'].includes(error.code) && body?.preflight?.schemaVersion === 'protocol_preflight.v1') {
       var issues = function (items) { return (Array.isArray(items) ? items : []).slice(0, 50).filter(function (item) {
         return item && typeof item.code === 'string' && typeof item.path === 'string'
           && typeof item.message?.ru === 'string' && typeof item.message?.en === 'string';
