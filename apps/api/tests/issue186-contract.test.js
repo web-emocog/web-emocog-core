@@ -32,8 +32,8 @@ test('delegate probe provenance accepts only bounded diagnostics without pixels 
 test('#186 public pinned media preserves only decoder eligibility facts, never storage paths or probe errors', () => {
   const { publicProtocolDefinition } = require('../stimuli/public-projection');
   const definition = { mediaManifest: { 1: { mimeType: 'image/png', media_info: { codec: 'png', duration_ms: 0,
-    frame_count: 1, animated: false, content_path: '/private/path', preview_error: 'private error', arbitrary: true } } } };
+    frame_count: 1, animated: false, image_decode_version: 'image_decode.v1', content_path: '/private/path', preview_error: 'private error', arbitrary: true } } } };
   const result = publicProtocolDefinition(definition);
   assert.deepEqual(result.mediaManifest[1].media_info, { codec: 'png', duration_ms: 0, frame_count: 1, animated: false });
-  assert.doesNotMatch(JSON.stringify(result), /private|arbitrary|content_path/);
+  assert.doesNotMatch(JSON.stringify(result), /private|arbitrary|content_path|image_decode_version/);
 });

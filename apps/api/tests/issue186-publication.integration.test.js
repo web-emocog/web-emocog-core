@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
-test('#186 publish legacy PNG/JPEG, ignore archival refs and preserve publication after rejection', {
+test('#186 publish fresh/legacy PNG/JPEG/BMP, recheck cached facts and preserve publication after rejection', {
   skip: !process.env.S2_TEST_DATABASE_URL,
 }, async t => {
   const db = new URL(process.env.S2_TEST_DATABASE_URL);
@@ -38,8 +38,8 @@ test('#186 publish legacy PNG/JPEG, ignore archival refs and preserve publicatio
     const res = await fetch(base+route, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify(body) }); const result = await res.json(); assert.equal(res.status, status, JSON.stringify(result)); return result;
   }
-  for (const format of ['png', 'jpeg']) await t.test(format, async () => {
-    const filename = `synthetic.${format}`;
+  for (const format of ['png', 'jpeg', 'bmp']) for (const legacy of [false, true]) await t.test(`${format} ${legacy ? 'legacy cache' : 'fresh'}`, async () => {
+    const filename = `synthetic-${legacy ? 'legacy' : 'fresh'}.${format}`;
     if (format === 'png') await fs.writeFile(path.join(root, 'stimuli', filename), png);
     else execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=32x32',
       '-frames:v', '1', path.join(root, 'stimuli', filename)], { timeout: 15000 });
@@ -48,20 +48,42 @@ test('#186 publish legacy PNG/JPEG, ignore archival refs and preserve publicatio
       [project, `image/${format}`, JSON.stringify({ content_path: filename, source: {
         stimulusId: 'historical-browser-only-id', slides: [2147483000], trials: [{ stimulus_id: 2147483001 }],
       } }), user])).rows[0].id;
+    // A historical poster/SHA check is not evidence of current static-image decoding.
+    const sourceBytes = await fs.readFile(path.join(root, 'stimuli', filename));
+    const sha256 = createHash('sha256').update(sourceBytes).digest('hex');
+    const oldPoster = `historical-${format}.jpg`;
+    const version = randomUUID();
+    if (legacy) {
+      await fs.writeFile(path.join(root, 'stimuli', oldPoster), png);
+      await pool.query(`INSERT INTO stimulus_versions(id,stimulus_id,content_path,mime_type,size_bytes,sha256,preview_path,preview_status,media_info)
+        VALUES($1,$2,$3,$4,$5,$6,$7,'ready',$8::jsonb)`, [version, stimulus, filename, `image/${format}`, sourceBytes.length, sha256,
+        oldPoster, JSON.stringify({ validated_sha256: sha256, codec: format === 'jpeg' ? 'mjpeg' : format, duration_ms: 1000 })]);
+      await pool.query('UPDATE stimuli SET current_version_id=$1 WHERE id=$2', [version, stimulus]);
+    }
     const definition = { version: 'v2.0', blocks: [{ id: 'passive', type: 'passive',
       content: { useRT: false, responseMode: 'none', slideDuration: 2000 }, trials: [{ stimulusId: stimulus, duration: 2000 }] }] };
     definition.blocks[0].content.validTime = { schemaVersion: 'passive_valid_time.v1', enabled: true, maxExtensionRatio: .5, minSegmentMs: 1000 };
     definition.settings = { physiologyMethods: { heartRate: 'auto', respiration: 'motion' } };
-    // No prior version/decoder metadata: publication must pin/decode before static eligibility is checked.
+    // Revalidate cached legacy facts without replacing the original, its version or its checksum.
     const protocol = await request('/protocols', 'POST', { project_id: project, name: randomUUID(), definition }, 201);
     assert.equal(protocol.preflight.ok, true);
-    assert.equal(protocol.definition.mediaManifest[stimulus].media_info.codec, format === 'png' ? 'png' : 'mjpeg');
+    assert.equal(protocol.definition.mediaManifest[stimulus].media_info.codec, format === 'jpeg' ? 'mjpeg' : format);
+    const pinnedVersion = protocol.definition.mediaManifest[stimulus].versionId;
+    if (legacy) assert.equal(pinnedVersion, version);
+    assert.equal(protocol.definition.mediaManifest[stimulus].sha256, sha256);
+    assert.deepEqual(await fs.readFile(path.join(root, 'stimuli', filename)), sourceBytes);
+    const decoded = (await pool.query('SELECT media_info, preview_path FROM stimulus_versions WHERE id=$1', [pinnedVersion])).rows[0];
+    assert.equal(decoded.media_info.image_decode_version, 'image_decode.v1');
+    assert.notEqual(decoded.preview_path, oldPoster);
+    assert.notEqual(decoded.media_info.duration_ms, 1000);
     const quality = require('../../shared/protocol-quality');
     assert.equal(quality.validate(protocol.definition), true, 'publication and participant QC must agree about static eligibility');
     const first = await request('/invitations', 'POST', { protocol_id: protocol.id }, 201);
     const saved = structuredClone(protocol.definition);
     definition.settings.physiologyMethods = { heartRate: 'pos', respiration: 'luma' };
     const updated = await request('/protocols/'+protocol.id, 'PATCH', { definition }, 200);
+    assert.equal((await pool.query('SELECT preview_path FROM stimulus_versions WHERE id=$1', [pinnedVersion])).rows[0].preview_path,
+      decoded.preview_path, 'current verification must be reused, not redecoded at every publish');
     const savedBeforeRejection = (await pool.query('SELECT definition FROM protocols WHERE id=$1', [protocol.id])).rows[0].definition;
     assert.equal(updated.preflight.ok, true);
     assert.deepEqual(updated.definition.settings.physiologyMethods, definition.settings.physiologyMethods);
@@ -91,6 +113,28 @@ test('#186 publish legacy PNG/JPEG, ignore archival refs and preserve publicatio
       assert.equal(mediaFailure.code, 'protocol_stimulus_unavailable');
       assert.ok(mediaFailure.preflight.errors.some(item => item.code === 'passive_valid_time_media_unsupported'));
       assert.doesNotMatch(JSON.stringify(mediaFailure.preflight), /unsupported.gif|content_path|synthetic\./);
+    }
+    if (format === 'png' && legacy) {
+      const apngPath = path.join(root, 'stimuli', 'animated.png');
+      execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=32x32:rate=2', '-frames:v', '2',
+        '-plays', '0', '-f', 'apng', apngPath], { timeout: 15000 });
+      const animated = (await pool.query(`INSERT INTO stimuli(project_id,name,mime_type,metadata,created_by,visibility)
+        VALUES($1,'Synthetic animated PNG','image/png',$2::jsonb,$3,'private') RETURNING id`,
+        [project, JSON.stringify({ content_path: 'animated.png' }), user])).rows[0].id;
+      const animatedBytes = await fs.readFile(apngPath);
+      const animatedSha = createHash('sha256').update(animatedBytes).digest('hex');
+      const animatedVersion = randomUUID();
+      // Even a legacy cache falsely claiming static PNG cannot authorize animation.
+      await pool.query(`INSERT INTO stimulus_versions(id,stimulus_id,content_path,mime_type,size_bytes,sha256,preview_path,preview_status,media_info)
+        VALUES($1,$2,'animated.png','image/png',$3,$4,$5,'ready',$6::jsonb)`, [animatedVersion, animated, animatedBytes.length,
+        animatedSha, oldPoster, JSON.stringify({ validated_sha256: animatedSha, codec: 'png', duration_ms: 0 })]);
+      await pool.query('UPDATE stimuli SET current_version_id=$1 WHERE id=$2', [animatedVersion, animated]);
+      const animatedDefinition = structuredClone(definition);
+      animatedDefinition.blocks[0].trials[0].stimulusId = animated;
+      const animatedRejected = await request('/protocols/'+protocol.id, 'PATCH', { definition: animatedDefinition }, 422);
+      assert.equal(animatedRejected.code, 'protocol_stimulus_unavailable');
+      assert.ok(animatedRejected.preflight.errors.some(item => item.code === 'passive_valid_time_media_unsupported'));
+      assert.deepEqual(await fs.readFile(apngPath), animatedBytes);
     }
     const otherProject = (await pool.query('INSERT INTO projects(organization_id,name,slug) VALUES($1,$2,$3) RETURNING id',
       [org, 'Other synthetic project', randomUUID()])).rows[0].id;

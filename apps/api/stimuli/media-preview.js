@@ -8,6 +8,8 @@ const { HttpError } = require('../security/http-error');
 const { trackPreviewArtifact } = require('./write-artifacts');
 const { previewBudget, accountObject, assertDiskSpace } = require('./storage-quotas');
 const { readStoragePolicy } = require('../config/storage-policy');
+const IMAGE_DECODE_VERSION = 'image_decode.v1';
+const staticImageMimes = new Set(['image/png', 'image/jpeg', 'image/bmp']);
 
 let active = 0;
 const pending = new Map();
@@ -70,6 +72,7 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
     const duration = Number(metadata.format?.duration);
     const result = { status: 'ready', path: path.relative(uploadsRoot, temporary), bytes: stat.size,
       info: { intrinsic_width: width, intrinsic_height: height, codec: String(stream.codec_name || '').slice(0, 64),
+        ...(staticImageMimes.has(version.mime_type) ? { image_decode_version: IMAGE_DECODE_VERSION } : {}),
         ...(Number.isFinite(duration) && duration >= 0 ? { duration_ms: Math.round(duration * 1000) } : {}) } };
     temporary = null;
     return result;
@@ -81,6 +84,8 @@ async function createPreview(version, uploadsRoot, options = config.storage.prev
 
 async function hasUsablePreview(version, uploadsRoot) {
   if (!version || version.media_info?.validated_sha256 !== version.sha256) return false;
+  // A legacy poster may have the right SHA but obsolete or absent decoder facts.
+  if (staticImageMimes.has(version.mime_type) && version.media_info?.image_decode_version !== IMAGE_DECODE_VERSION) return false;
   if (version.preview_status === 'unsupported') return true;
   return version.preview_status === 'ready'
     && (await resolveReadableServerOwnedUploadPath(uploadsRoot, version.preview_path)).ok;

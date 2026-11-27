@@ -129,7 +129,12 @@ test('#177 builder enables only static passive selections and explains extension
   for (const [type, mimeType] of [['video', 'video/mp4'], ['audio', 'audio/wav'], ['image', 'image/gif'], ['image', undefined]]) {
     assert.equal(context.builderPassiveValidTimeEligible(block, [...trials, { stimulusId: 31 }], [{ id: 31, type, mimeType }]), false);
   }
-  assert.equal(context.builderPassiveValidTimeEligible(block, [{ stimulusId: 31 }], [{ id: 31, type: 'image', mimeType: 'image/png' }]), false);
+  assert.equal(context.builderPassiveValidTimeEligible(block, [{ stimulusId: 31 }], [{ id: 31, type: 'image', mimeType: 'image/png' }]), true,
+    'legacy PNG is a candidate for server verification, not an already verified published image');
+  for (const id of ['browser-only-image', 'blob:local', '2147483648']) assert.equal(context.builderPassiveValidTimeEligible(block,
+    [{ stimulusId: id }], [{ id, type: 'image', mimeType: 'image/png' }]), false);
+  assert.equal(context.builderPassiveValidTimeEligible(block, [{ stimulusId: 31 }],
+    [{ id: 31, type: 'image', mimeType: 'image/png', contentAvailable: false }]), false);
   assert.equal(context.builderPassiveValidTimeEligible(block, [{ stimulusId: 31 }], [{ id: 31, type: 'image', mimeType: 'image/jpeg' }]), true);
   for (const percent of [0, 12.5, 50]) assert.deepEqual(JSON.parse(JSON.stringify(context.builderPassiveValidTimeConfig(true, percent))), policy(percent / 100));
   for (const percent of ['', -1, 51, NaN, Infinity, 'bad']) assert.equal(context.builderPassiveValidTimeConfig(true, percent), null);

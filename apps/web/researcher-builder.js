@@ -125,8 +125,9 @@ function builderPassiveValidTimeEligible(block, trials, stimuli = []) {
     if (id.startsWith('std_')) return !!globalThis.StandardStimuli?.resolveStandardStimulus(id);
     const media = stimuli.find(item => String(item.id).replace(/^api:/, '') === id);
     const mime = media?.mimeType ?? media?.mime_type;
-    return !!media && ['image', 'slides'].includes(media.type) && ['image/jpeg', 'image/png', 'image/bmp'].includes(mime)
-      && (mime !== 'image/png' || (media.codec ?? media.metadata?.codec) === 'png')
+    // This enables a publication-time server check, not permission to run unverified media.
+    return !!media && /^[1-9]\d*$/.test(id) && Number(id) <= 2147483647 && media.contentAvailable !== false
+      && ['image', 'slides'].includes(media.type) && ['image/jpeg', 'image/png', 'image/bmp'].includes(mime)
       && !media.animated && !media.metadata?.animated && !media.metadata?.isAnimated;
   });
 }
@@ -1536,8 +1537,11 @@ function ExperimentBuilderView(options = {}) {
       modal.querySelector('#passiveValidTimeHint').textContent = eligible
         ? trb('Выключено по умолчанию. Только статический пассивный просмотр. Засчитываются непрерывные валидные сегменты от 1 секунды; показ может продлеваться до выбранного предела. Условие и время реакции не меняются.',
           'Off by default. Static passive viewing only. Continuous valid segments of at least 1 second count; display may extend up to the selected limit. Condition and reaction time are unchanged.')
-        : trb('Недоступно для когнитивных/RT-задач, аудио, видео, смешанных или неподтверждённых медиа. Для PNG нужна проверка отсутствия анимации; иначе используйте JPEG/BMP или встроенные статические стимулы.',
-          'Unavailable for cognitive/RT tasks, audio, video, mixed or unverified media. PNG requires verified static decoding; otherwise use JPEG/BMP or built-in static stimuli.');
+          + (currentTrials.some(entry => !String(entry?.stimulusId ?? entry?.id ?? entry).replace(/^api:/, '').startsWith('std_'))
+            ? trb(' Изображения из библиотеки сервер автоматически проверит при публикации. Старые PNG, JPEG и BMP не нужно загружать заново. Анимация и неподходящие файлы не будут опубликованы.',
+              ' The server automatically checks library images when publishing. Existing PNG, JPEG and BMP files need not be uploaded again. Animated or unsuitable files will not be published.') : '')
+        : trb('Недоступно для этой пробы. Выберите пассивный просмотр по таймеру без ответа и сохранённые в библиотеке PNG, JPEG или BMP либо встроенные статические стимулы. Аудио, видео, анимация и ручная смена слайдов не поддерживаются.',
+          'Unavailable for this trial. Select passive timer-based viewing without responses and library PNG, JPEG or BMP images, or built-in static stimuli. Audio, video, animation and manual slide changes are not supported.');
     }
     validTimeCb.addEventListener('change', () => { markDirty(); refreshValidTimeControls(); });
     validTimePercent.addEventListener('input', markDirty);

@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { mayReadStimulus, mayManageSharing, rejectOwnedFields } = require('../stimuli/access');
-const { runMediaTool, createPreview, ensurePreview } = require('../stimuli/media-preview');
+const { runMediaTool, createPreview, hasUsablePreview, ensurePreview } = require('../stimuli/media-preview');
 const { collectMediaInventory } = require('../stimuli/media-inventory');
 const { hashFile } = require('../stimuli/versions');
 const { withMediaWrite } = require('../stimuli/versions');
@@ -76,6 +76,7 @@ test('preview generation confines inputs, records source geometry and rejects li
   assert.equal(preview.info.intrinsic_width, 1200);
   assert.equal(preview.info.intrinsic_height, 800);
   assert.equal(preview.info.duration_ms, 1500);
+  assert.equal(preview.info.image_decode_version, 'image_decode.v1');
   const config = require('../config');
   const originalOptions = config.storage.preview;
   config.storage.preview = options;
@@ -107,6 +108,22 @@ test('preview generation confines inputs, records source geometry and rejects li
   await assert.rejects(createPreview({ mime_type: 'image/png', content_path: 'linked.png' }, root, options));
   await assert.rejects(createPreview({ mime_type: 'image/png', content_path: '../escape.png' }, root, options));
   assert.deepEqual(await createPreview({ mime_type: 'application/pdf' }, root, options), { status: 'unsupported', info: {} });
+});
+
+test('#186 old image posters require current byte-bound decoding, without invalidating audio/video policy', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wecog-legacy-image-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'poster.jpg'), 'synthetic poster');
+  const old = { sha256: 'synthetic-sha', preview_status: 'ready', preview_path: 'poster.jpg',
+    media_info: { validated_sha256: 'synthetic-sha', codec: 'png' } };
+  for (const mime_type of ['image/png', 'image/jpeg', 'image/bmp']) {
+    assert.equal(await hasUsablePreview({ ...old, mime_type }, root), false);
+    const current = { ...old, mime_type, media_info: { ...old.media_info, image_decode_version: 'image_decode.v1' } };
+    assert.equal(await hasUsablePreview(current, root), true);
+    assert.equal(await hasUsablePreview({ ...current, media_info: { ...current.media_info, validated_sha256: 'other-sha' } }, root), false);
+    assert.equal(await hasUsablePreview({ ...current, preview_path: 'missing.jpg' }, root), false);
+  }
+  for (const mime_type of ['audio/wav', 'video/mp4']) assert.equal(await hasUsablePreview({ ...old, mime_type }, root), true);
 });
 
 test('backup reconciliation includes historical versions and posters and fails on missing/corrupt files', async t => {

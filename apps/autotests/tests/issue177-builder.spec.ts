@@ -99,13 +99,15 @@ for (const lang of ['ru', 'en']) test(`#177 ${lang}: default off, bounded opt-in
   expect((await savedBlock(page)).content.validTime).toBeUndefined();
 });
 
-test('#177 cognitive, audio/video, mixed media and unverified PNG cannot opt in', async ({ page }) => {
+test('#177 cognitive, audio/video, mixed media and missing library files cannot opt in', async ({ page }) => {
   for (const scenario of [
     { block: { ...passive(), type: 'cognitive_task', content: { ...passive().content, taskType: 'simple_rt' } }, stimuli: [standard] },
-    ...[['audio', 'audio/wav'], ['video', 'video/mp4'], ['image', 'image/gif'], ['image', 'image/png']].map(([type, mimeType]) => ({
+    ...[['audio', 'audio/wav'], ['video', 'video/mp4'], ['image', 'image/gif']].map(([type, mimeType]) => ({
       block: passive({ trials: [...passive().content.trials, { stimulusId: '31', duration: 12000 }] }),
       stimuli: [standard, { id: '31', type, mimeType, name: 'Non-static or unverified media' }]
-    }))
+    })),
+    { block: passive({ trials: [{ stimulusId: '31', duration: 12000 }] }),
+      stimuli: [{ id: '31', type: 'image', mimeType: 'image/png', contentAvailable: false }] },
   ]) {
     await mount(page, scenario.block, 3, 'en', scenario.stimuli);
     await page.locator('.open-trials-btn').click();
@@ -115,6 +117,26 @@ test('#177 cognitive, audio/video, mixed media and unverified PNG cannot opt in'
     await expect(page.locator('#passiveValidTimeHint')).toContainText('Unavailable');
     await page.locator('#trialCancelBtn').click();
   }
+});
+
+for (const mimeType of ['image/png', 'image/jpeg', 'image/bmp']) test(`#186 existing ${mimeType} without decoder metadata can request server verification`, async ({ page }) => {
+  const block = passive({ trials: [{ stimulusId: '31', duration: 12000, condition: 'original' }] });
+  const library = [{ id: '31', apiStimulusId: 31, type: 'image', mimeType, name: 'Existing synthetic image' }];
+  await mount(page, block, 3, 'ru', library);
+  await page.locator('.open-trials-btn').click();
+  await expect(page.locator('#passiveValidTimeCb')).toBeEnabled();
+  await expect(page.locator('#passiveValidTimeHint')).toContainText('сервер автоматически проверит');
+  await expect(page.locator('#passiveValidTimeHint')).not.toContainText('иначе используйте');
+  await page.locator('#passiveValidTimeCb').check();
+  await page.locator('#trialSaveBtn').click();
+  const saved = await savedBlock(page);
+  expect(saved.content.validTime).toEqual({ ...policy, maxExtensionRatio: .5 });
+  await page.locator('.bstep[data-step="8"]').click();
+  await page.locator('#finishSaveProtocolBtn').click();
+  await page.locator('[data-preflight-continue]').click();
+  await expect.poll(() => mutations.some(item => item.path === '/protocols')).toBe(true);
+  const definition = mutations.find(item => item.path === '/protocols')!.body.definition;
+  expect(definition.blocks.find((item: any) => item.id === 'passive').trials[0].stimulusId).toBe('31');
 });
 
 test('#177 canonical enabled copy can be disabled without resurrection after reopen', async ({ page }) => {
