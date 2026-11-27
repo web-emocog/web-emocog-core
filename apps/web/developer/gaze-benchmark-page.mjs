@@ -1,4 +1,4 @@
-import { mountGazeBenchmark } from './gaze-benchmark.mjs?v=20261124-load2';
+import { mountGazeBenchmark } from './gaze-benchmark.mjs?v=20261127-maskrows1';
 import { DiagnosticRun } from './diagnostic-run.mjs?v=20261104-4';
 import { authorizeDiagnostic } from './diagnostic-access.mjs?v=20261104-4';
 

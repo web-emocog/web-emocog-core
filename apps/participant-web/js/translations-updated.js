@@ -1,7 +1,7 @@
 /**
  * Расширение словаря переводов для Фазы 0 (политика конфиденциальности, опция «только сводка»).
  */
-import { translations as base } from '../translations.js?v=20261124-load2';
+import { translations as base } from '../translations.js?v=20261127-maskrows1';
 
 const additionsRu = {
     privacy_policy_short: 'Видео не записывается и не передаётся; все расчёты — на вашем устройстве; на сервер отправляются только обезличенные сводки.',

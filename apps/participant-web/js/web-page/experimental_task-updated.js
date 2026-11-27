@@ -8,7 +8,7 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { finishSession } from './tests-updated.js?v=20261124-load2';
+import { finishSession } from './tests-updated.js?v=20261127-maskrows1';
 import '../../../shared/instruction-responses.js?v=20261025-1';
 import { extractEyeSignalSample } from './eye-signal.js';
 import { fetchWithDeadline, throwIfRequestAborted } from '../session-runtime/http.mjs?v=20261110-integration1';
@@ -16,7 +16,7 @@ import { updateFromMetrics as qcOverlayUpdateFromMetrics } from '../qc-pause-ove
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { isVisible as isQcOverlayVisible } from '../qc-pause-overlay-new.js?v=20261103-1';
 import { getEmotionSample, appendEmotionSample } from '../emotion-stub-new.js?v=20261112-emotion2';
-import { translations } from '../../translations.js?v=20261124-load2';
+import { translations } from '../../translations.js?v=20261127-maskrows1';
 import { definitionForCognitiveRunner } from './protocol-invite-utils.js?v=20260915-1';
 import { createBlockMediaPreparation } from '../session-runtime/block-media-preparation.mjs?v=20261110-integration1';
 import { createPresentationPlan, restorePresentationPlan, resolveBlockPresentationPlan,
@@ -26,7 +26,7 @@ import { fetchMediaWithDeadline, mediaAbortError } from '../session-runtime/medi
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261124-load2';
+} from '../session-runtime/index.js?v=20261127-maskrows1';
 import {
     buildTrialRepeatPlan,
     collectTrialQualityIssues

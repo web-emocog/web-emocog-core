@@ -45,8 +45,8 @@ class FaceSegmenterInline {
     async _initialize(generation) {
         try {
             const [mask, region] = await Promise.all([
-                import('./face-segmenter/mask-analyzer.js?v=20261104-4'),
-                import('./face-segmenter/region-analyzer.js?v=20261110-integration1')
+                import('./face-segmenter/mask-analyzer.js?v=20261127-maskrows1'),
+                import('./face-segmenter/region-analyzer.js?v=20261127-maskrows1')
             ]);
             if (generation !== this.generation) return false;
             this.analysisCore = { ...mask, ...region };
@@ -166,7 +166,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof window !== 'undefined') {
     window.FaceSegmenter = FaceSegmenterInline;
-    window.FaceSegmenterReady = import('./face-segmenter/index.js?v=20261124-load2')
+    window.FaceSegmenterReady = import('./face-segmenter/index.js?v=20261127-maskrows1')
         .then(module => {
             const Model = module.FaceSegmenter || module.default;
             if (typeof Model !== 'function') throw new Error('segment_export_missing');

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261124-load2';
-import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261124-load2';
-import { VisionWorkerClient } from '../../participant-web/js/session-runtime/vision-worker-client.mjs?v=20261124-load2';
+import { PrecheckAnalyzer } from '../../participant-web/js/precheck-analyzer/PrecheckAnalyzer.js?v=20261127-maskrows1';
+import { FaceSegmenter } from '../../participant-web/js/face-segmenter/FaceSegmenter.js?v=20261127-maskrows1';
+import { VisionWorkerClient } from '../../participant-web/js/session-runtime/vision-worker-client.mjs?v=20261127-maskrows1';
 
 function replace(t, key, value) {
     const original = Object.getOwnPropertyDescriptor(globalThis, key);

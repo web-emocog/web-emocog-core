@@ -6,12 +6,12 @@ import {
     clearTaskContext,
     getRelativeSessionTimeMs
 } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261124-load2';
-import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261124-load2';
-import { stopPreCheck } from './precheck-updated.js?v=20261124-load2';
+import { translations } from '../../translations.js?v=20261127-maskrows1';
+import { updateFinalStepWithQC, nextStep } from './ui-updated.js?v=20261127-maskrows1';
+import { stopPreCheck } from './precheck-updated.js?v=20261127-maskrows1';
 import { resolveSignalProfile } from '../session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { startCameraFpsMonitor, stopCameraFpsMonitor, getAverageCameraFps } from './camera.js?v=20261104-4';
-import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261124-load2';
+import { loadAndStartCognitiveTask } from './experimental_task-updated.js?v=20261127-maskrows1';
 import {
     deriveInvitationHubMetrics,
     definitionForCognitiveRunner,
@@ -23,8 +23,8 @@ import {
     runProtocolTestSequence,
     startTestHub,
     stopHubEmotionPreview
-} from '../gaze-tracker/gaze-tests/index.js?v=20261124-load2';
-import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261124-load2';
+} from '../gaze-tracker/gaze-tests/index.js?v=20261127-maskrows1';
+import { stopGazeTestsAnalysisLoop } from '../gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261127-maskrows1';
 import { DEFAULT_THRESHOLDS } from '../qc-metrics/constants.js';
 import { CALIBRATION_CAPTURE_VERSION, CALIBRATION_CLICKS, CALIBRATION_POSITIONS,
     CORRECTION_POSITIONS, BENCHMARK_POSITIONS, calibrationCapturePolicy, collectCalibrationClick
@@ -49,7 +49,7 @@ import {
 import {
     getSessionRuntime,
     isContinuousSessionAnalysisRunning
-} from '../session-runtime/index.js?v=20261124-load2';
+} from '../session-runtime/index.js?v=20261127-maskrows1';
 import {
     setHeadPoseGuideMode,
     setCalibrationGuideTarget,

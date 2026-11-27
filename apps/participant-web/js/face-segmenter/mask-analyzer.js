@@ -7,7 +7,7 @@
  */
 
 import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
-import { createFaceSupport, rememberFaceSupport, isFacePixel } from './face-support.mjs?v=20261028-139';
+import { createFaceSupport, rememberFaceSupport } from './face-support.mjs?v=20261028-139';
 
 /**
  * Анализ масок сегментации
@@ -143,33 +143,39 @@ export function extractFaceRegion(maskData, maskWidth, maskHeight, faceLandmarks
         others: 0
     };
 
+    const fallbackRanges = support ? null : [[startX, endX]];
     for (let y = startY; y < endY; y++) {
-        for (let x = startX; x < endX; x++) {
-            const idx = y * maskWidth + x;
-            if (x < 0 || x >= maskWidth || y < 0 || y >= maskHeight || idx >= maskData.length
-                || (support && !isFacePixel(support, x, y))) continue;
-            
-            const classIdx = maskData[idx];
-            regionStats.totalPixels++;
-            
-            switch (classIdx) {
-                case CLASS_INDICES.FACE_SKIN:
-                    regionStats.faceSkin++;
-                    break;
-                case CLASS_INDICES.HAIR:
-                    regionStats.hair++;
-                    break;
-                case CLASS_INDICES.BACKGROUND:
-                    regionStats.background++;
-                    break;
-                case CLASS_INDICES.BODY_SKIN:
-                    regionStats.bodySkin++;
-                    break;
-                case CLASS_INDICES.CLOTHES:
-                    regionStats.clothes++;
-                    break;
-                default:
-                    regionStats.others++;
+        // Contour spans are ordered and disjoint; scan the same pixels without a lookup per pixel.
+        const ranges = support ? support.rows.get(y) : fallbackRanges;
+        if (!ranges) continue;
+        for (const [left, right] of ranges) {
+            const firstX = Math.max(startX, left), lastX = Math.min(endX, right);
+            for (let x = firstX; x < lastX; x++) {
+                const idx = y * maskWidth + x;
+                if (x < 0 || x >= maskWidth || y < 0 || y >= maskHeight || idx >= maskData.length) continue;
+
+                const classIdx = maskData[idx];
+                regionStats.totalPixels++;
+
+                switch (classIdx) {
+                    case CLASS_INDICES.FACE_SKIN:
+                        regionStats.faceSkin++;
+                        break;
+                    case CLASS_INDICES.HAIR:
+                        regionStats.hair++;
+                        break;
+                    case CLASS_INDICES.BACKGROUND:
+                        regionStats.background++;
+                        break;
+                    case CLASS_INDICES.BODY_SKIN:
+                        regionStats.bodySkin++;
+                        break;
+                    case CLASS_INDICES.CLOTHES:
+                        regionStats.clothes++;
+                        break;
+                    default:
+                        regionStats.others++;
+                }
             }
         }
     }

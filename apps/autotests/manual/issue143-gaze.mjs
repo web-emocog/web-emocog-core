@@ -1,5 +1,5 @@
 // Loopback-only historical harness; the developer page has a separate auth gate.
-import { mountGazeBenchmark } from '../../web/developer/gaze-benchmark.mjs?v=20261124-load2';
+import { mountGazeBenchmark } from '../../web/developer/gaze-benchmark.mjs?v=20261127-maskrows1';
 const params = new URLSearchParams(location.search);
 const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
 const diagnostic = mountGazeBenchmark({ mode: loopback ? params.get('models') : null, pose: params.get('pose') === '1',

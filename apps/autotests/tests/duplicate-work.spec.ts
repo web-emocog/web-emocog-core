@@ -3,6 +3,33 @@ import { test, expect } from '@playwright/test';
 const entry = '/apps/participant-web/mvp_with_precheck_1-updated.html';
 const root = '/apps/participant-web/js/';
 
+test('segmentation mask scans preserve exact face pixels without per-pixel contour lookups', async ({ page }) => {
+  await page.goto(entry);
+  const result = await page.evaluate(async root => {
+    const { createFaceSupport } = await import(root + 'face-segmenter/face-support.mjs?v=20261028-139');
+    const { extractFaceRegion } = await import(root + 'face-segmenter/mask-analyzer.js?v=20261127-maskrows1');
+    const fixturePath = '/apps/autotests/tests/fixtures/face-visibility.mjs';
+    const { faceVisibilityFixture } = await import(fixturePath);
+    const outcomes = [];
+    for (const width of [79, 256]) for (const roll of [0, .2]) {
+      const input = faceVisibilityFixture({ width, height: width + 11, roll });
+      const support = createFaceSupport(input.landmarks, input.width, input.height);
+      const get = support.rows.get.bind(support.rows);
+      let lookups = 0, expected = 0;
+      support.rows.get = (y: number) => { lookups++; return get(y); };
+      for (let y = 0; y < input.height; y++) for (let x = 0; x < input.width; x++) {
+        if (input.contains((x + .5) / input.width, (y + .5) / input.height)) expected++;
+      }
+      const output = extractFaceRegion(input.data, input.width, input.height, input.landmarks,
+        input.width, input.height, support);
+      outcomes.push({ exact: output.stats.totalPixels === expected && output.stats.faceSkin === expected,
+        boundedLookups: lookups <= input.height, method: output.sampling.method });
+    }
+    return outcomes;
+  }, root);
+  expect(result).toEqual(Array.from({ length: 4 }, () => ({ exact: true, boundedLookups: true, method: 'face_oval_pixels.v1' })));
+});
+
 test('participant startup loads one URL version of each module without starting sensors', async ({ page }) => {
   await page.addInitScript(() => {
     (window as any).sensorRequests = 0;
@@ -35,7 +62,7 @@ test('participant startup loads one URL version of each module without starting 
 test('concurrent precheck starts request one camera and release a cancelled late stream', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/precheck-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/precheck-updated.js?v=20261127-maskrows1');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     let requests = 0, stopped = 0, release!: (stream: any) => void;
     navigator.mediaDevices.getUserMedia = () => { requests++; return new Promise(resolve => { release = resolve; }); };
@@ -52,7 +79,7 @@ test('concurrent precheck starts request one camera and release a cancelled late
 test('precheck has one loop and stale results cannot publish after stop/restart', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/precheck-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/precheck-updated.js?v=20261127-maskrows1');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     const releases: Array<(frame: any) => void> = [];
     let analyses = 0, segmentations = 0;
@@ -78,7 +105,7 @@ test('precheck has one loop and stale results cannot publish after stop/restart'
 test('calibration preparation is single-flight and a failed preparation permits retry', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/tests-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/tests-updated.js?v=20261127-maskrows1');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     state.sessionData.precheck = { pass_fail: true };
     const original = (window as any).QCMetricsReady;
@@ -104,7 +131,7 @@ test('calibration preparation is single-flight and a failed preparation permits 
 test('precheck relinquishes analysis ownership without resetting the continuous analyzer', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/precheck-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/precheck-updated.js?v=20261127-maskrows1');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     const runtime = state.runtime.sessionRuntime;
     const original = runtime.isAnalysisRunning;
@@ -127,7 +154,7 @@ test('precheck relinquishes analysis ownership without resetting the continuous 
 test('precheck history does not keep WeakMap pixel buffers through historical frame keys', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/precheck-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/precheck-updated.js?v=20261127-maskrows1');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     const pixels = await import(root + 'session-runtime/frame-pixels.mjs');
     const frame = { timestamp: 1, landmarks: [], face: { detected: false }, illumination: { value: 0 }, pose: {} };
@@ -147,7 +174,7 @@ test('precheck history does not keep WeakMap pixel buffers through historical fr
 for (const readiness of [0, 1]) test(`stopping precheck at readyState ${readiness} releases setup listeners and FPS callbacks`, async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async ({ root, readiness }) => {
-    const module = await import(root + 'web-page/precheck-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/precheck-updated.js?v=20261127-maskrows1');
     const video = document.getElementById('precheckVideo') as HTMLVideoElement;
     let stopped = 0, callbackId = 0;
     const callbacks = new Map<number, VideoFrameRequestCallback>(), handlers = new Set<any>(), timers = new Set<number>();
@@ -182,7 +209,7 @@ for (const readiness of [0, 1]) test(`stopping precheck at readyState ${readines
 test('successful precheck reuses its camera and starts only one analysis loop', async ({ page }) => {
   await page.goto(entry);
   const result = await page.evaluate(async root => {
-    const module = await import(root + 'web-page/precheck-updated.js?v=20261124-load2');
+    const module = await import(root + 'web-page/precheck-updated.js?v=20261127-maskrows1');
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
     const video = document.getElementById('precheckVideo') as HTMLVideoElement;
     let requests = 0, stopped = 0, analyses = 0, callback: VideoFrameRequestCallback | null = null;
@@ -218,7 +245,7 @@ test('legacy gaze cannot fork after restart and hands over without clearing cont
   await page.goto('/apps/participant-web/tools/session-report.html');
   const result = await page.evaluate(async root => {
     const { state } = await import(root + 'web-page/state.js?v=20261025-1');
-    const loop = await import(root + 'gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261124-load2');
+    const loop = await import(root + 'gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261127-maskrows1');
     const video = document.createElement('video'); video.id = 'precheckVideo'; document.body.appendChild(video);
     Object.defineProperties(video, { srcObject: { value: {} }, readyState: { value: 2 }, currentTime: { value: 1 } });
     let continuous = false, updates = 0, resets = 0;

@@ -187,7 +187,7 @@ test('30-second backup uses typed cumulative ingest and final upload supersedes 
   expect(uploads[0].respiration_summary).toMatchObject({ resp_rate_mean: 15, resp_sample_count: 3, resp_available: true });
   await expect.poll(() => page.evaluate(() => (window as any).__WECOG_STATE__.sessionData.serverBackup.status)).toBe('saved');
   await page.evaluate(async moduleVersion => {
-    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261124-load2`, location.href).href);
+    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261127-maskrows1`, location.href).href);
     await finishSession();
     (window as any).__backupTicks[0]();
   }, moduleVersion);
@@ -235,7 +235,7 @@ test('configured hard stop waits for the current RT response, saves results and 
     shared.runtime.invitationProtocolDefinition.settings = { qualityControl: { schemaVersion: 'protocol_quality.v1', rules: {
       gazeValid: { enabled: true, threshold: 99, hardStop: true }
     } } };
-    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261124-load2`, location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261127-maskrows1`, location.href).href);
     await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition });
   }, moduleVersion);
   await page.locator('#cogStartBtn').click();
@@ -313,7 +313,7 @@ test('final screen and ingest still work if all local checkpoint writes fail', a
     shared.sessionData.startTime = Date.now() - 35 * 60 * 1000;
     shared.sessionData.cognitiveResults = [{ blockId: 'task-a', trialId: 'a', rt: 420, correct: true }];
     shared.runtime.sessionRuntime.checkpoints.save = async () => { throw new Error('QuotaExceededError'); };
-    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261124-load2`, location.href).href);
+    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261127-maskrows1`, location.href).href);
     await finishSession();
   }, { code, moduleVersion });
   await expect(page.locator('#step7')).toHaveClass(/active/);
@@ -348,7 +348,7 @@ test('failed final upload survives reload with the exact original payload and fi
     shared.sessionData.cognitiveResults = [{ rt: 410, correct: true, blockId: 'task-a', trialId: 'a' }];
     shared.sessionData.eyeTracking = [{ t: 100, valid: true, x: .4, y: .4 }, { t: 200, valid: true, x: .5, y: .5 }];
     shared.runtime.sessionRuntime.checkpoints._savePrimary = async () => { throw new Error('quota'); };
-    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261124-load2`, location.href).href);
+    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261127-maskrows1`, location.href).href);
     await finishSession();
   }, { code, moduleVersion });
   await expect(page.locator('#step7')).toHaveClass(/active/);
@@ -427,7 +427,7 @@ test('reload resumes the next instruction without erasing earlier RT, and finish
     shared.sessionData.ids = { session: 'resume-rt', participant: 'p', invitationCode: code };
     shared.runtime.sessionRuntime.policyShown = true;
     shared.runtime.sessionRuntime.notifyBlockComplete = async () => true;
-    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261124-load2`, location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261127-maskrows1`, location.href).href);
     await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition });
   }, { code, moduleVersion });
   await page.locator('#cogStartBtn').click();
@@ -447,7 +447,7 @@ test('reload resumes the next instruction without erasing earlier RT, and finish
     const shared = (window as any).__WECOG_STATE__;
     (window as any).setLanguage('en');
     shared.runtime.sessionRuntime.notifyBlockComplete = async () => true;
-    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261124-load2`, location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261127-maskrows1`, location.href).href);
     await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition });
   }, { moduleVersion });
   await expect(page.locator('#cogTitle')).toHaveText('Second task');
@@ -549,7 +549,7 @@ test('return from page history restores accepted RT but does not accept the inte
     shared.sessionData.shellStep = 6;
     shared.runtime.sessionRuntime.policyShown = true;
     shared.runtime.sessionRuntime.notifyBlockComplete = async () => true;
-    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261124-load2`, location.href).href);
+    const { loadAndStartCognitiveTask } = await import(new URL(`js/web-page/experimental_task-updated.js?v=20261127-maskrows1`, location.href).href);
     await loadAndStartCognitiveTask({ protocol: shared.runtime.invitationProtocolDefinition });
   }, { code, moduleVersion });
   await page.locator('#cogStartBtn').click();
@@ -636,7 +636,7 @@ test('history return preserves a failed final upload and handles a rejected manu
     let stopped = 0, release: () => void = () => {};
     runtime.cameraStream = { getTracks: () => [{ stop() { stopped++; } }] };
     runtime.sessionRuntime.audioCollector = { stop: () => new Promise<void>(resolve => { release = resolve; }) };
-    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261124-load2`, location.href).href);
+    const { finishSession } = await import(new URL(`js/web-page/tests-updated.js?v=20261127-maskrows1`, location.href).href);
     const finishing = finishSession();
     try {
       if (stopped !== 1) throw new Error('Camera must be released before queued audio finishes');
@@ -670,7 +670,7 @@ test('late camera permission after page exit stops the track without reactivatin
   const outcome = await page.evaluate(async () => {
     const w = window as any;
     w.nextStep(5);
-    const { startPreCheck } = await import(new URL('js/web-page/precheck-updated.js?v=20261124-load2', location.href).href);
+    const { startPreCheck } = await import(new URL('js/web-page/precheck-updated.js?v=20261127-maskrows1', location.href).href);
     let resolvePermission: (stream: any) => void = () => {};
     let requests = 0, stops = 0;
     navigator.mediaDevices.getUserMedia = () => {
@@ -762,7 +762,7 @@ test('page exit retires an in-flight local gaze analysis before it can publish o
   const outcome = await page.evaluate(async moduleVersion => {
     const shared = (window as any).__WECOG_STATE__;
     const { startGazeTestsAnalysisLoop, isGazeTestsAnalysisLoopRunning } = await import(new URL(
-      `js/gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261124-load2`, location.href).href);
+      `js/gaze-tracker/gaze-tests/common/analysis-loop.js?v=20261127-maskrows1`, location.href).href);
     const video = document.getElementById('precheckVideo') as HTMLVideoElement;
     Object.defineProperties(video, { srcObject: { configurable: true, writable: true, value: {} },
       readyState: { configurable: true, value: 4 }, currentTime: { configurable: true, value: 1 } });
@@ -874,7 +874,7 @@ for (const failure of ['calibration', 'continuation', 'legacy-shell'] as const) 
           shared.runtime.invitationParticipantShell = { consent: true, questionnaire: true, precheck: false, calibration: false };
           w.nextStep(6);
         } else {
-          const { continueInvitationSessionAfterShell } = await import(new URL(`js/web-page/tests-updated.js?v=20261124-load2`, location.href).href);
+          const { continueInvitationSessionAfterShell } = await import(new URL(`js/web-page/tests-updated.js?v=20261127-maskrows1`, location.href).href);
           await continueInvitationSessionAfterShell();
         }
       }
@@ -916,7 +916,7 @@ test('explicit recovery after a preparation failure reloads the same session at 
     shared.sessionData.shellStep = 5;
     shared.sessionData.cognitiveResults = [{ blockId: 'accepted', rt: 450 }];
     shared.runtime.sessionRuntime.startContinuousModules = async () => { throw new Error('test preparation failure'); };
-    const { continueInvitationSessionAfterShell } = await import(new URL(`js/web-page/tests-updated.js?v=20261124-load2`, location.href).href);
+    const { continueInvitationSessionAfterShell } = await import(new URL(`js/web-page/tests-updated.js?v=20261127-maskrows1`, location.href).href);
     await continueInvitationSessionAfterShell();
     return shared.sessionData.ids;
   }, moduleVersion);
