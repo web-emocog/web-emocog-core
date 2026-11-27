@@ -15,17 +15,17 @@ import {
     updateFinalStepWithQC,
     stopPreCheckOnLeave,
     downloadData 
-} from './ui.js?v=20261124-load2';
+} from './ui.js?v=20261127-maskrows1';
 
 import { 
     startPreCheck, 
     stopPreCheck
-} from './precheck.js?v=20261124-load2';
+} from './precheck.js?v=20261127-maskrows1';
 
 import { 
     startCalibration, 
     finishSession 
-} from './tests.js?v=20261124-load2';
+} from './tests.js?v=20261127-maskrows1';
 
 // Функции доступные для HTML
 window.setLanguage = setLanguage;

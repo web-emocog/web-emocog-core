@@ -31,8 +31,11 @@ function linked(source, basename) {
   return url.pathname + url.search;
 }
 const extractorUrl = linked(analyzer, 'au-extractor.js');
+const maskDependencies = ['mask-analyzer.js', 'region-analyzer.js']
+  .map(name => linked('apps/participant-web/js/face-segmenter/FaceSegmenter.js', name));
 const oldDependencies = [
   extractorUrl,
+  ...maskDependencies,
   linked('apps/participant-web/js/emotion-stub-new.js', 'public-api.js'),
   linked(pipeline, 'neutral-calibration.mjs'),
   linked('apps/participant-web/js/web-page/app-updated.js', 'index.js'),
@@ -152,6 +155,19 @@ try {
         }
         assert.deepEqual(errors, [], `JavaScript errors after starting ${entry.page}`);
         if (entry.page === participant) {
+          const resources = await page.evaluate(async () => {
+            await window.FaceSegmenterReady;
+            return performance.getEntriesByType('resource').map(resource => new URL(resource.name).pathname + new URL(resource.name).search);
+          });
+          for (const oldUrl of maskDependencies) {
+            const path = new URL(oldUrl, origin).pathname.slice(1);
+            if (!oldFile(path).equals(await readFile(join(root, path)))) {
+              // The developer entry may already have fetched the new URL into this shared HTTP cache.
+              assert.ok(newRequests.some(url => url.split('?')[0] === '/' + path && url !== oldUrl)
+                && resources.some(url => url.split('?')[0] === '/' + path && url !== oldUrl)
+                && !resources.includes(oldUrl), `Changed mask processor remained cached after upgrading: ${path}`);
+            }
+          }
           const methods = await page.evaluate(async () => {
             const pipelineUrl = performance.getEntriesByType('resource').map(resource => resource.name)
               .find(name => new URL(name).pathname.endsWith('/session-runtime/frame-pipeline.js'));

@@ -29,11 +29,11 @@
 
 import { CLASS_INDICES, CLASS_NAMES } from './constants.js?v=20261025-1';
 import { createSegmentThresholds } from './thresholds.js?v=20261110-integration1';
-import { analyzeMasks } from './mask-analyzer.js?v=20261104-4';
-import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261110-integration1';
+import { analyzeMasks } from './mask-analyzer.js?v=20261127-maskrows1';
+import { analyzeFaceRegionsVisibility } from './region-analyzer.js?v=20261127-maskrows1';
 import { createVisualizationMask } from './visualization.js?v=20261104-4';
 import { createAnalysisCanvas } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-load2';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261127-maskrows1';
 import { segmentationDelegate } from './delegate-policy.mjs';
 import { MaskReader } from './mask-reader.mjs';
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,

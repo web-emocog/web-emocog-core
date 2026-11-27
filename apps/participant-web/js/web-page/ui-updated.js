@@ -6,8 +6,8 @@
  */
 import { participantDebug as dbg, participantDebugError as dbgErr } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';
 import { state, recordSessionEvent } from './state.js?v=20261025-1';
-import { translations } from '../../translations.js?v=20261124-load2';
-import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261124-load2';
+import { translations } from '../../translations.js?v=20261127-maskrows1';
+import { stopPreCheck, resetIndicatorsToWaiting, checkAllIndicators } from './precheck-updated.js?v=20261127-maskrows1';
 import { measureRenderFPS } from './camera.js?v=20261104-4';
 import { buildAggregatesPayload } from '../unified-aggregates-new.js?v=20261122-validtime1';
 import { hide as hideQcOverlay } from '../qc-pause-overlay-new.js?v=20261103-1';
@@ -75,7 +75,7 @@ async function maybeStartInvitationSessionAfterShell() {
     if (!shell || !isInvitationSession()) return false;
     if (shell.precheck || shell.calibration) return false;
     try {
-        const mod = await import('./tests-updated.js?v=20261124-load2');
+        const mod = await import('./tests-updated.js?v=20261127-maskrows1');
         if (typeof mod.continueInvitationSessionAfterShell === 'function') {
             return (await mod.continueInvitationSessionAfterShell()) !== false;
         }

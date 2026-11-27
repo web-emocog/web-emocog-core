@@ -137,32 +137,38 @@ export function analyzeAreaPixels(maskData, dimensions, areaBounds, areaName, th
     };
 
     // Анализируем пиксели в прямоугольной области
+    const fallbackRanges = support ? null : [[startX, endX]];
     for (let y = startY; y < endY; y++) {
-        for (let x = startX; x < endX; x++) {
-            const idx = y * maskWidth + x;
-            if (idx >= maskData.length || (support && !isFacePixel(support, x, y))) continue;
-            
-            const classIdx = maskData[idx];
-            counts.total++;
-            
-            switch (classIdx) {
-                case CLASS_INDICES.FACE_SKIN:
-                    counts.faceSkin++;
-                    break;
-                case CLASS_INDICES.BODY_SKIN:
-                    counts.bodySkin++;
-                    break;
-                case CLASS_INDICES.HAIR:
-                    counts.hair++;
-                    break;
-                case CLASS_INDICES.BACKGROUND:
-                    counts.background++;
-                    break;
-                case CLASS_INDICES.CLOTHES:
-                    counts.clothes++;
-                    break;
-                default:
-                    counts.others++;
+        const ranges = support ? support.rows.get(y) : fallbackRanges;
+        if (!ranges) continue;
+        for (const [left, right] of ranges) {
+            const firstX = Math.max(startX, left), lastX = Math.min(endX, right);
+            for (let x = firstX; x < lastX; x++) {
+                const idx = y * maskWidth + x;
+                if (idx >= maskData.length) continue;
+
+                const classIdx = maskData[idx];
+                counts.total++;
+
+                switch (classIdx) {
+                    case CLASS_INDICES.FACE_SKIN:
+                        counts.faceSkin++;
+                        break;
+                    case CLASS_INDICES.BODY_SKIN:
+                        counts.bodySkin++;
+                        break;
+                    case CLASS_INDICES.HAIR:
+                        counts.hair++;
+                        break;
+                    case CLASS_INDICES.BACKGROUND:
+                        counts.background++;
+                        break;
+                    case CLASS_INDICES.CLOTHES:
+                        counts.clothes++;
+                        break;
+                    default:
+                        counts.others++;
+                }
             }
         }
     }

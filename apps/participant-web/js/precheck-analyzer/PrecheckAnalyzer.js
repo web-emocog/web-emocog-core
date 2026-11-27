@@ -17,7 +17,7 @@ import { analyzePose, checkStability, checkEyesCentering, addToHistory } from '.
 import { analyzeEyes } from './eyes-analyzer.js';
 import { analyzeMouth } from './mouth-analyzer.js';
 import { createAnalysisCanvas, rememberFramePixels } from '../session-runtime/frame-pixels.mjs';
-import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261124-load2';
+import { VisionWorkerClient } from '../session-runtime/vision-worker-client.mjs?v=20261127-maskrows1';
 
 import { participantDebug as dbg, participantDebugErrorOnce as dbgErrorOnce,
     notifyParticipantCallback, resetParticipantDiagnostics } from '../session-runtime/participant-diagnostic.mjs?v=20261110-integration1';

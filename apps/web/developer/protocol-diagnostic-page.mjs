@@ -1,4 +1,4 @@
-import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261124-load2';
+import { ProtocolDiagnostic } from './protocol-diagnostic.mjs?v=20261127-maskrows1';
 import { PROTOCOL_PROFILE_ID, NEW_PROTOCOL_PROFILE_ID, resolveSignalProfile, MODEL_ASSETS, protocolCameraConstraints } from '../../participant-web/js/session-runtime/protocol-profile.mjs?v=20261110-integration1';
 import { expressionNames } from './emotion-comparison.mjs?v=20261112-emotion2';
 

@@ -52,7 +52,7 @@ for (const passed of [true, false]) test(`independent validation ${passed ? 'res
     s.runtime.calibrationRecoveryContinuation = { phase: 'cognitive_instruction',
       restoreLayout: () => { (window as any).__layoutRestored = true; },
       resolve: () => { (window as any).__resumed++; }, reject() {} };
-    const { startGazeValidation } = await import(new URL('js/web-page/tests-updated.js?v=20261124-load2', location.href).href);
+    const { startGazeValidation } = await import(new URL('js/web-page/tests-updated.js?v=20261127-maskrows1', location.href).href);
     startGazeValidation();
     document.getElementById('validationIntroStartBtn')!.click();
     const previous = Object.getOwnPropertyDescriptor(s.runtime, 'currentGazePrediction');
@@ -142,7 +142,7 @@ test('short recalibration requires a saved boundary and cancellation keeps its g
     const plan = { points: w.__gazeCalibrationDebug.points, clicks: w.__gazeCalibrationDebug.clicksPerPoint };
     s.runtime.calibrationRecoveryContinuation.restoreLayout();
     const layout = ['.container', '.top-bar'].map(selector => (document.querySelector(selector) as HTMLElement).style.display);
-    const { stopParticipantTestLoops } = await import(new URL('js/web-page/tests-updated.js?v=20261124-load2', location.href).href);
+    const { stopParticipantTestLoops } = await import(new URL('js/web-page/tests-updated.js?v=20261127-maskrows1', location.href).href);
     stopParticipantTestLoops(); await w.pendingCalibration;
     return { plan, layout, cancelled: w.recoveryCancelled, required: s.runtime.sessionRuntime.requiresGazeCalibration(),
       rows: s.sessionData.cognitiveResults };

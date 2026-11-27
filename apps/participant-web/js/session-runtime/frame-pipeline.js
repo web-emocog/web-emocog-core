@@ -12,14 +12,14 @@ import {
     startEmotionSession
 } from '../emotion-stub-new.js?v=20261112-emotion2';
 import { NeutralCalibration } from '../emotion/neutral-calibration.mjs?v=20261112-emotion1';
-import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261124-load2';
+import { ContinuousBodyPoseCollector } from './continuous-body-pose.js?v=20261127-maskrows1';
 import { getContentViewport } from '../gaze-tracker/viewport-coordinates.mjs';
 import { updateHeadPoseGuide } from '../gaze-tracker/head-pose-guide.js?v=20261103-1';
 import { getFramePixels } from './frame-pixels.mjs';
 import { observeVideoFrames } from './video-frames.mjs?v=20261104-4';
 import { resolveSignalProfile, frameBudget } from './protocol-profile.mjs?v=20261110-integration1';
 import { validTimeFrameReasons } from './passive-valid-time.mjs?v=20261122-validtime1';
-import { FrameLatency, assessFrameHeadroom } from './frame-latency.mjs?v=20261124-load2';
+import { FrameLatency, assessFrameHeadroom } from './frame-latency.mjs?v=20261127-maskrows1';
 
 const SAME_FRAME_RETRY_MS = 8;
 // Native callbacks jitter around the requested cadence. Avoid an extra timer
