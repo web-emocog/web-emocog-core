@@ -28,7 +28,7 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
   if (!ids.length) return { ok: unavailable.length === 0, referencedIds: [], unavailable };
 
   const result = definition?.mediaManifest ? { rows: await loadPinnedStimuli(queryable, projectId, definition) } : await queryable.query(
-    `SELECT id, name, mime_type, metadata, created_by, visibility
+    `SELECT id, project_id, name, mime_type, metadata, created_by, visibility
      FROM stimuli
      WHERE project_id = $1 AND id = ANY($2::int[])
      ORDER BY id`,
@@ -42,14 +42,11 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
       unavailable.push({ id, code: 'stimulus_record_missing', name: null });
       continue;
     }
-    // Use the loaded version, not a trial label or client-supplied manifest MIME.
-    if (validTimeIds.has(id) && (!eligiblePassiveValidTimeTrial({ stimulusId: id },
-      { ...row.pinned_version?.media_info, mime_type: row.mime_type })
+    if (validTimeIds.has(id) && (!['image/png', 'image/jpeg', 'image/bmp'].includes(row.mime_type)
       || (definition.mediaManifest && definition.mediaManifest[String(id)]?.mimeType !== row.mime_type))) {
       unavailable.push({ id, code: 'passive_valid_time_media_unsupported', name: row.name || null });
       continue;
     }
-    if (validTimeIds.has(id)) validTimeMedia[String(id)] = { ...row.pinned_version?.media_info, mime_type: row.mime_type };
     if (visualIds.has(id) && row.mime_type && !/^(image|video|audio)\//.test(row.mime_type)) {
       unavailable.push({ id, code: 'stimulus_media_type_unsupported', name: row.name || null });
       continue;
@@ -66,15 +63,26 @@ async function inspectProtocolStimuli(queryable, projectId, definition, options 
     );
     if (!resolved.ok) {
       unavailable.push({ id, code: resolved.code, name: row.name || null });
+      continue;
     } else if (row.sha256 && await hashFile(resolved.absolutePath, resolved.root) !== row.sha256) {
       unavailable.push({ id, code: 'stimulus_checksum_mismatch', name: row.name || null });
+      continue;
     } else if (options.verifyDecoding) {
       try {
         const version = row.pinned_version || await ensureStimulusVersion(queryable, row, { uploadsRoot });
-        await ensurePlayableVersion(queryable, version, uploadsRoot);
+        row.pinned_version = await ensurePlayableVersion(queryable, version, uploadsRoot,
+          { requireCurrentImageDecode: validTimeIds.has(id) });
       } catch (error) {
         unavailable.push({ id, code: error.code || 'media_decode_failed', name: row.name || null });
+        continue;
       }
+    }
+    // Admission must evaluate the freshly checked version, never obsolete cached facts.
+    if (validTimeIds.has(id)) {
+      const media = { ...row.pinned_version?.media_info, mime_type: row.mime_type };
+      if (!eligiblePassiveValidTimeTrial({ stimulusId: id }, media)) {
+        unavailable.push({ id, code: 'passive_valid_time_media_unsupported', name: row.name || null });
+      } else validTimeMedia[String(id)] = media;
     }
   }
 

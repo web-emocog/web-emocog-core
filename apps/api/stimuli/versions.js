@@ -101,6 +101,9 @@ function manifestEntry(row, version) {
 
 async function pinProtocolMedia(client, projectId, definition, user, options = {}) {
   const ids = referencedDatabaseStimulusIds(definition).sort((a, b) => a - b);
+  const validTimeIds = new Set((definition?.blocks || [])
+    .filter(block => [block?.blockConfig, block?.content].some(source => source?.validTime?.enabled === true))
+    .flatMap(block => referencedDatabaseStimulusIds({ blocks: [block] })));
   // Client manifests never authorize or select a server file version.
   const pinned = { ...definition, mediaManifest: {} };
   if (!ids.length) return pinned;
@@ -113,7 +116,8 @@ async function pinProtocolMedia(client, projectId, definition, user, options = {
       throw new HttpError(422, 'Protocol stimulus is unavailable or private', 'protocol_stimulus_unavailable');
     }
     const version = await ensureStimulusVersion(client, row, options);
-    const inspected = await ensurePlayableVersion(client, version, options.uploadsRoot || uploadsRoot);
+    const inspected = await ensurePlayableVersion(client, version, options.uploadsRoot || uploadsRoot,
+      { requireCurrentImageDecode: validTimeIds.has(id) });
     pinned.mediaManifest[String(id)] = manifestEntry(row, inspected);
   }
   return pinned;
