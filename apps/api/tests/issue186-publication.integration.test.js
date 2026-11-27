@@ -38,6 +38,7 @@ test('#186 publish fresh/legacy PNG/JPEG/BMP, recheck cached facts and preserve 
     const res = await fetch(base+route, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify(body) }); const result = await res.json(); assert.equal(res.status, status, JSON.stringify(result)); return result;
   }
+  const admissionFixtures = [];
   for (const format of ['png', 'jpeg', 'bmp']) for (const legacy of [false, true]) await t.test(`${format} ${legacy ? 'legacy cache' : 'fresh'}`, async () => {
     const filename = `synthetic-${legacy ? 'legacy' : 'fresh'}.${format}`;
     if (format === 'png') await fs.writeFile(path.join(root, 'stimuli', filename), png);
@@ -80,6 +81,7 @@ test('#186 publish fresh/legacy PNG/JPEG/BMP, recheck cached facts and preserve 
     assert.equal(quality.validate(protocol.definition), true, 'publication and participant QC must agree about static eligibility');
     const first = await request('/invitations', 'POST', { protocol_id: protocol.id }, 201);
     const saved = structuredClone(protocol.definition);
+    if (legacy) admissionFixtures.push({ definition: saved, version: pinnedVersion, sha256, static: true });
     definition.settings.physiologyMethods = { heartRate: 'pos', respiration: 'luma' };
     const updated = await request('/protocols/'+protocol.id, 'PATCH', { definition }, 200);
     assert.equal((await pool.query('SELECT preview_path FROM stimulus_versions WHERE id=$1', [pinnedVersion])).rows[0].preview_path,
@@ -131,6 +133,10 @@ test('#186 publish fresh/legacy PNG/JPEG/BMP, recheck cached facts and preserve 
       await pool.query('UPDATE stimuli SET current_version_id=$1 WHERE id=$2', [animatedVersion, animated]);
       const animatedDefinition = structuredClone(definition);
       animatedDefinition.blocks[0].trials[0].stimulusId = animated;
+      admissionFixtures.push({ definition: { ...animatedDefinition, mediaManifest: { [animated]: {
+        versionId: animatedVersion, mimeType: 'image/png', sha256: animatedSha, sizeBytes: animatedBytes.length,
+        media_info: { codec: 'png', duration_ms: 0 },
+      } } }, version: animatedVersion, sha256: animatedSha, static: false });
       const animatedRejected = await request('/protocols/'+protocol.id, 'PATCH', { definition: animatedDefinition }, 422);
       assert.equal(animatedRejected.code, 'protocol_stimulus_unavailable');
       assert.ok(animatedRejected.preflight.errors.some(item => item.code === 'passive_valid_time_media_unsupported'));
@@ -152,5 +158,21 @@ test('#186 publish fresh/legacy PNG/JPEG/BMP, recheck cached facts and preserve 
     assert.deepEqual(stillSaved, savedBeforeRejection, 'rejected publication must preserve the saved definition including private metadata');
     assert.deepEqual((await pool.query('SELECT protocol_definition FROM invitations WHERE id=$1', [first.id])).rows[0].protocol_definition,
       immutable, 'failed editing must not mutate an existing participant invitation');
+  });
+  await t.test('participant media checks use refreshed decoder facts, not obsolete static/animated claims', async () => {
+    const { withMediaWrite } = require('../stimuli/versions');
+    const { inspectProtocolStimuli } = require('../stimuli/protocol-availability');
+    for (const fixture of admissionFixtures) {
+      await pool.query('UPDATE stimulus_versions SET media_info=$1::jsonb WHERE id=$2',
+        [JSON.stringify({ validated_sha256: fixture.sha256, codec: 'png', duration_ms: fixture.static ? 1000 : 0 }), fixture.version]);
+      const report = await withMediaWrite(pool, client => inspectProtocolStimuli(client, project, fixture.definition,
+        { verifyDecoding: true, uploadsRoot: path.join(root, 'stimuli'), user: { sub: user, role: 'researcher' } }));
+      assert.equal(report.ok, fixture.static);
+      if (fixture.static) {
+        const media = Object.values(report.validTimeMedia)[0];
+        assert.equal(media.image_decode_version, 'image_decode.v1');
+        assert.notEqual(media.duration_ms, 1000);
+      } else assert.equal(report.unavailable[0].code, 'passive_valid_time_media_unsupported');
+    }
   });
 });

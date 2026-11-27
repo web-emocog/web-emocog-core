@@ -117,11 +117,13 @@ test('#186 old image posters require current byte-bound decoding, without invali
   const old = { sha256: 'synthetic-sha', preview_status: 'ready', preview_path: 'poster.jpg',
     media_info: { validated_sha256: 'synthetic-sha', codec: 'png' } };
   for (const mime_type of ['image/png', 'image/jpeg', 'image/bmp']) {
-    assert.equal(await hasUsablePreview({ ...old, mime_type }, root), false);
+    assert.equal(await hasUsablePreview({ ...old, mime_type }, root), true, 'ordinary library viewing does not force redecoding');
+    const options = { requireCurrentImageDecode: true };
+    assert.equal(await hasUsablePreview({ ...old, mime_type }, root, options), false);
     const current = { ...old, mime_type, media_info: { ...old.media_info, image_decode_version: 'image_decode.v1' } };
-    assert.equal(await hasUsablePreview(current, root), true);
-    assert.equal(await hasUsablePreview({ ...current, media_info: { ...current.media_info, validated_sha256: 'other-sha' } }, root), false);
-    assert.equal(await hasUsablePreview({ ...current, preview_path: 'missing.jpg' }, root), false);
+    assert.equal(await hasUsablePreview(current, root, options), true);
+    assert.equal(await hasUsablePreview({ ...current, media_info: { ...current.media_info, validated_sha256: 'other-sha' } }, root, options), false);
+    assert.equal(await hasUsablePreview({ ...current, preview_path: 'missing.jpg' }, root, options), false);
   }
   for (const mime_type of ['audio/wav', 'video/mp4']) assert.equal(await hasUsablePreview({ ...old, mime_type }, root), true);
 });

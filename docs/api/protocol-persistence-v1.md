@@ -61,11 +61,13 @@ No error path grants access, substitutes a file, publishes an invalid definition
 or changes an already issued invitation. Static-image requirements for valid-time
 extension remain unchanged.
 
-Legacy PNG/JPEG/BMP preview caches are refreshed automatically when their
+For valid-time publication/admission, legacy PNG/JPEG/BMP preview caches are
+refreshed automatically when their
 server-owned `media_info.image_decode_version` is absent or obsolete, even when
 the historical poster and `validated_sha256` exist. Fresh bounded decoding
 replaces obsolete media facts; a successful result is reused on later reads and
-publications. The original binary, stimulus/version IDs, checksum and existing
+publications. Ordinary library/preview reads do not force redecoding. The original
+binary, stimulus/version IDs, checksum and existing
 invitation snapshots are not replaced. This is lazy validation, not a bulk data
 migration. Audio/video cache policy and resource limits remain unchanged.
 
@@ -75,6 +77,9 @@ switch formats or upload an old file again just because browser metadata is
 missing. Publication still rejects animation (including APNG with stale cached
 facts claiming static PNG), inaccessible files, RT/manual tasks and unsupported
 media. Decoder cache-version bookkeeping is not copied into participant manifests.
+Participant media checks evaluate static eligibility after decoding has refreshed
+the same version's facts. Obsolete cached claims cannot either reject a real
+static image before inspection or authorize animation after inspection.
 
 `GET /invitations/by-code/:public_code` resolves the latest published invitation,
 returning its immutable `code`, `invitation_id` and `publication_version`.
